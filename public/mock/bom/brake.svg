@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+  <rect x="1" y="1" width="94" height="94" rx="12" fill="#FEF2F2" stroke="#FECACA"/>
+  <g fill="none" stroke="#DC2626" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M28 54c0-12 9-22 20-22s20 10 20 22-9 22-20 22-20-10-20-22z"/>
+    <path d="M52 36l10 6v24l-10 6"/>
+    <path d="M44 44h8"/>
+    <path d="M44 54h8"/>
+    <path d="M44 64h8"/>
+  </g>
+  <text x="48" y="86" text-anchor="middle" font-family="ui-sans-serif, system-ui" font-size="10" fill="#B91C1C">Brake</text>
+</svg>

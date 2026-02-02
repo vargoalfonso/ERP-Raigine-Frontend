@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">
+  <rect x="1" y="1" width="94" height="94" rx="12" fill="#EFF6FF" stroke="#DBEAFE"/>
+  <g fill="none" stroke="#2563EB" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M26 56c7-16 15-24 22-24s15 8 22 24"/>
+    <path d="M28 58h40"/>
+    <path d="M34 58v10"/>
+    <path d="M62 58v10"/>
+  </g>
+  <text x="48" y="86" text-anchor="middle" font-family="ui-sans-serif, system-ui" font-size="10" fill="#1D4ED8">Engine</text>
+</svg>
