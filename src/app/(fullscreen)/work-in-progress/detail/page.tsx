@@ -1,9 +1,12 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeftOutlined, EyeOutlined } from "@ant-design/icons";
 import { Button, Card, Table, Tabs, Tag } from "antd";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetWorkInProgressByIdQuery } from "@/lib/api/work-in-progress/api";
+import type { WorkInProgressRecord } from "@/lib/api/work-in-progress/interface";
 
 interface RowHistory {
   key: string;
@@ -16,29 +19,52 @@ interface RowHistory {
 }
 
 export default function WorkInProgressDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <WorkInProgressDetailPageContent />
+    </Suspense>
+  );
+}
+
+function WorkInProgressDetailPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const id = searchParams.get("id");
   const uniq = searchParams.get("uniq") ?? "LV7-001";
 
   const [activeTab, setActiveTab] = useState("1");
 
+  const useApi = Boolean(apiBaseUrl) && Boolean(id);
+  const { data: wipOneResponse, isFetching: wipFetching } = useGetWorkInProgressByIdQuery(id ?? "", {
+    skip: !useApi,
+  });
+
+  const apiRecord: WorkInProgressRecord | null = useMemo(() => {
+    if (!useApi) return null;
+    return wipOneResponse?.data ?? null;
+  }, [useApi, wipOneResponse?.data]);
+
   const detailInfo = useMemo(
     () => ({
-      uniq,
-      partNumber: "EMA7-001",
-      partName: "Engine Mount Assembly",
-      model: "Camry 2024",
-      woNumber: "WO-001-2024",
-      process: "Assembly",
-      station: "Welding Station 2",
-      stock: 200,
-      kanbanCode: "KBN-001-2024",
+      uniq: apiRecord?.product_uniq ?? apiRecord?.master_list?.uniq_code ?? uniq,
+      partNumber: apiRecord?.master_list?.part_no ?? "EMA7-001",
+      partName: apiRecord?.part_name ?? apiRecord?.master_list?.part_name ?? "Engine Mount Assembly",
+      model: apiRecord?.master_list?.model ?? "Camry 2024",
+      woNumber: apiRecord?.work_order?.wo_number ?? apiRecord?.work_order_reference ?? "WO-001-2024",
+      process: apiRecord?.current_process ?? "Assembly",
+      station: apiRecord?.process_station ?? "Welding Station 2",
+      stock: Number(apiRecord?.quantity_in_process ?? 200),
+      kanbanCode: apiRecord?.batch_number ?? "KBN-001-2024",
       type: "Child Part",
-      stockToCompleteKanban: 250,
-      kanban: 5,
-      status: "On Track",
+      stockToCompleteKanban: Math.max(
+        0,
+        Number(apiRecord?.master_list?.kanban_quantity ?? 250) -
+          Number(apiRecord?.quantity_in_process ?? 0)
+      ),
+      kanban: Math.max(1, Math.ceil(Number(apiRecord?.master_list?.kanban_quantity ?? 250) / 50)),
+      status: apiRecord?.process_status ?? "On Track",
     }),
-    [uniq]
+    [apiRecord, uniq]
   );
 
   const historyData: RowHistory[] = [
@@ -119,6 +145,11 @@ export default function WorkInProgressDetailPage() {
         <Card className="rounded-2xl shadow">
           <h2 className="text-xl font-bold">Details & History Log</h2>
           <p className="text-gray-400">Complete Work In-Progress Detail for {detailInfo.uniq}</p>
+          {useApi && (
+            <div className="mt-2 text-xs text-gray-500">
+              {wipFetching ? "Loading from API..." : "Loaded from API"}
+            </div>
+          )}
 
           <Tabs
             activeKey={activeTab}

@@ -2,8 +2,8 @@ import { MasterListSupplierRecord } from "../master-list/interface";
 import { WarehouseRecord } from "../warehouse/interface";
 
 export interface RawMaterialRecord {
-  current_stock: any;
-  master_list: any;
+  current_stock?: number;
+  master_list?: unknown;
   id: string;
   warehouse_id?: string;
   master_list_supplier_id?: string;

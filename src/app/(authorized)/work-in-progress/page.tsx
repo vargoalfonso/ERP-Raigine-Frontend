@@ -17,6 +17,13 @@ import { BsBoxSeam } from "react-icons/bs";
 import { HiOutlineArchiveBox } from "react-icons/hi2";
 import { LuChartColumn } from "react-icons/lu";
 import { FaRegEdit, FaRegTrashAlt } from "react-icons/fa";
+import { apiBaseUrl } from "@/lib/api/instance";
+import {
+  useDeleteWorkInProgressMutation,
+  useGetAllWorkInProgressQuery,
+  useUpdateWorkInProgressMutation,
+} from "@/lib/api/work-in-progress/api";
+import type { WorkInProgressRecord } from "@/lib/api/work-in-progress/interface";
 
 type WipRecord = {
   id: string;
@@ -123,6 +130,21 @@ export default function WorkInProgressPage() {
   const [tab, setTab] = useState("wip");
   const [processFilter, setProcessFilter] = useState<string>("all");
 
+  const useApi = Boolean(apiBaseUrl);
+  const [currentPage] = useState(1);
+  const [pageSize] = useState(50);
+  const {
+    data: wipResponse,
+    isFetching: wipFetching,
+    isSuccess: wipSuccess,
+    refetch: refetchWip,
+  } = useGetAllWorkInProgressQuery(
+    { currentPage, pageSize },
+    { skip: !useApi }
+  );
+  const [updateWip] = useUpdateWorkInProgressMutation();
+  const [deleteWip] = useDeleteWorkInProgressMutation();
+
   const [wipData, setWipData] = useState<WipRecord[]>(dummyWipData);
 
   const [editOpen, setEditOpen] = useState(false);
@@ -141,6 +163,49 @@ export default function WorkInProgressPage() {
     ]);
   }, []);
 
+  const mapApiProcess = (value: string | undefined): WipRecord["process"] => {
+    const v = (value ?? "").toLowerCase();
+    if (v.includes("machin")) return "Machining";
+    if (v.includes("quality") || v.includes("qc")) return "Quality Check";
+    return "Assembly";
+  };
+
+  const mapApiToUi = (row: WorkInProgressRecord): WipRecord => {
+    const uniq = row.product_uniq ?? row.master_list?.uniq_code ?? "-";
+    const partNumber = row.master_list?.part_no ?? "-";
+    const partName = row.part_name ?? row.master_list?.part_name ?? "-";
+    const model = row.master_list?.model ?? "-";
+    const woNumber = row.work_order?.wo_number ?? row.work_order_reference ?? "-";
+    const stock = Number(row.quantity_in_process ?? 0);
+    const kanbanCode = row.batch_number ?? "-";
+    const process = mapApiProcess(row.current_process);
+    const target = uniqTargets.get(uniq) ?? row.master_list?.kanban_quantity ?? 250;
+    const stockToCompleteKanban = Math.max(0, Number(target) - stock);
+    const kanban = Math.max(0, Math.ceil(Number(target || 0) / 50));
+
+    return {
+      id: row.id,
+      process,
+      uniq,
+      partNumber,
+      partName,
+      model,
+      woNumber,
+      stock,
+      kanbanCode,
+      type: "Child Part",
+      stockToCompleteKanban,
+      kanban,
+    };
+  };
+
+  const displayedWipData = useMemo(() => {
+    if (useApi && wipSuccess) {
+      return (wipResponse?.data ?? []).map(mapApiToUi);
+    }
+    return wipData;
+  }, [useApi, wipData, wipResponse?.data, wipSuccess]);
+
   const updateAutoFill = () => {
     const uniq = editForm.getFieldValue("uniq");
     const stock = editForm.getFieldValue("stock");
@@ -150,7 +215,9 @@ export default function WorkInProgressPage() {
   };
 
   const openWipDetail = (record: WipRecord) => {
-    router.push(`/work-in-progress/detail?uniq=${encodeURIComponent(record.uniq)}`);
+    router.push(
+      `/work-in-progress/detail?id=${encodeURIComponent(record.id)}&uniq=${encodeURIComponent(record.uniq)}`
+    );
   };
 
   const openEditDrawer = (record: WipRecord) => {
@@ -178,23 +245,35 @@ export default function WorkInProgressPage() {
       const values = await editForm.validateFields();
       if (!editingWip) return;
 
-      setWipData((prev) =>
-        prev.map((row) => {
-          if (row.id !== editingWip.id) return row;
-          return {
-            ...row,
-            uniq: values.uniq ?? row.uniq,
-            woNumber: values.woNumber ?? row.woNumber,
-            kanbanCode: values.kanbanCode ?? row.kanbanCode,
-            type: (values.type ?? row.type) as WipRecord["type"],
-            process: (values.process ?? row.process) as WipRecord["process"],
-            stock: Number(values.stock ?? row.stock),
-            stockToCompleteKanban: Number(
-              values.stockToCompleteKanban ?? row.stockToCompleteKanban
-            ),
-          };
-        })
-      );
+      if (useApi && wipSuccess) {
+        await updateWip({
+          id: editingWip.id,
+          product_uniq: values.uniq ?? editingWip.uniq,
+          work_order_reference: values.woNumber ?? editingWip.woNumber,
+          batch_number: values.kanbanCode ?? editingWip.kanbanCode,
+          current_process: values.process ?? editingWip.process,
+          quantity_in_process: Number(values.stock ?? editingWip.stock),
+        }).unwrap();
+        await refetchWip();
+      } else {
+        setWipData((prev) =>
+          prev.map((row) => {
+            if (row.id !== editingWip.id) return row;
+            return {
+              ...row,
+              uniq: values.uniq ?? row.uniq,
+              woNumber: values.woNumber ?? row.woNumber,
+              kanbanCode: values.kanbanCode ?? row.kanbanCode,
+              type: (values.type ?? row.type) as WipRecord["type"],
+              process: (values.process ?? row.process) as WipRecord["process"],
+              stock: Number(values.stock ?? row.stock),
+              stockToCompleteKanban: Number(
+                values.stockToCompleteKanban ?? row.stockToCompleteKanban
+              ),
+            };
+          })
+        );
+      }
 
       messageApi.success("Saved");
       closeEditDrawer();
@@ -213,17 +292,26 @@ export default function WorkInProgressPage() {
     setDeletingWip(null);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deletingWip) return;
-    setWipData((prev) => prev.filter((row) => row.id !== deletingWip.id));
-    if (editingWip?.id === deletingWip.id) {
-      closeEditDrawer();
+    try {
+      if (useApi && wipSuccess) {
+        await deleteWip(deletingWip.id).unwrap();
+        await refetchWip();
+      } else {
+        setWipData((prev) => prev.filter((row) => row.id !== deletingWip.id));
+      }
+      if (editingWip?.id === deletingWip.id) {
+        closeEditDrawer();
+      }
+      messageApi.success("Deleted");
+      closeDeleteModal();
+    } catch {
+      messageApi.error("Failed to delete");
     }
-    messageApi.success("Deleted");
-    closeDeleteModal();
   };
 
-  const filteredData = wipData.filter((row) => {
+  const filteredData = displayedWipData.filter((row) => {
     const matchesSearch =
       !searchValue ||
       [
@@ -356,6 +444,13 @@ export default function WorkInProgressPage() {
             icon={<ReloadOutlined />}
             size="small"
             className="text-gray-600 hover:text-gray-800"
+            onClick={() => {
+              if (useApi) {
+                refetchWip();
+                return;
+              }
+              messageApi.info("Using mock data");
+            }}
           />
         </div>
       ),
@@ -628,6 +723,7 @@ export default function WorkInProgressPage() {
                   pagination={false}
                   bordered
                   scroll={{ x: "max-content" }}
+                  loading={useApi ? wipFetching : false}
                 />
               </div>
             </div>

@@ -4,6 +4,8 @@ import React, { useMemo, useState } from "react";
 import { Button, Card, InputNumber, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useCreatePoSplitMutation } from "@/lib/api/system-settings/api";
 
 type StatusType = "Active" | "Inactive";
 
@@ -51,6 +53,9 @@ function makeEntry(idx: number): Entry {
 export default function PurchaseOrderCreatePage() {
   const router = useRouter();
 
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [createPoSplit, { isLoading: isSaving }] = useCreatePoSplitMutation();
+
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
 
   const completeCount = useMemo(
@@ -75,7 +80,7 @@ export default function PurchaseOrderCreatePage() {
     setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
   };
 
-  const onSave = () => {
+  const onSave = async () => {
     for (const e of entries) {
       const err = validateEntry(e);
       if (err) {
@@ -84,8 +89,29 @@ export default function PurchaseOrderCreatePage() {
       }
     }
 
-    message.success("PO split setting saved");
-    router.push("/system-settings");
+    if (!apiEnabled) {
+      message.success("PO split setting saved");
+      router.push("/system-settings");
+      return;
+    }
+
+    try {
+      for (const e of entries) {
+        await createPoSplit({
+          material_type: e.materialType!,
+          min_order_qty: e.minOrderQty!,
+          max_split_lines: e.maxSplitLines!,
+          split_rule: e.splitRule!,
+          status: e.status!,
+        }).unwrap();
+        updateEntry(e.id, { created: true });
+      }
+
+      message.success("PO split setting saved");
+      router.push("/system-settings");
+    } catch (err: any) {
+      message.error(err?.data?.message ?? err?.error ?? "Failed to save PO split settings");
+    }
   };
 
   return (
@@ -103,7 +129,7 @@ export default function PurchaseOrderCreatePage() {
 
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
+              <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={isSaving}>
                 Save Parameter
               </Button>
             </div>

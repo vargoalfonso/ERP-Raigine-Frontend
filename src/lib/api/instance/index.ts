@@ -73,7 +73,8 @@ export const generateHeaders = async ({
   return headers;
 };
 
-export const apiBaseUrl = `${process.env.NEXT_PUBLIC_API_URL}`;
+const rawBaseUrl = process.env.NEXT_PUBLIC_API_URL;
+export const apiBaseUrl = rawBaseUrl && rawBaseUrl !== "undefined" ? rawBaseUrl : "";
 
 export const apiSlice = createApi({
   reducerPath: "api",

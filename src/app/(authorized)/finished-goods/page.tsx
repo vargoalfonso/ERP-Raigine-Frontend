@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -32,6 +32,12 @@ import { IoLocationOutline } from "react-icons/io5";
 import { FinishedGoodsRecord } from "@/lib/api/finished-goods/interface";
 import { FaRegEdit, FaRegTrashAlt } from "react-icons/fa";
 import StatsCardStatus from "@/components/StatsCardStatus";
+import { apiBaseUrl } from "@/lib/api/instance";
+import {
+  useDeleteMutation as useDeleteFinishedGoodsMutation,
+  useGetAllQuery as useGetAllFinishedGoodsQuery,
+  useUpdateMutation as useUpdateFinishedGoodsMutation,
+} from "@/lib/api/finished-goods/api";
 
 function getStockStatus(record: FinishedGoodsRecord):
   | "low"
@@ -361,7 +367,6 @@ const dummyStatusData: FinishedGoodsRecord[] = [
 export default function FinishedGoodsPage() {
   const router = useRouter();
   const [searchValue, setSearchValue] = useState("");
-  const [loading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [tab, setTab] = useState("inventory");
@@ -377,6 +382,36 @@ export default function FinishedGoodsPage() {
   const [deletingRecord, setDeletingRecord] =
     useState<FinishedGoodsRecord | null>(null);
   const [form] = Form.useForm();
+
+  const useApi = Boolean(apiBaseUrl);
+  const {
+    data: finishedGoodsResponse,
+    isFetching: finishedGoodsFetching,
+    isSuccess: finishedGoodsSuccess,
+    refetch: refetchFinishedGoods,
+  } = useGetAllFinishedGoodsQuery(
+    { currentPage, pageSize },
+    { skip: !useApi }
+  );
+  const [updateFinishedGood] = useUpdateFinishedGoodsMutation();
+  const [deleteFinishedGood] = useDeleteFinishedGoodsMutation();
+
+  const apiFinishedGoods = useMemo(() => {
+    if (!useApi || !finishedGoodsSuccess) return null;
+    return finishedGoodsResponse?.data ?? [];
+  }, [finishedGoodsResponse?.data, finishedGoodsSuccess, useApi]);
+
+  const displayedRows = useMemo(() => {
+    if (apiFinishedGoods) return apiFinishedGoods;
+    return tab === "inventory" ? dummyInventoryData : dummyStatusData;
+  }, [apiFinishedGoods, tab]);
+
+  const totalRows =
+    apiFinishedGoods && finishedGoodsResponse?.pagination?.total != null
+      ? finishedGoodsResponse.pagination.total
+      : displayedRows.length;
+
+  const loading = useApi ? finishedGoodsFetching : false;
 
   const openStatusDetail = (record: FinishedGoodsRecord) => {
     setStatusDetailRecord(record);
@@ -422,8 +457,18 @@ export default function FinishedGoodsPage() {
   const handleSaveEdit = async () => {
     try {
       const values = await form.validateFields();
-      console.log("Updated values:", values);
-      // TODO: panggil API update FG
+      if (!editingRecord) return;
+
+      if (useApi && finishedGoodsSuccess) {
+        await updateFinishedGood({
+          id: editingRecord.id,
+          body: {
+            current_stock: Number(values.current_stock ?? editingRecord.current_stock ?? 0),
+          },
+        }).unwrap();
+        await refetchFinishedGoods();
+      }
+
       setEditDrawerOpen(false);
     } catch (error) {
       console.log("Validation failed:", error);
@@ -436,10 +481,19 @@ export default function FinishedGoodsPage() {
     setDeleteModalOpen(true);
   };
   const handleConfirmDelete = () => {
-    console.log("Deleted record:", deletingRecord);
-    // TODO: panggil API delete FG
-    setDeleteModalOpen(false);
-    setDeletingRecord(null);
+    (async () => {
+      if (!deletingRecord) return;
+      try {
+        if (useApi && finishedGoodsSuccess) {
+          await deleteFinishedGood({ id: deletingRecord.id }).unwrap();
+          await refetchFinishedGoods();
+        }
+        setDeleteModalOpen(false);
+        setDeletingRecord(null);
+      } catch {
+        setDeleteModalOpen(false);
+      }
+    })();
   };
   const columns: ColumnType<FinishedGoodsRecord>[] = [
     {
@@ -551,7 +605,7 @@ export default function FinishedGoodsPage() {
             type="text"
             icon={<EyeOutlined />}
             size="small"
-            onClick={() => router.push(`/finished-goods/detail`)}
+            onClick={() => router.push(`/finished-goods/detail?id=${record.id}`)}
             className="text-blue-600 hover:text-blue-800"
           />
           <Button
@@ -796,14 +850,14 @@ export default function FinishedGoodsPage() {
         <div className="p-6">
           <TableTemplate
             columns={tab === "inventory" ? columns : columnsStatus}
-            data={tab === "inventory" ? dummyInventoryData : dummyStatusData}
+            data={displayedRows}
             rowKey="id"
             searchValue={searchValue}
             onSearchChange={setSearchValue}
             searchPlaceholder="Search finished goods..."
             pageSize={pageSize}
             currentPage={currentPage}
-            total={2}
+            total={totalRows}
             onPageChange={setCurrentPage}
             onPageSizeChange={setPageSize}
             loading={loading}

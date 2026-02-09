@@ -4,6 +4,8 @@ import React, { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { Button, Card, Form, Input, Select, message } from "antd";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useCreateAccessControlMatrixMutation } from "@/lib/api/system-settings/api";
 
 type UserAccessEntry = {
   key: string;
@@ -36,6 +38,10 @@ const employeeIdOptions = ["EMP-001", "EMP-002", "EMP-003", "EMP-004", "EMP-005"
 export default function AddUserAccessControlPage() {
   const router = useRouter();
 
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [createAccessControlMatrix, { isLoading: isSaving }] =
+    useCreateAccessControlMatrixMutation();
+
   const [entries, setEntries] = useState<UserAccessEntry[]>([{ key: "1" }]);
   const [forms] = useState(() => new Map<string, ReturnType<typeof Form.useForm>[0]>());
 
@@ -67,8 +73,27 @@ export default function AddUserAccessControlPage() {
       }
     }
 
-    message.success("User access saved");
-    router.push("/system-settings");
+    if (!apiEnabled) {
+      message.success("User access saved");
+      router.push("/system-settings");
+      return;
+    }
+
+    try {
+      for (const entry of entries) {
+        await createAccessControlMatrix({
+          full_name: entry.fullName!,
+          employee_id: entry.employeeId!,
+          department: entry.department!,
+          role: entry.role!,
+        }).unwrap();
+      }
+
+      message.success("User access saved");
+      router.push("/system-settings");
+    } catch (err: any) {
+      message.error(err?.data?.message ?? err?.error ?? "Failed to save user access");
+    }
   };
 
   return (
@@ -97,7 +122,7 @@ export default function AddUserAccessControlPage() {
 
           <div className="flex items-center gap-2">
             <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-            <Button type="primary" icon={<SaveOutlined />} onClick={handleSave}>
+            <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={isSaving}>
               Save User Access
             </Button>
           </div>
@@ -108,7 +133,7 @@ export default function AddUserAccessControlPage() {
         <div className="border border-blue-100 bg-blue-50 rounded-2xl p-5">
           <div className="text-blue-700 font-semibold">Multiple User Access</div>
           <div className="text-blue-700/80 text-sm mt-1">
-            Add new users to the system quickly and securely. Each user will be granted access based on the role you assign. You can add more users using the "Add Another User" button.
+            Add new users to the system quickly and securely. Each user will be granted access based on the role you assign. You can add more users using the &quot;Add Another User&quot; button.
           </div>
         </div>
 

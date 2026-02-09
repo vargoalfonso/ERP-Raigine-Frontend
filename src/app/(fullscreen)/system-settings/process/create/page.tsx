@@ -4,6 +4,8 @@ import React, { useMemo, useState } from "react";
 import { Button, Card, Input, InputNumber, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useCreateProcessMutation } from "@/lib/api/system-settings/api";
 
 type StatusType = "Active" | "Inactive";
 
@@ -44,6 +46,9 @@ function makeEntry(idx: number): Entry {
 export default function ProcessCreatePage() {
   const router = useRouter();
 
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [createProcess, { isLoading: isSaving }] = useCreateProcessMutation();
+
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
 
   const completeCount = useMemo(
@@ -67,7 +72,7 @@ export default function ProcessCreatePage() {
     setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
   };
 
-  const onSave = () => {
+  const onSave = async () => {
     for (const e of entries) {
       const err = validateEntry(e);
       if (err) {
@@ -76,8 +81,28 @@ export default function ProcessCreatePage() {
       }
     }
 
-    message.success("Process saved");
-    router.push("/system-settings");
+    if (!apiEnabled) {
+      message.success("Process saved");
+      router.push("/system-settings");
+      return;
+    }
+
+    try {
+      for (const e of entries) {
+        await createProcess({
+          category: e.category!,
+          process_name: e.processName!,
+          sequence: e.sequence!,
+          status: e.status!,
+        }).unwrap();
+        updateEntry(e.id, { created: true });
+      }
+
+      message.success("Process saved");
+      router.push("/system-settings");
+    } catch (err: any) {
+      message.error(err?.data?.message ?? err?.error ?? "Failed to save process");
+    }
   };
 
   return (
@@ -95,7 +120,7 @@ export default function ProcessCreatePage() {
 
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
+              <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={isSaving}>
                 Save Parameter
               </Button>
             </div>

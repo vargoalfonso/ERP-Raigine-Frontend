@@ -1,0 +1,765 @@
+"use client";
+
+import { Suspense, useEffect, useMemo, useState } from "react";
+import {
+  Button,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
+  Table,
+  Tag,
+  message,
+} from "antd";
+import type { ColumnsType } from "antd/es/table";
+import {
+  CrownOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  EyeOutlined,
+  MailOutlined,
+  PhoneOutlined,
+  PlusOutlined,
+  TeamOutlined,
+  UserOutlined,
+} from "@ant-design/icons";
+import { useRouter, useSearchParams } from "next/navigation";
+
+type TabKey = "employee" | "department";
+
+type EmployeeRow = {
+  key: string;
+  empId: string;
+  name: string;
+  isManager: boolean;
+  jobTitle: string;
+  jobLevel: string;
+  email: string;
+  phone: string;
+  department: string;
+  manager: string;
+  role: string;
+  roleHint: string;
+  joinDate: string;
+  status: "Active" | "Inactive";
+};
+
+type DepartmentRow = {
+  key: string;
+  code?: string;
+  name: string;
+  head: string;
+  parentDepartment?: string;
+  description?: string;
+  employeeCount: number;
+  status: "Active" | "Inactive";
+};
+
+const STORAGE_EMPLOYEES = "ai-erp-employees";
+const STORAGE_DEPARTMENTS = "ai-erp-departments";
+
+export default function EmployeeDeptPage() {
+  return (
+    <Suspense fallback={null}>
+      <EmployeeDeptPageContent />
+    </Suspense>
+  );
+}
+
+function EmployeeDeptPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [activeTab, setActiveTab] = useState<TabKey>("employee");
+  const [viewDeptOpen, setViewDeptOpen] = useState(false);
+  const [editDeptOpen, setEditDeptOpen] = useState(false);
+  const [selectedDept, setSelectedDept] = useState<DepartmentRow | null>(null);
+
+  const [deptSearch, setDeptSearch] = useState("");
+  const [deptStatus, setDeptStatus] = useState<"All" | DepartmentRow["status"]>("All");
+
+  const [editDeptForm] = Form.useForm();
+
+  const defaultEmployees: EmployeeRow[] = [
+    {
+      key: "emp-001",
+      empId: "EMP-001",
+      name: "John Smith",
+      isManager: true,
+      jobTitle: "Production Manager",
+      jobLevel: "Manager",
+      email: "john.smith@company.com",
+      phone: "+62-812-3456-7890",
+      department: "Production",
+      manager: "Sarah Wilson",
+      role: "Production Manager",
+      roleHint: "Full Production Access",
+      joinDate: "3/15/2022",
+      status: "Active",
+    },
+    {
+      key: "emp-002",
+      empId: "EMP-002",
+      name: "Jane Doe",
+      isManager: true,
+      jobTitle: "Quality Control Supervisor",
+      jobLevel: "Supervisor",
+      email: "jane.doe@company.com",
+      phone: "+62-812-3456-7891",
+      department: "Quality Control",
+      manager: "Mike Johnson",
+      role: "QC Supervisor",
+      roleHint: "QC Module Access",
+      joinDate: "11/20/2021",
+      status: "Active",
+    },
+    {
+      key: "emp-003",
+      empId: "EMP-003",
+      name: "Mike Johnson",
+      isManager: true,
+      jobTitle: "Department Head - Manufacturing",
+      jobLevel: "Department Head",
+      email: "mike.johnson@company.com",
+      phone: "+62-812-3456-7892",
+      department: "Manufacturing",
+      manager: "David Chen",
+      role: "Department Head",
+      roleHint: "Full Manufacturing Access",
+      joinDate: "7/10/2020",
+      status: "Active",
+    },
+    {
+      key: "emp-004",
+      empId: "EMP-004",
+      name: "Sarah Wilson",
+      isManager: false,
+      jobTitle: "PPIC Coordinator",
+      jobLevel: "Coordinator",
+      email: "sarah.wilson@company.com",
+      phone: "+62-812-3456-7893",
+      department: "PPIC",
+      manager: "David Chen",
+      role: "PPIC Coordinator",
+      roleHint: "Planning & Inventory Access",
+      joinDate: "1/8/2023",
+      status: "Active",
+    },
+    {
+      key: "emp-005",
+      empId: "EMP-005",
+      name: "David Chen",
+      isManager: true,
+      jobTitle: "Operations Director",
+      jobLevel: "Director",
+      email: "david.chen@company.com",
+      phone: "+62-812-3456-7894",
+      department: "Operations",
+      manager: "Top Level",
+      role: "Operations Director",
+      roleHint: "Full System Access",
+      joinDate: "5/15/2019",
+      status: "Active",
+    },
+  ];
+
+  const defaultDepartments: DepartmentRow[] = [
+    { key: "dept-1", code: "DEPT-001", name: "Production", head: "John Smith", employeeCount: 12, status: "Active" },
+    { key: "dept-2", code: "DEPT-002", name: "Quality Control", head: "Jane Doe", employeeCount: 8, status: "Active" },
+    { key: "dept-3", code: "DEPT-003", name: "Manufacturing", head: "Mike Johnson", employeeCount: 15, status: "Active" },
+    { key: "dept-4", code: "DEPT-004", name: "PPIC", head: "Sarah Wilson", employeeCount: 6, status: "Active" },
+    { key: "dept-5", code: "DEPT-005", name: "Operations", head: "David Chen", employeeCount: 5, status: "Active" },
+  ];
+
+  const [employees, setEmployees] = useState<EmployeeRow[]>(defaultEmployees);
+
+  const [departments, setDepartments] = useState<DepartmentRow[]>(defaultDepartments);
+  const [hasLoaded, setHasLoaded] = useState(false);
+
+  useEffect(() => {
+    try {
+      const rawEmployees = localStorage.getItem(STORAGE_EMPLOYEES);
+      const rawDepartments = localStorage.getItem(STORAGE_DEPARTMENTS);
+
+      if (rawEmployees) {
+        setEmployees(JSON.parse(rawEmployees) as EmployeeRow[]);
+      } else {
+        localStorage.setItem(STORAGE_EMPLOYEES, JSON.stringify(defaultEmployees));
+      }
+
+      if (rawDepartments) {
+        const parsed = JSON.parse(rawDepartments) as DepartmentRow[];
+
+        const usedNums = parsed
+          .map((d) => d.code)
+          .filter((c): c is string => Boolean(c))
+          .map((code) => {
+            const m = code.match(/(\d+)$/);
+            return m ? Number(m[1]) : null;
+          })
+          .filter((n): n is number => typeof n === "number" && Number.isFinite(n));
+
+        let next = (usedNums.length ? Math.max(...usedNums) : 0) + 1;
+        let changed = false;
+
+        const backfilled = parsed.map((d) => {
+          if (d.code) return d;
+          changed = true;
+          const code = `DEPT-${String(next).padStart(3, "0")}`;
+          next += 1;
+          return { ...d, code };
+        });
+
+        if (changed) {
+          localStorage.setItem(STORAGE_DEPARTMENTS, JSON.stringify(backfilled));
+        }
+        setDepartments(backfilled);
+      } else {
+        localStorage.setItem(STORAGE_DEPARTMENTS, JSON.stringify(defaultDepartments));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setHasLoaded(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t === "department") setActiveTab("department");
+    if (t === "employee") setActiveTab("employee");
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!hasLoaded) return;
+    try {
+      localStorage.setItem(STORAGE_EMPLOYEES, JSON.stringify(employees));
+    } catch {
+      // ignore
+    }
+  }, [employees, hasLoaded]);
+
+  useEffect(() => {
+    if (!hasLoaded) return;
+    try {
+      localStorage.setItem(STORAGE_DEPARTMENTS, JSON.stringify(departments));
+    } catch {
+      // ignore
+    }
+  }, [departments, hasLoaded]);
+
+  const metrics = useMemo(() => {
+    const totalEmployees = employees.length;
+    const managers = employees.filter((e) => e.isManager).length;
+    const departmentsCount = departments.length;
+    const activeUsers = employees.filter((e) => e.status === "Active").length;
+    return { totalEmployees, managers, departmentsCount, activeUsers };
+  }, [employees, departments]);
+
+  const filteredDepartments = useMemo(() => {
+    const q = deptSearch.trim().toLowerCase();
+    return departments.filter((d) => {
+      const matchesSearch =
+        !q ||
+        (d.code || "").toLowerCase().includes(q) ||
+        d.name.toLowerCase().includes(q) ||
+        d.head.toLowerCase().includes(q);
+      const matchesStatus = deptStatus === "All" ? true : d.status === deptStatus;
+      return matchesSearch && matchesStatus;
+    });
+  }, [departments, deptSearch, deptStatus]);
+
+  const tabButtonClass = (on: boolean) =>
+    "rounded-lg px-4 py-2 text-sm font-medium transition-colors border " +
+    (on ? "bg-white text-gray-900 border-gray-200 shadow-sm" : "bg-transparent text-gray-600 border-transparent hover:bg-white");
+
+  const employeeColumns: ColumnsType<EmployeeRow> = [
+    {
+      title: "Employee",
+      key: "employee",
+      width: 230,
+      render: (_: unknown, record) => (
+        <div className="flex items-start gap-3">
+          <div className="mt-1 text-gray-400">≋</div>
+          <div className="leading-tight">
+            <span className="inline-flex items-center rounded-md border border-gray-200 bg-white px-2 py-0.5 text-xs font-semibold text-gray-700">
+              {record.empId}
+            </span>
+            <div className="text-sm font-semibold text-gray-900 mt-1">{record.name}</div>
+            {record.isManager && (
+              <div className="text-xs text-orange-600 mt-1 inline-flex items-center gap-1">
+                <CrownOutlined />
+                <span>Manager</span>
+              </div>
+            )}
+          </div>
+        </div>
+      ),
+    },
+    {
+      title: "Job Title",
+      key: "jobTitle",
+      width: 210,
+      render: (_: unknown, record) => (
+        <div className="leading-tight">
+          <div className="text-sm font-semibold text-gray-900">{record.jobTitle}</div>
+          <div className="text-xs text-gray-500 mt-1">{record.jobLevel}</div>
+        </div>
+      ),
+    },
+    {
+      title: "Contact",
+      key: "contact",
+      width: 240,
+      render: (_: unknown, record) => (
+        <div className="leading-tight">
+          <div className="flex items-center gap-2 text-xs text-gray-600">
+            <MailOutlined className="text-gray-400" />
+            <span>{record.email}</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-gray-600 mt-1">
+            <PhoneOutlined className="text-gray-400" />
+            <span>{record.phone}</span>
+          </div>
+        </div>
+      ),
+    },
+    {
+      title: "Department",
+      dataIndex: "department",
+      key: "department",
+      width: 140,
+      render: (v: string) => (
+        <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
+          {v}
+        </span>
+      ),
+    },
+    {
+      title: "Manager",
+      dataIndex: "manager",
+      key: "manager",
+      width: 140,
+      render: (v: string) => (
+        <span className={"text-sm " + (v === "Top Level" ? "text-gray-400" : "text-gray-900")}>{v}</span>
+      ),
+    },
+    {
+      title: "Role",
+      key: "role",
+      width: 200,
+      render: (_: unknown, record) => (
+        <div className="leading-tight">
+          <div className="text-sm font-semibold text-gray-900">{record.role}</div>
+          <div className="text-xs text-gray-500 mt-1">{record.roleHint}</div>
+        </div>
+      ),
+    },
+    {
+      title: "Join Date",
+      dataIndex: "joinDate",
+      key: "joinDate",
+      width: 110,
+      render: (v: string) => <span className="text-sm text-gray-800">{v}</span>,
+    },
+    {
+      title: "Status",
+      dataIndex: "status",
+      key: "status",
+      width: 90,
+      render: (v: EmployeeRow["status"]) => (
+        <span className="text-sm font-semibold text-blue-600">{v}</span>
+      ),
+    },
+    {
+      title: "Actions",
+      key: "actions",
+      width: 120,
+      fixed: "right",
+      render: (_: unknown, record) => (
+        <div className="flex items-center justify-end gap-1">
+          <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => message.info(`View ${record.empId} (mock)`)} />
+          <Button size="small" type="text" icon={<EditOutlined />} onClick={() => message.info(`Edit ${record.empId} (mock)`)} />
+          <Button
+            size="small"
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => setEmployees((prev) => prev.filter((e) => e.key !== record.key))}
+          />
+        </div>
+      ),
+    },
+  ];
+
+  const departmentColumns: ColumnsType<DepartmentRow> = [
+    { title: "Department", dataIndex: "name", key: "name", render: (v: string) => <span className="text-sm font-semibold text-gray-900">{v}</span> },
+    { title: "Head", dataIndex: "head", key: "head", render: (v: string) => <span className="text-sm text-gray-800">{v}</span> },
+    { title: "Employees", dataIndex: "employeeCount", key: "employeeCount", render: (v: number) => <span className="text-sm text-gray-800">{v}</span> },
+    {
+      title: "Status",
+      dataIndex: "status",
+      key: "status",
+      render: (v: DepartmentRow["status"]) => (
+        <Tag color={v === "Active" ? "blue" : "default"} className="!rounded-full !px-3 !py-0.5 !text-xs">
+          {v}
+        </Tag>
+      ),
+    },
+    {
+      title: "Actions",
+      key: "actions",
+      width: 120,
+      fixed: "right",
+      render: (_: unknown, record) => (
+        <div className="flex items-center justify-end gap-1">
+          <Button
+            size="small"
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => {
+              setSelectedDept(record);
+              setViewDeptOpen(true);
+            }}
+          />
+          <Button
+            size="small"
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setSelectedDept(record);
+              editDeptForm.setFieldsValue({
+                code: record.code || "DEPT-000",
+                name: record.name,
+                head: record.head,
+                parentDepartment: record.parentDepartment,
+                description: record.description,
+                employeeCount: record.employeeCount,
+                status: record.status,
+              });
+              setEditDeptOpen(true);
+            }}
+          />
+          <Button
+            size="small"
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => setDepartments((prev) => prev.filter((d) => d.key !== record.key))}
+          />
+        </div>
+      ),
+    },
+  ];
+
+  const selectedDeptEmployees = useMemo(() => {
+    if (!selectedDept) return [];
+    return employees.filter((e) => e.department === selectedDept.name);
+  }, [employees, selectedDept]);
+
+  return (
+    <div className="p-6 bg-gray-50 min-h-screen">
+      <div className="mb-6">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 mb-1">Employee Management</h1>
+              <p className="text-sm text-gray-500">Manage employee master data and organizational hierarchy supporting workflows and approvals</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button className="!rounded-lg" icon={<TeamOutlined />} onClick={() => router.push("/employee-dept/add-department")}>
+                Add Department
+              </Button>
+              <Button
+                type="primary"
+                className="!rounded-lg"
+                icon={<PlusOutlined />}
+                onClick={() => router.push("/employee-dept/add-employee")}
+              >
+                Add Employee
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-semibold text-gray-500">Total Employees</div>
+              <div className="text-2xl font-bold text-gray-900 mt-1">{metrics.totalEmployees}</div>
+            </div>
+            <UserOutlined className="text-blue-600 text-xl" />
+          </div>
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-semibold text-gray-500">Managers</div>
+              <div className="text-2xl font-bold text-gray-900 mt-1">{metrics.managers}</div>
+            </div>
+            <CrownOutlined className="text-orange-500 text-xl" />
+          </div>
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-semibold text-gray-500">Departments</div>
+              <div className="text-2xl font-bold text-gray-900 mt-1">{metrics.departmentsCount}</div>
+            </div>
+            <TeamOutlined className="text-green-600 text-xl" />
+          </div>
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
+            <div>
+              <div className="text-xs font-semibold text-gray-500">Active Users</div>
+              <div className="text-2xl font-bold text-gray-900 mt-1">{metrics.activeUsers}</div>
+            </div>
+            <UserOutlined className="text-purple-600 text-xl" />
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+        <div className="flex items-center gap-2 rounded-xl bg-gray-50 p-2 w-fit">
+          <button
+            type="button"
+            className={tabButtonClass(activeTab === "employee")}
+            onClick={() => {
+              setActiveTab("employee");
+              router.replace("/employee-dept?tab=employee");
+            }}
+          >
+            Employee Management
+          </button>
+          <button
+            type="button"
+            className={tabButtonClass(activeTab === "department")}
+            onClick={() => {
+              setActiveTab("department");
+              router.replace("/employee-dept?tab=department");
+            }}
+          >
+            Department Management
+          </button>
+        </div>
+
+        {activeTab === "employee" ? (
+          <div className="mt-5">
+            <div className="flex items-center justify-between">
+              <div className="text-lg font-semibold text-gray-900">Employee Master Data</div>
+              <div className="text-xs text-gray-500">{employees.length} employees</div>
+            </div>
+
+            <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
+              <Table<EmployeeRow>
+                columns={employeeColumns}
+                dataSource={employees}
+                rowKey="key"
+                size="middle"
+                pagination={false}
+                scroll={{ x: "max-content" }}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="text-lg font-semibold text-gray-900">Department Master Data</div>
+                <div className="text-xs text-gray-500 mt-1">{filteredDepartments.length} departments</div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Input
+                  className="!rounded-lg w-64"
+                  placeholder="Search department/head..."
+                  value={deptSearch}
+                  onChange={(e) => setDeptSearch(e.target.value)}
+                  allowClear
+                />
+                <Select
+                  className="!rounded-lg w-40"
+                  value={deptStatus}
+                  onChange={(v) => setDeptStatus(v)}
+                  options={[
+                    { label: "All Status", value: "All" },
+                    { label: "Active", value: "Active" },
+                    { label: "Inactive", value: "Inactive" },
+                  ]}
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
+              <Table<DepartmentRow>
+                columns={departmentColumns}
+                dataSource={filteredDepartments}
+                rowKey="key"
+                size="middle"
+                pagination={false}
+                scroll={{ x: "max-content" }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <Modal
+        open={viewDeptOpen}
+        onCancel={() => {
+          setViewDeptOpen(false);
+          setSelectedDept(null);
+        }}
+        title={<div className="text-sm font-semibold">Department Detail</div>}
+        footer={
+          <Button
+            className="!rounded-lg"
+            onClick={() => {
+              setViewDeptOpen(false);
+              setSelectedDept(null);
+            }}
+          >
+            Close
+          </Button>
+        }
+      >
+        {selectedDept ? (
+          <div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="rounded-lg border border-gray-100 p-3">
+                <div className="text-xs text-gray-500">Department Code</div>
+                <div className="text-sm font-semibold text-gray-900 mt-1">{selectedDept.code || "—"}</div>
+              </div>
+              <div className="rounded-lg border border-gray-100 p-3">
+                <div className="text-xs text-gray-500">Department</div>
+                <div className="text-sm font-semibold text-gray-900 mt-1">{selectedDept.name}</div>
+              </div>
+              <div className="rounded-lg border border-gray-100 p-3">
+                <div className="text-xs text-gray-500">Head</div>
+                <div className="text-sm font-semibold text-gray-900 mt-1">{selectedDept.head}</div>
+              </div>
+              <div className="rounded-lg border border-gray-100 p-3">
+                <div className="text-xs text-gray-500">Parent Department</div>
+                <div className="text-sm font-semibold text-gray-900 mt-1">{selectedDept.parentDepartment || "—"}</div>
+              </div>
+              <div className="rounded-lg border border-gray-100 p-3">
+                <div className="text-xs text-gray-500">Employees</div>
+                <div className="text-sm font-semibold text-gray-900 mt-1">{selectedDept.employeeCount}</div>
+              </div>
+              <div className="rounded-lg border border-gray-100 p-3">
+                <div className="text-xs text-gray-500">Status</div>
+                <div className="mt-1">
+                  <Tag color={selectedDept.status === "Active" ? "blue" : "default"} className="!rounded-full !px-3 !py-0.5 !text-xs">
+                    {selectedDept.status}
+                  </Tag>
+                </div>
+              </div>
+            </div>
+
+            {selectedDept.description ? (
+              <div className="mt-3 rounded-lg border border-gray-100 p-3">
+                <div className="text-xs text-gray-500">Description</div>
+                <div className="text-sm text-gray-900 mt-1 whitespace-pre-wrap">{selectedDept.description}</div>
+              </div>
+            ) : null}
+
+            <div className="mt-4">
+              <div className="text-sm font-semibold text-gray-900">Employees in Department</div>
+              <div className="text-xs text-gray-500 mt-1">{selectedDeptEmployees.length} employees</div>
+
+              <div className="mt-3 overflow-hidden rounded-xl border border-gray-100">
+                <Table<EmployeeRow>
+                  columns={employeeColumns.filter((c) => c.key !== "actions")}
+                  dataSource={selectedDeptEmployees}
+                  rowKey="key"
+                  size="small"
+                  pagination={false}
+                  scroll={{ x: "max-content" }}
+                />
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-gray-500">No department selected</div>
+        )}
+      </Modal>
+
+      <Modal
+        open={editDeptOpen}
+        onCancel={() => {
+          setEditDeptOpen(false);
+          setSelectedDept(null);
+          editDeptForm.resetFields();
+        }}
+        title={<div className="text-sm font-semibold">Edit Department</div>}
+        okText="Save"
+        cancelText="Cancel"
+        okButtonProps={{ className: "!rounded-lg" }}
+        cancelButtonProps={{ className: "!rounded-lg" }}
+        onOk={async () => {
+          try {
+            const values = await editDeptForm.validateFields();
+            if (!selectedDept) return;
+
+            setDepartments((prev) =>
+              prev.map((d) =>
+                d.key === selectedDept.key
+                  ? {
+                      ...d,
+                      code: values.code,
+                      name: values.name,
+                      head: values.head,
+                      parentDepartment: values.parentDepartment || undefined,
+                      description: values.description || undefined,
+                      employeeCount: Number(values.employeeCount || 0),
+                      status: values.status,
+                    }
+                  : d
+              )
+            );
+
+            setEditDeptOpen(false);
+            setSelectedDept(null);
+            editDeptForm.resetFields();
+            message.success("Department updated");
+          } catch {
+            // validation handled by form
+          }
+        }}
+      >
+        <Form form={editDeptForm} layout="vertical">
+          <Form.Item name="code" label="Department Code" rules={[{ required: true }]}>
+            <Input className="!rounded-lg" disabled placeholder="DEPT-001" />
+          </Form.Item>
+          <Form.Item name="name" label="Department Name" rules={[{ required: true }]}>
+            <Input className="!rounded-lg" placeholder="Department" />
+          </Form.Item>
+          <Form.Item name="head" label="Department Head" rules={[{ required: true }]}>
+            <Select className="!rounded-lg" options={employees.map((e) => ({ label: e.name, value: e.name }))} />
+          </Form.Item>
+          <Form.Item name="parentDepartment" label="Parent Department">
+            <Select
+              className="!rounded-lg"
+              allowClear
+              placeholder="Select parent"
+              options={departments.map((d) => ({ label: d.name, value: d.name }))}
+            />
+          </Form.Item>
+          <Form.Item name="description" label="Description">
+            <Input.TextArea className="!rounded-lg" rows={3} placeholder="Department description" />
+          </Form.Item>
+          <Form.Item name="employeeCount" label="Employees" rules={[{ required: true }]}>
+            <InputNumber className="!rounded-lg w-full" min={0} placeholder="e.g. 10" />
+          </Form.Item>
+          <Form.Item name="status" label="Status" rules={[{ required: true }]}>
+            <Select
+              className="!rounded-lg"
+              options={[
+                { label: "Active", value: "Active" },
+                { label: "Inactive", value: "Inactive" },
+              ]}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </div>
+  );
+}

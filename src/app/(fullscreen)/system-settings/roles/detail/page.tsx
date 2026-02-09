@@ -1,9 +1,17 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 export default function RoleDetailRedirectPage() {
+  return (
+    <Suspense fallback={null}>
+      <RoleDetailRedirectPageContent />
+    </Suspense>
+  );
+}
+
+function RoleDetailRedirectPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 

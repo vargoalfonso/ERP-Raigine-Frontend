@@ -18,6 +18,9 @@ import {
   DeleteOutlined,
   SaveOutlined,
 } from "@ant-design/icons";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useCreateWorkInProgressMutation } from "@/lib/api/work-in-progress/api";
+import type { CreateWorkInProgressRequest, ProcessPriority } from "@/lib/api/work-in-progress/interface";
 type WipType = "Child Part" | "Warehouse FG";
 type Process = "Welding" | "CNC Machine" | "Quality Check";
 
@@ -46,6 +49,8 @@ type WipFormValues = {
 export default function CreateWorkInProgressPage() {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const useApi = Boolean(apiBaseUrl);
+  const [createWorkInProgress] = useCreateWorkInProgressMutation();
   const [entries, setEntries] = useState<WipEntry[]>([
     {
       id: "1",
@@ -169,9 +174,41 @@ export default function CreateWorkInProgressPage() {
     }
     try {
       setIsSubmitting(true);
-      console.log("Save WIP Entries:", entries);
-      message.success("Saved");
+      if (useApi) {
+        const nowIso = new Date().toISOString();
+        const estimatedIso = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+        const defaultPriority: ProcessPriority = "Medium";
+
+        const requests: CreateWorkInProgressRequest[] = entries.map((e) => ({
+          product_uniq: e.uniq,
+          part_name: e.wipType === "Warehouse FG" ? "Warehouse FG" : "Child Part",
+          work_order_reference: e.woNumber,
+          batch_number: e.packingNumber,
+          quantity_in_process: e.stock,
+          current_process: e.process,
+          process_station: "Default Station",
+          production_start_date: nowIso,
+          estimated_completion: estimatedIso,
+          current_operator: "System",
+          process_priority: defaultPriority,
+          process_notes: `wipType=${e.wipType}; stockToCompleteKanban=${e.stockToCompleteKanban}; pcsPerKanban=${e.pcsPerKanban}`,
+        }));
+
+        for (const req of requests) {
+          await createWorkInProgress(req).unwrap();
+        }
+
+        message.success("Saved to API");
+      } else {
+        console.log("Save WIP Entries:", entries);
+        message.success("Saved (mock)");
+      }
+
       router.push("/work-in-progress");
+    } catch (err) {
+      console.error(err);
+      message.error("Failed to save WIP entries");
     } finally {
       setIsSubmitting(false);
     }

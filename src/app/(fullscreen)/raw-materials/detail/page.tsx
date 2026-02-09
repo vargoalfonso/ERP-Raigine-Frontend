@@ -109,7 +109,7 @@ export default function FinishedGoodDetailPage() {
     {
       title: "Action",
       key: "action",
-      render: (_: any, record: RowHistory) => (
+      render: (_: unknown, record: RowHistory) => (
         <Button
           type="text"
           icon={<EyeOutlined />}

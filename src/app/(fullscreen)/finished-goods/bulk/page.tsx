@@ -14,6 +14,7 @@ import {
   Divider,
   Radio,
 } from "antd";
+import type { RadioChangeEvent } from "antd";
 import {
   UploadOutlined,
   DownloadOutlined,
@@ -219,7 +220,7 @@ export default function BulkFinishedGoodsPage() {
           const dataLines = lines.slice(1);
           const parsed: RowData[] = dataLines.map((line, idx) => {
             const cols = line.split(",").map((c) => c.trim());
-            const obj: any = {};
+            const obj: Record<string, string> = {};
             headers.forEach((h, i) => {
               obj[h] = cols[i] ?? "";
             });
@@ -320,7 +321,7 @@ export default function BulkFinishedGoodsPage() {
     router.push("/finished-goods/create");
   };
 
-  const handleModeChange = (e: any) => {
+  const handleModeChange = (e: RadioChangeEvent) => {
     const value = e.target.value as "manual" | "bulk";
     setMode(value);
     if (value === "bulk") {
