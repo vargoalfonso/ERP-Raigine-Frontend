@@ -6,6 +6,7 @@ import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useCreatePoSplitMutation } from "@/lib/api/system-settings/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type StatusType = "Active" | "Inactive";
 
@@ -102,15 +103,14 @@ export default function PurchaseOrderCreatePage() {
           min_order_qty: e.minOrderQty!,
           max_split_lines: e.maxSplitLines!,
           split_rule: e.splitRule!,
-          status: e.status!,
         }).unwrap();
         updateEntry(e.id, { created: true });
       }
 
       message.success("PO split setting saved");
       router.push("/system-settings");
-    } catch (err: any) {
-      message.error(err?.data?.message ?? err?.error ?? "Failed to save PO split settings");
+    } catch (err: unknown) {
+      message.error(getApiErrorMessage(err, "Failed to save PO split settings"));
     }
   };
 

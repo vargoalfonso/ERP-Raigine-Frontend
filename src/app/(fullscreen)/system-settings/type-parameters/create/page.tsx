@@ -6,6 +6,7 @@ import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useCreateTypeParameterMutation } from "@/lib/api/system-settings/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type StatusType = "Active" | "Inactive";
 
@@ -91,8 +92,8 @@ export default function TypeParametersCreatePage() {
 
       message.success("WIP Type saved");
       router.push("/system-settings");
-    } catch (err: any) {
-      message.error(err?.data?.message ?? err?.error ?? "Failed to save WIP Type");
+    } catch (err: unknown) {
+      message.error(getApiErrorMessage(err, "Failed to save WIP Type"));
     }
   };
 

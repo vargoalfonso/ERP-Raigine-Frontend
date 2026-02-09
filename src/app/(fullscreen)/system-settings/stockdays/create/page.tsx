@@ -11,6 +11,7 @@ import {
 import { useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useCreateStockdaysMutation } from "@/lib/api/system-settings/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type Entry = {
   id: string;
@@ -90,15 +91,15 @@ export default function StockdaysCreatePage() {
 
     try {
       await createStockdays({
-        type: type!,
-        uniq: entry.uniq!,
+        inventory_type: type!,
+        item_uniq_code: entry.uniq!,
         calculation_type: entry.calculationType!,
         constanta: entry.constanta!,
       }).unwrap();
       updateEntry(id, { created: true });
       message.success("Entry saved");
-    } catch (err: any) {
-      message.error(err?.data?.message ?? err?.error ?? "Failed to save entry");
+    } catch (err: unknown) {
+      message.error(getApiErrorMessage(err, "Failed to save entry"));
     }
   };
 
@@ -130,8 +131,8 @@ export default function StockdaysCreatePage() {
       for (const e of entries) {
         if (e.created) continue;
         await createStockdays({
-          type,
-          uniq: e.uniq!,
+          inventory_type: type,
+          item_uniq_code: e.uniq!,
           calculation_type: e.calculationType!,
           constanta: e.constanta!,
         }).unwrap();
@@ -140,8 +141,8 @@ export default function StockdaysCreatePage() {
 
       message.success("Stockdays parameter saved");
       router.push("/system-settings");
-    } catch (err: any) {
-      message.error(err?.data?.message ?? err?.error ?? "Failed to save stockdays parameter");
+    } catch (err: unknown) {
+      message.error(getApiErrorMessage(err, "Failed to save stockdays parameter"));
     }
   };
 

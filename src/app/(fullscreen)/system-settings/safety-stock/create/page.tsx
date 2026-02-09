@@ -11,6 +11,7 @@ import {
 import { useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useCreateSafetyStockMutation } from "@/lib/api/system-settings/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type Entry = {
   id: string;
@@ -91,15 +92,15 @@ export default function SafetyStockCreatePage() {
 
     try {
       await createSafetyStock({
-        type: type!,
-        uniq: entry.uniq!,
+        inventory_type: type!,
+        item_uniq_code: entry.uniq!,
         calculation_type: entry.calculationType!,
         constanta: entry.constanta!,
       }).unwrap();
       updateEntry(id, { created: true });
       message.success("Entry saved");
-    } catch (err: any) {
-      message.error(err?.data?.message ?? err?.error ?? "Failed to save entry");
+    } catch (err: unknown) {
+      message.error(getApiErrorMessage(err, "Failed to save entry"));
     }
   };
 
@@ -131,8 +132,8 @@ export default function SafetyStockCreatePage() {
       for (const e of entries) {
         if (e.created) continue;
         await createSafetyStock({
-          type,
-          uniq: e.uniq!,
+          inventory_type: type,
+          item_uniq_code: e.uniq!,
           calculation_type: e.calculationType!,
           constanta: e.constanta!,
         }).unwrap();
@@ -141,8 +142,8 @@ export default function SafetyStockCreatePage() {
 
       message.success("Safety stock parameter saved");
       router.push("/system-settings");
-    } catch (err: any) {
-      message.error(err?.data?.message ?? err?.error ?? "Failed to save safety stock parameter");
+    } catch (err: unknown) {
+      message.error(getApiErrorMessage(err, "Failed to save safety stock parameter"));
     }
   };
 

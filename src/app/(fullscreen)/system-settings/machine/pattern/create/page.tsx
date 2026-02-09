@@ -6,6 +6,7 @@ import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useCreateMachinePatternMutation } from "@/lib/api/system-settings/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type StatusType = "Active" | "Inactive";
 
@@ -82,18 +83,17 @@ export default function MachinePatternCreatePage() {
     try {
       for (const e of entries) {
         await createMachinePattern({
-          machine_name: e.machineName!,
+          pattern_name: e.machineName!,
           machine_count: e.machineCount!,
           operating_hours: e.operatingHours!,
-          status: e.status!,
         }).unwrap();
         updateEntry(e.id, { created: true });
       }
 
       message.success("Machine pattern saved");
       router.push("/system-settings");
-    } catch (err: any) {
-      message.error(err?.data?.message ?? err?.error ?? "Failed to save machine pattern");
+    } catch (err: unknown) {
+      message.error(getApiErrorMessage(err, "Failed to save machine pattern"));
     }
   };
 
