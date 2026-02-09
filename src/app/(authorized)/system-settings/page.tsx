@@ -31,6 +31,21 @@ import {
   AppstoreOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
+import { apiBaseUrl } from "@/lib/api/instance";
+import {
+  useGetAccessControlMatrixQuery,
+  useGetApprovalWorkflowsQuery,
+  useGetGlobalWorkingDaysQuery,
+  useGetKanbanStandardsQuery,
+  useGetMachinePatternsQuery,
+  useGetPoSplitSettingsQuery,
+  useGetProcessesQuery,
+  useGetRolesQuery,
+  useGetSafetyStockQuery,
+  useGetStockdaysQuery,
+  useGetTypeParametersQuery,
+  useGetUomsQuery,
+} from "@/lib/api/system-settings/api";
 
 type StatusType = "Active" | "Inactive";
 
@@ -569,6 +584,7 @@ type MachinePatternFormValues = {
 
 export default function SystemSettingsPage() {
   const router = useRouter();
+  const apiEnabled = Boolean(apiBaseUrl);
   const [selectedModuleId, setSelectedModuleId] = useState<string>(
     "access-control-matrix"
   );
@@ -581,6 +597,83 @@ export default function SystemSettingsPage() {
   const [typeFilter, setTypeFilter] = useState<"All Types" | StatusType>(
     "All Types"
   );
+
+  const { data: rolesApiData, isFetching: isFetchingRoles } = useGetRolesQuery(undefined, {
+    skip: !apiEnabled,
+    refetchOnMountOrArgChange: true,
+  });
+  const { data: accessControlApiData, isFetching: isFetchingAccessControl } =
+    useGetAccessControlMatrixQuery(undefined, {
+      skip: !apiEnabled,
+      refetchOnMountOrArgChange: true,
+    });
+  const { data: safetyApiData, isFetching: isFetchingSafety } = useGetSafetyStockQuery(undefined, {
+    skip: !apiEnabled,
+    refetchOnMountOrArgChange: true,
+  });
+  const { data: stockdaysApiData, isFetching: isFetchingStockdays } = useGetStockdaysQuery(undefined, {
+    skip: !apiEnabled,
+    refetchOnMountOrArgChange: true,
+  });
+  const { data: typeParameterApiData, isFetching: isFetchingTypeParameters } =
+    useGetTypeParametersQuery(undefined, {
+      skip: !apiEnabled,
+      refetchOnMountOrArgChange: true,
+    });
+  const { data: uomApiData, isFetching: isFetchingUom } = useGetUomsQuery(undefined, {
+    skip: !apiEnabled,
+    refetchOnMountOrArgChange: true,
+  });
+  const { data: poSplitApiData, isFetching: isFetchingPoSplit } =
+    useGetPoSplitSettingsQuery(undefined, {
+      skip: !apiEnabled,
+      refetchOnMountOrArgChange: true,
+    });
+  const { data: approvalApiData, isFetching: isFetchingApproval } = useGetApprovalWorkflowsQuery(
+    undefined,
+    {
+      skip: !apiEnabled,
+      refetchOnMountOrArgChange: true,
+    }
+  );
+  const { data: kanbanApiData, isFetching: isFetchingKanban } = useGetKanbanStandardsQuery(
+    undefined,
+    {
+      skip: !apiEnabled,
+      refetchOnMountOrArgChange: true,
+    }
+  );
+  const { data: globalApiData, isFetching: isFetchingGlobal } = useGetGlobalWorkingDaysQuery(
+    undefined,
+    {
+      skip: !apiEnabled,
+      refetchOnMountOrArgChange: true,
+    }
+  );
+  const { data: processApiData, isFetching: isFetchingProcess } = useGetProcessesQuery(undefined, {
+    skip: !apiEnabled,
+    refetchOnMountOrArgChange: true,
+  });
+  const { data: machineApiData, isFetching: isFetchingMachine } = useGetMachinePatternsQuery(
+    undefined,
+    {
+      skip: !apiEnabled,
+      refetchOnMountOrArgChange: true,
+    }
+  );
+
+  const roleNameById = useMemo(() => {
+    return new Map((rolesApiData ?? []).map((r) => [r.id, r.name] as const));
+  }, [rolesApiData]);
+
+  const rolePeopleCountByRoleId = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const entry of accessControlApiData ?? []) {
+      const next = (counts.get(entry.role_id) ?? 0) + 1;
+      counts.set(entry.role_id, next);
+    }
+    return counts;
+  }, [accessControlApiData]);
 
   const [rows, setRows] = useState<ParameterRow[]>(initialRows);
   const [roleRows, setRoleRows] = useState<RoleRow[]>(initialRoleRows);
@@ -604,6 +697,146 @@ export default function SystemSettingsPage() {
   const [machinePatternRows, setMachinePatternRows] = useState<MachinePatternRow[]>(
     initialMachinePatternRows
   );
+
+  const rowsSource = useMemo<ParameterRow[]>(() => {
+    if (!apiEnabled) return rows;
+    return (accessControlApiData ?? []).map((r) => ({
+      id: r.id,
+      name: r.full_name,
+      empId: r.employee_id,
+      department: r.department,
+      role: roleNameById.get(r.role_id) ?? r.role_id,
+      team: "-",
+      permissions: [],
+      lastLogin: "-",
+      status: "Active",
+    }));
+  }, [accessControlApiData, apiEnabled, roleNameById, rows]);
+
+  const roleRowsSource = useMemo<RoleRow[]>(() => {
+    if (!apiEnabled) return roleRows;
+    return (rolesApiData ?? []).map((r) => ({
+      id: r.id,
+      roleName: r.name,
+      numberOfPeople: rolePeopleCountByRoleId.get(r.id) ?? 0,
+      lastUpdated: "-",
+    }));
+  }, [apiEnabled, rolePeopleCountByRoleId, roleRows, rolesApiData]);
+
+  const safetyRowsSource = useMemo<SafetyStockRow[]>(() => {
+    if (!apiEnabled) return safetyRows;
+    return (safetyApiData ?? []).map((r) => ({
+      id: r.id,
+      inventoryType: r.inventory_type,
+      parameter: r.calculation_type,
+      constanta: r.constanta,
+      status: "Active",
+    }));
+  }, [apiEnabled, safetyApiData, safetyRows]);
+
+  const stockdaysRowsSource = useMemo<StockdaysRow[]>(() => {
+    if (!apiEnabled) return stockdaysRows;
+    return (stockdaysApiData ?? []).map((r) => ({
+      id: r.id,
+      inventoryType: r.inventory_type,
+      parameter: r.calculation_type,
+      constanta: r.constanta,
+      status: "Active",
+    }));
+  }, [apiEnabled, stockdaysApiData, stockdaysRows]);
+
+  const typeParameterRowsSource = useMemo<TypeParameterRow[]>(() => {
+    if (!apiEnabled) return typeParameterRows;
+    return (typeParameterApiData ?? []).map((r) => ({
+      id: r.id,
+      typeCode: r.type_code,
+      typeName: r.type_name,
+      description: r.description,
+      status: r.status,
+    }));
+  }, [apiEnabled, typeParameterApiData, typeParameterRows]);
+
+  const uomRowsSource = useMemo<UomRow[]>(() => {
+    if (!apiEnabled) return uomRows;
+    return (uomApiData ?? []).map((r) => ({
+      id: r.id,
+      code: r.code,
+      name: r.name,
+      category: (r.category as UomCategory) ?? "Quantity",
+      status: r.status,
+    }));
+  }, [apiEnabled, uomApiData, uomRows]);
+
+  const purchaseOrderRowsSource = useMemo<PurchaseOrderRow[]>(() => {
+    if (!apiEnabled) return purchaseOrderRows;
+    return (poSplitApiData ?? []).map((r) => ({
+      id: r.id,
+      materialType: r.material_type,
+      minOrderQty: r.min_order_qty,
+      maxSplitLines: r.max_split_lines,
+      splitRule: r.split_rule,
+      status: r.status,
+    }));
+  }, [apiEnabled, poSplitApiData, purchaseOrderRows]);
+
+  const approvalWorkflowRowsSource = useMemo<ApprovalWorkflowRow[]>(() => {
+    if (!apiEnabled) return approvalWorkflowRows;
+    return (approvalApiData ?? []).map((r) => ({
+      id: r.id,
+      menuAction: r.action_name,
+      level1Role: r.level_1_role,
+      level2Role: r.level_2_role,
+      level3Role: r.level_3_role,
+      level4Role: r.level_4_role,
+      status: r.status,
+    }));
+  }, [apiEnabled, approvalApiData, approvalWorkflowRows]);
+
+  const kanbanRowsSource = useMemo<KanbanRow[]>(() => {
+    if (!apiEnabled) return kanbanRows;
+    return (kanbanApiData ?? []).map((r) => ({
+      id: r.id,
+      productName: r.item_name,
+      productCode: r.item_uniq_code,
+      kanbanQty: r.kanban_qty,
+      minStock: r.min_stock,
+      maxStock: r.max_stock,
+      status: r.status,
+    }));
+  }, [apiEnabled, kanbanApiData, kanbanRows]);
+
+  const globalWorkingDaysRowsSource = useMemo<GlobalWorkingDaysRow[]>(() => {
+    if (!apiEnabled) return globalWorkingDaysRows;
+    return (globalApiData ?? []).map((r) => ({
+      id: r.id,
+      period: r.period,
+      workingDays: r.working_days,
+      createdDate: "-",
+    }));
+  }, [apiEnabled, globalApiData, globalWorkingDaysRows]);
+
+  const processRowsSource = useMemo<ProcessRow[]>(() => {
+    if (!apiEnabled) return processRows;
+    return (processApiData ?? []).map((r) => ({
+      id: r.id,
+      processCode: r.process_code,
+      processName: r.process_name,
+      category: r.category,
+      sequence: r.sequence,
+      status: r.status,
+    }));
+  }, [apiEnabled, processApiData, processRows]);
+
+  const machinePatternRowsSource = useMemo<MachinePatternRow[]>(() => {
+    if (!apiEnabled) return machinePatternRows;
+    return (machineApiData ?? []).map((r) => ({
+      id: r.id,
+      patternName: r.pattern_name,
+      machineCount: r.machine_count,
+      operatingHours: r.operating_hours,
+      status: r.status,
+    }));
+  }, [apiEnabled, machineApiData, machinePatternRows]);
 
   const [machineTab, setMachineTab] = useState<"pattern" | "fast-slow">("pattern");
 
@@ -756,7 +989,7 @@ export default function SystemSettingsPage() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return rows
+    return rowsSource
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -765,17 +998,17 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, rows, typeFilter]);
+  }, [query, rowsSource, typeFilter]);
 
   const filteredRoles = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return roleRows;
-    return roleRows.filter((r) => r.roleName.toLowerCase().includes(q));
-  }, [query, roleRows]);
+    if (!q) return roleRowsSource;
+    return roleRowsSource.filter((r) => r.roleName.toLowerCase().includes(q));
+  }, [query, roleRowsSource]);
 
   const filteredSafety = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return safetyRows
+    return safetyRowsSource
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -784,11 +1017,11 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, safetyRows, typeFilter]);
+  }, [query, safetyRowsSource, typeFilter]);
 
   const filteredStockdays = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return stockdaysRows
+    return stockdaysRowsSource
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -797,11 +1030,11 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, stockdaysRows, typeFilter]);
+  }, [query, stockdaysRowsSource, typeFilter]);
 
   const filteredTypeParameters = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return typeParameterRows
+    return typeParameterRowsSource
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -810,21 +1043,21 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, typeParameterRows, typeFilter]);
+  }, [query, typeParameterRowsSource, typeFilter]);
 
   const filteredUom = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return uomRows
+    return uomRowsSource
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
         return [r.code, r.name, r.category].join(" ").toLowerCase().includes(q);
       });
-  }, [query, uomRows, typeFilter]);
+  }, [query, typeFilter, uomRowsSource]);
 
   const filteredPurchaseOrder = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return purchaseOrderRows
+    return purchaseOrderRowsSource
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -833,11 +1066,11 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, purchaseOrderRows, typeFilter]);
+  }, [purchaseOrderRowsSource, query, typeFilter]);
 
   const filteredApprovalWorkflow = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return approvalWorkflowRows
+    return approvalWorkflowRowsSource
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -852,11 +1085,11 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, approvalWorkflowRows, typeFilter]);
+  }, [approvalWorkflowRowsSource, query, typeFilter]);
 
   const filteredKanban = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return kanbanRows
+    return kanbanRowsSource
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -865,19 +1098,19 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, kanbanRows, typeFilter]);
+  }, [kanbanRowsSource, query, typeFilter]);
 
   const filteredGlobalWorkingDays = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return globalWorkingDaysRows.filter((r) => {
+    return globalWorkingDaysRowsSource.filter((r) => {
       if (!q) return true;
       return r.period.toLowerCase().includes(q);
     });
-  }, [query, globalWorkingDaysRows]);
+  }, [globalWorkingDaysRowsSource, query]);
 
   const filteredProcess = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return processRows
+    return processRowsSource
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -886,17 +1119,17 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, processRows, typeFilter]);
+  }, [processRowsSource, query, typeFilter]);
 
   const filteredMachinePattern = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return machinePatternRows
+    return machinePatternRowsSource
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
         return r.patternName.toLowerCase().includes(q);
       });
-  }, [query, machinePatternRows, typeFilter]);
+  }, [machinePatternRowsSource, query, typeFilter]);
 
   const openCreate = () => {
     setEditMode("create");
@@ -3601,6 +3834,7 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
+                    loading={apiEnabled && isFetchingRoles}
                   />
                 ) : selectedModuleId === "safety-stock" ? (
                   <Table<SafetyStockRow>
@@ -3609,6 +3843,7 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
+                    loading={apiEnabled && isFetchingSafety}
                   />
                 ) : selectedModuleId === "stockdays" ? (
                   <Table<StockdaysRow>
@@ -3617,6 +3852,7 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
+                    loading={apiEnabled && isFetchingStockdays}
                   />
                 ) : selectedModuleId === "type-parameters" ? (
                   <Table<TypeParameterRow>
@@ -3625,6 +3861,7 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
+                    loading={apiEnabled && isFetchingTypeParameters}
                   />
                 ) : selectedModuleId === "uom-global" ? (
                   <Table<UomRow>
@@ -3633,6 +3870,7 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
+                    loading={apiEnabled && isFetchingUom}
                   />
                 ) : selectedModuleId === "purchase-order" ? (
                   <Table<PurchaseOrderRow>
@@ -3641,6 +3879,7 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
+                    loading={apiEnabled && isFetchingPoSplit}
                   />
                 ) : selectedModuleId === "approval-workflow" ? (
                   <Table<ApprovalWorkflowRow>
@@ -3649,6 +3888,7 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
+                    loading={apiEnabled && isFetchingApproval}
                   />
                 ) : selectedModuleId === "kanban" ? (
                   <Table<KanbanRow>
@@ -3657,6 +3897,7 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
+                    loading={apiEnabled && isFetchingKanban}
                   />
                 ) : selectedModuleId === "global" ? (
                   <Table<GlobalWorkingDaysRow>
@@ -3665,6 +3906,7 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
+                    loading={apiEnabled && isFetchingGlobal}
                   />
                 ) : selectedModuleId === "process" ? (
                   <Table<ProcessRow>
@@ -3673,6 +3915,7 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
+                    loading={apiEnabled && isFetchingProcess}
                   />
                 ) : selectedModuleId === "machine" ? (
                   <Table<MachinePatternRow>
@@ -3681,6 +3924,7 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
+                    loading={apiEnabled && isFetchingMachine}
                   />
                 ) : (
                   <Table<ParameterRow>
@@ -3689,6 +3933,7 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
+                    loading={apiEnabled && isFetchingAccessControl}
                   />
                 )}
               </div>

@@ -6,6 +6,7 @@ import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useCreateUomMutation } from "@/lib/api/system-settings/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type StatusType = "Active" | "Inactive";
 
@@ -89,10 +90,9 @@ export default function UomGlobalCreatePage() {
     try {
       for (const e of entries) {
         await createUom({
-          type_code: e.typeCode!,
-          type_name: e.typeName!,
+          code: e.typeCode!,
+          name: e.typeName!,
           category: e.category!,
-          status: e.status!,
         }).unwrap();
 
         updateEntry(e.id, { created: true });
@@ -100,8 +100,8 @@ export default function UomGlobalCreatePage() {
 
       message.success("UoM parameter saved");
       router.push("/system-settings");
-    } catch (err: any) {
-      message.error(err?.data?.message ?? err?.error ?? "Failed to save UoM parameter");
+    } catch (err: unknown) {
+      message.error(getApiErrorMessage(err, "Failed to save UoM parameter"));
     }
   };
 

@@ -6,6 +6,7 @@ import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useCreateKanbanStandardMutation } from "@/lib/api/system-settings/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type StatusType = "Active" | "Inactive";
 
@@ -102,20 +103,19 @@ export default function KanbanFgStandardsCreatePage() {
     try {
       for (const e of entries) {
         await createKanbanStandard({
-          product_name: e.productName!,
-          product_code: e.productCode!,
+          item_name: e.productName!,
+          item_uniq_code: e.productCode!,
           kanban_qty: e.kanbanQty!,
           min_stock: e.minStock!,
           max_stock: e.maxStock!,
-          status: e.status!,
         }).unwrap();
         updateEntry(e.id, { created: true });
       }
 
       message.success("Kanban standard saved");
       router.push("/system-settings");
-    } catch (err: any) {
-      message.error(err?.data?.message ?? err?.error ?? "Failed to save kanban standard");
+    } catch (err: unknown) {
+      message.error(getApiErrorMessage(err, "Failed to save kanban standard"));
     }
   };
 

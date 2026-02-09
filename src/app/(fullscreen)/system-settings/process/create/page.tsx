@@ -6,6 +6,7 @@ import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useCreateProcessMutation } from "@/lib/api/system-settings/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type StatusType = "Active" | "Inactive";
 
@@ -34,7 +35,7 @@ const STATUS_OPTIONS = [
 function makeEntry(idx: number): Entry {
   return {
     id: `entry-${idx}`,
-    processCode: "Auto Generated",
+    processCode: "",
     category: undefined,
     processName: undefined,
     sequence: undefined,
@@ -61,6 +62,7 @@ export default function ProcessCreatePage() {
   };
 
   const validateEntry = (e: Entry) => {
+    if (!e.processCode?.trim()) return "Process Code is required";
     if (!e.category) return "Category is required";
     if (!e.processName) return "Process Name is required";
     if (e.sequence === undefined || e.sequence === null) return "Sequence is required";
@@ -90,18 +92,18 @@ export default function ProcessCreatePage() {
     try {
       for (const e of entries) {
         await createProcess({
+          process_code: e.processCode.trim(),
           category: e.category!,
           process_name: e.processName!,
           sequence: e.sequence!,
-          status: e.status!,
         }).unwrap();
         updateEntry(e.id, { created: true });
       }
 
       message.success("Process saved");
       router.push("/system-settings");
-    } catch (err: any) {
-      message.error(err?.data?.message ?? err?.error ?? "Failed to save process");
+    } catch (err: unknown) {
+      message.error(getApiErrorMessage(err, "Failed to save process"));
     }
   };
 
@@ -151,7 +153,11 @@ export default function ProcessCreatePage() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                   <div>
                     <div className="text-sm text-gray-700 mb-2">Process Code</div>
-                    <Input value={e.processCode} disabled />
+                    <Input
+                      value={e.processCode}
+                      onChange={(ev) => updateEntry(e.id, { processCode: ev.target.value, created: false })}
+                      placeholder="e.g. PRS-001"
+                    />
                   </div>
 
                   <div>

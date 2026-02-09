@@ -6,6 +6,7 @@ import { LeftOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useCreateRoleMutation } from "@/lib/api/system-settings/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type FeatureGroup = {
   title: string;
@@ -292,11 +293,11 @@ function CreateRolePageContent() {
     }
 
     try {
-      await createRole({ role_name: roleName.trim(), permissions: checked }).unwrap();
+      await createRole({ name: roleName.trim(), permissions: checked }).unwrap();
       message.success(isEdit ? "Role updated" : "Role created");
       router.push("/system-settings");
-    } catch (err: any) {
-      message.error(err?.data?.message ?? err?.error ?? "Failed to save role");
+    } catch (err: unknown) {
+      message.error(getApiErrorMessage(err, "Failed to save role"));
     }
   };
 
