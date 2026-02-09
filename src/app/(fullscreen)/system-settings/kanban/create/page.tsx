@@ -4,6 +4,8 @@ import React, { useMemo, useState } from "react";
 import { Button, Card, InputNumber, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useCreateKanbanStandardMutation } from "@/lib/api/system-settings/api";
 
 type StatusType = "Active" | "Inactive";
 
@@ -53,6 +55,10 @@ function makeEntry(idx: number): Entry {
 export default function KanbanFgStandardsCreatePage() {
   const router = useRouter();
 
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [createKanbanStandard, { isLoading: isSaving }] =
+    useCreateKanbanStandardMutation();
+
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
 
   const completeCount = useMemo(
@@ -78,7 +84,7 @@ export default function KanbanFgStandardsCreatePage() {
     setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
   };
 
-  const onSave = () => {
+  const onSave = async () => {
     for (const e of entries) {
       const err = validateEntry(e);
       if (err) {
@@ -87,8 +93,30 @@ export default function KanbanFgStandardsCreatePage() {
       }
     }
 
-    message.success("Kanban standard saved");
-    router.push("/system-settings");
+    if (!apiEnabled) {
+      message.success("Kanban standard saved");
+      router.push("/system-settings");
+      return;
+    }
+
+    try {
+      for (const e of entries) {
+        await createKanbanStandard({
+          product_name: e.productName!,
+          product_code: e.productCode!,
+          kanban_qty: e.kanbanQty!,
+          min_stock: e.minStock!,
+          max_stock: e.maxStock!,
+          status: e.status!,
+        }).unwrap();
+        updateEntry(e.id, { created: true });
+      }
+
+      message.success("Kanban standard saved");
+      router.push("/system-settings");
+    } catch (err: any) {
+      message.error(err?.data?.message ?? err?.error ?? "Failed to save kanban standard");
+    }
   };
 
   const onPickProductName = (entryId: string, productName: string) => {
@@ -124,7 +152,7 @@ export default function KanbanFgStandardsCreatePage() {
 
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
+              <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={isSaving}>
                 Save Parameter
               </Button>
             </div>

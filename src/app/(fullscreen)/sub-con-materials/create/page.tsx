@@ -20,6 +20,7 @@ import {
   DeleteOutlined,
 } from "@ant-design/icons";
 import type { FormInstance } from "antd";
+import type { Dayjs } from "dayjs";
 
 const { Title, Text } = Typography;
 
@@ -30,7 +31,7 @@ type SubConStockReceivedFormData = {
   partNumber?: string;
   partName?: string;
   periodPo?: string;
-  dateReceived?: any;
+  dateReceived?: Dayjs | null;
   quantityReceived?: number;
   subconVendorName?: string;
   addStock?: number;

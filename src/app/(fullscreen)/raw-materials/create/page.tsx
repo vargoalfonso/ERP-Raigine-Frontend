@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Input,
@@ -15,6 +15,7 @@ import {
   message,
   Radio,
 } from "antd";
+import type { RadioChangeEvent } from "antd";
 import type { FormInstance } from "antd";
 import {
   ArrowLeftOutlined,
@@ -268,6 +269,14 @@ const RawMaterialForm = ({
 };
 
 export default function CreateRawMaterialPage() {
+  return (
+    <Suspense fallback={null}>
+      <CreateRawMaterialPageContent />
+    </Suspense>
+  );
+}
+
+function CreateRawMaterialPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
@@ -486,7 +495,7 @@ export default function CreateRawMaterialPage() {
   };
   const [mode, setMode] = useState<"manual" | "bulk">("manual");
 
-  const handleModeChange = (e: any) => {
+  const handleModeChange = (e: RadioChangeEvent) => {
     const value = e.target.value as "manual" | "bulk";
     setMode(value);
     if (value === "bulk") {

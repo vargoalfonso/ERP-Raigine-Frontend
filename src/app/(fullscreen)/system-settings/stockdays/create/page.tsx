@@ -9,6 +9,8 @@ import {
   SaveOutlined,
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useCreateStockdaysMutation } from "@/lib/api/system-settings/api";
 
 type Entry = {
   id: string;
@@ -51,6 +53,9 @@ function makeEntry(idx: number): Entry {
 export default function StockdaysCreatePage() {
   const router = useRouter();
 
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [createStockdays, { isLoading: isSaving }] = useCreateStockdaysMutation();
+
   const [type, setType] = useState<string | undefined>(undefined);
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
 
@@ -67,7 +72,7 @@ export default function StockdaysCreatePage() {
     return null;
   };
 
-  const onCreateStockDays = (id: string) => {
+  const onCreateStockDays = async (id: string) => {
     const entry = entries.find((e) => e.id === id);
     if (!entry) return;
 
@@ -77,15 +82,31 @@ export default function StockdaysCreatePage() {
       return;
     }
 
-    updateEntry(id, { created: true });
-    message.success("Entry saved");
+    if (!apiEnabled) {
+      updateEntry(id, { created: true });
+      message.success("Entry saved");
+      return;
+    }
+
+    try {
+      await createStockdays({
+        type: type!,
+        uniq: entry.uniq!,
+        calculation_type: entry.calculationType!,
+        constanta: entry.constanta!,
+      }).unwrap();
+      updateEntry(id, { created: true });
+      message.success("Entry saved");
+    } catch (err: any) {
+      message.error(err?.data?.message ?? err?.error ?? "Failed to save entry");
+    }
   };
 
   const addAnother = () => {
     setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
   };
 
-  const onSave = () => {
+  const onSave = async () => {
     if (!type) {
       message.error("Type is required");
       return;
@@ -99,8 +120,29 @@ export default function StockdaysCreatePage() {
       }
     }
 
-    message.success("Stockdays parameter saved");
-    router.push("/system-settings");
+    if (!apiEnabled) {
+      message.success("Stockdays parameter saved");
+      router.push("/system-settings");
+      return;
+    }
+
+    try {
+      for (const e of entries) {
+        if (e.created) continue;
+        await createStockdays({
+          type,
+          uniq: e.uniq!,
+          calculation_type: e.calculationType!,
+          constanta: e.constanta!,
+        }).unwrap();
+        updateEntry(e.id, { created: true });
+      }
+
+      message.success("Stockdays parameter saved");
+      router.push("/system-settings");
+    } catch (err: any) {
+      message.error(err?.data?.message ?? err?.error ?? "Failed to save stockdays parameter");
+    }
   };
 
   return (
@@ -118,7 +160,7 @@ export default function StockdaysCreatePage() {
 
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
+              <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={isSaving}>
                 Save Parameter
               </Button>
             </div>

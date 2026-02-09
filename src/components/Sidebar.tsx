@@ -1,21 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import {
   MdChevronLeft,
   MdChevronRight,
   MdHome,
   MdBarChart,
+  MdTrendingUp,
   MdShoppingBag,
   MdDescription,
+  MdReceiptLong,
   MdSettings,
   MdGroup,
   MdStorefront,
   MdBuild,
   MdArchive,
   MdSchedule,
+  MdHistory,
   MdWarning,
   MdScience,
   MdContentCopy,
@@ -50,6 +53,12 @@ const menuItems: MenuItem[] = [
     href: "/qc-dashboard",
   },
   {
+    id: "demand-forecasting",
+    label: "Demand Forecasting",
+    icon: MdTrendingUp,
+    href: "/demand-forecasting",
+  },
+  {
     id: "sales",
     label: "Shop Floor",
     icon: MdShoppingBag,
@@ -73,8 +82,20 @@ const menuItems: MenuItem[] = [
         href: "/prl-management",
       },
       {
+        id: "prl-pattern-history",
+        label: "PRL & Pattern History",
+        icon: MdHistory,
+        href: "/prl-pattern-history",
+      },
+      {
+        id: "po-budget",
+        label: "PO Budget",
+        icon: MdReceiptLong,
+        href: "/po-budget",
+      },
+      {
         id: "customer-po",
-        label: "Customer PO & DN",
+        label: "Customer PO DN SO",
         icon: MdContentCopy,
         href: "/customer-po",
       },
@@ -117,6 +138,18 @@ const menuItems: MenuItem[] = [
         icon: MdDescription,
         href: "/work-orders",
       },
+      {
+        id: "machine-master-data",
+        label: "Machine Master Data",
+        icon: MdSettings,
+        href: "/machine-master-data",
+      },
+      {
+        id: "machine-pattern",
+        label: "Machine Pattern",
+        icon: MdTrendingUp,
+        href: "/machine-pattern",
+      },
     ],
   },
   {
@@ -149,12 +182,6 @@ const menuItems: MenuItem[] = [
         href: "/raw-materials",
       },
       {
-        id: "outgoing-raw-material",
-        label: "Outgoing - Raw Material",
-        icon: MdScience,
-        href: "/outgoing-raw-material",
-      },
-      {
         id: "indirect-material-raw",
         label: "Indirect Material Raw",
         icon: MdScience,
@@ -178,13 +205,116 @@ const menuItems: MenuItem[] = [
         icon: MdDescription,
         href: "/stock-opname",
       },
+      {
+        id: "product-return",
+        label: "Product Return",
+        icon: MdReceiptLong,
+        href: "/product-return",
+      },
+      {
+        id: "outgoing-raw-material",
+        label: "Outgoing - Raw Material",
+        icon: MdScience,
+        href: "/outgoing-raw-material",
+      },
+    ],
+  },
+  {
+    id: "procurement",
+    label: "PROCUREMENT",
+    icon: MdReceiptLong,
+    children: [
+      {
+        id: "po-raw-material",
+        label: "PO - Raw Material",
+        icon: MdReceiptLong,
+        href: "/po-procurement?tab=raw",
+      },
+      {
+        id: "po-indirect",
+        label: "PO - Indirect",
+        icon: MdReceiptLong,
+        href: "/po-procurement?tab=indirect",
+      },
+      {
+        id: "po-subcon",
+        label: "PO - Sub Con",
+        icon: MdReceiptLong,
+        href: "/po-procurement?tab=subcon",
+      },
+      {
+        id: "dn-raw-material",
+        label: "DN - Raw Material",
+        icon: MdContentCopy,
+        href: "/dn-procurement?tab=raw",
+      },
+      {
+        id: "dn-indirect",
+        label: "DN - Indirect",
+        icon: MdContentCopy,
+        href: "/dn-procurement?tab=indirect",
+      },
+      {
+        id: "dn-subcon",
+        label: "DN - Sub Con",
+        icon: MdContentCopy,
+        href: "/dn-procurement?tab=subcon",
+      },
+    ],
+  },
+  {
+    id: "delivery",
+    label: "DELIVERY",
+    icon: MdSchedule,
+    children: [
+      {
+        id: "delivery-scheduling",
+        label: "Delivery Scheduling",
+        icon: MdSchedule,
+        href: "/delivery-scheduling",
+      },
+    ],
+  },
+  {
+    id: "user-management",
+    label: "USER MANAGEMENT",
+    icon: MdGroup,
+    children: [
+      {
+        id: "employee-dept",
+        label: "Employee & Dept",
+        icon: MdGroup,
+        href: "/employee-dept",
+      },
+    ],
+  },
+  {
+    id: "automation",
+    label: "AUTOMATION",
+    icon: MdBuild,
+    children: [
+      {
+        id: "robot-automation",
+        label: "Robot Automation",
+        icon: MdBuild,
+        href: "/robot-automation",
+      },
     ],
   },
 ];
 
 export default function Sidebar() {
+  return (
+    <Suspense fallback={null}>
+      <SidebarContent />
+    </Suspense>
+  );
+}
+
+function SidebarContent() {
   const [isExpanded, setIsExpanded] = useState(true);
   const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const toggleSidebar = () => {
     setIsExpanded(!isExpanded);
@@ -215,7 +345,17 @@ export default function Sidebar() {
     }
 
     // Regular menu item
-    const isActive = pathname === item.href;
+    let isActive = pathname === item.href;
+    if (!isActive && item.href) {
+      const [hrefPath, hrefQuery] = item.href.split("?");
+      if (hrefPath === pathname && hrefQuery) {
+        const hrefParams = new URLSearchParams(hrefQuery);
+        isActive = Array.from(hrefParams.entries()).every(
+          ([key, value]) => searchParams.get(key) === value
+        );
+      }
+    }
+
     return (
       <Link
         key={item.id}

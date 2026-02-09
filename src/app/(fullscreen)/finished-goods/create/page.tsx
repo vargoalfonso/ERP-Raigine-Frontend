@@ -14,6 +14,7 @@ import {
   message,
   Radio,
 } from "antd";
+import type { RadioChangeEvent } from "antd";
 import type { FormInstance } from "antd";
 import {
   ArrowLeftOutlined,
@@ -22,6 +23,8 @@ import {
   DeleteOutlined,
 } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useCreateMutation as useCreateFinishedGoodMutation } from "@/lib/api/finished-goods/api";
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -333,6 +336,7 @@ const FinishedGoodsForm = ({
 export default function CreateFinishedGoodsPage() {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [createFinishedGood] = useCreateFinishedGoodMutation();
   const [formEntries, setFormEntries] = useState<FormEntry[]>([
     { id: 1, key: "form-1", formRef: { current: null } },
   ]);
@@ -379,7 +383,34 @@ export default function CreateFinishedGoodsPage() {
       setIsSubmitting(true);
       const allFormData = await validateAllForms();
 
-      console.log("All form data:", allFormData);
+      if (apiBaseUrl) {
+        await Promise.all(
+          allFormData.map((row) =>
+            createFinishedGood({
+              current_stock: Number(row.quantity_produced ?? 0),
+              cost: Number(row.unit_cost ?? 0),
+              production_operator: row.production_operator,
+              quality_inspector: row.quality_inspector,
+              notes: [
+                row.product_uniq ? `UNIQ: ${row.product_uniq}` : null,
+                row.part_name ? `Part: ${row.part_name}` : null,
+                row.work_order_reference ? `WO: ${row.work_order_reference}` : null,
+                row.batch_number ? `Batch: ${row.batch_number}` : null,
+                row.quality_status ? `Quality: ${row.quality_status}` : null,
+                row.storage_location ? `Storage: ${row.storage_location}` : null,
+                row.production_completion_date
+                  ? `Completion: ${row.production_completion_date.format("YYYY-MM-DD")}`
+                  : null,
+                row.production_notes ? `Notes: ${row.production_notes}` : null,
+              ]
+                .filter(Boolean)
+                .join(" | "),
+            }).unwrap()
+          )
+        );
+      } else {
+        console.log("All form data:", allFormData);
+      }
 
       message.success(
         `Successfully created ${allFormData.length} finished goods entries!`
@@ -399,7 +430,7 @@ export default function CreateFinishedGoodsPage() {
   };
 
   // Handler for mode change
-  const handleModeChange = (e: any) => {
+  const handleModeChange = (e: RadioChangeEvent) => {
     const value = e.target.value as "manual" | "bulk";
     setMode(value);
     if (value === "bulk") {

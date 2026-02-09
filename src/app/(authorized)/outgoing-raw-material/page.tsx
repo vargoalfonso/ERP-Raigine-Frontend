@@ -139,6 +139,20 @@ const reasonOptions: ReasonOption[] = [
 
 const unitOptions: Unit[] = ["Kg", "Pcs", "Box", "Pallet", "Roll", "Meter"];
 
+const packingCatalog: Array<{
+  packingList: string;
+  rmCode: string;
+  rmName: string;
+  currentStock: number;
+  unit: Unit;
+}> = [
+  { packingList: "PL-345678", rmCode: "RM-PL-69795", rmName: "Steel Wire - Grade A", currentStock: 500, unit: "Kg" },
+  { packingList: "PL-112233", rmCode: "RM-PL-28693", rmName: "Aluminum Sheet - 2mm", currentStock: 300, unit: "Kg" },
+  { packingList: "PL-998877", rmCode: "RM-PL-398456", rmName: "Copper Wire - 1.5mm", currentStock: 800, unit: "Kg" },
+  { packingList: "PL-556677", rmCode: "RM-PL-512389", rmName: "Plastic Resin - ABS", currentStock: 250, unit: "Kg" },
+  { packingList: "PL-223344", rmCode: "RM-PL-69795", rmName: "Steel Wire - Grade A", currentStock: 650, unit: "Kg" },
+];
+
 type OutgoingFormValues = {
   packingList: string;
   rmCode: string;
@@ -307,10 +321,8 @@ export default function OutgoingRawMaterialPage() {
       <Modal
         title={
           <div>
-            <div className="font-semibold">
-              Outgoing RM Transaction - {detailRow?.transactionId}
-            </div>
-            <div className="text-xs text-gray-500">Complete information about this outgoing transaction</div>
+            <div className="text-sm font-bold text-slate-900">Outgoing RM Transaction - {detailRow?.transactionId}</div>
+            <div className="text-xs text-slate-500 mt-0.5">Complete information about this outgoing transaction</div>
           </div>
         }
         open={detailOpen}
@@ -320,76 +332,76 @@ export default function OutgoingRawMaterialPage() {
         destroyOnClose
       >
         {detailRow && (
-          <div className="space-y-4">
-            <div className="flex items-start justify-between gap-3">
+          <div className="space-y-5">
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <div className="text-xs text-gray-500">Transaction Date</div>
-                <div className="text-sm font-medium text-gray-900">{detailRow.date}</div>
+                <div className="text-xs text-slate-500">Transaction Date</div>
+                <div className="text-sm text-slate-900 mt-1">{detailRow.date}</div>
               </div>
               <div className="text-right">
-                <div className="text-xs text-gray-500">Reason</div>
-                <Tag className="bg-blue-50 text-blue-700 border-blue-100">{detailRow.reason}</Tag>
+                <div className="text-xs text-slate-500">Reason</div>
+                <Tag className="!mt-1 !rounded-md !border-blue-200 !bg-blue-600 !text-white">{detailRow.reason}</Tag>
               </div>
             </div>
 
             <div>
-              <div className="text-gray-900 font-semibold mb-2">Raw Material Information</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="text-sm font-semibold text-slate-900 mb-2">Raw Material Information</div>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <div className="text-xs text-gray-500">RM Code</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.rmCode}</div>
+                  <div className="text-xs text-slate-500">RM Code</div>
+                  <div className="text-sm text-slate-900 mt-1">{detailRow.rmCode}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500">RM Name</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.rmName}</div>
+                  <div className="text-xs text-slate-500">RM Name</div>
+                  <div className="text-sm text-slate-900 mt-1">{detailRow.rmName}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500">Packing List</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.packingList}</div>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-gray-900 font-semibold mb-2">Transaction Details</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <div className="text-xs text-gray-500">Quantity Out</div>
-                  <div className="text-sm font-semibold text-red-600">- {detailRow.qtyOutKg} {detailRow.unit}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Purpose</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.purpose}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Stock Before</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.stockBeforeKg} {detailRow.unit}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Stock After</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.stockAfterKg} {detailRow.unit}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Destination</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.destination}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Work Order</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.workOrder}</div>
+                  <div className="text-xs text-slate-500">Packing List</div>
+                  <div className="text-sm text-slate-900 mt-1">{detailRow.packingList}</div>
                 </div>
               </div>
             </div>
 
             <div>
-              <div className="text-gray-900 font-semibold mb-2">Approval Information</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="text-sm font-semibold text-slate-900 mb-2">Transaction Details</div>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <div className="text-xs text-gray-500">Requested By</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.requestedBy}</div>
+                  <div className="text-xs text-slate-500">Quantity Out</div>
+                  <div className="text-sm font-semibold text-red-600 mt-1">- {detailRow.qtyOutKg} {detailRow.unit}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500">Approved By</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.approvedBy}</div>
+                  <div className="text-xs text-slate-500">Purpose</div>
+                  <div className="text-sm text-slate-900 mt-1">{detailRow.purpose}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Stock Before</div>
+                  <div className="text-sm text-slate-900 mt-1">{detailRow.stockBeforeKg} {detailRow.unit}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Stock After</div>
+                  <div className="text-sm font-semibold text-slate-900 mt-1">{detailRow.stockAfterKg} {detailRow.unit}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Destination</div>
+                  <div className="text-sm text-slate-900 mt-1">{detailRow.destination}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Work Order</div>
+                  <div className="text-sm text-slate-900 mt-1">{detailRow.workOrder}</div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div className="text-sm font-semibold text-slate-900 mb-2">Approval Information</div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <div className="text-xs text-slate-500">Requested By</div>
+                  <div className="text-sm text-slate-900 mt-1">{detailRow.requestedBy}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">Approved By</div>
+                  <div className="text-sm text-slate-900 mt-1">{detailRow.approvedBy}</div>
                 </div>
               </div>
             </div>
@@ -418,7 +430,21 @@ export default function OutgoingRawMaterialPage() {
 
         <Form form={form} layout="vertical">
           <Form.Item label="Packing List RM" name="packingList" rules={[{ required: true }]}>
-            <Input placeholder="Scan or enter packing list" />
+            <Input
+              placeholder="Scan or enter packing list"
+              onChange={(e) => {
+                const v = e.target.value?.trim();
+                const found = packingCatalog.find((x) => x.packingList.toLowerCase() === v.toLowerCase());
+                if (!found) return;
+                form.setFieldsValue({
+                  packingList: found.packingList,
+                  rmCode: found.rmCode,
+                  rmName: found.rmName,
+                  currentStock: found.currentStock,
+                  unit: found.unit,
+                });
+              }}
+            />
           </Form.Item>
 
           <div className="text-gray-900 font-semibold mb-2">Raw Material Information</div>
@@ -448,18 +474,31 @@ export default function OutgoingRawMaterialPage() {
 
           <div className="text-gray-900 font-semibold mb-2">Outgoing Transaction Details</div>
 
-          <Form.Item label="Quantity Out" name="qtyOut" rules={[{ required: true }]}>
+          <Form.Item
+            label="Quantity Out"
+            name="qtyOut"
+            rules={[
+              { required: true },
+              {
+                validator: async (_, value) => {
+                  const stock = Number(form.getFieldValue("currentStock") ?? 0);
+                  const qty = Number(value ?? 0);
+                  if (qty > stock) throw new Error("Quantity out cannot exceed current stock");
+                },
+              },
+            ]}
+          >
             <InputNumber className="w-full" min={0} placeholder="Enter quantity to decrease" />
           </Form.Item>
 
-          <Form.Item label="Reason" name="reason" rules={[{ required: true }]}>
+          <Form.Item label="Reason" name="reason" rules={[{ required: true, message: "Select reason" }]}>
             <Select
               placeholder="Select reason"
               options={reasonOptions.map((r) => ({ label: r, value: r }))}
             />
           </Form.Item>
 
-          <Form.Item label="Purpose" name="purpose">
+          <Form.Item label="Purpose" name="purpose" rules={[{ required: true, message: "Purpose is required" }]}>
             <Input placeholder="Describe the purpose (e.g., Work Order WO-2024-045)" />
           </Form.Item>
 

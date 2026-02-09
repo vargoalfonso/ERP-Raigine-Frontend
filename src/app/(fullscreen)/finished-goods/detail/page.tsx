@@ -1,9 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { Suspense, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeftOutlined, EyeOutlined } from "@ant-design/icons";
 import { Table, Tabs, Card, Tag, Button } from "antd";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetOneByIdQuery } from "@/lib/api/finished-goods/api";
+import type { FinishedGoodsRecord } from "@/lib/api/finished-goods/interface";
 
 interface RowHistory {
   key: string;
@@ -16,8 +19,28 @@ interface RowHistory {
 }
 
 export default function FinishedGoodDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <FinishedGoodDetailPageContent />
+    </Suspense>
+  );
+}
+
+function FinishedGoodDetailPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const id = searchParams.get("id");
   const [activeTab, setActiveTab] = useState("1");
+
+  const useApi = Boolean(apiBaseUrl) && Boolean(id);
+  const { data: fgOneResponse, isFetching: fgFetching } = useGetOneByIdQuery(id ?? "", {
+    skip: !useApi,
+  });
+
+  const record: FinishedGoodsRecord | null = useMemo(() => {
+    if (!useApi) return null;
+    return fgOneResponse?.data ?? null;
+  }, [fgOneResponse?.data, useApi]);
 
   /* ================= SAMPLE DATA HISTORY ================= */
   const historyData: RowHistory[] = [
@@ -109,7 +132,7 @@ export default function FinishedGoodDetailPage() {
     {
       title: "Action",
       key: "action",
-      render: (_: any, record: RowHistory) => (
+      render: (_: unknown, record: RowHistory) => (
         <Button
           type="text"
           icon={<EyeOutlined />}
@@ -122,14 +145,14 @@ export default function FinishedGoodDetailPage() {
 
   /* ================= DATA DETAIL ================= */
   const detailInfo = {
-    uniq: "LV7-001",
-    productName: "Engine Mount Assembly",
-    model: "Camry 2024",
-    woNumber: "WO-2024-001",
-    warehouse: "WH-FG-002",
-    stock: 250,
-    stockKanban: 50,
-    kanban: 5,
+    uniq: record?.master_list?.uniq_code ?? "LV7-001",
+    productName: record?.master_list?.part_name ?? "Engine Mount Assembly",
+    model: record?.master_list?.model ?? "Camry 2024",
+    woNumber: record?.work_order?.wo_number ?? "WO-2024-001",
+    warehouse: record?.warehouse?.code ?? "WH-FG-002",
+    stock: record?.current_stock ?? 250,
+    stockKanban: Number(record?.stock_to_complete ?? 50),
+    kanban: record?.total_kanban ?? 5,
     status: "Normal",
   };
 
@@ -157,6 +180,11 @@ export default function FinishedGoodDetailPage() {
           <p className="text-gray-400">
             Complete Finished Good Detail for {detailInfo.uniq}
           </p>
+          {useApi && (
+            <div className="mt-2 text-xs text-gray-500">
+              {fgFetching ? "Loading from API..." : "Loaded from API"}
+            </div>
+          )}
 
           {/* ================= TABS ================= */}
           <Tabs

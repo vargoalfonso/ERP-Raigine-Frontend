@@ -4,6 +4,8 @@ import React, { useMemo, useState } from "react";
 import { Button, Card, Input, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useCreateTypeParameterMutation } from "@/lib/api/system-settings/api";
 
 type StatusType = "Active" | "Inactive";
 
@@ -35,6 +37,9 @@ function makeEntry(idx: number): Entry {
 export default function TypeParametersCreatePage() {
   const router = useRouter();
 
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [createTypeParameter, { isLoading: isSaving }] = useCreateTypeParameterMutation();
+
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
 
   const completeCount = useMemo(
@@ -58,7 +63,7 @@ export default function TypeParametersCreatePage() {
     setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
   };
 
-  const onSave = () => {
+  const onSave = async () => {
     for (const e of entries) {
       const err = validateEntry(e);
       if (err) {
@@ -67,8 +72,28 @@ export default function TypeParametersCreatePage() {
       }
     }
 
-    message.success("WIP Type saved");
-    router.push("/system-settings");
+    if (!apiEnabled) {
+      message.success("WIP Type saved");
+      router.push("/system-settings");
+      return;
+    }
+
+    try {
+      for (const e of entries) {
+        await createTypeParameter({
+          type_code: e.typeCode!,
+          type_name: e.typeName!,
+          description: e.description!,
+          status: e.status!,
+        }).unwrap();
+        updateEntry(e.id, { created: true });
+      }
+
+      message.success("WIP Type saved");
+      router.push("/system-settings");
+    } catch (err: any) {
+      message.error(err?.data?.message ?? err?.error ?? "Failed to save WIP Type");
+    }
   };
 
   return (
@@ -86,7 +111,7 @@ export default function TypeParametersCreatePage() {
 
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
+              <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={isSaving}>
                 Save Parameter
               </Button>
             </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeftOutlined, EyeOutlined } from "@ant-design/icons";
 import { Button, Card, Table, Tabs, Tag } from "antd";
@@ -16,6 +16,14 @@ type DeliveryNoteLogRow = {
 };
 
 export default function IndirectRawMaterialDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <IndirectRawMaterialDetailPageContent />
+    </Suspense>
+  );
+}
+
+function IndirectRawMaterialDetailPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const uniq = searchParams.get("uniq") ?? "RM-001";

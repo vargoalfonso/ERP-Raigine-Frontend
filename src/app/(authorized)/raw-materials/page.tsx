@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -37,12 +37,14 @@ import { FaRegEdit, FaRegTrashAlt } from "react-icons/fa";
 import {
   useGetAllRawMaterialsQuery,
   useDeleteRawMaterialMutation,
+  useUpdateRawMaterialMutation,
 } from "@/lib/api/raw-materials/api";
 import { RawMaterialRecord } from "@/lib/api/raw-materials/interface";
 import {
   formatNumber,
   getStatusStockColor,
 } from "@/lib/api/raw-materials/utils";
+import { apiBaseUrl } from "@/lib/api/instance";
 
 // Mock data untuk demo
 const MOCK_RAW_MATERIALS: RawMaterialRecord[] = [
@@ -108,6 +110,13 @@ interface DetailModalState {
   isEditing: boolean;
 }
 
+type RawMaterialDrawerValues = {
+  category: string;
+  master_list_supplier_id: string;
+  stock: number;
+  unit: string;
+};
+
 const RawMaterialDetailModal = ({
   state,
   onClose,
@@ -117,11 +126,11 @@ const RawMaterialDetailModal = ({
 }: {
   state: DetailModalState;
   onClose: () => void;
-  onSave: (data: any) => void;
+  onSave: (data: RawMaterialDrawerValues) => void;
   onDelete: (record: RawMaterialRecord) => void;
   onStartEdit: () => void;
 }) => {
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<RawMaterialDrawerValues>();
   const [loading, setLoading] = useState(false);
 
   const handleSave = async () => {
@@ -332,6 +341,20 @@ export default function RawMaterialsPage() {
   const [pageSize, setPageSize] = useState(10);
   const [searchValue, setSearchValue] = useState("");
   const [deleteRawMaterial] = useDeleteRawMaterialMutation();
+  const [updateRawMaterial] = useUpdateRawMaterialMutation();
+
+  const useApi = Boolean(apiBaseUrl);
+  const {
+    data: rawMaterialsResponse,
+    isFetching: rawMaterialsFetching,
+    isError: rawMaterialsIsError,
+    isSuccess: rawMaterialsIsSuccess,
+    refetch: refetchRawMaterials,
+  } = useGetAllRawMaterialsQuery(
+    { currentPage, pageSize },
+    { skip: !useApi }
+  );
+
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletingRecord, setDeletingRecord] =
     useState<RawMaterialRecord | null>(null);
@@ -343,17 +366,25 @@ export default function RawMaterialsPage() {
   const [rawMaterials, setRawMaterials] =
     useState<RawMaterialRecord[]>(MOCK_RAW_MATERIALS);
 
-  // Gunakan mock data untuk demo, ganti dengan API data jika tersedia
+  const displayedRawMaterials = useMemo(() => {
+    if (useApi && rawMaterialsIsSuccess) return rawMaterialsResponse?.data ?? [];
+    return rawMaterials;
+  }, [rawMaterials, rawMaterialsIsSuccess, rawMaterialsResponse?.data, useApi]);
 
-  const pagination = { total: MOCK_RAW_MATERIALS.length };
+  const pagination = {
+    total:
+      (useApi && rawMaterialsIsSuccess
+        ? rawMaterialsResponse?.pagination?.total
+        : undefined) ?? displayedRawMaterials.length,
+  };
 
   const stats = {
     totalItems: pagination.total || 0,
-    availableItems: rawMaterials.filter((item) => item.status === "Available")
+    availableItems: displayedRawMaterials.filter((item) => item.status === "Available")
       .length,
-    lowStockItems: rawMaterials.filter((item) => item.status === "LowStock")
+    lowStockItems: displayedRawMaterials.filter((item) => item.status === "LowStock")
       .length,
-    outOfStockItems: rawMaterials.filter((item) => item.status === "OutOfStock")
+    outOfStockItems: displayedRawMaterials.filter((item) => item.status === "OutOfStock")
       .length,
   };
 
@@ -378,11 +409,15 @@ export default function RawMaterialsPage() {
   const handleConfirmDelete = async () => {
     if (!deletingRecord) return;
     try {
-      // jika pakai API:
-      // await deleteRawMaterial(deletingRecord.id).unwrap();
-
-      // MOCK delete
-      setRawMaterials((prev) => prev.filter((item) => item.id !== deletingRecord.id));
+      if (useApi && rawMaterialsIsSuccess && !rawMaterialsIsError) {
+        await deleteRawMaterial({ id: deletingRecord.id }).unwrap();
+        await refetchRawMaterials();
+      } else {
+        // MOCK delete
+        setRawMaterials((prev) =>
+          prev.filter((item) => item.id !== deletingRecord.id)
+        );
+      }
 
       message.success("Raw material deleted successfully!");
       closeDeleteModal();
@@ -404,9 +439,40 @@ export default function RawMaterialsPage() {
     });
   };
 
-  const handleDetailSave = (data: any) => {
-    message.success("Raw material updated successfully!");
-    setDetailModal({ visible: false, record: null, isEditing: false });
+  const handleDetailSave = async (data: RawMaterialDrawerValues) => {
+    try {
+      if (detailModal.record && useApi && rawMaterialsIsSuccess && !rawMaterialsIsError) {
+        await updateRawMaterial({
+          id: detailModal.record.id,
+          body: {
+            category: data.category,
+            master_list_supplier_id: data.master_list_supplier_id,
+            stock: data.stock,
+            unit: data.unit,
+          },
+        }).unwrap();
+        await refetchRawMaterials();
+      } else if (detailModal.record) {
+        setRawMaterials((prev) =>
+          prev.map((item) =>
+            item.id === detailModal.record!.id
+              ? {
+                  ...item,
+                  category: data.category,
+                  master_list_supplier_id: data.master_list_supplier_id,
+                  stock: data.stock,
+                  unit: data.unit,
+                }
+              : item
+          )
+        );
+      }
+
+      message.success("Raw material updated successfully!");
+      setDetailModal({ visible: false, record: null, isEditing: false });
+    } catch {
+      message.error("Failed to update raw material");
+    }
   };
 
   const handleDetailClose = () => {
@@ -671,7 +737,7 @@ export default function RawMaterialsPage() {
         <div className="p-6">
           <TableTemplate
             columns={columns}
-            data={rawMaterials}
+            data={displayedRawMaterials}
             rowKey="id"
             searchValue={searchValue}
             onSearchChange={setSearchValue}
@@ -681,7 +747,7 @@ export default function RawMaterialsPage() {
             total={pagination?.total || 0}
             onPageChange={setCurrentPage}
             onPageSizeChange={setPageSize}
-            loading={false}
+            loading={useApi ? rawMaterialsFetching : false}
           />
         </div>
       </div>
