@@ -26,10 +26,23 @@ import {
 } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 
+import {
+  useDeleteAccessControlMatrixMutation,
+  useDeleteEmployeeMutation,
+  useGetAccessControlMatrixQuery,
+  useGetEmployeesQuery,
+  useGetRolesQuery,
+  useUpdateAccessControlMatrixMutation,
+  useUpdateEmployeeMutation,
+} from "@/lib/api/system-settings/api";
+import { getApiErrorMessage } from "@/lib/api/error";
+
 type TabKey = "employee" | "department";
 
 type EmployeeRow = {
   key: string;
+  apiId?: string;
+  accessControlId?: string;
   empId: string;
   name: string;
   isManager: boolean;
@@ -40,6 +53,7 @@ type EmployeeRow = {
   department: string;
   manager: string;
   role: string;
+  roleId?: string;
   roleHint: string;
   joinDate: string;
   status: "Active" | "Inactive";
@@ -70,15 +84,40 @@ export default function EmployeeDeptPage() {
 function EmployeeDeptPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
+  const apiEnabled = Boolean(apiBaseUrl);
+
+  const { data: employeesApiData, refetch: refetchEmployees } = useGetEmployeesQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const { data: accessControlApiData, refetch: refetchAccessControl } = useGetAccessControlMatrixQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const { data: rolesApiData, refetch: refetchRoles } = useGetRolesQuery(undefined, {
+    skip: !apiEnabled,
+  });
+
+  const [updateEmployee] = useUpdateEmployeeMutation();
+  const [deleteEmployee] = useDeleteEmployeeMutation();
+  const [updateAccessControl] = useUpdateAccessControlMatrixMutation();
+  const [deleteAccessControl] = useDeleteAccessControlMatrixMutation();
+
   const [activeTab, setActiveTab] = useState<TabKey>("employee");
   const [viewDeptOpen, setViewDeptOpen] = useState(false);
   const [editDeptOpen, setEditDeptOpen] = useState(false);
   const [selectedDept, setSelectedDept] = useState<DepartmentRow | null>(null);
 
+  const [viewEmployeeOpen, setViewEmployeeOpen] = useState(false);
+  const [editEmployeeOpen, setEditEmployeeOpen] = useState(false);
+  const [deleteEmployeeOpen, setDeleteEmployeeOpen] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState<EmployeeRow | null>(null);
+
   const [deptSearch, setDeptSearch] = useState("");
   const [deptStatus, setDeptStatus] = useState<"All" | DepartmentRow["status"]>("All");
 
   const [editDeptForm] = Form.useForm();
+  const [editEmployeeForm] = Form.useForm();
 
   const defaultEmployees: EmployeeRow[] = [
     {
@@ -177,6 +216,10 @@ function EmployeeDeptPageContent() {
   const [hasLoaded, setHasLoaded] = useState(false);
 
   useEffect(() => {
+    if (apiEnabled) {
+      setHasLoaded(true);
+      return;
+    }
     try {
       const rawEmployees = localStorage.getItem(STORAGE_EMPLOYEES);
       const rawDepartments = localStorage.getItem(STORAGE_DEPARTMENTS);
@@ -232,30 +275,100 @@ function EmployeeDeptPageContent() {
   }, [searchParams]);
 
   useEffect(() => {
+    if (apiEnabled) return;
     if (!hasLoaded) return;
     try {
       localStorage.setItem(STORAGE_EMPLOYEES, JSON.stringify(employees));
     } catch {
       // ignore
     }
-  }, [employees, hasLoaded]);
+  }, [employees, hasLoaded, apiEnabled]);
 
   useEffect(() => {
+    if (apiEnabled) return;
     if (!hasLoaded) return;
     try {
       localStorage.setItem(STORAGE_DEPARTMENTS, JSON.stringify(departments));
     } catch {
       // ignore
     }
-  }, [departments, hasLoaded]);
+  }, [departments, hasLoaded, apiEnabled]);
+
+  const rolesById = useMemo(() => {
+    const list = rolesApiData ?? [];
+    const map: Record<string, string> = {};
+    for (const r of list) map[r.id] = r.name;
+    return map;
+  }, [rolesApiData]);
+
+  const accessControlByEmployeeId = useMemo(() => {
+    const list = accessControlApiData ?? [];
+    const map: Record<string, (typeof list)[number]> = {};
+    for (const ac of list) {
+      if (ac.employee_id) map[ac.employee_id] = ac;
+    }
+    return map;
+  }, [accessControlApiData]);
+
+  const apiEmployeesRows: EmployeeRow[] = useMemo(() => {
+    if (!apiEnabled) return [];
+    const list = employeesApiData ?? [];
+
+    return list.map((e) => {
+      const ac = accessControlByEmployeeId[e.employee_id];
+      const department = ac?.department ?? "-";
+      const roleId = ac?.role_id;
+      const roleName = roleId ? rolesById[roleId] ?? roleId : "-";
+
+      const normalizedStatus = String(e.status ?? "Active").toLowerCase();
+      const status: EmployeeRow["status"] = normalizedStatus === "inactive" ? "Inactive" : "Active";
+
+      return {
+        key: e.id,
+        apiId: e.id,
+        accessControlId: ac?.id,
+        empId: e.employee_id,
+        name: ac?.full_name || e.full_name,
+        isManager: false,
+        jobTitle: "-",
+        jobLevel: "-",
+        email: e.email ?? "-",
+        phone: "-",
+        department,
+        manager: "Top Level",
+        role: roleName,
+        roleId,
+        roleHint: "",
+        joinDate: "-",
+        status,
+      };
+    });
+  }, [apiEnabled, employeesApiData, accessControlByEmployeeId, rolesById]);
+
+  const departmentOptionsApi = useMemo(() => {
+    const depts = new Set<string>();
+    for (const ac of accessControlApiData ?? []) {
+      if (ac.department) depts.add(ac.department);
+    }
+    return Array.from(depts)
+      .sort((a, b) => a.localeCompare(b))
+      .map((d) => ({ label: d, value: d }));
+  }, [accessControlApiData]);
+
+  const roleOptionsApi = useMemo(() => {
+    return (rolesApiData ?? []).map((r) => ({ label: r.name, value: r.id }));
+  }, [rolesApiData]);
 
   const metrics = useMemo(() => {
-    const totalEmployees = employees.length;
-    const managers = employees.filter((e) => e.isManager).length;
-    const departmentsCount = departments.length;
-    const activeUsers = employees.filter((e) => e.status === "Active").length;
+    const activeEmployees = apiEnabled ? apiEmployeesRows : employees;
+    const activeDepartments = apiEnabled ? departmentOptionsApi.map((d) => d.value) : departments.map((d) => d.name);
+
+    const totalEmployees = activeEmployees.length;
+    const managers = activeEmployees.filter((e) => e.isManager).length;
+    const departmentsCount = apiEnabled ? activeDepartments.length : departments.length;
+    const activeUsers = activeEmployees.filter((e) => e.status === "Active").length;
     return { totalEmployees, managers, departmentsCount, activeUsers };
-  }, [employees, departments]);
+  }, [employees, departments, apiEmployeesRows, apiEnabled, departmentOptionsApi]);
 
   const filteredDepartments = useMemo(() => {
     const q = deptSearch.trim().toLowerCase();
@@ -379,14 +492,41 @@ function EmployeeDeptPageContent() {
       fixed: "right",
       render: (_: unknown, record) => (
         <div className="flex items-center justify-end gap-1">
-          <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => message.info(`View ${record.empId} (mock)`)} />
-          <Button size="small" type="text" icon={<EditOutlined />} onClick={() => message.info(`Edit ${record.empId} (mock)`)} />
+          <Button
+            size="small"
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => {
+              setSelectedEmployee(record);
+              setViewEmployeeOpen(true);
+            }}
+          />
+          <Button
+            size="small"
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setSelectedEmployee(record);
+              editEmployeeForm.setFieldsValue({
+                empId: record.empId,
+                name: record.name,
+                email: record.email === "-" ? "" : record.email,
+                department: record.department === "-" ? undefined : record.department,
+                roleId: record.roleId,
+                status: record.status,
+              });
+              setEditEmployeeOpen(true);
+            }}
+          />
           <Button
             size="small"
             type="text"
             danger
             icon={<DeleteOutlined />}
-            onClick={() => setEmployees((prev) => prev.filter((e) => e.key !== record.key))}
+            onClick={() => {
+              setSelectedEmployee(record);
+              setDeleteEmployeeOpen(true);
+            }}
           />
         </div>
       ),
@@ -455,8 +595,50 @@ function EmployeeDeptPageContent() {
 
   const selectedDeptEmployees = useMemo(() => {
     if (!selectedDept) return [];
-    return employees.filter((e) => e.department === selectedDept.name);
-  }, [employees, selectedDept]);
+    const source = apiEnabled ? apiEmployeesRows : employees;
+    return source.filter((e) => e.department === selectedDept.name);
+  }, [employees, selectedDept, apiEnabled, apiEmployeesRows]);
+
+  const employeeRows = apiEnabled ? apiEmployeesRows : employees;
+
+  const departmentsReadOnlyApi: DepartmentRow[] = useMemo(() => {
+    if (!apiEnabled) return [];
+    const byName = new Map<string, number>();
+    for (const ac of accessControlApiData ?? []) {
+      const dept = ac.department || "-";
+      byName.set(dept, (byName.get(dept) ?? 0) + 1);
+    }
+    return Array.from(byName.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, employeeCount]) => ({
+        key: name,
+        code: undefined,
+        name,
+        head: "-",
+        parentDepartment: undefined,
+        description: undefined,
+        employeeCount,
+        status: "Active",
+      }));
+  }, [apiEnabled, accessControlApiData]);
+
+  const departmentColumnsReadOnlyApi: ColumnsType<DepartmentRow> = useMemo(
+    () => [
+      { title: "Department", dataIndex: "name", key: "name", render: (v: string) => <span className="text-sm font-semibold text-gray-900">{v}</span> },
+      { title: "Employees", dataIndex: "employeeCount", key: "employeeCount", render: (v: number) => <span className="text-sm text-gray-800">{v}</span> },
+      {
+        title: "Status",
+        dataIndex: "status",
+        key: "status",
+        render: (v: DepartmentRow["status"]) => (
+          <Tag color={v === "Active" ? "blue" : "default"} className="!rounded-full !px-3 !py-0.5 !text-xs">
+            {v}
+          </Tag>
+        ),
+      },
+    ],
+    []
+  );
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
@@ -481,6 +663,12 @@ function EmployeeDeptPageContent() {
               </Button>
             </div>
           </div>
+
+          {apiEnabled ? (
+            <div className="mt-3 text-xs text-amber-700">
+              API mode: only Employee edit/delete is connected. Department create/edit uses mock data.
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -545,13 +733,13 @@ function EmployeeDeptPageContent() {
           <div className="mt-5">
             <div className="flex items-center justify-between">
               <div className="text-lg font-semibold text-gray-900">Employee Master Data</div>
-              <div className="text-xs text-gray-500">{employees.length} employees</div>
+              <div className="text-xs text-gray-500">{employeeRows.length} employees</div>
             </div>
 
             <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
               <Table<EmployeeRow>
                 columns={employeeColumns}
-                dataSource={employees}
+                dataSource={employeeRows}
                 rowKey="key"
                 size="middle"
                 pagination={false}
@@ -564,34 +752,38 @@ function EmployeeDeptPageContent() {
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <div className="text-lg font-semibold text-gray-900">Department Master Data</div>
-                <div className="text-xs text-gray-500 mt-1">{filteredDepartments.length} departments</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {apiEnabled ? departmentsReadOnlyApi.length : filteredDepartments.length} departments
+                </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <Input
-                  className="!rounded-lg w-64"
-                  placeholder="Search department/head..."
-                  value={deptSearch}
-                  onChange={(e) => setDeptSearch(e.target.value)}
-                  allowClear
-                />
-                <Select
-                  className="!rounded-lg w-40"
-                  value={deptStatus}
-                  onChange={(v) => setDeptStatus(v)}
-                  options={[
-                    { label: "All Status", value: "All" },
-                    { label: "Active", value: "Active" },
-                    { label: "Inactive", value: "Inactive" },
-                  ]}
-                />
-              </div>
+              {!apiEnabled ? (
+                <div className="flex items-center gap-2">
+                  <Input
+                    className="!rounded-lg w-64"
+                    placeholder="Search department/head..."
+                    value={deptSearch}
+                    onChange={(e) => setDeptSearch(e.target.value)}
+                    allowClear
+                  />
+                  <Select
+                    className="!rounded-lg w-40"
+                    value={deptStatus}
+                    onChange={(v) => setDeptStatus(v)}
+                    options={[
+                      { label: "All Status", value: "All" },
+                      { label: "Active", value: "Active" },
+                      { label: "Inactive", value: "Inactive" },
+                    ]}
+                  />
+                </div>
+              ) : null}
             </div>
 
             <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
               <Table<DepartmentRow>
-                columns={departmentColumns}
-                dataSource={filteredDepartments}
+                columns={apiEnabled ? departmentColumnsReadOnlyApi : departmentColumns}
+                dataSource={apiEnabled ? departmentsReadOnlyApi : filteredDepartments}
                 rowKey="key"
                 size="middle"
                 pagination={false}
@@ -601,6 +793,227 @@ function EmployeeDeptPageContent() {
           </div>
         )}
       </div>
+
+      <Modal
+        open={viewEmployeeOpen}
+        onCancel={() => {
+          setViewEmployeeOpen(false);
+          setSelectedEmployee(null);
+        }}
+        title={<div className="text-sm font-semibold">Employee Detail</div>}
+        footer={
+          <Button
+            className="!rounded-lg"
+            onClick={() => {
+              setViewEmployeeOpen(false);
+              setSelectedEmployee(null);
+            }}
+          >
+            Close
+          </Button>
+        }
+      >
+        {selectedEmployee ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="rounded-lg border border-gray-100 p-3">
+              <div className="text-xs text-gray-500">Employee ID</div>
+              <div className="text-sm font-semibold text-gray-900 mt-1">{selectedEmployee.empId}</div>
+            </div>
+            <div className="rounded-lg border border-gray-100 p-3">
+              <div className="text-xs text-gray-500">Name</div>
+              <div className="text-sm font-semibold text-gray-900 mt-1">{selectedEmployee.name}</div>
+            </div>
+            <div className="rounded-lg border border-gray-100 p-3">
+              <div className="text-xs text-gray-500">Email</div>
+              <div className="text-sm text-gray-900 mt-1">{selectedEmployee.email}</div>
+            </div>
+            <div className="rounded-lg border border-gray-100 p-3">
+              <div className="text-xs text-gray-500">Department</div>
+              <div className="text-sm text-gray-900 mt-1">{selectedEmployee.department}</div>
+            </div>
+            <div className="rounded-lg border border-gray-100 p-3">
+              <div className="text-xs text-gray-500">Role</div>
+              <div className="text-sm text-gray-900 mt-1">{selectedEmployee.role}</div>
+            </div>
+            <div className="rounded-lg border border-gray-100 p-3">
+              <div className="text-xs text-gray-500">Status</div>
+              <div className="text-sm text-gray-900 mt-1">{selectedEmployee.status}</div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-gray-500">No employee selected</div>
+        )}
+      </Modal>
+
+      <Modal
+        open={editEmployeeOpen}
+        onCancel={() => {
+          setEditEmployeeOpen(false);
+          setSelectedEmployee(null);
+          editEmployeeForm.resetFields();
+        }}
+        title={<div className="text-sm font-semibold">Edit Employee</div>}
+        okText="Save"
+        cancelText="Cancel"
+        okButtonProps={{ className: "!rounded-lg" }}
+        cancelButtonProps={{ className: "!rounded-lg" }}
+        onOk={async () => {
+          try {
+            const values = await editEmployeeForm.validateFields();
+            if (!selectedEmployee) return;
+
+            if (!apiEnabled) {
+              setEmployees((prev) =>
+                prev.map((e) =>
+                  e.key === selectedEmployee.key
+                    ? {
+                        ...e,
+                        name: values.name,
+                        email: values.email || "-",
+                        department: values.department || "-",
+                        status: values.status,
+                      }
+                    : e
+                )
+              );
+              message.success("Employee updated");
+            } else {
+              const apiId = selectedEmployee.apiId;
+              if (!apiId) throw new Error("Missing employee id");
+
+              await updateEmployee({
+                id: apiId,
+                body: {
+                  full_name: values.name,
+                  email: values.email || null,
+                  status: values.status,
+                },
+              }).unwrap();
+
+              if (selectedEmployee.accessControlId) {
+                await updateAccessControl({
+                  id: selectedEmployee.accessControlId,
+                  body: {
+                    employee_id: selectedEmployee.empId,
+                    full_name: values.name,
+                    department: values.department,
+                    role_id: values.roleId,
+                  },
+                }).unwrap();
+              }
+
+              message.success("Employee updated");
+              refetchEmployees();
+              refetchAccessControl();
+              refetchRoles();
+            }
+
+            setEditEmployeeOpen(false);
+            setSelectedEmployee(null);
+            editEmployeeForm.resetFields();
+          } catch (e) {
+            message.error(getApiErrorMessage(e, "Failed to update employee"));
+          }
+        }}
+      >
+        <Form form={editEmployeeForm} layout="vertical">
+          <Form.Item name="empId" label="Employee ID">
+            <Input className="!rounded-lg" disabled />
+          </Form.Item>
+          <Form.Item name="name" label="Full Name" rules={[{ required: true }]}> 
+            <Input className="!rounded-lg" placeholder="Full name" />
+          </Form.Item>
+          <Form.Item name="email" label="Email">
+            <Input className="!rounded-lg" placeholder="name@company.com" />
+          </Form.Item>
+          <Form.Item name="department" label="Department" rules={[{ required: true }]}>
+            {apiEnabled ? (
+              <Select
+                className="!rounded-lg"
+                placeholder="Select department"
+                options={departmentOptionsApi}
+                showSearch
+                filterOption={(input, option) =>
+                  String(option?.label ?? "")
+                    .toLowerCase()
+                    .includes(input.toLowerCase())
+                }
+              />
+            ) : (
+              <Input className="!rounded-lg" placeholder="Department" />
+            )}
+          </Form.Item>
+
+          <Form.Item name="roleId" label="Role" rules={apiEnabled ? [{ required: true }] : undefined}>
+            {apiEnabled ? (
+              <Select
+                className="!rounded-lg"
+                placeholder="Select role"
+                options={roleOptionsApi}
+                showSearch
+                filterOption={(input, option) =>
+                  String(option?.label ?? "")
+                    .toLowerCase()
+                    .includes(input.toLowerCase())
+                }
+              />
+            ) : (
+              <Input className="!rounded-lg" placeholder="Role" />
+            )}
+          </Form.Item>
+
+          <Form.Item name="status" label="Status" rules={[{ required: true }]}>
+            <Select
+              className="!rounded-lg"
+              options={[
+                { label: "Active", value: "Active" },
+                { label: "Inactive", value: "Inactive" },
+              ]}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="Delete employee?"
+        open={deleteEmployeeOpen}
+        okText="Delete"
+        okButtonProps={{ danger: true, className: "!rounded-lg" }}
+        cancelText="Cancel"
+        cancelButtonProps={{ className: "!rounded-lg" }}
+        onCancel={() => {
+          setDeleteEmployeeOpen(false);
+          setSelectedEmployee(null);
+        }}
+        onOk={async () => {
+          if (!selectedEmployee) return;
+          try {
+            if (!apiEnabled) {
+              setEmployees((prev) => prev.filter((e) => e.key !== selectedEmployee.key));
+              message.success("Employee deleted");
+            } else {
+              if (selectedEmployee.accessControlId) {
+                await deleteAccessControl(selectedEmployee.accessControlId).unwrap();
+              }
+              if (selectedEmployee.apiId) {
+                await deleteEmployee(selectedEmployee.apiId).unwrap();
+              }
+              message.success("Employee deleted");
+              refetchEmployees();
+              refetchAccessControl();
+            }
+
+            setDeleteEmployeeOpen(false);
+            setSelectedEmployee(null);
+          } catch (e) {
+            message.error(getApiErrorMessage(e, "Failed to delete employee"));
+          }
+        }}
+      >
+        <div className="text-gray-700">
+          This will remove <span className="font-semibold">{selectedEmployee?.empId}</span>.
+        </div>
+      </Modal>
 
       <Modal
         open={viewDeptOpen}

@@ -7,6 +7,8 @@ import { Button, Card, Form, Input, message, Typography } from "antd";
 import { useRouter } from "next/navigation";
 import React from "react";
 import Cookies from "js-cookie";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useLoginMutation } from "@/lib/api/auth/api";
 
 interface LoginFormValues {
   email: string;
@@ -17,14 +19,31 @@ const { Title, Link } = Typography;
 
 export default function LoginPage() {
   const router = useRouter();
+  const [login, { isLoading }] = useLoginMutation();
+  const apiEnabled = Boolean(apiBaseUrl);
 
   const handleLogin = async (values: LoginFormValues) => {
-    // Simpan token dummy
-    Cookies.set("Authorization", "DUMMY_TOKEN", { expires: 7 });
+    if (!apiEnabled) {
+      Cookies.set("Authorization", "DUMMY_TOKEN", { expires: 7 });
+      message.success("Login bypassed (DEV MODE - API disabled)");
+      router.push("/dashboard");
+      return;
+    }
 
-    message.success("Login bypassed (DEV MODE)");
+    try {
+      const res = await login({ email: values.email, password: values.password }).unwrap();
+      const token = res?.data?.token;
+      if (!token) {
+        message.error("Login success but token missing");
+        return;
+      }
 
-    router.push("/dashboard");
+      Cookies.set("Authorization", token, { expires: 7 });
+      message.success("Login success");
+      router.push("/dashboard");
+    } catch (err: unknown) {
+      message.error("Login failed");
+    }
   };
 
   return (
@@ -89,9 +108,10 @@ export default function LoginPage() {
             <Form.Item>
               <button
                 type="submit"
+                disabled={isLoading}
                 className={`w-full bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-blue-600 cursor-pointer`}
               >
-                Login
+                {isLoading ? "Logging in..." : "Login"}
               </button>
             </Form.Item>
           </Form>

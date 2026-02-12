@@ -56,6 +56,13 @@ export type EmployeeRecord = {
   status?: string;
 };
 
+export type CreateEmployeeRequest = {
+  employee_id: string;
+  full_name: string;
+  email?: string | null;
+  status?: string;
+};
+
 export type CreateAccessControlMatrixRequest = {
   full_name: string;
   employee_id: string;
@@ -237,6 +244,23 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
     }),
 
+    updateRole: builder.mutation<{ message?: string; data?: RoleRecord }, { id: string; body: Partial<CreateRoleRequest> }>({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.role}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    deleteRole: builder.mutation<{ message?: string; id?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.role}/${id}`,
+        method: "DELETE",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
     getRoles: builder.query<RoleRecord[], void>({
       query: () => ({
         url: `${ROUTES.role}`,
@@ -246,10 +270,37 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       transformResponse: (response: unknown) => normalizeArrayResponse<RoleRecord>(response),
     }),
 
-    getEmployees: builder.query<{ data: EmployeeRecord[] }, void>({
+    getEmployees: builder.query<EmployeeRecord[], void>({
       query: () => ({
         url: `${ROUTES.employee}`,
         method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => normalizeArrayResponse<EmployeeRecord>(response),
+    }),
+
+    createEmployee: builder.mutation<{ message?: string; data?: EmployeeRecord }, CreateEmployeeRequest>({
+      query: (body) => ({
+        url: `${ROUTES.employee}`,
+        method: "POST",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    updateEmployee: builder.mutation<{ message?: string; data?: EmployeeRecord }, { id: string; body: Partial<CreateEmployeeRequest> }>({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.employee}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    deleteEmployee: builder.mutation<{ message?: string; id?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.employee}/${id}`,
+        method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
     }),
@@ -278,6 +329,26 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
     }),
 
+    updateAccessControlMatrix: builder.mutation<
+      { message?: string; data?: AccessControlMatrixRecord },
+      { id: string; body: Partial<CreateAccessControlMatrixRequest> }
+    >({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.accessControlMatrix}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    deleteAccessControlMatrix: builder.mutation<{ message?: string; id?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.accessControlMatrix}/${id}`,
+        method: "DELETE",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
     // Approval workflow
     createApprovalWorkflow: builder.mutation<
       { message?: string; data?: ApprovalWorkflowRecord },
@@ -287,6 +358,26 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         url: `${ROUTES.approvalWorkflow}`,
         method: "POST",
         body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    updateApprovalWorkflow: builder.mutation<
+      { message?: string; data?: ApprovalWorkflowRecord },
+      { id: string; body: Partial<CreateApprovalWorkflowRequest> }
+    >({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.approvalWorkflow}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    deleteApprovalWorkflow: builder.mutation<{ message?: string; id?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.approvalWorkflow}/${id}`,
+        method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
     }),
@@ -314,6 +405,26 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
     }),
 
+    updateGlobalWorkingDays: builder.mutation<
+      { message?: string; data?: GlobalWorkingDaysRecord },
+      { id: string; body: Partial<CreateGlobalWorkingDaysRequest> }
+    >({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.globalWorkingDays}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    deleteGlobalWorkingDays: builder.mutation<{ message?: string; id?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.globalWorkingDays}/${id}`,
+        method: "DELETE",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
     getGlobalWorkingDays: builder.query<GlobalWorkingDaysRecord[], void>({
       query: () => ({
         url: `${ROUTES.globalWorkingDays}`,
@@ -333,6 +444,26 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         url: `${ROUTES.kanban}`,
         method: "POST",
         body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    updateKanbanStandard: builder.mutation<
+      { message?: string; data?: KanbanStandardRecord },
+      { id: string; body: Partial<CreateKanbanStandardRequest> }
+    >({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.kanban}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    deleteKanbanStandard: builder.mutation<{ message?: string; id?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.kanban}/${id}`,
+        method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
     }),
@@ -360,6 +491,26 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
     }),
 
+    updateMachinePattern: builder.mutation<
+      { message?: string; data?: MachinePatternRecord },
+      { id: string; body: Partial<CreateMachinePatternRequest> }
+    >({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.machinePattern}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    deleteMachinePattern: builder.mutation<{ message?: string; id?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.machinePattern}/${id}`,
+        method: "DELETE",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
     getMachinePatterns: builder.query<MachinePatternRecord[], void>({
       query: () => ({
         url: `${ROUTES.machinePattern}`,
@@ -376,6 +527,26 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         url: `${ROUTES.process}`,
         method: "POST",
         body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    updateProcess: builder.mutation<
+      { message?: string; data?: ProcessRecord },
+      { id: string; body: Partial<CreateProcessRequest> }
+    >({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.process}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    deleteProcess: builder.mutation<{ message?: string; id?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.process}/${id}`,
+        method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
     }),
@@ -400,6 +571,23 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
     }),
 
+    updateUom: builder.mutation<{ message?: string; data?: UomRecord }, { id: string; body: Partial<CreateUomRequest> & { status?: StatusType } }>({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.uom}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    deleteUom: builder.mutation<{ message?: string; id?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.uom}/${id}`,
+        method: "DELETE",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
     getUoms: builder.query<UomRecord[], void>({
       query: () => ({
         url: `${ROUTES.uom}`,
@@ -418,6 +606,26 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         url: `${ROUTES.typeParameter}`,
         method: "POST",
         body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    updateTypeParameter: builder.mutation<
+      { message?: string; data?: TypeParameterRecord },
+      { id: string; body: Partial<CreateTypeParameterRequest> }
+    >({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.typeParameter}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    deleteTypeParameter: builder.mutation<{ message?: string; id?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.typeParameter}/${id}`,
+        method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
     }),
@@ -445,6 +653,26 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
     }),
 
+    updateSafetyStock: builder.mutation<
+      { message?: string; data?: SafetyStockRecord },
+      { id: string; body: Partial<CreateSafetyStockRequest> }
+    >({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.safetyStock}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    deleteSafetyStock: builder.mutation<{ message?: string; id?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.safetyStock}/${id}`,
+        method: "DELETE",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
     getSafetyStock: builder.query<SafetyStockRecord[], void>({
       query: () => ({
         url: `${ROUTES.safetyStock}`,
@@ -464,6 +692,26 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         url: `${ROUTES.stockdays}`,
         method: "POST",
         body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    updateStockdays: builder.mutation<
+      { message?: string; data?: StockdaysRecord },
+      { id: string; body: Partial<CreateStockdaysRequest> }
+    >({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.stockdays}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    deleteStockdays: builder.mutation<{ message?: string; id?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.stockdays}/${id}`,
+        method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
     }),
@@ -488,6 +736,26 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
     }),
 
+    updatePoSplit: builder.mutation<
+      { message?: string; data?: PoSplitRecord },
+      { id: string; body: Partial<CreatePoSplitRequest> & { status?: StatusType } }
+    >({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.poSplit}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    deletePoSplit: builder.mutation<{ message?: string; id?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.poSplit}/${id}`,
+        method: "DELETE",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
     getPoSplitSettings: builder.query<PoSplitRecord[], void>({
       query: () => ({
         url: `${ROUTES.poSplit}`,
@@ -502,28 +770,55 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
 
 export const {
   useCreateRoleMutation,
+  useUpdateRoleMutation,
+  useDeleteRoleMutation,
   useGetRolesQuery,
   useGetEmployeesQuery,
+  useCreateEmployeeMutation,
+  useUpdateEmployeeMutation,
+  useDeleteEmployeeMutation,
   useGetAccessControlMatrixQuery,
   useCreateAccessControlMatrixMutation,
+  useUpdateAccessControlMatrixMutation,
+  useDeleteAccessControlMatrixMutation,
   useCreateApprovalWorkflowMutation,
+  useUpdateApprovalWorkflowMutation,
+  useDeleteApprovalWorkflowMutation,
   useGetApprovalWorkflowsQuery,
   useCreateGlobalWorkingDaysMutation,
+  useUpdateGlobalWorkingDaysMutation,
+  useDeleteGlobalWorkingDaysMutation,
   useGetGlobalWorkingDaysQuery,
   useCreateKanbanStandardMutation,
+  useUpdateKanbanStandardMutation,
+  useDeleteKanbanStandardMutation,
   useGetKanbanStandardsQuery,
   useCreateMachinePatternMutation,
+  useUpdateMachinePatternMutation,
+  useDeleteMachinePatternMutation,
   useGetMachinePatternsQuery,
   useCreateProcessMutation,
+  useUpdateProcessMutation,
+  useDeleteProcessMutation,
   useGetProcessesQuery,
   useCreateUomMutation,
+  useUpdateUomMutation,
+  useDeleteUomMutation,
   useGetUomsQuery,
   useCreateTypeParameterMutation,
+  useUpdateTypeParameterMutation,
+  useDeleteTypeParameterMutation,
   useGetTypeParametersQuery,
   useCreateSafetyStockMutation,
+  useUpdateSafetyStockMutation,
+  useDeleteSafetyStockMutation,
   useGetSafetyStockQuery,
   useCreateStockdaysMutation,
+  useUpdateStockdaysMutation,
+  useDeleteStockdaysMutation,
   useGetStockdaysQuery,
   useCreatePoSplitMutation,
+  useUpdatePoSplitMutation,
+  useDeletePoSplitMutation,
   useGetPoSplitSettingsQuery,
 } = systemSettingsSlice;

@@ -7,6 +7,8 @@ import { Button, Card, Table, Tabs, Tag } from "antd";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetWorkInProgressByIdQuery } from "@/lib/api/work-in-progress/api";
 import type { WorkInProgressRecord } from "@/lib/api/work-in-progress/interface";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 
 interface RowHistory {
   key: string;
@@ -39,6 +41,9 @@ function WorkInProgressDetailPageContent() {
     skip: !useApi,
   });
 
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !Boolean(apiBaseUrl) });
+  const bomUniqIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
+
   const apiRecord: WorkInProgressRecord | null = useMemo(() => {
     if (!useApi) return null;
     return wipOneResponse?.data ?? null;
@@ -47,10 +52,30 @@ function WorkInProgressDetailPageContent() {
   const detailInfo = useMemo(
     () => ({
       uniq: apiRecord?.product_uniq ?? apiRecord?.master_list?.uniq_code ?? uniq,
-      partNumber: apiRecord?.master_list?.part_no ?? "EMA7-001",
-      partName: apiRecord?.part_name ?? apiRecord?.master_list?.part_name ?? "Engine Mount Assembly",
-      model: apiRecord?.master_list?.model ?? "Camry 2024",
-      woNumber: apiRecord?.work_order?.wo_number ?? apiRecord?.work_order_reference ?? "WO-001-2024",
+      partNumber:
+        ((apiRecord?.product_uniq ?? apiRecord?.master_list?.uniq_code)
+          ? bomUniqIndex.partNumberByUniq[apiRecord?.product_uniq ?? apiRecord?.master_list?.uniq_code ?? ""]
+          : undefined) ??
+        (apiRecord as any)?.master_list?.part_no ??
+        "EMA7-001",
+      partName:
+        ((apiRecord?.product_uniq ?? apiRecord?.master_list?.uniq_code)
+          ? bomUniqIndex.partNameByUniq[apiRecord?.product_uniq ?? apiRecord?.master_list?.uniq_code ?? ""]
+          : undefined) ??
+        apiRecord?.part_name ??
+        apiRecord?.master_list?.part_name ??
+        "Engine Mount Assembly",
+      model:
+        ((apiRecord?.product_uniq ?? apiRecord?.master_list?.uniq_code)
+          ? bomUniqIndex.assemblyCodeByUniq[apiRecord?.product_uniq ?? apiRecord?.master_list?.uniq_code ?? ""]
+          : undefined) ??
+        apiRecord?.master_list?.model ??
+        "Camry 2024",
+      woNumber:
+        apiRecord?.work_order?.wo_number ??
+        apiRecord?.work_order_reference ??
+        apiRecord?.batch_number ??
+        "WO-001-2024",
       process: apiRecord?.current_process ?? "Assembly",
       station: apiRecord?.process_station ?? "Welding Station 2",
       stock: Number(apiRecord?.quantity_in_process ?? 200),
@@ -64,7 +89,7 @@ function WorkInProgressDetailPageContent() {
       kanban: Math.max(1, Math.ceil(Number(apiRecord?.master_list?.kanban_quantity ?? 250) / 50)),
       status: apiRecord?.process_status ?? "On Track",
     }),
-    [apiRecord, uniq]
+    [apiRecord, bomUniqIndex, uniq]
   );
 
   const historyData: RowHistory[] = [

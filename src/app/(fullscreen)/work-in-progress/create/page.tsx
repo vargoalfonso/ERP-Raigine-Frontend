@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Form,
@@ -21,6 +21,9 @@ import {
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useCreateWorkInProgressMutation } from "@/lib/api/work-in-progress/api";
 import type { CreateWorkInProgressRequest, ProcessPriority } from "@/lib/api/work-in-progress/interface";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { generateNextWorkOrderNumber } from "@/lib/utils/workOrder";
 type WipType = "Child Part" | "Warehouse FG";
 type Process = "Welding" | "CNC Machine" | "Quality Check";
 
@@ -51,43 +54,27 @@ export default function CreateWorkInProgressPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const useApi = Boolean(apiBaseUrl);
   const [createWorkInProgress] = useCreateWorkInProgressMutation();
-  const [entries, setEntries] = useState<WipEntry[]>([
-    {
-      id: "1",
-      uniq: "LV-001",
-      woNumber: "WO-2024-0239",
-      packingNumber: "KBN-004-2024",
-      wipType: "Child Part",
-      process: "Welding",
-      stock: 100,
-      stockToCompleteKanban: 100,
-      pcsPerKanban: 20,
-    },
-    {
-      id: "2",
-      uniq: "LV-001",
-      woNumber: "WO-2024-0239",
-      packingNumber: "KBN-004-2024",
-      wipType: "Warehouse FG",
-      process: "CNC Machine",
-      stock: 100,
-      stockToCompleteKanban: 100,
-      pcsPerKanban: 20,
-    },
-    {
-      id: "3",
-      uniq: "LV-001",
-      woNumber: "WO-2024-0239",
-      packingNumber: "KBN-004-2024",
-      wipType: "Child Part",
-      process: "Quality Check",
-      stock: 100,
-      stockToCompleteKanban: 100,
-      pcsPerKanban: 20,
-    },
-  ]);
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !useApi });
+  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
+  const uniqOptions = bomIndex.options.length
+    ? bomIndex.options
+    : [
+        { label: "LV-001", value: "LV-001" },
+        { label: "LV-002", value: "LV-002" },
+        { label: "LV-003", value: "LV-003" },
+      ];
+
+  const [generatedWo, setGeneratedWo] = useState<string>(() => generateNextWorkOrderNumber());
+  const [entries, setEntries] = useState<WipEntry[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form] = Form.useForm<WipFormValues>();
+
+  useEffect(() => {
+    // Prefill a generated WO so user doesn't need to type/select.
+    if (!form.getFieldValue("woNumber")) {
+      form.setFieldValue("woNumber", generatedWo);
+    }
+  }, [form, generatedWo]);
 
   const uniqTargets = useMemo(() => {
     return new Map<string, number>([
@@ -312,11 +299,13 @@ export default function CreateWorkInProgressPage() {
                 <Form.Item label="Uniq" name="uniq" rules={[{ required: true, message: "Uniq is required" }]}>
                   <Select
                     placeholder="Select Uniq"
-                    options={[
-                      { label: "LV-001", value: "LV-001" },
-                      { label: "LV-002", value: "LV-002" },
-                      { label: "LV-003", value: "LV-003" },
-                    ]}
+                    showSearch
+                    options={uniqOptions}
+                    filterOption={(input, option) =>
+                      String(option?.label ?? "")
+                        .toLowerCase()
+                        .includes(input.toLowerCase())
+                    }
                   />
                 </Form.Item>
 
@@ -326,11 +315,25 @@ export default function CreateWorkInProgressPage() {
                   rules={[{ required: true, message: "Work Order Number is required" }]}
                 >
                   <Select
-                    placeholder="Select WO"
-                    options={[
-                      { label: "WO-2024-0239", value: "WO-2024-0239" },
-                      { label: "WO-2024-0240", value: "WO-2024-0240" },
-                    ]}
+                    placeholder="WO-ddmmyy-001"
+                    options={[{ label: generatedWo, value: generatedWo }]}
+                    dropdownRender={(menu) => (
+                      <div>
+                        {menu}
+                        <div className="px-3 py-2 border-t border-gray-100">
+                          <Button
+                            size="small"
+                            onClick={() => {
+                              const next = generateNextWorkOrderNumber();
+                              setGeneratedWo(next);
+                              form.setFieldValue("woNumber", next);
+                            }}
+                          >
+                            Generate New WO
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   />
                 </Form.Item>
 

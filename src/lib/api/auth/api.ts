@@ -9,7 +9,33 @@ export const authApiSlice = apiSlice.injectEndpoints({
       { email: string; password: string }
     >({
       query: (credentials) => ({
-        url: "/auth/login",
+        url: "/api/auth/login",
+        method: "POST",
+        meta: {
+          useAuthorization: false,
+          contentType: "application/json",
+        },
+        body: credentials,
+      }),
+      transformResponse: (response: unknown) => {
+        const r = response as Partial<{ token: string; user: AuthResponse["user"] }>;
+
+        return {
+          message: "OK",
+          status: "success",
+          data: {
+            token: r?.token ?? "",
+            user: (r?.user as AuthResponse["user"]) ?? ({} as AuthResponse["user"]),
+          },
+        } satisfies LoginStatusType;
+      },
+    }),
+    register: builder.mutation<
+      ApiResponse<DataObject<AuthResponse>>,
+      { username: string; email: string; password: string }
+    >({
+      query: (credentials) => ({
+        url: "/api/auth/register",
         method: "POST",
         meta: {
           useAuthorization: false,
@@ -18,24 +44,7 @@ export const authApiSlice = apiSlice.injectEndpoints({
         body: credentials,
       }),
     }),
-    logout: builder.mutation<ApiResponse<DataObject<null>>, void>({
-      query: () => ({
-        url: "/auth/logout",
-        method: "POST",
-      }),
-    }),
-    register: builder.mutation<
-      ApiResponse<DataObject<AuthResponse>>,
-      { email: string; password: string }
-    >({
-      query: (credentials) => ({
-        url: "/auth/register",
-        method: "POST",
-        body: credentials,
-      }),
-    }),
   }),
 });
 
-export const { useLoginMutation, useLogoutMutation, useRegisterMutation } =
-  authApiSlice;
+export const { useLoginMutation, useRegisterMutation } = authApiSlice;

@@ -352,7 +352,7 @@ export default function RawMaterialsPage() {
     refetch: refetchRawMaterials,
   } = useGetAllRawMaterialsQuery(
     { currentPage, pageSize },
-    { skip: !useApi }
+    { skip: !useApi, refetchOnMountOrArgChange: true }
   );
 
   const [deleteOpen, setDeleteOpen] = useState(false);

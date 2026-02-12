@@ -4,20 +4,34 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
+  Form,
   Input,
+  InputNumber,
   Modal,
+  Select,
   Table,
   Tag,
   message,
 } from "antd";
 import {
   DeleteOutlined,
+  EditOutlined,
   EyeOutlined,
   FilterOutlined,
   PlusOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
+
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import {
+  useDeleteIndirectRawMaterialMutation,
+  useGetAllIndirectRawMaterialQuery,
+  useUpdateIndirectRawMaterialMutation,
+} from "@/lib/api/indirect-raw-material/api";
+import type { BackendIndirectRawMaterial } from "@/lib/api/indirect-raw-material/api";
 
 type IndirectRawMaterialRow = {
   id: string;
@@ -69,8 +83,75 @@ export default function IndirectRawMaterialsPage() {
   const router = useRouter();
   const [messageApi, contextHolder] = message.useMessage();
 
+  const useApi = Boolean(apiBaseUrl);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !useApi });
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomTreeRes?.data ?? []),
+    [bomTreeRes?.data]
+  );
+
+  const {
+    data: apiRows,
+    isSuccess: apiSuccess,
+    refetch: refetchApiRows,
+  } = useGetAllIndirectRawMaterialQuery(
+    { currentPage, pageSize },
+    { skip: !useApi, refetchOnMountOrArgChange: true }
+  );
+
+  const [deleteIndirect] = useDeleteIndirectRawMaterialMutation();
+  const [updateIndirect] = useUpdateIndirectRawMaterialMutation();
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingRow, setEditingRow] = useState<IndirectRawMaterialRow | null>(null);
+  const [editForm] = Form.useForm();
+
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<IndirectRawMaterialRow[]>(initialRows);
+
+  const displayedRows = useMemo(() => {
+    if (!useApi || !apiSuccess) return rows;
+
+    const raw = apiRows?.data ?? [];
+    const toTime = (value: string | undefined): number => {
+      if (!value) return 0;
+      const t = new Date(value).getTime();
+      return Number.isFinite(t) ? t : 0;
+    };
+
+    return [...raw]
+      .sort((a, b) => {
+        const bt = toTime(b.created_at) || toTime(b.updated_at);
+        const at = toTime(a.created_at) || toTime(a.updated_at);
+        if (bt !== at) return bt - at;
+        return String(b.id).localeCompare(String(a.id));
+      })
+      .map((r) => {
+        const uniq = r.uniq ?? "-";
+        const partNumber = bomIndex.partNumberByUniq?.[uniq] ?? "-";
+        const partName = bomIndex.partNameByUniq?.[uniq] ?? r.item_name ?? "-";
+        const warehouse = r.warehouse_code ?? "-";
+        const currentStock = Number(r.quantity ?? 0);
+        const status: IndirectRawMaterialRow["status"] = currentStock <= 0 ? "LOW STOCK" : "NORMAL";
+        return {
+          id: r.id,
+          uniq,
+          partNumber,
+          partName,
+          warehouse,
+          currentStock,
+          toCompleteKanban: 0,
+          kanbanCount: 0,
+          stockDays: 0,
+          safetyStockDays: 0,
+          status,
+          buyFlag: "NOT BUY",
+        };
+      });
+  }, [apiRows?.data, apiSuccess, bomIndex.partNameByUniq, bomIndex.partNumberByUniq, rows, useApi]);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletingRow, setDeletingRow] = useState<IndirectRawMaterialRow | null>(
@@ -79,19 +160,90 @@ export default function IndirectRawMaterialsPage() {
 
   const filteredRows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => {
+    if (!q) return displayedRows;
+    return displayedRows.filter((r) => {
       return (
         r.uniq.toLowerCase().includes(q) ||
         r.partNumber.toLowerCase().includes(q) ||
         r.partName.toLowerCase().includes(q)
       );
     });
-  }, [query, rows]);
+  }, [displayedRows, query]);
 
   const openDelete = (row: IndirectRawMaterialRow) => {
     setDeletingRow(row);
     setDeleteOpen(true);
+  };
+
+  const apiRowById = useMemo(() => {
+    const m = new Map<string, BackendIndirectRawMaterial>();
+    for (const r of apiRows?.data ?? []) {
+      if (r?.id) m.set(String(r.id), r);
+    }
+    return m;
+  }, [apiRows?.data]);
+
+  const openEdit = (row: IndirectRawMaterialRow) => {
+    setEditingRow(row);
+    const apiRaw = useApi ? apiRowById.get(row.id) : undefined;
+    editForm.setFieldsValue({
+      uniq: apiRaw?.uniq ?? row.uniq,
+      item_name: apiRaw?.item_name ?? row.partName,
+      warehouse_code: apiRaw?.warehouse_code ?? row.warehouse,
+      quantity: apiRaw?.quantity ?? row.currentStock,
+      unit_measurement: apiRaw?.unit_measurement ?? "",
+      reference_no: apiRaw?.reference_no ?? "",
+      notes: apiRaw?.notes ?? "",
+    });
+    setEditOpen(true);
+  };
+
+  const closeEdit = () => {
+    setEditOpen(false);
+    setEditingRow(null);
+    editForm.resetFields();
+  };
+
+  const saveEdit = async () => {
+    if (!editingRow) return;
+    const values = await editForm.validateFields();
+
+    if (useApi) {
+      updateIndirect({
+        id: editingRow.id,
+        body: {
+          uniq: values.uniq,
+          item_name: values.item_name,
+          warehouse_code: values.warehouse_code,
+          quantity: Number(values.quantity ?? 0),
+          unit_measurement: values.unit_measurement,
+          reference_no: values.reference_no,
+          notes: values.notes,
+        },
+      })
+        .unwrap()
+        .then(() => refetchApiRows())
+        .then(() => messageApi.success("Updated"))
+        .catch(() => messageApi.error("Failed to update"))
+        .finally(() => closeEdit());
+      return;
+    }
+
+    const nextUniq = String(values.uniq ?? editingRow.uniq);
+    setRows((prev) =>
+      prev.map((r) =>
+        r.id === editingRow.id
+          ? {
+              ...r,
+              uniq: nextUniq,
+              warehouse: String(values.warehouse_code ?? r.warehouse),
+              currentStock: Number(values.quantity ?? r.currentStock),
+            }
+          : r
+      )
+    );
+    messageApi.success("Updated");
+    closeEdit();
   };
 
   const closeDelete = () => {
@@ -101,6 +253,16 @@ export default function IndirectRawMaterialsPage() {
 
   const confirmDelete = () => {
     if (!deletingRow) return;
+    if (useApi) {
+      deleteIndirect(deletingRow.id)
+        .unwrap()
+        .then(() => refetchApiRows())
+        .then(() => messageApi.success("Deleted"))
+        .catch(() => messageApi.error("Failed to delete"))
+        .finally(() => closeDelete());
+      return;
+    }
+
     setRows((prev) => prev.filter((r) => r.id !== deletingRow.id));
     messageApi.success("Deleted");
     closeDelete();
@@ -215,6 +377,7 @@ export default function IndirectRawMaterialsPage() {
               )
             }
           />
+          <Button type="text" icon={<EditOutlined />} onClick={() => openEdit(row)} />
           <Button
             type="text"
             danger
@@ -229,6 +392,53 @@ export default function IndirectRawMaterialsPage() {
   return (
     <div className="p-6 space-y-4">
       {contextHolder}
+
+      <Modal
+        title="Edit Material"
+        open={editOpen}
+        okText="Save"
+        cancelText="Cancel"
+        onOk={saveEdit}
+        onCancel={closeEdit}
+        destroyOnClose
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item name="uniq" label="UNIQ" rules={[{ required: true }]}>
+            <Input />
+          </Form.Item>
+
+          <Form.Item name="item_name" label="Item Name">
+            <Input />
+          </Form.Item>
+
+          <Form.Item name="warehouse_code" label="Warehouse Code">
+            <Input />
+          </Form.Item>
+
+          <Form.Item name="quantity" label="Quantity" rules={[{ required: true }]}>
+            <InputNumber className="w-full" min={0} />
+          </Form.Item>
+
+          <Form.Item name="unit_measurement" label="Unit">
+            <Select
+              allowClear
+              options={[
+                { label: "Kg", value: "Kg" },
+                { label: "Pcs", value: "Pcs" },
+                { label: "Box", value: "Box" },
+              ]}
+            />
+          </Form.Item>
+
+          <Form.Item name="reference_no" label="Reference No">
+            <Input />
+          </Form.Item>
+
+          <Form.Item name="notes" label="Notes">
+            <Input.TextArea rows={3} />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title="Delete item?"

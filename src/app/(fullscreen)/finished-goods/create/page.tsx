@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Input,
@@ -25,6 +25,11 @@ import {
 import type { Dayjs } from "dayjs";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useCreateMutation as useCreateFinishedGoodMutation } from "@/lib/api/finished-goods/api";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { useGetAllQuery as useGetAllFinishedGoodsQuery } from "@/lib/api/finished-goods/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { generateNextWorkOrderNumber } from "@/lib/utils/workOrder";
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -59,6 +64,8 @@ const FinishedGoodsForm = ({
   showRemove = true,
   initialValues,
   formRef,
+  uniqOptions,
+  partNameByUniq,
 }: {
   entryNumber: number;
   onFinish: (values: FinishedGoodsFormData) => Promise<void>;
@@ -66,6 +73,8 @@ const FinishedGoodsForm = ({
   showRemove?: boolean;
   initialValues?: FinishedGoodsFormData;
   formRef?: React.MutableRefObject<FormInstance | null>;
+  uniqOptions: { label: string; value: string }[];
+  partNameByUniq: Record<string, string>;
 }) => {
   const [form] = Form.useForm();
   const [mounted, setMounted] = useState(false);
@@ -137,7 +146,24 @@ const FinishedGoodsForm = ({
             label="Product UNIQ"
             rules={[{ required: true, message: "Please enter product UNIQ" }]}
           >
-            <Input placeholder="LV7-001" size="large" className="rounded-lg" />
+            <Select
+              showSearch
+              placeholder="Select UNIQ"
+              size="large"
+              className="rounded-lg"
+              options={uniqOptions}
+              filterOption={(input, option) =>
+                String(option?.label ?? "")
+                  .toLowerCase()
+                  .includes(input.toLowerCase())
+              }
+              onChange={(value) => {
+                const partName = partNameByUniq[String(value)] ?? "";
+                if (partName && !String(form.getFieldValue("part_name") ?? "").trim()) {
+                  form.setFieldValue("part_name", partName);
+                }
+              }}
+            />
           </Form.Item>
 
           <Form.Item
@@ -165,7 +191,7 @@ const FinishedGoodsForm = ({
             ]}
           >
             <Input
-              placeholder="WO-2024-001"
+              placeholder="WO-ddmmyy-001"
               size="large"
               className="rounded-lg"
             />
@@ -337,9 +363,47 @@ export default function CreateFinishedGoodsPage() {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createFinishedGood] = useCreateFinishedGoodMutation();
+  const useApi = Boolean(apiBaseUrl);
+
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !useApi });
+  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
+  const uniqOptions = bomIndex.options.length
+    ? bomIndex.options
+    : [
+        { label: "LV-001", value: "LV-001" },
+        { label: "LV-002", value: "LV-002" },
+        { label: "LV-003", value: "LV-003" },
+      ];
+
+  // Try to sync WO counter with existing API data (best-effort).
+  const { data: finishedGoodsRes } = useGetAllFinishedGoodsQuery(
+    { currentPage: 1, pageSize: 5000 },
+    { skip: !useApi }
+  );
+  const existingWos = useMemo(() => {
+    const rows = finishedGoodsRes?.data ?? [];
+    return rows
+      .map((r) => r.work_order?.wo_number)
+      .filter((v): v is string => Boolean(v && String(v).trim()));
+  }, [finishedGoodsRes?.data]);
+
   const [formEntries, setFormEntries] = useState<FormEntry[]>([
     { id: 1, key: "form-1", formRef: { current: null } },
   ]);
+
+  const [workOrderByFormKey, setWorkOrderByFormKey] = useState<Record<string, string>>({});
+  useEffect(() => {
+    // Reserve WO numbers for all current forms (so localStorage counter advances).
+    setWorkOrderByFormKey((prev) => {
+      const next: Record<string, string> = { ...prev };
+      for (const entry of formEntries) {
+        if (!next[entry.key]) {
+          next[entry.key] = generateNextWorkOrderNumber({ existingWoNumbers: existingWos });
+        }
+      }
+      return next;
+    });
+  }, [existingWos, formEntries]);
 
   // New state: mode = "manual" | "bulk"
   const [mode, setMode] = useState<"manual" | "bulk">("manual");
@@ -352,6 +416,11 @@ export default function CreateFinishedGoodsPage() {
       formRef: { current: null },
     };
     setFormEntries([...formEntries, newEntry]);
+
+    setWorkOrderByFormKey((prev) => ({
+      ...prev,
+      [newEntry.key]: prev[newEntry.key] ?? generateNextWorkOrderNumber({ existingWoNumbers: existingWos }),
+    }));
   };
 
   const handleRemoveEntry = (id: number) => {
@@ -387,20 +456,22 @@ export default function CreateFinishedGoodsPage() {
         await Promise.all(
           allFormData.map((row) =>
             createFinishedGood({
-              current_stock: Number(row.quantity_produced ?? 0),
-              cost: Number(row.unit_cost ?? 0),
-              production_operator: row.production_operator,
-              quality_inspector: row.quality_inspector,
+              uniq: row.product_uniq,
+              item_name: row.part_name,
+              warehouse_code: row.storage_location,
+              quantity: Number(row.quantity_produced ?? 0),
+              unit_measurement: "pcs",
+              date: row.production_completion_date
+                ? row.production_completion_date.format("YYYY-MM-DD")
+                : undefined,
+              reference_no: row.work_order_reference || row.batch_number,
               notes: [
-                row.product_uniq ? `UNIQ: ${row.product_uniq}` : null,
-                row.part_name ? `Part: ${row.part_name}` : null,
                 row.work_order_reference ? `WO: ${row.work_order_reference}` : null,
                 row.batch_number ? `Batch: ${row.batch_number}` : null,
                 row.quality_status ? `Quality: ${row.quality_status}` : null,
-                row.storage_location ? `Storage: ${row.storage_location}` : null,
-                row.production_completion_date
-                  ? `Completion: ${row.production_completion_date.format("YYYY-MM-DD")}`
-                  : null,
+                row.production_operator ? `Operator: ${row.production_operator}` : null,
+                row.quality_inspector ? `Inspector: ${row.quality_inspector}` : null,
+                row.unit_cost != null ? `UnitCost: ${row.unit_cost}` : null,
                 row.production_notes ? `Notes: ${row.production_notes}` : null,
               ]
                 .filter(Boolean)
@@ -418,8 +489,13 @@ export default function CreateFinishedGoodsPage() {
 
       // Navigate back to finished goods list
       router.push("/finished-goods");
-    } catch {
-      message.error("Failed to submit. Please check your data and try again.");
+    } catch (error: unknown) {
+      message.error(
+        getApiErrorMessage(
+          error,
+          "Failed to submit. Please check your data and try again."
+        )
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -524,10 +600,10 @@ export default function CreateFinishedGoodsPage() {
           </Card>
 
           {/* Render multiple forms */}
-          {formEntries.map((entry, index) => (
+          {formEntries.map((entry) => (
             <div
               key={entry.key}
-              className={index !== formEntries.length - 1 ? "mb-12" : ""}
+              className={entry.key !== formEntries[formEntries.length - 1]?.key ? "mb-12" : ""}
             >
               <FinishedGoodsForm
                 entryNumber={entry.id}
@@ -535,6 +611,12 @@ export default function CreateFinishedGoodsPage() {
                 onRemove={() => handleRemoveEntry(entry.id)}
                 showRemove={formEntries.length > 1}
                 formRef={entry.formRef}
+                uniqOptions={uniqOptions}
+                partNameByUniq={bomIndex.partNameByUniq}
+                initialValues={{
+                  work_order_reference:
+                    workOrderByFormKey[entry.key] ?? generateNextWorkOrderNumber({ existingWoNumbers: existingWos }),
+                }}
               />
             </div>
           ))}

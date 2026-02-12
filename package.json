@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "smoke:api": "node scripts/smoke-api.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.2",
