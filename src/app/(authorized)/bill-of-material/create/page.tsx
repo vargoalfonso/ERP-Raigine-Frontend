@@ -23,6 +23,9 @@ import {
   RightOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useCreateBomMutation } from "@/lib/api/bom/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -78,6 +81,9 @@ export default function CreateBomPage() {
   const [step, setStep] = useState(0);
   const [messageApi, contextHolder] = message.useMessage();
   const [form] = Form.useForm<Step1Values>();
+  const useApi = Boolean(apiBaseUrl);
+  const [createBom] = useCreateBomMutation();
+  const [saving, setSaving] = useState(false);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [childFileLists, setChildFileLists] = useState<
     Record<number, UploadFile[]>
@@ -123,6 +129,49 @@ export default function CreateBomPage() {
 
   const childParts = Form.useWatch("child_parts", form);
   const childPartsCount = Array.isArray(childParts) ? childParts.length : 0;
+
+  const saveBom = async () => {
+    try {
+      setSaving(true);
+      // When user is on Step 2, Step 1 fields are unmounted.
+      // AntD Form preserves values, but `validateFields()` may not return them.
+      await form.validateFields();
+      const values = form.getFieldsValue(true) as Step1Values;
+
+      const parentUniq = String(values.parent_uniq ?? "").trim();
+      if (!parentUniq) {
+        messageApi.error("Parent UNIQ is required");
+        return;
+      }
+
+      if (useApi) {
+        const imageFile = (fileList?.[0]?.originFileObj ?? null) as File | null;
+
+        await createBom({
+          assembly_code: parentUniq,
+          uniq: parentUniq,
+          part_name: values.part_name ?? "",
+          part_number: values.part_number,
+          status: values.status,
+          description: values.description,
+          process_routes: values.process_routes,
+          material_spec: values.material_spec,
+          child_parts: values.child_parts,
+          imageFile,
+        }).unwrap();
+
+        messageApi.success("BOM saved to API");
+      } else {
+        messageApi.success("BOM saved (UI only)");
+      }
+
+      router.push("/bill-of-material");
+    } catch (err) {
+      messageApi.error(getApiErrorMessage(err, "Failed to save BOM"));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const addLevel1Child = () => {
     const current = form.getFieldValue("child_parts") ?? [];
@@ -879,10 +928,8 @@ export default function CreateBomPage() {
                   <Button
                     type="primary"
                     disabled={childPartsCount === 0}
-                    onClick={() => {
-                      messageApi.success("BOM saved (UI only)");
-                      router.push("/bill-of-material");
-                    }}
+                    loading={saving}
+                    onClick={saveBom}
                   >
                     Save BOM
                   </Button>

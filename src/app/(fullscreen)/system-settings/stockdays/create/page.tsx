@@ -10,42 +10,42 @@ import {
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
-import { useCreateStockdaysMutation } from "@/lib/api/system-settings/api";
+import { useCreateStockdaysMutation, useGetStockdaysQuery } from "@/lib/api/system-settings/api";
 import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { mockBomTree } from "@/lib/mock/bomTree";
+import { useGetAllRawMaterialsQuery } from "@/lib/api/raw-materials/api";
+import { useGetAllIndirectRawMaterialQuery } from "@/lib/api/indirect-raw-material/api";
+import { useGetAllSubconRawMaterialQuery } from "@/lib/api/subcon-raw-material/api";
+import { useGetAllQuery as useGetAllFinishedGoodsQuery } from "@/lib/api/finished-goods/api";
+import {
+  collectBomUniqsForInventoryType,
+  INVENTORY_TYPE_OPTIONS,
+  type InventoryType,
+} from "@/lib/utils/bomInventoryType";
 
 type Entry = {
   id: string;
   uniq?: string;
-  calculationType?: string;
+  parameterNote?: string;
   constanta?: number;
   created: boolean;
 };
 
-const TYPE_OPTIONS = [
-  {
-    label: "Stockdays - PRL = Stock / (PRL/Working days)",
-    value: "Stockdays - PRL = Stock / (PRL/Working days)",
-  },
-  {
-    label: "Stockdays - DailyUsage = Stock / Daily Usage (Data history)",
-    value: "Stockdays - DailyUsage = Stock / Daily Usage (Data history)",
-  },
-];
+const UNIQ_OPTIONS: Array<{ label: string; value: string }> = [];
 
-const UNIQ_OPTIONS = TYPE_OPTIONS;
+const STOCKDAYS_CALCULATION_TYPE = "Stockdays - DailyUsage = Stock / Daily Usage (Data history)";
 
-const CALCULATION_OPTIONS = [
-  {
-    label: "Type | (PRL / Working Days * Parameter)",
-    value: "Type | (PRL / Working Days * Parameter)",
-  },
+const FALLBACK_PARAMETER_OPTIONS: Array<{ label: string; value: string }> = [
+  { label: STOCKDAYS_CALCULATION_TYPE, value: STOCKDAYS_CALCULATION_TYPE },
 ];
 
 function makeEntry(idx: number): Entry {
   return {
     id: `entry-${idx}`,
     uniq: undefined,
-    calculationType: CALCULATION_OPTIONS[0]?.value,
+    parameterNote: FALLBACK_PARAMETER_OPTIONS[0]?.value,
     constanta: undefined,
     created: false,
   };
@@ -55,10 +55,104 @@ export default function StockdaysCreatePage() {
   const router = useRouter();
 
   const apiEnabled = Boolean(apiBaseUrl);
+  const [type, setType] = useState<InventoryType | undefined>(undefined);
+  const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
+
   const [createStockdays, { isLoading: isSaving }] = useCreateStockdaysMutation();
 
-  const [type, setType] = useState<string | undefined>(undefined);
-  const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
+  const { data: existingStockdays } = useGetStockdaysQuery(undefined, {
+    skip: !apiEnabled,
+    refetchOnMountOrArgChange: true,
+  });
+
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+
+  const { data: rawMaterialsRes, isFetching: isFetchingRawMaterials } = useGetAllRawMaterialsQuery(
+    { currentPage: 1, pageSize: 10000 },
+    { skip: !apiEnabled || type !== "Raw Material" }
+  );
+  const { data: indirectRes, isFetching: isFetchingIndirect } = useGetAllIndirectRawMaterialQuery(
+    { currentPage: 1, pageSize: 10000 },
+    { skip: !apiEnabled || type !== "Indirect Raw Material" }
+  );
+  const { data: subconRes, isFetching: isFetchingSubcon } = useGetAllSubconRawMaterialQuery(
+    { currentPage: 1, pageSize: 10000 },
+    { skip: !apiEnabled || type !== "SubCon" }
+  );
+  const { data: finishedGoodsRes, isFetching: isFetchingFinishedGoods } = useGetAllFinishedGoodsQuery(
+    { currentPage: 1, pageSize: 10000 },
+    { skip: !apiEnabled || type !== "Finished Goods" }
+  );
+
+  const bomSource = useMemo(() => {
+    const apiTree = bomTreeRes?.data ?? [];
+    return apiTree.length > 0 ? apiTree : mockBomTree;
+  }, [bomTreeRes?.data]);
+
+  const bomIndex = useMemo(() => buildBomUniqIndex(bomSource), [bomSource]);
+
+  const fallbackUniqOptions = useMemo(() => {
+    if (!type) return [];
+    const uniqs = collectBomUniqsForInventoryType(bomSource as unknown as import("@/lib/api/bom/api").BackendBomNode[], type);
+    const allowed = new Set(uniqs);
+    return bomIndex.options.filter((o) => allowed.has(o.value));
+  }, [bomIndex.options, bomSource, type]);
+
+  const uniqOptions = useMemo(() => {
+    if (!type) return [];
+
+    // Requirement: when API is enabled, UNIQ must come from the DB list for each type.
+    if (apiEnabled) {
+      const uniqs: string[] = [];
+
+      if (type === "Raw Material") {
+        for (const item of rawMaterialsRes?.data ?? []) {
+          if (typeof item?.uniq === "string" && item.uniq.trim()) uniqs.push(item.uniq.trim());
+        }
+      } else if (type === "Indirect Raw Material") {
+        for (const item of indirectRes?.data ?? []) {
+          if (typeof item?.uniq === "string" && item.uniq.trim()) uniqs.push(item.uniq.trim());
+        }
+      } else if (type === "SubCon") {
+        for (const item of subconRes?.data ?? []) {
+          if (typeof item?.uniq === "string" && item.uniq.trim()) uniqs.push(item.uniq.trim());
+        }
+      } else if (type === "Finished Goods") {
+        for (const fg of finishedGoodsRes?.data ?? []) {
+          const u = fg?.master_list?.uniq_code;
+          if (typeof u === "string" && u.trim()) uniqs.push(u.trim());
+        }
+      }
+
+      return Array.from(new Set(uniqs))
+        .sort((a, b) => a.localeCompare(b))
+        .map((u) => ({ label: u, value: u }));
+    }
+
+    return fallbackUniqOptions;
+  }, [
+    apiEnabled,
+    fallbackUniqOptions,
+    finishedGoodsRes?.data,
+    indirectRes?.data,
+    rawMaterialsRes?.data,
+    subconRes?.data,
+    type,
+  ]);
+
+  const isUniqLoading =
+    Boolean(type) &&
+    apiEnabled &&
+    ((type === "Raw Material" && isFetchingRawMaterials) ||
+      (type === "Indirect Raw Material" && isFetchingIndirect) ||
+      (type === "SubCon" && isFetchingSubcon) ||
+      (type === "Finished Goods" && isFetchingFinishedGoods));
+
+  const parameterOptions = useMemo(() => {
+    // Stockdays calculation type is informational only but backend expects a specific allowed value.
+    // Keep it fixed to prevent validation errors.
+    return [{ label: STOCKDAYS_CALCULATION_TYPE, value: STOCKDAYS_CALCULATION_TYPE }];
+  }, []);
 
   const completeCount = useMemo(() => entries.filter((e) => e.created).length, [entries]);
 
@@ -68,7 +162,7 @@ export default function StockdaysCreatePage() {
 
   const validateEntry = (e: Entry) => {
     if (!e.uniq) return "Uniq is required";
-    if (!e.calculationType) return "Calculation Type is required";
+    if (!e.parameterNote) return "Parameter is required";
     if (e.constanta === undefined || e.constanta === null) return "Constanta is required";
     return null;
   };
@@ -93,7 +187,7 @@ export default function StockdaysCreatePage() {
       await createStockdays({
         inventory_type: type!,
         item_uniq_code: entry.uniq!,
-        calculation_type: entry.calculationType!,
+        calculation_type: entry.parameterNote!,
         constanta: entry.constanta!,
       }).unwrap();
       updateEntry(id, { created: true });
@@ -133,7 +227,7 @@ export default function StockdaysCreatePage() {
         await createStockdays({
           inventory_type: type,
           item_uniq_code: e.uniq!,
-          calculation_type: e.calculationType!,
+          calculation_type: e.parameterNote!,
           constanta: e.constanta!,
         }).unwrap();
         updateEntry(e.id, { created: true });
@@ -196,9 +290,12 @@ export default function StockdaysCreatePage() {
               <div className="w-[280px]">
                 <Select
                   value={type}
-                  onChange={setType}
+                  onChange={(v) => {
+                    setType(v);
+                    setEntries((prev) => prev.map((e) => ({ ...e, uniq: undefined, created: false })));
+                  }}
                   placeholder="Select Type"
-                  options={TYPE_OPTIONS}
+                  options={INVENTORY_TYPE_OPTIONS}
                 />
               </div>
               <InfoCircleOutlined className="text-blue-600" />
@@ -233,17 +330,23 @@ export default function StockdaysCreatePage() {
                       <Select
                         value={e.uniq}
                         onChange={(v) => updateEntry(e.id, { uniq: v, created: false })}
-                        placeholder="Select Uniq"
-                        options={UNIQ_OPTIONS}
+                        placeholder={type ? "Select Uniq" : "Select Type first"}
+                        options={type ? uniqOptions : UNIQ_OPTIONS}
+                        disabled={!type}
+                        loading={isUniqLoading}
+                        showSearch
+                        optionFilterProp="label"
                       />
                     </div>
 
                     <div className="lg:col-span-4">
-                      <div className="text-sm text-gray-700 mb-2">Calculation Type</div>
+                      <div className="text-sm text-gray-700 mb-2">Parameter (note)</div>
                       <Select
-                        value={e.calculationType}
-                        onChange={(v) => updateEntry(e.id, { calculationType: v, created: false })}
-                        options={CALCULATION_OPTIONS}
+                        value={e.parameterNote}
+                        onChange={(v) => updateEntry(e.id, { parameterNote: v, created: false })}
+                        placeholder="Select parameter note"
+                        options={parameterOptions}
+                        disabled
                       />
                     </div>
 

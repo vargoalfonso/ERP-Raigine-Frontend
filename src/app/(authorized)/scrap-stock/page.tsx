@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -33,6 +33,17 @@ import { IoLocationOutline } from "react-icons/io5";
 import { FinishedGoodsRecord } from "@/lib/api/finished-goods/interface";
 import { FaRegEdit, FaRegTrashAlt } from "react-icons/fa";
 import dayjs from "dayjs";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex, type BomUniqIndex } from "@/lib/utils/bomUniq";
+import {
+  useDeleteScrapStockMutation,
+  useGetAllScrapStockQuery,
+  useUpdateScrapStockMutation,
+} from "@/lib/api/scrap-stock/api";
+import type { BackendScrapStock } from "@/lib/api/scrap-stock/api";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetTypeParametersQuery } from "@/lib/api/system-settings/api";
 
 // Scrap record type and dummy data matching the scrap stock table
 type ScrapRecord = {
@@ -45,6 +56,28 @@ type ScrapRecord = {
   scrap_type: string;
   reasons: string;
   quantity: number;
+};
+
+const toScrapRecord = (item: BackendScrapStock, bomIndex?: BomUniqIndex): ScrapRecord => {
+  const uniq = item.uniq ?? "-";
+  const bomPartName = uniq !== "-" ? bomIndex?.partNameByUniq[uniq] : undefined;
+  const bomPartNumber = uniq !== "-" ? bomIndex?.partNumberByUniq[uniq] : undefined;
+  const bomAssemblyCode = uniq !== "-" ? bomIndex?.assemblyCodeByUniq[uniq] : undefined;
+
+  return {
+    id: item.id,
+    uniq,
+    part_number: bomPartNumber ?? item.part_number ?? "-",
+    part_info: {
+      name: bomPartName ?? item.item_name ?? "-",
+      model: bomAssemblyCode,
+    },
+    date_received: item.date_received ?? item.created_at ?? "-",
+    packing_number: item.packing_number ?? "-",
+    scrap_type: item.scrap_type ?? "-",
+    reasons: item.reasons ?? "-",
+    quantity: typeof item.quantity === "number" ? item.quantity : (item.scrap_qty ?? 0),
+  };
 };
 
 const dummyScrapData: ScrapRecord[] = [
@@ -209,6 +242,8 @@ type ScrapEditFormValues = {
   scrap_type?: string;
   validator?: string;
   quantity?: number;
+  weight?: number;
+  unit_measurement?: string;
 };
 
 const dummyInventoryData: FinishedGoodsRecord[] = [
@@ -223,7 +258,7 @@ const dummyInventoryData: FinishedGoodsRecord[] = [
     },
     work_order: {
       id: "1",
-      wo_number: "WO-2024-001",
+      wo_number: "WO-110226-001",
     },
     warehouse: {
       id: "1",
@@ -247,7 +282,7 @@ const dummyInventoryData: FinishedGoodsRecord[] = [
     },
     work_order: {
       id: "2",
-      wo_number: "WO-2024-002",
+      wo_number: "WO-110226-002",
     },
     warehouse: {
       id: "2",
@@ -274,7 +309,7 @@ const dummyStatusData: FinishedGoodsRecord[] = [
     },
     work_order: {
       id: "1",
-      wo_number: "WO-2024-001",
+      wo_number: "WO-110226-001",
     },
     warehouse: {
       id: "1",
@@ -293,12 +328,71 @@ export default function ScrapStockPage() {
   const router = useRouter();
   const [messageApi, contextHolder] = message.useMessage();
   const [searchValue, setSearchValue] = useState("");
-  const [loading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [tab, setTab] = useState("scrap");
 
-  const [scrapData, setScrapData] = useState<ScrapRecord[]>(dummyScrapData);
+  const useApi = Boolean(apiBaseUrl);
+  const { data: typeParams } = useGetTypeParametersQuery(undefined, {
+    skip: !useApi,
+    refetchOnMountOrArgChange: true,
+  });
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !useApi });
+  const bomUniqIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
+  const uniqOptions = useMemo(() => {
+    const idx = bomUniqIndex;
+    return idx.options.length
+      ? idx.options
+      : [
+          { label: "LV-001", value: "LV-001" },
+          { label: "LV-002", value: "LV-002" },
+          { label: "LV-003", value: "LV-003" },
+        ];
+  }, [bomUniqIndex]);
+
+  const scrapTypeOptions = useMemo(() => {
+    const fallback = [
+      { label: "Setting Machine Scrap", value: "Setting Machine Scrap" },
+      { label: "Process Scrap", value: "Process Scrap" },
+      { label: "Product Return Scrap", value: "Product Return Scrap" },
+    ];
+
+    if (!useApi) return fallback;
+
+    const candidates = (typeParams ?? [])
+      .filter((p) => String(p?.status ?? "").toLowerCase() !== "inactive")
+      .filter((p) => {
+        const code = String(p?.type_code ?? "").trim().toLowerCase();
+        const name = String(p?.type_name ?? "").trim().toLowerCase();
+        return code.startsWith("scrap") || name.includes("scrap");
+      })
+      .map((p) => String(p?.type_name ?? p?.type_code ?? "").trim())
+      .filter(Boolean);
+
+    const uniq = Array.from(new Set(candidates)).sort((a, b) => a.localeCompare(b));
+    if (uniq.length === 0) return fallback;
+    return uniq.map((v) => ({ label: v, value: v }));
+  }, [typeParams, useApi]);
+
+  const [localScrapData, setLocalScrapData] = useState<ScrapRecord[]>(dummyScrapData);
+
+  const {
+    data: scrapRes,
+    isFetching: isScrapFetching,
+    refetch: refetchScrap,
+  } = useGetAllScrapStockQuery(
+    { currentPage, pageSize },
+    { skip: !useApi || tab !== "scrap" }
+  );
+
+  const [deleteScrapStock, { isLoading: isDeleting }] = useDeleteScrapStockMutation();
+  const [updateScrapStock, { isLoading: isUpdating }] = useUpdateScrapStockMutation();
+
+  const scrapData = useMemo(() => {
+    if (!useApi) return localScrapData;
+    const items = scrapRes?.data ?? [];
+    return items.map((i) => toScrapRecord(i, bomUniqIndex));
+  }, [bomUniqIndex, localScrapData, scrapRes?.data, useApi]);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletingScrap, setDeletingScrap] = useState<ScrapRecord | null>(null);
@@ -330,7 +424,43 @@ export default function ScrapStockPage() {
   const handleSaveEdit = async () => {
     try {
       const values = await editForm.validateFields();
-      console.log("Save scrap edit:", { id: editingScrap?.id, ...values });
+
+      if (useApi && editingScrap?.id) {
+        await updateScrapStock({
+          id: editingScrap.id,
+          body: {
+            uniq: values.uniq,
+            packing_number: values.packing_number,
+            date_received: values.date_received ? values.date_received.format("YYYY-MM-DD") : undefined,
+            scrap_type: values.scrap_type,
+            scrap_qty: values.scrap_quantity,
+            validator: values.validator,
+            quantity: values.quantity,
+            weight: values.weight,
+            unit_measurement: values.unit_measurement,
+          },
+        }).unwrap();
+        await refetchScrap();
+      } else if (!useApi && editingScrap?.id) {
+        setLocalScrapData((prev) =>
+          prev.map((item) =>
+            item.id !== editingScrap.id
+              ? item
+              : {
+                  ...item,
+                  uniq: values.uniq ?? item.uniq,
+                  date_received: values.date_received
+                    ? values.date_received.format("YYYY-MM-DD")
+                    : item.date_received,
+                  packing_number: values.packing_number ?? item.packing_number,
+                  scrap_type: values.scrap_type ?? item.scrap_type,
+                  quantity: typeof values.quantity === "number" ? values.quantity : item.quantity,
+                  reasons: item.reasons,
+                }
+          )
+        );
+      }
+
       messageApi.success("Saved");
       closeEditDrawer();
     } catch {
@@ -339,7 +469,7 @@ export default function ScrapStockPage() {
   };
 
   const openScrapDetail = (record: ScrapRecord) => {
-    router.push(`/scrap-stock/detail?uniq=${encodeURIComponent(record.uniq)}`);
+    router.push(`/scrap-stock/detail?id=${encodeURIComponent(record.id)}`);
   };
 
   const openDeleteModal = (record: ScrapRecord) => {
@@ -352,15 +482,26 @@ export default function ScrapStockPage() {
     setDeletingScrap(null);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deletingScrap) return;
 
-    setScrapData((prev) => prev.filter((item) => item.id !== deletingScrap.id));
-    if (editingScrap?.id === deletingScrap.id) {
-      closeEditDrawer();
+    try {
+      if (useApi) {
+        await deleteScrapStock(deletingScrap.id).unwrap();
+        await refetchScrap();
+      } else {
+        setLocalScrapData((prev) => prev.filter((item) => item.id !== deletingScrap.id));
+      }
+
+      if (editingScrap?.id === deletingScrap.id) {
+        closeEditDrawer();
+      }
+
+      messageApi.success("Deleted");
+      closeDeleteModal();
+    } catch (err: unknown) {
+      messageApi.error(getApiErrorMessage(err, "Failed to delete"));
     }
-    messageApi.success("Deleted");
-    closeDeleteModal();
   };
 
   const scrapColumns = makeScrapColumns({
@@ -641,6 +782,7 @@ export default function ScrapStockPage() {
         okText="Delete"
         okButtonProps={{ danger: true }}
         cancelText="Cancel"
+        confirmLoading={isDeleting}
         onOk={handleConfirmDelete}
         onCancel={closeDeleteModal}
       >
@@ -659,7 +801,7 @@ export default function ScrapStockPage() {
         footer={
           <div className="flex items-center justify-end gap-3">
             <Button onClick={closeEditDrawer}>Cancel</Button>
-            <Button type="primary" onClick={handleSaveEdit}>
+            <Button type="primary" onClick={handleSaveEdit} loading={isUpdating}>
               Save
             </Button>
           </div>
@@ -673,11 +815,13 @@ export default function ScrapStockPage() {
           >
             <Select
               placeholder="Select Uniq"
-              options={[
-                { label: "LV-001", value: "LV-001" },
-                { label: "LV-002", value: "LV-002" },
-                { label: "LV-003", value: "LV-003" },
-              ]}
+              showSearch
+              options={uniqOptions}
+              filterOption={(input, option) =>
+                String(option?.label ?? "")
+                  .toLowerCase()
+                  .includes(input.toLowerCase())
+              }
             />
           </Form.Item>
 
@@ -717,17 +861,7 @@ export default function ScrapStockPage() {
           >
             <Select
               placeholder="Select Scrap Type"
-              options={[
-                {
-                  label: "Setting Machine Scrap",
-                  value: "Setting Machine Scrap",
-                },
-                { label: "Process Scrap", value: "Process Scrap" },
-                {
-                  label: "Product Return Scrap",
-                  value: "Product Return Scrap",
-                },
-              ]}
+              options={scrapTypeOptions}
             />
           </Form.Item>
 
@@ -742,6 +876,21 @@ export default function ScrapStockPage() {
                 { label: "John Mejer", value: "John Mejer" },
                 { label: "QC Inspector A", value: "QC Inspector A" },
                 { label: "Operator John", value: "Operator John" },
+              ]}
+            />
+          </Form.Item>
+
+          <Form.Item label="Weight" name="weight">
+            <InputNumber className="w-full" min={0} placeholder="10" />
+          </Form.Item>
+
+          <Form.Item label="Unit Measurement" name="unit_measurement">
+            <Select
+              placeholder="Select unit"
+              options={[
+                { label: "pcs", value: "pcs" },
+                { label: "kg", value: "kg" },
+                { label: "box", value: "box" },
               ]}
             />
           </Form.Item>
@@ -859,7 +1008,7 @@ export default function ScrapStockPage() {
             total={tab === "scrap" ? scrapData.length : dummyStatusData.length}
             onPageChange={setCurrentPage}
             onPageSizeChange={setPageSize}
-            loading={loading}
+            loading={isScrapFetching}
           />
         </div>
       </div>

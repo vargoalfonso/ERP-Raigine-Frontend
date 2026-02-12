@@ -47,14 +47,23 @@ export default function AddUserAccessControlPage() {
     [rolesData]
   );
 
+  const employees = useMemo(() => employeesData ?? [], [employeesData]);
+  const employeeUuidByCode = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const employee of employees) {
+      map.set(employee.employee_id, employee.id);
+    }
+    return map;
+  }, [employees]);
+
   const employeeOptions = useMemo(() => {
-    const employees = employeesData?.data ?? [];
-    if (!employees.length) return employeeIdOptionsFallback;
+    if (!employees.length) return apiEnabled ? [] : employeeIdOptionsFallback;
     return employees.map((e) => ({
-      label: `${e.employee_id} — ${e.full_name}`,
-      value: e.id,
+      label: e.employee_id,
+      value: e.employee_id,
+      title: e.full_name,
     }));
-  }, [employeesData]);
+  }, [apiEnabled, employees]);
 
   const [entries, setEntries] = useState<UserAccessEntry[]>([{ key: "1" }]);
   const [forms] = useState(() => new Map<string, ReturnType<typeof Form.useForm>[0]>());
@@ -95,9 +104,13 @@ export default function AddUserAccessControlPage() {
 
     try {
       for (const entry of entries) {
+        const selectedEmployeeCodeOrId = entry.employeeId!;
+        const resolvedEmployeeUuid =
+          employeeUuidByCode.get(selectedEmployeeCodeOrId) ?? selectedEmployeeCodeOrId;
+
         await createAccessControlMatrix({
           full_name: entry.fullName!,
-          employee_id: entry.employeeId!,
+          employee_id: resolvedEmployeeUuid,
           department: entry.department!,
           role_id: entry.roleId!,
         }).unwrap();
@@ -251,7 +264,7 @@ function UserEntryForm({
             options={employeeOptions}
             showSearch
             filterOption={(input, option) =>
-              String(option?.label ?? "")
+              `${String(option?.label ?? "")} ${String((option as { title?: string } | undefined)?.title ?? "")}`
                 .toLowerCase()
                 .includes(input.toLowerCase())
             }

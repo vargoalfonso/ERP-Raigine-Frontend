@@ -21,6 +21,10 @@ import {
 } from "@ant-design/icons";
 import type { FormInstance } from "antd";
 import type { Dayjs } from "dayjs";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { useCreateSubconRawMaterialMutation } from "@/lib/api/subcon-raw-material/api";
 
 const { Title, Text } = Typography;
 
@@ -30,6 +34,7 @@ type SubConStockReceivedFormData = {
   uniq?: string;
   partNumber?: string;
   partName?: string;
+  warehouseDestination?: string;
   periodPo?: string;
   dateReceived?: Dayjs | null;
   quantityReceived?: number;
@@ -48,17 +53,42 @@ const SubConStockReceivedFormCard = ({
   formRef,
   showRemove,
   onRemove,
+  uniqOptions,
+  partNumberByUniq,
+  partNameByUniq,
+  assemblyCodeByUniq,
 }: {
   entryNumber: number;
   formRef: React.MutableRefObject<FormInstance | null>;
   showRemove: boolean;
   onRemove: () => void;
+  uniqOptions: { label: string; value: string }[];
+  partNumberByUniq: Record<string, string | undefined>;
+  partNameByUniq: Record<string, string | undefined>;
+  assemblyCodeByUniq: Record<string, string | undefined>;
 }) => {
   const [form] = Form.useForm<SubConStockReceivedFormData>();
+  const watchedPartNumber = Form.useWatch("partNumber", form);
+  const watchedPartName = Form.useWatch("partName", form);
 
   useEffect(() => {
     formRef.current = form;
   }, [form, formRef]);
+
+  const applyUniqDerivedFields = (uniq: string | undefined) => {
+    if (!uniq) return;
+    const partNumber = partNumberByUniq?.[uniq];
+    const partName = partNameByUniq?.[uniq];
+    const assemblyCode = assemblyCodeByUniq?.[uniq];
+    const currentWarehouse = form.getFieldValue("warehouseDestination");
+
+    form.setFieldsValue({
+      uniq,
+      partNumber: partNumber ?? uniq,
+      partName: partName ?? assemblyCode ?? uniq,
+      ...(currentWarehouse ? {} : { warehouseDestination: "WH-001" }),
+    });
+  };
 
   return (
     <Card>
@@ -111,12 +141,40 @@ const SubConStockReceivedFormCard = ({
             label="Uniq"
             name="uniq"
             rules={[{ required: true, message: "Please select uniq!" }]}
+            extra={
+              watchedPartNumber || watchedPartName ? (
+                <div className="mt-1">
+                  {watchedPartNumber ? (
+                    <Text type="secondary">Part Number: {watchedPartNumber}</Text>
+                  ) : null}
+                  {watchedPartName ? (
+                    <div>
+                      <Text type="secondary">Part Name: {watchedPartName}</Text>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null
+            }
           >
-            <Select placeholder="SUB-001" size="large" allowClear>
-              <Select.Option value="SUB-001">SUB-001</Select.Option>
-              <Select.Option value="SUB-002">SUB-002</Select.Option>
-              <Select.Option value="SUB-003">SUB-003</Select.Option>
-            </Select>
+            <Select
+              placeholder="Select UNIQ from BOM"
+              size="large"
+              allowClear
+              showSearch
+              options={uniqOptions}
+              onChange={(value) => {
+                if (!value) {
+                  form.setFieldsValue({ uniq: undefined, partNumber: undefined, partName: undefined });
+                  return;
+                }
+                applyUniqDerivedFields(value);
+              }}
+              filterOption={(input, option) =>
+                String(option?.label ?? "")
+                  .toLowerCase()
+                  .includes(input.toLowerCase())
+              }
+            />
           </Form.Item>
 
           <Form.Item
@@ -124,7 +182,7 @@ const SubConStockReceivedFormCard = ({
             name="partNumber"
             rules={[{ required: true, message: "Please input part number!" }]}
           >
-            <Input placeholder="Automatic field" size="large" />
+            <Input placeholder="Auto from BOM" size="large" />
           </Form.Item>
 
           <Form.Item
@@ -132,7 +190,20 @@ const SubConStockReceivedFormCard = ({
             name="partName"
             rules={[{ required: true, message: "Please input part name!" }]}
           >
-            <Input placeholder="Automatic field" size="large" />
+            <Input placeholder="Auto from BOM" size="large" />
+          </Form.Item>
+
+          <Form.Item
+            label="Warehouse Destination"
+            name="warehouseDestination"
+            rules={[{ required: true, message: "Please select warehouse!" }]}
+            initialValue="WH-001"
+          >
+            <Select placeholder="WH-001" size="large" allowClear>
+              <Select.Option value="WH-001">WH-001</Select.Option>
+              <Select.Option value="WH-002">WH-002</Select.Option>
+              <Select.Option value="WH-003">WH-003</Select.Option>
+            </Select>
           </Form.Item>
 
           <Form.Item
@@ -197,6 +268,19 @@ export default function CreateSubConStockReceivedPage() {
   const [loading, setLoading] = useState(false);
   const [entries, setEntries] = useState<FormEntry[]>([]);
 
+  const [createSubconRawMaterial] = useCreateSubconRawMaterialMutation();
+
+  const useApi = Boolean(apiBaseUrl);
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !useApi });
+  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
+  const uniqOptions = bomIndex.options.length
+    ? bomIndex.options
+    : [
+        { label: "SUB-001", value: "SUB-001" },
+        { label: "SUB-002", value: "SUB-002" },
+        { label: "SUB-003", value: "SUB-003" },
+      ];
+
   useEffect(() => {
     if (entries.length === 0) {
       setEntries([{ id: 1, key: "entry-1", formRef: { current: null } }]);
@@ -214,6 +298,7 @@ export default function CreateSubConStockReceivedPage() {
         v.uniq &&
         v.partNumber &&
         v.partName &&
+        v.warehouseDestination &&
         v.periodPo &&
         v.dateReceived &&
         typeof v.quantityReceived === "number" &&
@@ -243,10 +328,28 @@ export default function CreateSubConStockReceivedPage() {
         const form = entry.formRef.current;
         if (!form) continue;
         await form.validateFields();
+
+        const v = form.getFieldsValue() as SubConStockReceivedFormData;
+        if (useApi) {
+          await createSubconRawMaterial({
+            uniq: v.uniq,
+            item_name: v.partName ?? v.uniq,
+            warehouse_code: v.warehouseDestination ?? "WH-001",
+            quantity: Number(v.addStock ?? v.quantityReceived ?? 0),
+            unit_measurement: "pcs",
+            date: (v.dateReceived ? v.dateReceived.format("YYYY-MM-DD") : new Date().toISOString().slice(0, 10)),
+            reference_no: v.deliveryNotesNumber || v.invoiceNumber,
+            notes: [
+              v.subconVendorName ? `Vendor: ${v.subconVendorName}` : null,
+              v.periodPo ? `Period: ${v.periodPo}` : null,
+              v.invoiceNumber ? `Invoice: ${v.invoiceNumber}` : null,
+            ].filter(Boolean).join(" | ") || undefined,
+          }).unwrap();
+        }
       }
 
       message.success("Stock received saved");
-      router.push("/sub-con-materials");
+      router.push("/sub-con-materials?mode=received");
     } catch {
       message.error("Please complete all required fields");
     } finally {
@@ -297,6 +400,10 @@ export default function CreateSubConStockReceivedPage() {
                 formRef={entry.formRef}
                 showRemove={entries.length > 1}
                 onRemove={() => removeEntry(entry.id)}
+                uniqOptions={uniqOptions}
+                partNumberByUniq={bomIndex.partNumberByUniq ?? {}}
+                partNameByUniq={bomIndex.partNameByUniq ?? {}}
+                assemblyCodeByUniq={bomIndex.assemblyCodeByUniq ?? {}}
               />
             </div>
           ))}

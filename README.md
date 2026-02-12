@@ -46,5 +46,6 @@ npm run start
 
 ## Docs
 
-- [docs/api-ui-testing.md](docs/api-ui-testing.md) — UI-based API testing for integrated modules (Raw Materials / WIP / Finished Goods).
+- [docs/api-ui-testing.md](docs/api-ui-testing.md) — UI-based API testing + list of pages already connected to API.
+- [docs/api-pages-endpoints-matrix.md](docs/api-pages-endpoints-matrix.md) — Endpoint ↔ page matrix (what can be tested where).
 - [docs/system-settings-ui-testing.md](docs/system-settings-ui-testing.md) — UI-based API testing for System Settings routes.

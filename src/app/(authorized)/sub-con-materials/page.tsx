@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Button,
   Drawer,
@@ -23,6 +23,15 @@ import {
   SearchOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
+
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import {
+  useDeleteSubconRawMaterialMutation,
+  useGetAllSubconRawMaterialQuery,
+  useUpdateSubconRawMaterialMutation,
+} from "@/lib/api/subcon-raw-material/api";
 
 type ViewMode = "Stock In Vendor" | "Stock Received from Vendor";
 
@@ -83,10 +92,38 @@ const stockReceivedInitialRows: SubConRow[] = [
 
 export default function SubConMaterialsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [mode, setMode] = useState<ViewMode>("Stock In Vendor");
   const [query, setQuery] = useState("");
   const [rowsVendor, setRowsVendor] = useState<SubConRow[]>(stockInVendorInitialRows);
   const [rowsReceived, setRowsReceived] = useState<SubConRow[]>(stockReceivedInitialRows);
+
+  const useApi = Boolean(apiBaseUrl);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  useEffect(() => {
+    const m = searchParams.get("mode");
+    if (m === "received") setMode("Stock Received from Vendor");
+  }, [searchParams]);
+
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !useApi });
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomTreeRes?.data ?? []),
+    [bomTreeRes?.data]
+  );
+
+  const {
+    data: apiRows,
+    isSuccess: apiSuccess,
+    refetch: refetchApiRows,
+  } = useGetAllSubconRawMaterialQuery(
+    { currentPage, pageSize },
+    { skip: !useApi, refetchOnMountOrArgChange: true }
+  );
+
+  const [deleteSubcon] = useDeleteSubconRawMaterialMutation();
+  const [updateSubcon] = useUpdateSubconRawMaterialMutation();
 
   const [editOpen, setEditOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<SubConRow | null>(null);
@@ -100,7 +137,57 @@ export default function SubConMaterialsPage() {
   const [deletingRow, setDeletingRow] = useState<SubConRow | null>(null);
   const [deletingMode, setDeletingMode] = useState<ViewMode>("Stock In Vendor");
 
-  const activeRows = mode === "Stock In Vendor" ? rowsVendor : rowsReceived;
+  const apiReceivedRows = useMemo((): SubConRow[] => {
+    if (!useApi || !apiSuccess) return [];
+
+    const raw = apiRows?.data ?? [];
+    const toTime = (value: string | undefined): number => {
+      if (!value) return 0;
+      const t = new Date(value).getTime();
+      return Number.isFinite(t) ? t : 0;
+    };
+
+    return [...raw]
+      .sort((a, b) => {
+        const bt = toTime(b.created_at) || toTime(b.updated_at);
+        const at = toTime(a.created_at) || toTime(a.updated_at);
+        if (bt !== at) return bt - at;
+        return String(b.id).localeCompare(String(a.id));
+      })
+      .map((r) => {
+        const uniq = r.uniq ?? "-";
+        const partNumber = bomIndex.partNumberByUniq?.[uniq] ?? "-";
+        const partName = bomIndex.partNameByUniq?.[uniq] ?? r.item_name ?? "-";
+        const quantity = Number(r.quantity ?? 0);
+        const dateDelivery = r.date ?? "-";
+        const totalStock = quantity;
+        const totalPO = 0;
+        const deltaPoStock = 0;
+        const status: SubConRow["status"] = totalStock <= 0 ? "LOW STOCK" : "NORMAL";
+        return {
+          id: r.id,
+          deliveryNotesNumber: r.reference_no,
+          uniq,
+          partNumber,
+          partName,
+          subconVendor: "-",
+          period: "-",
+          dateDelivery,
+          stockDate: quantity,
+          totalStock,
+          totalPO,
+          deltaPoStock,
+          status,
+          dnLogs: 0,
+        };
+      });
+  }, [apiRows?.data, apiSuccess, bomIndex.partNameByUniq, bomIndex.partNumberByUniq, useApi]);
+
+  const activeRows = useMemo(() => {
+    if (mode === "Stock In Vendor") return rowsVendor;
+    if (useApi && apiSuccess) return apiReceivedRows;
+    return rowsReceived;
+  }, [apiReceivedRows, apiSuccess, mode, rowsReceived, rowsVendor, useApi]);
 
   const availablePeriods = useMemo(() => {
     const periods = new Set(activeRows.map((r) => r.period));
@@ -147,6 +234,13 @@ export default function SubConMaterialsPage() {
 
   const confirmDelete = () => {
     if (!deletingRow) return;
+    if (useApi && deletingMode === "Stock Received from Vendor") {
+      deleteSubcon(deletingRow.id)
+        .unwrap()
+        .then(() => refetchApiRows())
+        .finally(() => closeDelete());
+      return;
+    }
     if (deletingMode === "Stock In Vendor") {
       setRowsVendor((prev) => prev.filter((r) => r.id !== deletingRow.id));
     } else {
@@ -196,6 +290,24 @@ export default function SubConMaterialsPage() {
 
     // Recompute delta based on available fields
     next.deltaPoStock = Math.max(0, next.totalPO - next.totalStock);
+
+    if (useApi && editingMode === "Stock Received from Vendor") {
+      try {
+        await updateSubcon({
+          id: editingRow.id,
+          body: {
+            uniq: next.uniq,
+            item_name: next.partName,
+            quantity: Number(next.totalStock ?? next.stockDate ?? 0),
+            reference_no: next.deliveryNotesNumber,
+          },
+        }).unwrap();
+        await refetchApiRows();
+      } finally {
+        closeEdit();
+      }
+      return;
+    }
 
     if (editingMode === "Stock In Vendor") {
       setRowsVendor((prev) => prev.map((r) => (r.id === next.id ? next : r)));

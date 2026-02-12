@@ -18,6 +18,8 @@ import { HiOutlineArchiveBox } from "react-icons/hi2";
 import { LuChartColumn } from "react-icons/lu";
 import { FaRegEdit, FaRegTrashAlt } from "react-icons/fa";
 import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import {
   useDeleteWorkInProgressMutation,
   useGetAllWorkInProgressQuery,
@@ -131,6 +133,8 @@ export default function WorkInProgressPage() {
   const [processFilter, setProcessFilter] = useState<string>("all");
 
   const useApi = Boolean(apiBaseUrl);
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !useApi });
+  const bomUniqIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
   const [currentPage] = useState(1);
   const [pageSize] = useState(50);
   const {
@@ -172,10 +176,14 @@ export default function WorkInProgressPage() {
 
   const mapApiToUi = (row: WorkInProgressRecord): WipRecord => {
     const uniq = row.product_uniq ?? row.master_list?.uniq_code ?? "-";
-    const partNumber = row.master_list?.part_no ?? "-";
-    const partName = row.part_name ?? row.master_list?.part_name ?? "-";
-    const model = row.master_list?.model ?? "-";
-    const woNumber = row.work_order?.wo_number ?? row.work_order_reference ?? "-";
+    const partNumber = (uniq !== "-" ? bomUniqIndex.partNumberByUniq[uniq] : undefined) ?? "-";
+    const partName =
+      (uniq !== "-" ? bomUniqIndex.partNameByUniq[uniq] : undefined) ??
+      row.part_name ??
+      row.master_list?.part_name ??
+      "-";
+    const model = (uniq !== "-" ? bomUniqIndex.assemblyCodeByUniq[uniq] : undefined) ?? row.master_list?.model ?? "-";
+    const woNumber = row.work_order?.wo_number ?? row.work_order_reference ?? row.batch_number ?? "-";
     const stock = Number(row.quantity_in_process ?? 0);
     const kanbanCode = row.batch_number ?? "-";
     const process = mapApiProcess(row.current_process);
@@ -336,20 +344,14 @@ export default function WorkInProgressPage() {
 
   const columns: ColumnType<WipRecord>[] = [
     {
-      title: "Process",
-      key: "process",
-      width: 120,
+      title: "WO Number",
+      key: "woNumber",
+      width: 140,
       render: (_: unknown, record: WipRecord) => (
-        <span className="inline-flex rounded-full bg-[#F1F5F9] px-3 py-1 text-xs text-gray-700">
-          {record.process}
+        <span className="inline-flex rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700">
+          {record.woNumber}
         </span>
       ),
-    },
-    {
-      title: "Uniq",
-      dataIndex: "uniq",
-      key: "uniq",
-      width: 110,
     },
     {
       title: "Part Number",
@@ -369,14 +371,20 @@ export default function WorkInProgressPage() {
       ),
     },
     {
-      title: "WO Number",
-      key: "woNumber",
-      width: 140,
+      title: "Process",
+      key: "process",
+      width: 120,
       render: (_: unknown, record: WipRecord) => (
-        <span className="inline-flex rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700">
-          {record.woNumber}
+        <span className="inline-flex rounded-full bg-[#F1F5F9] px-3 py-1 text-xs text-gray-700">
+          {record.process}
         </span>
       ),
+    },
+    {
+      title: "Uniq",
+      dataIndex: "uniq",
+      key: "uniq",
+      width: 110,
     },
     {
       title: "Stock",

@@ -137,7 +137,7 @@ function FinishedGoodDetailPageContent() {
           type="text"
           icon={<EyeOutlined />}
           className="text-blue-600 hover:text-blue-800"
-          onClick={() => router.push(`/finished-good/detail/${record.key}`)}
+          onClick={() => router.push(`/finished-goods/detail?id=${record.key}`)}
         />
       ),
     },
@@ -296,7 +296,7 @@ function FinishedGoodDetailPageContent() {
       <div className="flex justify-end px-8 pb-8">
         <Button
           className="bg-blue-600 text-white rounded-xl"
-          onClick={() => router.push("/finished-good")}
+          onClick={() => router.push("/finished-goods")}
         >
           Back
         </Button>

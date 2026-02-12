@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Input,
@@ -25,6 +25,9 @@ import {
 } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import {
   useCreateRawMaterialMutation,
   useUpdateRawMaterialMutation,
@@ -106,6 +109,18 @@ const RawMaterialForm = ({
 }) => {
   const [form] = Form.useForm();
   const [mounted, setMounted] = useState(false);
+  const useApi = Boolean(apiBaseUrl);
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !useApi });
+  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
+  const watchedPartNumber = Form.useWatch("code", form);
+  const watchedPartName = Form.useWatch("name", form);
+  const uniqOptions = bomIndex.options.length
+    ? bomIndex.options
+    : [
+        { label: "LV-001", value: "LV-001" },
+        { label: "LV-002", value: "LV-002" },
+        { label: "LV-003", value: "LV-003" },
+      ];
 
   // Set mounted state
   useEffect(() => {
@@ -131,6 +146,25 @@ const RawMaterialForm = ({
   if (!mounted) {
     return null;
   }
+
+  const applyUniqDerivedFields = (uniq: string | undefined) => {
+    if (!uniq) return;
+
+    const partNumber = bomIndex.partNumberByUniq?.[uniq];
+    const partName = bomIndex.partNameByUniq?.[uniq];
+    const assemblyCode = bomIndex.assemblyCodeByUniq?.[uniq];
+
+    const currentWarehouse = form.getFieldValue("warehouse_id");
+    const nextWarehouse = currentWarehouse ? undefined : "WH-001";
+
+    form.setFieldsValue({
+      uniq,
+      code: partNumber ?? uniq,
+      name: partName ?? assemblyCode ?? uniq,
+      quality_status: form.getFieldValue("quality_status") ?? "pending",
+      ...(nextWarehouse ? { warehouse_id: nextWarehouse } : {}),
+    });
+  };
 
   return (
     <Card>
@@ -166,18 +200,57 @@ const RawMaterialForm = ({
       </div>
 
       <Form form={form} layout="vertical" onFinish={onFinish}>
-        {/* Row 1: Uniq, Type, Source, Warehouse */}
+        {/* Hidden required fields (auto-filled from BOM/ defaults) */}
+        <Form.Item name="code" hidden rules={[{ required: true }]}>
+          <Input />
+        </Form.Item>
+        <Form.Item name="name" hidden rules={[{ required: true }]}>
+          <Input />
+        </Form.Item>
+        <Form.Item name="quality_status" hidden initialValue="pending" rules={[{ required: true }]}>
+          <Input />
+        </Form.Item>
+
+        {/* Row 1: Uniq, Type, Source, Warehouse (match screenshot) */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Form.Item
             label="Uniq"
             name="uniq"
-            rules={[{ required: true, message: "Please input uniq!" }]}
+            rules={[{ required: true, message: "Please select uniq!" }]}
+            extra={
+              watchedPartNumber || watchedPartName ? (
+                <div className="mt-1">
+                  {watchedPartNumber ? (
+                    <Text type="secondary">Part Number: {watchedPartNumber}</Text>
+                  ) : null}
+                  {watchedPartName ? (
+                    <div>
+                      <Text type="secondary">Part Name: {watchedPartName}</Text>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null
+            }
           >
-            <Select placeholder="LV-001" size="large" allowClear>
-              <Option value="LV-001">LV-001</Option>
-              <Option value="LV-002">LV-002</Option>
-              <Option value="LV-003">LV-003</Option>
-            </Select>
+            <Select
+              placeholder="Select UNIQ from BOM"
+              size="large"
+              allowClear
+              showSearch
+              options={uniqOptions}
+              onChange={(value) => {
+                if (!value) {
+                  form.setFieldsValue({ uniq: undefined, code: undefined, name: undefined });
+                  return;
+                }
+                applyUniqDerivedFields(value);
+              }}
+              filterOption={(input, option) =>
+                String(option?.label ?? "")
+                  .toLowerCase()
+                  .includes(input.toLowerCase())
+              }
+            />
           </Form.Item>
 
           <Form.Item
@@ -212,14 +285,14 @@ const RawMaterialForm = ({
             rules={[{ required: true, message: "Please select warehouse!" }]}
           >
             <Select placeholder="WH-001" size="large" allowClear>
-              <Option value="warehouse1">WH-001</Option>
-              <Option value="warehouse2">WH-002</Option>
-              <Option value="warehouse3">WH-003</Option>
+              <Option value="WH-001">WH-001</Option>
+              <Option value="WH-002">WH-002</Option>
+              <Option value="WH-003">WH-003</Option>
             </Select>
           </Form.Item>
         </div>
 
-        {/* Row 2: Stock, Unit, Weight */}
+        {/* Row 2: Stock, Unit, Weight (match screenshot) */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Form.Item
             label="Stock"
@@ -315,6 +388,7 @@ function CreateRawMaterialPageContent() {
       return {
         warehouse_id: data.warehouse_id,
         master_list_supplier_id: data.master_list_supplier_id,
+        uniq: data.uniq,
         code: data.code,
         name: data.name,
         category: data.category,
@@ -342,7 +416,7 @@ function CreateRawMaterialPageContent() {
     return undefined;
   };
 
-  const handleSubmitForm = async (values: RawMaterialFormData) => {
+  const handleSubmitForm = async (values: RawMaterialFormData): Promise<boolean> => {
     try {
       console.log("handleSubmitForm called with values:", values);
       console.log("isEditMode:", isEditMode);
@@ -361,7 +435,7 @@ function CreateRawMaterialPageContent() {
       const validation = validateRawMaterialData(validationData);
       if (!validation.isValid) {
         message.error(validation.errors.join(", "));
-        return;
+        return false;
       }
 
       if (isEditMode && itemId) {
@@ -403,6 +477,7 @@ function CreateRawMaterialPageContent() {
       } else {
         // Create new raw material
         const createData: CreateRawMaterialRequest = {
+          uniq: values.uniq,
           code: values.code!,
           name: values.name!,
           category: values.category,
@@ -430,12 +505,14 @@ function CreateRawMaterialPageContent() {
       }
 
       // Don't navigate immediately - let handleSubmitAll handle navigation
+      return true;
     } catch (error: unknown) {
       // console.error("Error saving raw material:", error);
       message.error(
         (error as { data?: { message?: string } })?.data?.message ||
           "Failed to save raw material"
       );
+      return false;
     }
   };
 
@@ -526,7 +603,11 @@ function CreateRawMaterialPageContent() {
 
             // Submit this form's data
             console.log(`Submitting form ${entry.id} with values:`, values);
-            await handleSubmitForm(values);
+            const ok = await handleSubmitForm(values);
+            if (!ok) {
+              setLoading(false);
+              return;
+            }
           } catch (validationError) {
             console.error(
               `Validation failed for form ${entry.id}:`,
@@ -542,7 +623,7 @@ function CreateRawMaterialPageContent() {
       }
 
       // Navigate back to raw materials list after all forms are submitted
-      // router.push("/raw-materials");
+      router.push("/raw-materials");
     } catch (error) {
       console.error("Error submitting forms:", error);
       message.error("Failed to submit forms");
@@ -669,7 +750,7 @@ function CreateRawMaterialPageContent() {
           </div>
 
           {/* Right: Indirect Material Raw */}
-          {!isEditMode && (
+          {/* {!isEditMode && (
             <Card className="h-fit">
               <div className="flex items-start justify-between">
                 <div>
@@ -691,6 +772,15 @@ function CreateRawMaterialPageContent() {
                   dataSource={indirectRows}
                   locale={{ emptyText: "No materials added" }}
                   columns={[
+                    {
+                      title: "Warehouse",
+                      dataIndex: "warehouse_id",
+                      key: "warehouse_id",
+                      width: 110,
+                      render: (v: string | undefined) => (
+                        <span className="font-mono text-xs">{v ?? "-"}</span>
+                      ),
+                    },
                     {
                       title: "Uniq",
                       dataIndex: "uniq",
@@ -736,7 +826,7 @@ function CreateRawMaterialPageContent() {
                 />
               </div>
             </Card>
-          )}
+          )} */}
         </div>
       </div>
 
