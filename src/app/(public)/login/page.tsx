@@ -1,9 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import Navbar from "@/components/login/Navbar";
-
-import { Button, Card, Form, Input, message, Typography } from "antd";
+import { Card, Form, Input, message, Typography } from "antd";
 import { useRouter } from "next/navigation";
 import React from "react";
 import Cookies from "js-cookie";
@@ -24,7 +22,7 @@ export default function LoginPage() {
 
   const handleLogin = async (values: LoginFormValues) => {
     if (!apiEnabled) {
-      Cookies.set("Authorization", "DUMMY_TOKEN", { expires: 7 });
+      Cookies.set("Authorization", "DUMMY_TOKEN", { expires: 7, path: "/", sameSite: "lax" });
       message.success("Login bypassed (DEV MODE - API disabled)");
       router.push("/dashboard");
       return;
@@ -38,10 +36,10 @@ export default function LoginPage() {
         return;
       }
 
-      Cookies.set("Authorization", token, { expires: 7 });
+      Cookies.set("Authorization", token, { expires: 7, path: "/", sameSite: "lax" });
       message.success("Login success");
       router.push("/dashboard");
-    } catch (err: unknown) {
+    } catch {
       message.error("Login failed");
     }
   };

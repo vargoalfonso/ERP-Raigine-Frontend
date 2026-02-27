@@ -11,7 +11,6 @@ import {
   EyeOutlined,
   PlusOutlined,
   RightOutlined,
-  ScanOutlined,
 } from "@ant-design/icons";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useDeleteBomMutation, useGetBomTreeQuery, useUpdateBomMutation, type BackendBomNode } from "@/lib/api/bom/api";
@@ -206,8 +205,6 @@ export default function BillOfMaterialPage() {
       ? (bomTreeResponse?.data ?? []).map((n) => mapNode(n, 0))
       : mockBomData;
 
-  const parentCount = bomData.length;
-  const childCount = bomData.reduce((acc, row) => acc + (row.children?.length ?? 0), 0);
   const expandableParentKeys = bomData.filter((r) => (r.children?.length ?? 0) > 0).map((r) => r.key);
 
   const columns: ColumnsType<BomRow> = [

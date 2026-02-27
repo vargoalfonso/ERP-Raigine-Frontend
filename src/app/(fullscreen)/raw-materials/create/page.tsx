@@ -10,8 +10,6 @@ import {
   Card,
   Button,
   InputNumber,
-  DatePicker,
-  Table,
   message,
   Radio,
 } from "antd";
@@ -42,7 +40,6 @@ import {
 import { validateRawMaterialData } from "@/lib/api/raw-materials/utils";
 
 const { Option } = Select;
-const { TextArea } = Input;
 const { Title, Text } = Typography;
 
 interface RawMaterialFormData {
@@ -78,16 +75,6 @@ interface FormEntry {
   key: string;
   formRef?: React.MutableRefObject<FormInstance | null>;
 }
-
-type IndirectMaterialRow = {
-  entryId: number;
-  uniq?: string;
-  category?: string;
-  master_list_supplier_id?: string;
-  warehouse_id?: string;
-  stock?: number;
-  unit?: string;
-};
 
 // Component untuk render single form
 const RawMaterialForm = ({
@@ -355,7 +342,6 @@ function CreateRawMaterialPageContent() {
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [formEntries, setFormEntries] = useState<FormEntry[]>([]);
-  const [indirectRows, setIndirectRows] = useState<IndirectMaterialRow[]>([]);
 
   // Initialize first form entry
   useEffect(() => {
@@ -378,8 +364,9 @@ function CreateRawMaterialPageContent() {
   const itemId = searchParams.get("id");
 
   // Get data for edit mode
-  const { data: existingData, isLoading: isLoadingData } =
-    useGetRawMaterialByIdQuery(itemId || "", { skip: !isEditMode || !itemId });
+  const { data: existingData } = useGetRawMaterialByIdQuery(itemId || "", {
+    skip: !isEditMode || !itemId,
+  });
 
   const getInitialValues = (): RawMaterialFormData | undefined => {
     // Return initial values for edit mode
@@ -517,7 +504,7 @@ function CreateRawMaterialPageContent() {
   };
 
   const handleAddAnotherEntry = async () => {
-    // When user clicks Add, capture current form values into the right-side list
+    // When user clicks Add, validate the current form and append a new entry
     const currentEntry = formEntries[formEntries.length - 1];
     const currentForm = currentEntry?.formRef?.current;
 
@@ -528,25 +515,6 @@ function CreateRawMaterialPageContent() {
 
     try {
       await currentForm.validateFields();
-      const values = currentForm.getFieldsValue() as RawMaterialFormData;
-
-      setIndirectRows((prev) => {
-        const nextRow: IndirectMaterialRow = {
-          entryId: currentEntry.id,
-          uniq: values.uniq,
-          category: values.category,
-          master_list_supplier_id: values.master_list_supplier_id,
-          warehouse_id: values.warehouse_id,
-          stock: values.stock,
-          unit: values.unit,
-        };
-
-        const exists = prev.some((r) => r.entryId === currentEntry.id);
-        if (exists) {
-          return prev.map((r) => (r.entryId === currentEntry.id ? nextRow : r));
-        }
-        return [...prev, nextRow];
-      });
 
       const newId = formEntries.length + 1;
       const newFormRef = { current: null };
@@ -565,11 +533,6 @@ function CreateRawMaterialPageContent() {
     }
   };
 
-  const handleRemoveIndirectRow = (entryId: number) => {
-    setIndirectRows((prev) => prev.filter((r) => r.entryId !== entryId));
-    // Keep the UI consistent: removing from the right also removes the matching left form.
-    setFormEntries((prev) => prev.filter((entry) => entry.id !== entryId));
-  };
   const [mode, setMode] = useState<"manual" | "bulk">("manual");
 
   const handleModeChange = (e: RadioChangeEvent) => {

@@ -227,7 +227,7 @@ export default function CreateWorkInProgressPage() {
       dataIndex: "stockToCompleteKanban",
       key: "stockToCompleteKanban",
       width: 160,
-      render: (v: number) => <span className="text-xs text-gray-700">pcs</span>,
+      render: () => <span className="text-xs text-gray-700">pcs</span>,
     },
     {
       title: "Pcs/Kanban",

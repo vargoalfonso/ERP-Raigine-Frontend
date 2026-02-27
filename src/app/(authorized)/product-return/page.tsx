@@ -15,7 +15,6 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useRouter } from "next/navigation";
 import {
   CalendarOutlined,
   CheckCircleOutlined,
@@ -82,7 +81,6 @@ function StatCard(props: {
 }
 
 export default function ProductReturnPage() {
-  const router = useRouter();
   const [tab, setTab] = useState<ReturnTab>("pending");
   const [isSubmitOpen, setIsSubmitOpen] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);

@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Button, Card } from "antd";
+import { Button, Card, Modal, QRCode } from "antd";
 import { LeftOutlined } from "@ant-design/icons";
 import { useParams, useRouter } from "next/navigation";
+import { encodeBarcodePayload } from "@/lib/utils/barcodePayload";
 
 type DetailTabId = "details";
 
@@ -101,6 +102,9 @@ export default function DnRawMaterialDetailPage() {
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const items = useMemo(() => mockItems(), []);
 
+  const [barcodeOpen, setBarcodeOpen] = useState(false);
+  const [barcodeItem, setBarcodeItem] = useState<DnDetailItem | null>(null);
+
   const toggleAll = (checked: boolean) => {
     if (!checked) {
       setSelectedKeys(new Set());
@@ -119,6 +123,11 @@ export default function DnRawMaterialDetailPage() {
   };
 
   const allChecked = items.length > 0 && selectedKeys.size === items.length;
+
+  const openBarcode = (item: DnDetailItem) => {
+    setBarcodeItem(item);
+    setBarcodeOpen(true);
+  };
 
   return (
     <div className="min-h-screen bg-[#EEF5FF]">
@@ -213,6 +222,7 @@ export default function DnRawMaterialDetailPage() {
                         <th className="text-left font-medium px-4 py-3">Packing Number</th>
                         <th className="text-left font-medium px-4 py-3">Pcs/Kanban</th>
                         <th className="text-left font-medium px-4 py-3">Date Incoming</th>
+                        <th className="text-right font-medium px-4 py-3">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -238,6 +248,15 @@ export default function DnRawMaterialDetailPage() {
                             </td>
                             <td className="px-4 py-4 whitespace-nowrap">{r.pcsPerKanban}</td>
                             <td className="px-4 py-4 whitespace-nowrap">{r.dateIncoming}</td>
+                            <td className="px-4 py-4 whitespace-nowrap text-right">
+                              <button type="button" className="inline-flex items-center text-gray-500 hover:text-gray-700" aria-label="QR" onClick={() => openBarcode(r)}>
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h3v3H7V7zM14 7h3v3h-3V7zM7 14h3v3H7v-3z" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 14h1m2 0h0m-3 3h3" />
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6z" />
+                                </svg>
+                              </button>
+                            </td>
                           </tr>
                         );
                       })}
@@ -247,6 +266,100 @@ export default function DnRawMaterialDetailPage() {
               </div>
             </div>
           </Card>
+
+          <Modal
+            title={<span className="text-sm font-semibold">DN Item Barcode</span>}
+            open={barcodeOpen}
+            onCancel={() => {
+              setBarcodeOpen(false);
+              setBarcodeItem(null);
+            }}
+            footer={
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  className="!rounded-lg"
+                  onClick={() => {
+                    setBarcodeOpen(false);
+                    setBarcodeItem(null);
+                  }}
+                >
+                  Close
+                </Button>
+              </div>
+            }
+            width={700}
+          >
+            {barcodeItem ? (
+              <div className="rounded-xl border border-gray-200 bg-white p-6">
+                <div className="text-center">
+                  <div className="text-lg font-extrabold tracking-wide text-gray-900">DN ITEM INFORMATION</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {dnNumber} • {barcodeItem.uniq}
+                  </div>
+                </div>
+
+                <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-[11px] text-gray-500">Material Code</div>
+                    <div className="text-sm font-semibold text-gray-900">{barcodeItem.materialInfo.code}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-gray-500">Material Name</div>
+                    <div className="text-sm font-semibold text-gray-900">{barcodeItem.materialInfo.name}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-gray-500">UoM</div>
+                    <div className="text-sm font-semibold text-gray-900">{barcodeItem.uom}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-gray-500">Order Qty</div>
+                    <div className="text-sm font-semibold text-gray-900">{barcodeItem.orderQty}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-gray-500">Packing Number</div>
+                    <div className="text-sm font-semibold text-gray-900">{barcodeItem.packingNumber}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] text-gray-500">Pcs/Kanban</div>
+                    <div className="text-sm font-semibold text-gray-900">{barcodeItem.pcsPerKanban}</div>
+                  </div>
+                </div>
+
+                <div className="my-5 h-px bg-gray-200" />
+
+                <div className="flex items-center justify-center">
+                  <div className="rounded-lg border border-gray-200 p-3">
+                    <QRCode
+                      value={encodeBarcodePayload({
+                        v: 1,
+                        t: "dnItem",
+                        dnNumber,
+                        uniq: barcodeItem.uniq,
+                        materialInfo: {
+                          code: barcodeItem.materialInfo.code,
+                          name: barcodeItem.materialInfo.name,
+                          model: barcodeItem.materialInfo.model,
+                        },
+                        totalQty: barcodeItem.totalQty,
+                        remainingQty: barcodeItem.remainingQty,
+                        uom: barcodeItem.uom,
+                        orderQty: barcodeItem.orderQty,
+                        packingNumber: barcodeItem.packingNumber,
+                        pcsPerKanban: barcodeItem.pcsPerKanban,
+                        dateIncoming: barcodeItem.dateIncoming,
+                      })}
+                      size={200}
+                      bordered={false}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-3 text-center text-sm font-semibold text-gray-900">{barcodeItem.uniq}</div>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-500">No item selected.</div>
+            )}
+          </Modal>
         </div>
       </div>
     </div>

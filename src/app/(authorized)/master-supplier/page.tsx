@@ -22,6 +22,12 @@ import {
   EditOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
+import { apiBaseUrl } from "@/lib/api/instance";
+import {
+  useDeleteMasterSupplierMutation,
+  useListMasterSuppliersQuery,
+  useUpdateMasterSupplierMutation,
+} from "@/lib/api/master-supplier/api";
 
 type SupplierStatus = "Active" | "Inactive";
 
@@ -137,19 +143,66 @@ export default function MasterSupplierPage() {
   const [searchValue, setSearchValue] = useState<string>("");
   const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined);
 
+  const apiEnabled = Boolean(apiBaseUrl);
+  const { data: apiList = [] } = useListMasterSuppliersQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const [deleteMasterSupplier] = useDeleteMasterSupplierMutation();
+  const [updateMasterSupplier] = useUpdateMasterSupplierMutation();
+
+  const rowsFromApi: SupplierRow[] = useMemo(() => {
+    const toTab = (rawType?: unknown): SupplierTab => {
+      const t = String(rawType ?? "").toLowerCase();
+      if (t.includes("subcon") || t.includes("sub-con")) return "SubCon";
+      if (t.includes("consum")) return "Indirect Raw Material";
+      return "Raw Material";
+    };
+
+    return apiList.map((r, idx) => {
+      const key = String(
+        (r.id ?? r.supplier_code ?? r.sebango ?? idx) as string | number
+      );
+
+      const cycleRaw = (r.customer_cycle ?? "") as string;
+      const cycleDays = Number.parseInt(cycleRaw, 10);
+
+      return {
+        key,
+        site: "Sebanggo",
+        uniq: String((r.uniq_code ?? r.uniq ?? "-") as string),
+        rawMaterialType: String((r.rawMaterialType ?? r.type ?? "-") as string),
+        type: String((r.type ?? "-") as string),
+        productModel: String((r.model ?? r.productModel ?? "-") as string),
+        partName: String((r.part_name ?? r.description ?? "-") as string),
+        partNumber: String((r.part_no ?? r.sebango ?? r.supplier_code ?? "-") as string),
+        gradeSize: String((r.size ?? r.gradeSize ?? "-") as string),
+        qtyPerKanban: Number((r.kanban_quantity ?? r.quantity ?? 0) as number),
+        uom: String((r.uom ?? "-") as string),
+        weightKg: Number((r.weight ?? r.weightKg ?? 0) as number),
+        location: String((r.location ?? "-") as string),
+        supplierName: String((r.supplier_name ?? r.supplierName ?? "-") as string),
+        cycleDays: Number.isFinite(cycleDays) ? cycleDays : 0,
+        status: (String(r.status ?? "Active") as SupplierStatus) ?? "Active",
+        tab: toTab(r.type),
+      } satisfies SupplierRow;
+    });
+  }, [apiList]);
+
+  const allRows = apiEnabled ? rowsFromApi : ALL_ROWS;
+
   const typeOptions = useMemo(() => {
     const unique = new Set(
-      ALL_ROWS.filter((r) => r.tab === activeTab)
+      allRows.filter((r) => r.tab === activeTab)
         .map((r) => (activeTab === "Indirect Raw Material" ? r.type : r.rawMaterialType))
         .filter((v): v is string => Boolean(v && v !== "-"))
     );
     return Array.from(unique).sort();
-  }, [activeTab]);
+  }, [activeTab, allRows]);
 
   const filteredRows = useMemo(() => {
     const q = searchValue.trim().toLowerCase();
 
-    return ALL_ROWS.filter((row) => row.tab === activeTab)
+    return allRows.filter((row) => row.tab === activeTab)
       .filter((row) => {
         if (!typeFilter) return true;
         if (activeTab === "Indirect Raw Material") return row.type === typeFilter;
@@ -173,7 +226,7 @@ export default function MasterSupplierPage() {
           .toLowerCase();
         return haystack.includes(q);
       });
-  }, [activeTab, searchValue, typeFilter]);
+  }, [activeTab, searchValue, typeFilter, allRows]);
 
   const columns: ColumnsType<SupplierRow> = useMemo(() => {
     const commonActionsCol: ColumnsType<SupplierRow>[number] = {
@@ -188,21 +241,63 @@ export default function MasterSupplierPage() {
             icon={<EyeOutlined />}
             size="small"
             className="text-blue-600 hover:text-blue-800"
-            onClick={() => messageApi.info(`View ${record.partNumber}`)}
+            onClick={() => {
+              if (!apiEnabled) {
+                messageApi.info(`View ${record.partNumber}`);
+                return;
+              }
+              messageApi.info(
+                `Supplier: ${record.supplierName} | Code: ${record.key} | Sebango/Part: ${record.partNumber}`
+              );
+            }}
           />
           <Button
             type="text"
             icon={<EditOutlined />}
             size="small"
             className="text-green-600 hover:text-green-800"
-            onClick={() => messageApi.info(`Edit ${record.partNumber}`)}
+            onClick={async () => {
+              if (!apiEnabled) {
+                messageApi.info(`Edit ${record.partNumber}`);
+                return;
+              }
+              const nextDescription = window.prompt(
+                "Edit description",
+                record.partName
+              );
+              if (nextDescription == null) return;
+              try {
+                await updateMasterSupplier({
+                  id: record.key,
+                  body: {
+                    description: nextDescription,
+                  },
+                }).unwrap();
+                messageApi.success("Updated");
+              } catch {
+                messageApi.error("Update failed");
+              }
+            }}
           />
           <Button
             type="text"
             icon={<DeleteOutlined />}
             size="small"
             className="text-red-600 hover:text-red-800"
-            onClick={() => messageApi.info(`Delete ${record.partNumber}`)}
+            onClick={async () => {
+              if (!apiEnabled) {
+                messageApi.info(`Delete ${record.partNumber}`);
+                return;
+              }
+              const ok = window.confirm("Delete this item?");
+              if (!ok) return;
+              try {
+                await deleteMasterSupplier(record.key).unwrap();
+                messageApi.success("Deleted");
+              } catch {
+                messageApi.error("Delete failed");
+              }
+            }}
           />
         </div>
       ),
@@ -419,7 +514,13 @@ export default function MasterSupplierPage() {
       },
       commonActionsCol,
     ];
-  }, [activeTab, messageApi]);
+  }, [
+    activeTab,
+    apiEnabled,
+    deleteMasterSupplier,
+    messageApi,
+    updateMasterSupplier,
+  ]);
 
   return (
     <div className="p-6 space-y-6">

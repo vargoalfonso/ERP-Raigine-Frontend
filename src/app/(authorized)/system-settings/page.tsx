@@ -34,6 +34,7 @@ import {
 } from "@ant-design/icons";
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
+  type AccessControlMatrixRecord,
   useGetAccessControlMatrixQuery,
   useGetApprovalWorkflowsQuery,
   useGetGlobalWorkingDaysQuery,
@@ -737,7 +738,7 @@ export default function SystemSettingsPage() {
   }, [rolesApiData]);
 
   const accessControlById = useMemo(() => {
-    const map = new Map<string, AccessControlRow>();
+    const map = new Map<string, AccessControlMatrixRecord>();
     for (const r of accessControlApiData ?? []) {
       map.set(r.id, r);
     }
@@ -1231,18 +1232,6 @@ export default function SystemSettingsPage() {
     setEditOpen(true);
   };
 
-  const openCreateSafety = () => {
-    setSafetyEditMode("create");
-    setSafetyEditingRow(null);
-    safetyForm.resetFields();
-    safetyForm.setFieldsValue({
-      parameter: "PRL/Working days * days",
-      constanta: 7,
-      status: "Active",
-    });
-    setSafetyEditOpen(true);
-  };
-
   const openCreateRole = () => {
     router.push("/system-settings/roles/create");
   };
@@ -1306,16 +1295,6 @@ export default function SystemSettingsPage() {
     setTypeParameterEditOpen(true);
   };
 
-  const openCreateUom = () => {
-    setUomEditMode("create");
-    setUomEditingRow(null);
-    uomForm.resetFields();
-    uomForm.setFieldsValue({
-      status: "Active",
-    });
-    setUomEditOpen(true);
-  };
-
   const openEditUom = (row: UomRow) => {
     setUomEditMode("edit");
     setUomEditingRow(row);
@@ -1326,20 +1305,6 @@ export default function SystemSettingsPage() {
       status: row.status,
     });
     setUomEditOpen(true);
-  };
-
-  const openCreatePurchaseOrder = () => {
-    setPurchaseOrderEditMode("create");
-    setPurchaseOrderEditingRow(null);
-    purchaseOrderForm.resetFields();
-    purchaseOrderForm.setFieldsValue({
-      materialType: "Raw Material",
-      minOrderQty: 1000,
-      maxSplitLines: 3,
-      splitRule: "By Supplier Capacity",
-      status: "Active",
-    });
-    setPurchaseOrderEditOpen(true);
   };
 
   const openEditPurchaseOrder = (row: PurchaseOrderRow) => {
@@ -1355,17 +1320,6 @@ export default function SystemSettingsPage() {
     setPurchaseOrderEditOpen(true);
   };
 
-  const openCreateApprovalWorkflow = () => {
-    setApprovalWorkflowEditMode("create");
-    setApprovalWorkflowEditingRow(null);
-    approvalWorkflowForm.resetFields();
-    approvalWorkflowForm.setFieldsValue({
-      status: "Active",
-      level4Role: "-",
-    });
-    setApprovalWorkflowEditOpen(true);
-  };
-
   const openEditApprovalWorkflow = (row: ApprovalWorkflowRow) => {
     setApprovalWorkflowEditMode("edit");
     setApprovalWorkflowEditingRow(row);
@@ -1378,49 +1332,6 @@ export default function SystemSettingsPage() {
       status: row.status,
     });
     setApprovalWorkflowEditOpen(true);
-  };
-
-  const openCreateKanban = () => {
-    setKanbanEditMode("create");
-    setKanbanEditingRow(null);
-    kanbanForm.resetFields();
-    kanbanForm.setFieldsValue({
-      status: "Active",
-      kanbanQty: 50,
-      minStock: 100,
-      maxStock: 500,
-    });
-    setKanbanEditOpen(true);
-  };
-
-  const openCreateGlobalWorkingDays = () => {
-    setGlobalWorkingDaysEditMode("create");
-    setGlobalWorkingDaysEditingRow(null);
-    globalWorkingDaysForm.resetFields();
-    globalWorkingDaysForm.setFieldsValue({
-      workingDays: 22,
-    });
-    setGlobalWorkingDaysEditOpen(true);
-  };
-
-  const openCreateProcess = () => {
-    setProcessEditMode("create");
-    setProcessEditingRow(null);
-    processForm.resetFields();
-    processForm.setFieldsValue({ status: "Active" });
-    setProcessEditOpen(true);
-  };
-
-  const openCreateMachinePattern = () => {
-    setMachinePatternEditMode("create");
-    setMachinePatternEditingRow(null);
-    machinePatternForm.resetFields();
-    machinePatternForm.setFieldsValue({
-      status: "Active",
-      machineCount: 10,
-      operatingHours: 8,
-    });
-    setMachinePatternEditOpen(true);
   };
 
   const openEditKanban = (row: KanbanRow) => {

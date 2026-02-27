@@ -495,7 +495,7 @@ export default function OutgoingRawMaterialPage() {
       message.success("Outgoing transaction created");
       closeTrx();
       refetchApiRows();
-    } catch (err) {
+    } catch {
       message.error("Failed to create outgoing transaction");
       return;
     }
@@ -619,7 +619,7 @@ export default function OutgoingRawMaterialPage() {
       message.success("Updated");
       closeEditApi();
       refetchApiRows();
-    } catch (_err) {
+    } catch {
       message.error("Failed to update transaction");
     }
   };
@@ -630,7 +630,7 @@ export default function OutgoingRawMaterialPage() {
       message.success("Deleted");
       refetchApiRows();
       if (detailMode === "api" && detailApiRow?.id === id) closeDetail();
-    } catch (err) {
+    } catch {
       message.error("Failed to delete transaction");
       return;
     }

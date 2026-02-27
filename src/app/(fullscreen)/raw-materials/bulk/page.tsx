@@ -262,7 +262,7 @@ export default function BulkFinishedGoodsPage() {
         const parsed = await parseCSV(file);
         setRows(parsed);
         message.success(`Parsed ${parsed.length} rows from CSV`);
-      } catch (err) {
+      } catch {
         message.error("Failed to parse CSV file");
         setRows([]);
       }
