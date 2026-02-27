@@ -2,9 +2,12 @@
 
 import React, { useMemo, useState } from "react";
 import { Button, Card, DatePicker, Input, InputNumber, Select, Tag, message } from "antd";
-import { LeftOutlined, SaveOutlined, PlusOutlined } from "@ant-design/icons";
+import { LeftOutlined, SaveOutlined, PlusOutlined, QrcodeOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import type { Dayjs } from "dayjs";
+import dayjs from "dayjs";
+import { decodeBarcodePayload } from "@/lib/utils/barcodePayload";
+import ScanQrModal from "@/components/ScanQrModal";
 
 type Step1Data = {
   period?: string;
@@ -116,6 +119,8 @@ export default function DnRawMaterialCreatePage() {
   });
 
   const [draft, setDraft] = useState<Step2Draft>({});
+
+  const [scanOpen, setScanOpen] = useState(false);
 
   const [items, setItems] = useState<DnItemRow[]>(() => {
     const baseDate = undefined;
@@ -248,6 +253,41 @@ export default function DnRawMaterialCreatePage() {
     router.push("/dn-management");
   };
 
+  const applyScan = (raw: string) => {
+    const result = decodeBarcodePayload(raw);
+    if (!result.ok) {
+      message.error(result.error);
+      return;
+    }
+
+    const payload = result.payload;
+    if (payload.t === "dn") {
+      setStep1((prev) => ({
+        ...prev,
+        period: payload.period ?? prev.period,
+        supplier: payload.supplier ?? prev.supplier,
+        totalPo: payload.totalPo ?? prev.totalPo,
+        totalIncoming: payload.totalIncoming ?? prev.totalIncoming,
+        dnCreated: payload.dnCreated ?? prev.dnCreated,
+        dnIncoming: payload.dnIncoming ?? prev.dnIncoming,
+      }));
+      message.success(`DN ${payload.dnNumber} loaded`);
+      return;
+    }
+
+    // dnItem
+    setDraft((prev) => ({
+      ...prev,
+      uniq: payload.uniq ?? prev.uniq,
+      orderQty: payload.orderQty ?? prev.orderQty,
+      uom: payload.uom ?? prev.uom,
+      packing: payload.packingNumber ?? prev.packing,
+      pcsPerKanban: payload.pcsPerKanban ?? prev.pcsPerKanban,
+      dateIncoming: payload.dateIncoming ? (dayjs(payload.dateIncoming).isValid() ? dayjs(payload.dateIncoming) : prev.dateIncoming) : prev.dateIncoming,
+    }));
+    message.success(`Item ${payload.uniq} loaded`);
+  };
+
   return (
     <div className="min-h-screen bg-[#EEF5FF]">
       <div className="bg-white border-b border-gray-200">
@@ -365,7 +405,12 @@ export default function DnRawMaterialCreatePage() {
                 <div className="text-base font-semibold text-gray-900">Step 2: Input Data</div>
                 <div className="text-sm text-gray-500">Input Data for each items</div>
               </div>
-              <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">Entry 1</Tag>
+              <div className="flex items-center gap-2">
+                <Button className="!rounded-lg" icon={<QrcodeOutlined />} onClick={() => setScanOpen(true)}>
+                  Scan
+                </Button>
+                <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">Entry 1</Tag>
+              </div>
             </div>
 
             <div className="mt-5 space-y-4">
@@ -503,6 +548,13 @@ export default function DnRawMaterialCreatePage() {
           </Card>
         </div>
       </div>
+
+      <ScanQrModal
+        open={scanOpen}
+        title={<span className="text-sm font-semibold">Scan QR</span>}
+        onClose={() => setScanOpen(false)}
+        onScanned={(value) => applyScan(value)}
+      />
     </div>
   );
 }

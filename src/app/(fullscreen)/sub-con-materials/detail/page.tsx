@@ -104,7 +104,7 @@ function SubConMaterialsDetailPageContent() {
       title: "Action",
       key: "action",
       width: 80,
-      render: (_: unknown, record: DeliveryNoteLogRow) => (
+      render: () => (
         <Button
           type="text"
           icon={<EyeOutlined />}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Button, DatePicker, Form, Input, Select, Table, Tag, message } from "antd";
+import { Button, DatePicker, Input, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { LeftOutlined, PlusOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
@@ -25,7 +25,6 @@ const formatIdr = (n: number) => `${formatNumber(n)} IDR`;
 
 export default function CreatePoProcurementPage() {
   const router = useRouter();
-  const [form] = Form.useForm();
 
   const [period, setPeriod] = useState<Dayjs | null>(dayjs("2024-01-01"));
   const [totalIncoming, setTotalIncoming] = useState<string>("245");

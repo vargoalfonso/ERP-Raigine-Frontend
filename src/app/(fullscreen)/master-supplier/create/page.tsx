@@ -1,11 +1,15 @@
 "use client";
 
 import React, { Suspense, useMemo, useState } from "react";
-import { Button, Card, Input, InputNumber, Select, Tag, message } from "antd";
+import { Button, Card, Input, InputNumber, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
-
-type SupplierOption = { label: string; value: string; supplierId: string };
+import { apiBaseUrl } from "@/lib/api/instance";
+import {
+  useCreateMasterSupplierMutation,
+  useListMasterSuppliersQuery,
+  useUpdateMasterSupplierMutation,
+} from "@/lib/api/master-supplier/api";
 
 type CycleType = "Daily" | "Weekly";
 
@@ -13,6 +17,7 @@ type SupplierItemRow = {
   key: string;
   sebanggo: string;
   uniq: string;
+  customerCycle: string;
   materialInfo: {
     code: string;
     name: string;
@@ -64,12 +69,6 @@ type IndirectDraft = {
   cycleDays?: number;
 };
 
-const SUPPLIERS: SupplierOption[] = [
-  { label: "PT Steel", value: "PT Steel", supplierId: "SUP-PT-STEEL" },
-  { label: "PT Metal Works", value: "PT Metal Works", supplierId: "SUP-PT-METAL" },
-  { label: "PT Chemical Solutions", value: "PT Chemical Solutions", supplierId: "SUP-PT-CHEM" },
-];
-
 const UNIQ_POOL = ["LV-001", "LV-002", "LV-003", "LV-004", "LV-005"]; // auto-generated mock
 
 function nextUniq(used: Set<string>) {
@@ -91,19 +90,56 @@ function MasterSupplierCreatePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const [createMasterSupplier] = useCreateMasterSupplierMutation();
+  const [updateMasterSupplier] = useUpdateMasterSupplierMutation();
+
+  const apiEnabled = Boolean(apiBaseUrl);
+  const { data: masterSuppliers = [] } = useListMasterSuppliersQuery(undefined, {
+    skip: !apiEnabled,
+  });
+
   const section = useMemo(() => {
     const s = (searchParams.get("section") ?? "").toLowerCase();
     return s === "indirect" ? "indirect" : "raw";
   }, [searchParams]);
 
-  const [selectedSupplier, setSelectedSupplier] = useState<string | undefined>(undefined);
-  const supplierId = useMemo(() => SUPPLIERS.find((s) => s.value === selectedSupplier)?.supplierId, [selectedSupplier]);
+  const [supplierName, setSupplierName] = useState<string>("");
+
+  const supplierCode = useMemo(() => {
+    const name = supplierName.trim();
+    if (!name) return "";
+
+    const letters = name.toUpperCase().replace(/[^A-Z]/g, "");
+    const prefix = (letters.slice(0, 3) || "SUP").padEnd(3, "X");
+    const re = new RegExp(`^${prefix}-(\\d+)$`);
+
+    let max = 0;
+    const getSupplierCodeFromUnknown = (record: unknown): string => {
+      if (!record || typeof record !== "object") return "";
+      if (!("supplier_code" in record)) return "";
+      const v = (record as { supplier_code?: unknown }).supplier_code;
+      if (typeof v === "string") return v;
+      if (typeof v === "number") return String(v);
+      return "";
+    };
+
+    for (const s of masterSuppliers) {
+      const code = getSupplierCodeFromUnknown(s);
+      const m = code.match(re);
+      if (!m) continue;
+      const n = Number.parseInt(m[1] ?? "0", 10);
+      if (Number.isFinite(n)) max = Math.max(max, n);
+    }
+
+    return `${prefix}-${String(max + 1).padStart(3, "0")}`;
+  }, [masterSuppliers, supplierName]);
 
   const [rows, setRows] = useState<SupplierItemRow[]>([
     {
       key: "ASM-LV-001",
       sebanggo: "ASM-LV-001",
       uniq: "LV-001",
+      customerCycle: "10",
       materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
       type: "Pipe",
       gradeSize: "STKM 550 - 5mm",
@@ -117,6 +153,7 @@ function MasterSupplierCreatePageContent() {
       key: "ASM-LV-002",
       sebanggo: "ASM-LV-002",
       uniq: "LV-002",
+      customerCycle: "10",
       materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
       type: "Steel Plate",
       gradeSize: "STKM 550 - 5mm",
@@ -130,6 +167,7 @@ function MasterSupplierCreatePageContent() {
       key: "ASM-LV-003",
       sebanggo: "ASM-LV-003",
       uniq: "LV-003",
+      customerCycle: "10",
       materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
       type: "Coil",
       gradeSize: "STKM 550 - 5mm",
@@ -143,6 +181,7 @@ function MasterSupplierCreatePageContent() {
       key: "ASM-LV-004",
       sebanggo: "ASM-LV-004",
       uniq: "LV-004",
+      customerCycle: "10",
       materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
       type: "Wire",
       gradeSize: "STKM 550 - 5mm",
@@ -174,7 +213,7 @@ function MasterSupplierCreatePageContent() {
     setDraft({
       sebanggo: row.sebanggo,
       uniq: row.uniq,
-      customerCycle: row.cycle,
+      customerCycle: row.customerCycle,
       quantity: row.quantity,
       type: row.type,
       description: row.materialInfo.name,
@@ -188,7 +227,7 @@ function MasterSupplierCreatePageContent() {
   };
 
   const upsertRow = () => {
-    if (!selectedSupplier) {
+    if (!supplierName.trim()) {
       message.error("Supplier Name is required");
       return;
     }
@@ -215,7 +254,12 @@ function MasterSupplierCreatePageContent() {
       key: editingKey ?? draft.sebanggo,
       sebanggo: draft.sebanggo,
       uniq: draft.uniq,
-      materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
+      customerCycle: draft.customerCycle,
+      materialInfo: {
+        code: "SP-001-A",
+        name: draft.description ?? "-",
+        model: "Camry 2024",
+      },
       type: draft.type ?? "-",
       gradeSize: "STKM 550 - 5mm",
       quantity: draft.quantity,
@@ -244,12 +288,92 @@ function MasterSupplierCreatePageContent() {
   };
 
   const onCreate = () => {
-    if (!selectedSupplier) {
-      message.error("Please select Supplier Name");
+    if (!supplierName.trim()) {
+      message.error("Please input Supplier Name");
       return;
     }
-    message.success("Master supplier item created");
-    router.push("/master-supplier");
+
+    if (!supplierCode) {
+      message.error("Supplier ID could not be generated");
+      return;
+    }
+
+    const supplierNameToSend = supplierName.trim();
+
+    const isFetchBaseQueryError = (
+      e: unknown
+    ): e is { status: number | string; data?: unknown } =>
+      Boolean(e && typeof e === "object" && "status" in e);
+
+    const run = async () => {
+      let okCount = 0;
+      let conflictCount = 0;
+      let failCount = 0;
+
+      for (const r of rows) {
+        const payload = {
+          supplier_code: supplierCode,
+          supplier_name: supplierNameToSend,
+          sebango: r.sebanggo,
+          customer_cycle: String(r.customerCycle ?? r.cycle),
+          quantity: Number(r.quantity),
+          type: String(r.type ?? "-"),
+          description: String(r.materialInfo?.name ?? "-"),
+        };
+
+        try {
+          await createMasterSupplier(payload).unwrap();
+          okCount += 1;
+        } catch (e: unknown) {
+          if (isFetchBaseQueryError(e) && e.status === 409) {
+            conflictCount += 1;
+
+            // If backend returns an existing record id, try update (edit) instead.
+            const getExistingId = (data: unknown): string | number | undefined => {
+              if (!data || typeof data !== "object") return undefined;
+              const root = data as Record<string, unknown>;
+              const rootId = root.id;
+              if (typeof rootId === "string" || typeof rootId === "number") return rootId;
+
+              const inner = root.data;
+              if (!inner || typeof inner !== "object") return undefined;
+              const innerId = (inner as Record<string, unknown>).id;
+              if (typeof innerId === "string" || typeof innerId === "number") return innerId;
+              return undefined;
+            };
+
+            const existingId = getExistingId(e.data);
+            if (existingId !== undefined && existingId !== null) {
+              try {
+                await updateMasterSupplier({ id: existingId, body: payload }).unwrap();
+                okCount += 1;
+                continue;
+              } catch {
+                // fall through to failCount
+              }
+            }
+
+            // If no id to update, treat as already exists (not a hard failure)
+            continue;
+          }
+
+          failCount += 1;
+        }
+      }
+
+      if (failCount === 0) {
+        if (conflictCount > 0) {
+          message.warning(`Some items already existed (${conflictCount})`);
+        }
+        message.success("Master supplier item created");
+        router.push("/master-supplier");
+        return;
+      }
+
+      message.error(`Failed to create ${failCount} item(s). Created: ${okCount}`);
+    };
+
+    void run();
   };
 
   // Indirect Raw Material flow
@@ -315,7 +439,7 @@ function MasterSupplierCreatePageContent() {
   };
 
   const upsertIndirectRow = () => {
-    if (!selectedSupplier) {
+    if (!supplierName.trim()) {
       message.error("Supplier Name is required");
       return;
     }
@@ -363,12 +487,87 @@ function MasterSupplierCreatePageContent() {
   };
 
   const onCreateIndirect = () => {
-    if (!selectedSupplier) {
-      message.error("Please select Supplier Name");
+    if (!supplierName.trim()) {
+      message.error("Please input Supplier Name");
       return;
     }
-    message.success("Master supplier item created");
-    router.push("/master-supplier");
+
+    if (!supplierCode) {
+      message.error("Supplier ID could not be generated");
+      return;
+    }
+
+    const supplierNameToSend = supplierName.trim();
+
+    const isFetchBaseQueryError = (
+      e: unknown
+    ): e is { status: number | string; data?: unknown } =>
+      Boolean(e && typeof e === "object" && "status" in e);
+
+    const run = async () => {
+      let okCount = 0;
+      let conflictCount = 0;
+      let failCount = 0;
+
+      for (const r of indirectRows) {
+        const payload = {
+          supplier_code: supplierCode,
+          supplier_name: supplierNameToSend,
+          sebango: r.partNumber,
+          customer_cycle: String(r.cycleDays),
+          quantity: Number(r.qtyPerKanban),
+          type: String(r.type ?? "-"),
+          description: String(r.partName ?? "-"),
+        };
+
+        try {
+          await createMasterSupplier(payload).unwrap();
+          okCount += 1;
+        } catch (e: unknown) {
+          if (isFetchBaseQueryError(e) && e.status === 409) {
+            conflictCount += 1;
+            const getExistingId = (data: unknown): string | number | undefined => {
+              if (!data || typeof data !== "object") return undefined;
+              const root = data as Record<string, unknown>;
+              const rootId = root.id;
+              if (typeof rootId === "string" || typeof rootId === "number") return rootId;
+
+              const inner = root.data;
+              if (!inner || typeof inner !== "object") return undefined;
+              const innerId = (inner as Record<string, unknown>).id;
+              if (typeof innerId === "string" || typeof innerId === "number") return innerId;
+              return undefined;
+            };
+
+            const existingId = getExistingId(e.data);
+            if (existingId !== undefined && existingId !== null) {
+              try {
+                await updateMasterSupplier({ id: existingId, body: payload }).unwrap();
+                okCount += 1;
+                continue;
+              } catch {
+                // fall through
+              }
+            }
+            continue;
+          }
+          failCount += 1;
+        }
+      }
+
+      if (failCount === 0) {
+        if (conflictCount > 0) {
+          message.warning(`Some items already existed (${conflictCount})`);
+        }
+        message.success("Master supplier item created");
+        router.push("/master-supplier");
+        return;
+      }
+
+      message.error(`Failed to create ${failCount} item(s). Created: ${okCount}`);
+    };
+
+    void run();
   };
 
   if (section === "indirect") {
@@ -414,18 +613,16 @@ function MasterSupplierCreatePageContent() {
               <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div>
                   <div className="text-sm text-gray-700 mb-2">Supplier Name</div>
-                  <Select
-                    value={selectedSupplier}
-                    onChange={(v) => setSelectedSupplier(v)}
-                    placeholder="Select supplier"
-                    options={SUPPLIERS.map((s) => ({ label: s.label, value: s.value }))}
-                    className="w-full"
+                  <Input
+                    value={supplierName}
+                    onChange={(e) => setSupplierName(e.target.value)}
+                    placeholder="Enter supplier name"
                   />
                 </div>
 
                 <div>
                   <div className="text-sm text-gray-700 mb-2">Supplier ID</div>
-                  <Input value={supplierId} placeholder="Auto-filled from supplier selection" disabled />
+                  <Input value={supplierCode} placeholder="Auto-generated" disabled />
                 </div>
               </div>
             </Card>
@@ -543,7 +740,7 @@ function MasterSupplierCreatePageContent() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
                   <div>
                     <div className="text-xs text-gray-500">Supplier Name</div>
-                    <div className="text-sm font-medium text-gray-900">{selectedSupplier ?? "-"}</div>
+                    <div className="text-sm font-medium text-gray-900">{supplierName.trim() || "-"}</div>
                   </div>
                   <div>
                     <div className="text-xs text-gray-500">Total Items</div>
@@ -673,21 +870,19 @@ function MasterSupplierCreatePageContent() {
             <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div>
                 <div className="text-sm text-gray-700 mb-2">Supplier Name</div>
-                <Select
-                  value={selectedSupplier}
-                  onChange={(v) => {
-                    setSelectedSupplier(v);
+                <Input
+                  value={supplierName}
+                  onChange={(e) => {
+                    setSupplierName(e.target.value);
                     ensureUniqInDraft();
                   }}
-                  placeholder="Select supplier"
-                  options={SUPPLIERS.map((s) => ({ label: s.label, value: s.value }))}
-                  className="w-full"
+                  placeholder="Enter supplier name"
                 />
               </div>
 
               <div>
                 <div className="text-sm text-gray-700 mb-2">Supplier ID</div>
-                <Input value={supplierId} placeholder="Auto-filled from supplier selection" disabled />
+                <Input value={supplierCode} placeholder="Auto-generated" disabled />
               </div>
             </div>
           </Card>
@@ -758,7 +953,7 @@ function MasterSupplierCreatePageContent() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
                 <div>
                   <div className="text-xs text-gray-500">Supplier Name</div>
-                  <div className="text-sm font-medium text-gray-900">{selectedSupplier ?? "-"}</div>
+                  <div className="text-sm font-medium text-gray-900">{supplierName.trim() || "-"}</div>
                 </div>
                 <div>
                   <div className="text-xs text-gray-500">Total Uniq Added</div>

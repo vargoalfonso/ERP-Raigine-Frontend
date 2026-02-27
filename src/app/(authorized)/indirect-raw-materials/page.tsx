@@ -84,8 +84,8 @@ export default function IndirectRawMaterialsPage() {
   const [messageApi, contextHolder] = message.useMessage();
 
   const useApi = Boolean(apiBaseUrl);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [currentPage] = useState(1);
+  const [pageSize] = useState(10);
 
   const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !useApi });
   const bomIndex = useMemo(
@@ -112,7 +112,7 @@ export default function IndirectRawMaterialsPage() {
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<IndirectRawMaterialRow[]>(initialRows);
 
-  const displayedRows = useMemo(() => {
+  const displayedRows = useMemo<IndirectRawMaterialRow[]>(() => {
     if (!useApi || !apiSuccess) return rows;
 
     const raw = apiRows?.data ?? [];
@@ -129,7 +129,7 @@ export default function IndirectRawMaterialsPage() {
         if (bt !== at) return bt - at;
         return String(b.id).localeCompare(String(a.id));
       })
-      .map((r) => {
+      .map((r): IndirectRawMaterialRow => {
         const uniq = r.uniq ?? "-";
         const partNumber = bomIndex.partNumberByUniq?.[uniq] ?? "-";
         const partName = bomIndex.partNameByUniq?.[uniq] ?? r.item_name ?? "-";
@@ -137,7 +137,7 @@ export default function IndirectRawMaterialsPage() {
         const currentStock = Number(r.quantity ?? 0);
         const status: IndirectRawMaterialRow["status"] = currentStock <= 0 ? "LOW STOCK" : "NORMAL";
         return {
-          id: r.id,
+          id: String(r.id),
           uniq,
           partNumber,
           partName,

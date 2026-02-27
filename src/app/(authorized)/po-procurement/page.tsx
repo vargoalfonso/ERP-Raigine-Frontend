@@ -177,7 +177,6 @@ function PoProcurementPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<ProcurementTab>("raw");
-  const [lineFilter, setLineFilter] = useState<string>("All Lines");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
@@ -224,17 +223,6 @@ function PoProcurementPageContent() {
   const activeSuppliers = 4;
   const totalPoValue = 190_000;
   const lateDeliveries = 1;
-
-  const lineOptions = useMemo(
-    () => [
-      { label: "All Lines", value: "All Lines" },
-      { label: "Line A", value: "Line A" },
-      { label: "Line B", value: "Line B" },
-      { label: "Line C", value: "Line C" },
-      { label: "Line D", value: "Line D" },
-    ],
-    []
-  );
 
   const pagedRows = useMemo(() => {
     const start = (page - 1) * pageSize;

@@ -3,6 +3,8 @@
 import React, { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import StatsCard from "@/components/StatsCard";
+import { Button, Modal, QRCode } from "antd";
+import { encodeBarcodePayload } from "@/lib/utils/barcodePayload";
 
 type DnTabId = "dn-board" | "po-dn-management" | "ppic-view" | "incoming-logs";
 
@@ -70,6 +72,9 @@ export default function DnManagementPage() {
 
   const [rows, setRows] = useState<DnRow[]>(dnRows);
 
+  const [barcodeOpen, setBarcodeOpen] = useState(false);
+  const [barcodeRow, setBarcodeRow] = useState<DnRow | null>(null);
+
   const totalDns = useMemo(() => rows.length, [rows]);
   const fullyReceived = useMemo(() => rows.filter((r) => r.progressPercent >= 100).length, [rows]);
   const pendingReceipt = useMemo(() => rows.filter((r) => r.progressPercent < 100).length, [rows]);
@@ -77,6 +82,11 @@ export default function DnManagementPage() {
 
   const openDetail = (dnNumber: string) => {
     router.push(`/dn-management/detail/${encodeURIComponent(dnNumber)}`);
+  };
+
+  const openBarcode = (row: DnRow) => {
+    setBarcodeRow(row);
+    setBarcodeOpen(true);
   };
 
   const deleteRow = (dnNumber: string) => {
@@ -332,7 +342,7 @@ export default function DnManagementPage() {
                           </td>
                           <td className="px-4 py-4 whitespace-nowrap text-right">
                             <div className="inline-flex items-center gap-3 text-gray-500">
-                              <button type="button" className="hover:text-gray-700" aria-label="QR">
+                              <button type="button" className="hover:text-gray-700" aria-label="QR" onClick={() => openBarcode(r)}>
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h3v3H7V7zM14 7h3v3h-3V7zM7 14h3v3H7v-3z" />
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 14h1m2 0h0m-3 3h3" />
@@ -395,6 +405,83 @@ export default function DnManagementPage() {
           )}
         </div>
       </div>
+
+      <Modal
+        title={<span className="text-sm font-semibold">DN Barcode</span>}
+        open={barcodeOpen}
+        onCancel={() => {
+          setBarcodeOpen(false);
+          setBarcodeRow(null);
+        }}
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              className="!rounded-lg"
+              onClick={() => {
+                setBarcodeOpen(false);
+                setBarcodeRow(null);
+              }}
+            >
+              Close
+            </Button>
+          </div>
+        }
+        width={620}
+      >
+        {barcodeRow ? (
+          <div className="rounded-xl border border-gray-200 bg-white p-6">
+            <div className="text-center">
+              <div className="text-lg font-extrabold tracking-wide text-gray-900">DN INFORMATION</div>
+              <div className="text-xs text-gray-500 mt-1">{barcodeRow.dnNumber}</div>
+            </div>
+
+            <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <div className="text-[11px] text-gray-500">Period</div>
+                <div className="text-sm font-semibold text-gray-900 whitespace-pre-line">{barcodeRow.period}</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-gray-500">Supplier</div>
+                <div className="text-sm font-semibold text-gray-900">{barcodeRow.supplier}</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-gray-500">Total PO</div>
+                <div className="text-sm font-semibold text-gray-900">{barcodeRow.totalPo.toLocaleString()}</div>
+              </div>
+              <div>
+                <div className="text-[11px] text-gray-500">Total Incoming</div>
+                <div className="text-sm font-semibold text-gray-900">{barcodeRow.totalIncoming.toLocaleString()}</div>
+              </div>
+            </div>
+
+            <div className="my-5 h-px bg-gray-200" />
+
+            <div className="flex items-center justify-center">
+              <div className="rounded-lg border border-gray-200 p-3">
+                <QRCode
+                  value={encodeBarcodePayload({
+                    v: 1,
+                    t: "dn",
+                    dnNumber: barcodeRow.dnNumber,
+                    period: barcodeRow.period,
+                    supplier: barcodeRow.supplier,
+                    totalPo: barcodeRow.totalPo,
+                    totalIncoming: barcodeRow.totalIncoming,
+                    dnCreated: barcodeRow.dnCreated,
+                    dnIncoming: barcodeRow.dnIncoming,
+                  })}
+                  size={180}
+                  bordered={false}
+                />
+              </div>
+            </div>
+
+            <div className="mt-3 text-center text-sm font-semibold text-gray-900">{barcodeRow.dnNumber}</div>
+          </div>
+        ) : (
+          <div className="text-sm text-gray-500">No DN selected.</div>
+        )}
+      </Modal>
     </div>
   );
 }

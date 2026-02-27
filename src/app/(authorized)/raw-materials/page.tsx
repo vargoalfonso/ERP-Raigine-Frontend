@@ -13,7 +13,6 @@ import {
   InputNumber,
   Drawer,
   Space,
-  Divider,
   Descriptions,
 } from "antd";
 import {
@@ -21,14 +20,12 @@ import {
   PlusOutlined,
   EyeOutlined,
   ExclamationCircleOutlined,
-  CloseOutlined,
   SaveOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
 import StatsCard from "@/components/StatsCard";
 import TableTemplate from "@/components/TableTemplate";
 import type { ColumnType } from "antd/es/table";
-import type { FormInstance } from "antd";
 import { BsBoxSeam } from "react-icons/bs";
 import { FiAlertTriangle } from "react-icons/fi";
 import { HiOutlineArchiveBox } from "react-icons/hi2";
@@ -139,7 +136,7 @@ const RawMaterialDetailModal = ({
       const values = await form.validateFields();
       onSave(values);
       setLoading(false);
-    } catch (error) {
+    } catch {
       message.error("Please complete all required fields");
     }
   };
@@ -426,17 +423,9 @@ export default function RawMaterialsPage() {
       if (detailModal.record?.id === deletingRecord.id) {
         setDetailModal({ visible: false, record: null, isEditing: false });
       }
-    } catch (error) {
+    } catch {
       message.error("Failed to delete raw material");
     }
-  };
-
-  const handleView = (record: RawMaterialRecord) => {
-    setDetailModal({
-      visible: true,
-      record,
-      isEditing: false,
-    });
   };
 
   const handleDetailSave = async (data: RawMaterialDrawerValues) => {

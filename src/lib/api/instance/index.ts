@@ -78,6 +78,7 @@ export const apiBaseUrl = rawBaseUrl && rawBaseUrl !== "undefined" ? rawBaseUrl 
 
 export const apiSlice = createApi({
   reducerPath: "api",
+  tagTypes: ["MasterSuppliers"],
   refetchOnFocus: true,
   baseQuery: async (args, api, extraOptions) => {
     const { useAuthorization = false, contentType = "application/json" } =

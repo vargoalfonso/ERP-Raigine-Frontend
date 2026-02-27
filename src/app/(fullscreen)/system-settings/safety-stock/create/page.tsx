@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Button, Card, Input, InputNumber, Select, Tag, message } from "antd";
+import { Button, Card, InputNumber, Select, Tag, message } from "antd";
 import {
   InfoCircleOutlined,
   LeftOutlined,

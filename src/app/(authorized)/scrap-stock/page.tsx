@@ -297,6 +297,8 @@ const dummyInventoryData: FinishedGoodsRecord[] = [
   },
 ];
 
+void dummyInventoryData;
+
 const dummyStatusData: FinishedGoodsRecord[] = [
   {
     id: "3",
@@ -658,6 +660,9 @@ export default function ScrapStockPage() {
       ),
     },
   ];
+
+  void columns;
+
   const columnsStatus: ColumnType<FinishedGoodsRecord>[] = [
     {
       title: "Alert Type",

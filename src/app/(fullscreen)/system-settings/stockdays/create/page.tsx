@@ -60,7 +60,7 @@ export default function StockdaysCreatePage() {
 
   const [createStockdays, { isLoading: isSaving }] = useCreateStockdaysMutation();
 
-  const { data: existingStockdays } = useGetStockdaysQuery(undefined, {
+  useGetStockdaysQuery(undefined, {
     skip: !apiEnabled,
     refetchOnMountOrArgChange: true,
   });

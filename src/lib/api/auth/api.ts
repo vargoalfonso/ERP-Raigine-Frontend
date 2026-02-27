@@ -18,14 +18,23 @@ export const authApiSlice = apiSlice.injectEndpoints({
         body: credentials,
       }),
       transformResponse: (response: unknown) => {
-        const r = response as Partial<{ token: string; user: AuthResponse["user"] }>;
+        const r = response as Partial<{
+          token: string;
+          user: AuthResponse["user"];
+          data: { token?: string; user?: AuthResponse["user"] };
+        }>;
+
+        const payload = (r && typeof r === "object" && "data" in r && r.data && typeof r.data === "object"
+          ? r.data
+          : r) as Partial<{ token: string; user: AuthResponse["user"] }>;
 
         return {
           message: "OK",
           status: "success",
           data: {
-            token: r?.token ?? "",
-            user: (r?.user as AuthResponse["user"]) ?? ({} as AuthResponse["user"]),
+            token: payload?.token ?? "",
+            user:
+              (payload?.user as AuthResponse["user"]) ?? ({} as AuthResponse["user"]),
           },
         } satisfies LoginStatusType;
       },

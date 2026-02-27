@@ -56,7 +56,7 @@ function WorkInProgressDetailPageContent() {
         ((apiRecord?.product_uniq ?? apiRecord?.master_list?.uniq_code)
           ? bomUniqIndex.partNumberByUniq[apiRecord?.product_uniq ?? apiRecord?.master_list?.uniq_code ?? ""]
           : undefined) ??
-        (apiRecord as any)?.master_list?.part_no ??
+        apiRecord?.master_list?.part_no ??
         "EMA7-001",
       partName:
         ((apiRecord?.product_uniq ?? apiRecord?.master_list?.uniq_code)

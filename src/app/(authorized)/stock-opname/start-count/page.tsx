@@ -172,13 +172,6 @@ function StockOpnameStartCountPageContent() {
     ]);
   }
 
-  const uploadProps: UploadProps = {
-    beforeUpload: () => {
-      message.success("File added (mock)");
-      return false;
-    },
-  };
-
   const bulkUploadProps: UploadProps = {
     multiple: false,
     beforeUpload: (file) => {
