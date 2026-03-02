@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "lint": "next lint",
+    "lint:fix": "next lint --fix",
     "start": "next start",
     "smoke:api": "node scripts/smoke-api.mjs"
   },
