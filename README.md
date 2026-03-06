@@ -4,8 +4,8 @@ Next.js (App Router) frontend for the MRP/ERP UI.
 
 ## Prerequisites
 
-- Node.js `>= 18.18` (recommended: Node `20`)
-
+- Node.js 18+ (recommended: latest LTS)
+- npm (or any compatible package manager)
 
 ## Setup
 
@@ -19,6 +19,7 @@ npm install
 
 This app expects an API base URL:
 
+- `NEXT_PUBLIC_API_URL` (required) — used as the base URL for API requests.
 
 Create a `.env.local` file in the project root:
 
@@ -55,9 +56,5 @@ npm run start
 
 ## Troubleshooting
 
-
-## Docs
-
-- [docs/api-ui-testing.md](docs/api-ui-testing.md) — UI-based API testing + list of pages already connected to API.
-- [docs/api-pages-endpoints-matrix.md](docs/api-pages-endpoints-matrix.md) — Endpoint ↔ page matrix (what can be tested where).
-- [docs/system-settings-ui-testing.md](docs/system-settings-ui-testing.md) — UI-based API testing for System Settings routes.
+- If you see network/API errors, verify `NEXT_PUBLIC_API_URL` is set correctly.
+- If login or authorized pages redirect unexpectedly, clear site cookies and try again.

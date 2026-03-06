@@ -1,0 +1,23 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: 
+      - 'build'
+      - '-t'
+      - 'asia-southeast1-docker.pkg.dev/eloquent-glow-437605-s1/cloud-run-source-deploy/mrp-frontend:latest'
+      - '-t'
+      - 'asia-southeast1-docker.pkg.dev/eloquent-glow-437605-s1/cloud-run-source-deploy/mrp-frontend:$COMMIT_SHA'
+      - '.'
+
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: 
+      - 'push'
+      - 'asia-southeast1-docker.pkg.dev/eloquent-glow-437605-s1/cloud-run-source-deploy/mrp-frontend'
+
+images:
+  - 'asia-southeast1-docker.pkg.dev/eloquent-glow-437605-s1/cloud-run-source-deploy/mrp-frontend:latest'
+  - 'asia-southeast1-docker.pkg.dev/eloquent-glow-437605-s1/cloud-run-source-deploy/mrp-frontend:$COMMIT_SHA'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

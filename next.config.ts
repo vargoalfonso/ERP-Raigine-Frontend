@@ -6,7 +6,7 @@ const configDir = path.dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
   /* config options here */
-  poweredByHeader: false,
+  output: "standalone",
   transpilePackages: ["antd"],
   experimental: {
     optimizePackageImports: ["antd"],
