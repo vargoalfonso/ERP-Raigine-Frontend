@@ -29,6 +29,16 @@ NEXT_PUBLIC_API_URL=http://localhost:8080
 
 Adjust the URL to match your backend.
 
+Optional (recommended for production): keep the debug smoke-test page disabled.
+
+```bash
+# Enable /api-smoke route (debug only)
+ENABLE_API_SMOKE=false
+
+# Block common crawlers/bots (recommended)
+BLOCK_BOTS=true
+```
+
 ## Run (Development)
 
 ```bash

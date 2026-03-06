@@ -2,6 +2,8 @@ import { apiSlice } from "@/lib/api/instance";
 import { ApiResponse, DataObject } from "@/types";
 import { AuthResponse, LoginStatusType } from "./interface";
 
+const LOGIN_FIELD = (process.env.NEXT_PUBLIC_AUTH_LOGIN_FIELD || "email").trim();
+
 export const authApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     login: builder.mutation<
@@ -15,7 +17,10 @@ export const authApiSlice = apiSlice.injectEndpoints({
           useAuthorization: false,
           contentType: "application/json",
         },
-        body: credentials,
+        body: {
+          [LOGIN_FIELD]: credentials.email,
+          password: credentials.password,
+        } as Record<string, string>,
       }),
       transformResponse: (response: unknown) => {
         const r = response as Partial<{
