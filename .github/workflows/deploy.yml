@@ -16,6 +16,7 @@ jobs:
           host: 34.50.122.42
           username: vargoalfonso
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
           script: |
             cd ~
             ./deploy.sh
