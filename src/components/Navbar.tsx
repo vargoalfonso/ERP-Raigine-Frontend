@@ -28,6 +28,7 @@ const getPageTitle = (pathname: string): string => {
     "/customer-po": "Customer PO & DN",
     "/master-supplier": "Master Supplier",
     "/master-supplier/create": "Add Master Supplier Item",
+    "/master-supplier/only/create": "Add Supplier (Only)",
     "/bill-of-material": "Bill Of Material",
     "/work-orders": "Work Orders",
     "/finished-goods": "Finished Goods",

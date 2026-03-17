@@ -406,6 +406,12 @@ export default function OutgoingRawMaterialPage() {
       const parsed = parseNotes(r.notes);
       const date = String(r.date ?? "") || String(r.created_at ?? "").slice(0, 10) || "-";
 
+      const reason = parsed.reason ?? (r.reason as ReasonOption | undefined);
+      const purpose = parsed.purpose ?? (typeof r.purpose === "string" ? r.purpose : undefined);
+      const workOrder = parsed.workOrder ?? (typeof r.work_order_no === "string" ? r.work_order_no : undefined);
+      const destination = parsed.destination ?? (typeof r.destination === "string" ? r.destination : undefined);
+      const remarks = parsed.remarks ?? (typeof r.remarks === "string" ? r.remarks : undefined);
+
       return {
         id: String(r.id ?? ""),
         date,
@@ -415,13 +421,13 @@ export default function OutgoingRawMaterialPage() {
         warehouseCode: String(r.warehouse_code ?? ""),
         quantity: Number(r.quantity ?? 0),
         unit: String(r.unit_measurement ?? ""),
-        referenceNo: String(r.reference_no ?? ""),
+        referenceNo: String(r.reference_no ?? r.packing_list_rm ?? ""),
         notes: String(r.notes ?? ""),
-        reason: parsed.reason,
-        purpose: parsed.purpose,
-        workOrder: parsed.workOrder,
-        destination: parsed.destination,
-        remarks: parsed.remarks,
+        reason,
+        purpose,
+        workOrder,
+        destination,
+        remarks,
       };
     });
   }, [apiRows?.data, apiSuccess, bomIndex.partNameByUniq, bomIndex.partNumberByUniq, useApi]);
@@ -473,6 +479,9 @@ export default function OutgoingRawMaterialPage() {
       const uniq = String(values.uniq ?? "");
       const itemName = bomIndex.partNameByUniq[uniq] || bomIndex.assemblyCodeByUniq[uniq] || "";
 
+      const transactionId = `TRX-OUT-${today.replaceAll("-", "")}-${Math.floor(Date.now() / 1000)}`;
+      const requestedBy = "Admin PPIC";
+
       const notes = buildNotes({
         reason: values.reason,
         purpose: values.purpose,
@@ -484,6 +493,16 @@ export default function OutgoingRawMaterialPage() {
       await createOutgoing({
         uniq,
         item_name: itemName,
+        // Postman spec fields
+        requested_by: requestedBy,
+        transaction_id: transactionId,
+        packing_list_rm: values.referenceNo,
+        reason: values.reason,
+        purpose: values.purpose,
+        work_order_no: values.workOrder,
+        destination: values.destination,
+        destination_location: values.destination,
+        remarks: values.remarks,
         warehouse_code: values.warehouseCode,
         quantity: Number(values.quantity ?? 0),
         unit_measurement: values.unit,
@@ -595,6 +614,9 @@ export default function OutgoingRawMaterialPage() {
       const uniq = String(values.uniq ?? "");
       const itemName = bomIndex.partNameByUniq[uniq] || bomIndex.assemblyCodeByUniq[uniq] || "";
 
+      const today = new Date().toISOString().slice(0, 10);
+      const requestedBy = "Admin PPIC";
+
       const notes = buildNotes({
         reason: values.reason,
         purpose: values.purpose,
@@ -608,9 +630,18 @@ export default function OutgoingRawMaterialPage() {
         body: {
           uniq,
           item_name: itemName,
+          requested_by: requestedBy,
+          packing_list_rm: values.referenceNo,
+          reason: values.reason,
+          purpose: values.purpose,
+          work_order_no: values.workOrder,
+          destination: values.destination,
+          destination_location: values.destination,
+          remarks: values.remarks,
           warehouse_code: values.warehouseCode,
           quantity: Number(values.quantity ?? 0),
           unit_measurement: values.unit,
+          date: today,
           reference_no: values.referenceNo,
           notes,
         },

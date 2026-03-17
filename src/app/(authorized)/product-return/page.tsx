@@ -24,11 +24,20 @@ import {
   PlusOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
+import { useRouter } from "next/navigation";
+import {
+  useCreateProductReturnMutation,
+  useDecideProductReturnMutation,
+  useGetProductReturnHistoryQuery,
+  useGetProductReturnPendingQuery,
+} from "@/lib/api/product-return/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type ReturnTab = "pending" | "qc" | "history";
 
 type ProductReturnRow = {
   key: string;
+  id: string;
   returnId: string;
   date: string;
   partNo: string;
@@ -46,14 +55,13 @@ type ProductReturnRow = {
 
 type SubmitFormValues = {
   kanban: string;
-  uniqId?: string;
+  uniqId: string;
   partNo?: string;
   partName?: string;
   model?: string;
   packingNumber?: string;
   dnNumber?: string;
   dateReceived?: unknown;
-  scrapType: "Product Return";
   scrapQty: number;
   weight?: number;
   unit: "Pcs";
@@ -81,12 +89,21 @@ function StatCard(props: {
 }
 
 export default function ProductReturnPage() {
+  const router = useRouter();
   const [tab, setTab] = useState<ReturnTab>("pending");
   const [isSubmitOpen, setIsSubmitOpen] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [form] = Form.useForm<SubmitFormValues>();
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [detailReturnId, setDetailReturnId] = useState<string | null>(null);
+  const [createProductReturn] = useCreateProductReturnMutation();
+  const [decideProductReturn, { isLoading: decisionLoading }] = useDecideProductReturnMutation();
+
+  const pendingQuery = useGetProductReturnPendingQuery();
+  const historyQuery = useGetProductReturnHistoryQuery();
+
+  const apiErrorMessage = useMemo(() => {
+    const err = pendingQuery.error ?? historyQuery.error;
+    return err ? getApiErrorMessage(err, "Failed to load product returns") : "";
+  }, [pendingQuery.error, historyQuery.error]);
 
   const [historyStatusFilter, setHistoryStatusFilter] = useState<
     "all" | ProductReturnRow["status"]
@@ -101,88 +118,70 @@ export default function ProductReturnPage() {
     []
   );
 
-  const [rows, setRows] = useState<ProductReturnRow[]>([
-    {
-      key: "ret-001",
-      returnId: "RET-001",
-      date: "2024-12-15",
-      partNo: "PN-45678",
-      partName: "Bearing Assembly",
-      kanban: "KB-123456",
-      scrapQty: 25,
-      reworkQty: 20,
-      status: "Pending QC",
-      submittedBy: "John Doe",
-      model: "Model-XYZ",
-      dnNumber: "DN-123456",
-      weight: 500,
-      scrapType: "Product Return",
-    },
-    {
-      key: "ret-002",
-      returnId: "RET-002",
-      date: "2024-12-14",
-      partNo: "PN-56789",
-      partName: "Gear Housing",
-      kanban: "KB-234567",
-      scrapQty: 10,
-      reworkQty: 8,
-      status: "QC Approved",
-      submittedBy: "Jane Smith",
-      model: "Model-GH",
-      dnNumber: "DN-234567",
-      weight: 350,
-      scrapType: "Product Return",
-    },
-    {
-      key: "ret-003",
-      returnId: "RET-003",
-      date: "2024-12-13",
-      partNo: "PN-67890",
-      partName: "Motor Shaft",
-      kanban: "KB-345678",
-      scrapQty: 15,
-      reworkQty: 12,
-      status: "Rework WO Created",
-      submittedBy: "Mike Johnson",
-      model: "Model-MS",
-      dnNumber: "DN-345678",
-      weight: 420,
-      scrapType: "Product Return",
-    },
-    {
-      key: "ret-004",
-      returnId: "RET-004",
-      date: "2024-12-16",
-      partNo: "PN-78901",
-      partName: "Hydraulic Cylinder",
-      kanban: "KB-456789",
-      scrapQty: 5,
-      reworkQty: 3,
-      status: "Pending QC",
-      submittedBy: "Sarah Williams",
-      model: "Model-HC",
-      dnNumber: "DN-456789",
-      weight: 250,
-      scrapType: "Product Return",
-    },
-    {
-      key: "ret-005",
-      returnId: "RET-005",
-      date: "2024-12-12",
-      partNo: "PN-89012",
-      partName: "Valve Assembly",
-      kanban: "KB-567890",
-      scrapQty: 8,
-      reworkQty: 6,
-      status: "Rejected",
-      submittedBy: "Tom Davis",
-      model: "Model-VA",
-      dnNumber: "DN-567890",
-      weight: 200,
-      scrapType: "Product Return",
-    },
-  ]);
+  const rows = useMemo<ProductReturnRow[]>(() => {
+    const pickStr = (...candidates: unknown[]): string => {
+      for (const c of candidates) {
+        if (typeof c === "string" && c.trim()) return c;
+      }
+      return "";
+    };
+    const pickNum = (...candidates: unknown[]): number => {
+      for (const c of candidates) {
+        if (typeof c === "number" && Number.isFinite(c)) return c;
+        if (typeof c === "string" && c.trim() && Number.isFinite(Number(c))) return Number(c);
+      }
+      return 0;
+    };
+
+    const normalizeDate = (value: string): string => {
+      const v = value.trim();
+      if (!v) return "-";
+      // ISO-like values
+      if (v.length >= 10 && v[4] === "-" && v[7] === "-") return v.slice(0, 10);
+      return v;
+    };
+
+    const normalizeStatus = (value: string): ProductReturnRow["status"] => {
+      const v = value.toLowerCase();
+      if (v.includes("approve")) return "QC Approved";
+      if (v.includes("reject")) return "Rejected";
+      if (v.includes("rework")) return "Rework WO Created";
+      return "Pending QC";
+    };
+
+    const pendingItems = pendingQuery.data?.data ?? [];
+    const historyItems = historyQuery.data?.data ?? [];
+    const items = tab === "history" ? historyItems : pendingItems;
+
+    return items.map((it, idx) => {
+      const r = it as Record<string, unknown>;
+      const backendId = pickStr(r.id, r.uuid, r.return_id, r.returnId);
+      const returnId = pickStr(r.return_id, r.returnId, r.id, r.uuid) || `RET-${String(idx + 1).padStart(3, "0")}`;
+      const date = normalizeDate(pickStr(r.date, r.date_received, r.dateReceived, r.created_at, r.createdAt));
+      const status = normalizeStatus(pickStr(r.status, "pending"));
+
+      return {
+        key: backendId || returnId,
+        id: backendId || returnId,
+        returnId,
+        date,
+        partNo: pickStr(r.part_no, r.partNo, r.part_number, r.partNumber) || "-",
+        partName: pickStr(r.part_name, r.partName) || "-",
+        kanban: pickStr(r.kanban) || "-",
+        scrapQty: pickNum(r.quantity_scrap, r.scrap_qty, r.scrapQty, r.scrap_quantity),
+        reworkQty: pickNum(r.quantity_rework, r.rework_qty, r.reworkQty, r.rework_quantity),
+        status,
+        submittedBy: pickStr(r.submitted_by, r.submittedBy) || "-",
+        model: pickStr(r.model) || undefined,
+        dnNumber: pickStr(r.dn_number, r.dnNumber) || undefined,
+        weight: (() => {
+          const w = pickNum(r.weight);
+          return w ? w : undefined;
+        })(),
+        scrapType: pickStr(r.scrap_type, r.scrapType) || undefined,
+      };
+    });
+  }, [pendingQuery.data, historyQuery.data, tab]);
 
   const uniqCatalog = useMemo(
     () =>
@@ -210,8 +209,7 @@ export default function ProductReturnPage() {
   const historyRows = useMemo(() => {
     const base = [...rows];
     base.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-    const filtered = historyStatusFilter === "all" ? base : base.filter((r) => r.status === historyStatusFilter);
-    return filtered;
+    return historyStatusFilter === "all" ? base : base.filter((r) => r.status === historyStatusFilter);
   }, [rows, historyStatusFilter]);
 
   const tableRows = useMemo(() => {
@@ -219,23 +217,21 @@ export default function ProductReturnPage() {
     if (tab === "qc") return qcRows;
     return historyRows;
   }, [historyRows, pendingRows, qcRows, tab]);
-  const detailRow = useMemo(() => {
-    if (!detailReturnId) return null;
-    return rows.find((r) => r.returnId === detailReturnId) ?? null;
-  }, [rows, detailReturnId]);
 
-  const openDetail = (returnId: string) => {
-    setDetailReturnId(returnId);
-    setDetailOpen(true);
+  const openDetail = (id: string) => {
+    router.push(`/product-return/detail/${encodeURIComponent(id)}`);
   };
 
   const kpis = useMemo(() => {
-    const totalReturns = rows.length;
-    const pendingQC = rows.filter((r) => r.status === "Pending QC").length;
-    const qcApproved = rows.filter((r) => r.status === "QC Approved").length;
-    const reworkCreated = rows.filter((r) => r.status === "Rework WO Created").length;
+    // If history isn't loaded yet, fall back to pending as a partial picture.
+    const base = (historyQuery.data?.data?.length ? historyQuery.data.data : pendingQuery.data?.data) ?? [];
+    const totalReturns = base.length;
+    const mapped = rows;
+    const pendingQC = mapped.filter((r) => r.status === "Pending QC").length;
+    const qcApproved = mapped.filter((r) => r.status === "QC Approved").length;
+    const reworkCreated = mapped.filter((r) => r.status === "Rework WO Created").length;
     return { totalReturns, pendingQC, qcApproved, reworkCreated };
-  }, [rows]);
+  }, [historyQuery.data, pendingQuery.data, rows]);
 
   const columns = useMemo<ColumnsType<ProductReturnRow>>(() => {
     const statusTag = (v: ProductReturnRow["status"]) => (
@@ -304,7 +300,7 @@ export default function ProductReturnPage() {
         align: "center",
         width: 80,
         render: (_, r) => (
-          <Button size="small" className="!rounded-lg" icon={<EyeOutlined />} onClick={() => openDetail(r.returnId)} />
+          <Button size="small" className="!rounded-lg" icon={<EyeOutlined />} onClick={() => openDetail(r.id)} />
         ),
       },
     ];
@@ -321,9 +317,12 @@ export default function ProductReturnPage() {
               <Button
                 size="small"
                 className="!rounded-lg !border-green-200 !text-green-700"
+                loading={decisionLoading}
                 onClick={() => {
-                  setRows((prev) => prev.map((x) => (x.returnId === r.returnId ? { ...x, status: "QC Approved" } : x)));
-                  message.success(`${r.returnId} approved`);
+                  decideProductReturn({ id: r.id, decision: "approve" })
+                    .unwrap()
+                    .then(() => message.success(`${r.returnId} approved`))
+                    .catch((e) => message.error(getApiErrorMessage(e, "Failed to approve")));
                 }}
               >
                 ✓ Approve
@@ -332,9 +331,12 @@ export default function ProductReturnPage() {
                 size="small"
                 danger
                 className="!rounded-lg"
+                loading={decisionLoading}
                 onClick={() => {
-                  setRows((prev) => prev.map((x) => (x.returnId === r.returnId ? { ...x, status: "Rejected" } : x)));
-                  message.error(`${r.returnId} rejected`);
+                  decideProductReturn({ id: r.id, decision: "reject" })
+                    .unwrap()
+                    .then(() => message.success(`${r.returnId} rejected`))
+                    .catch((e) => message.error(getApiErrorMessage(e, "Failed to reject")));
                 }}
               >
                 × Reject
@@ -382,6 +384,12 @@ export default function ProductReturnPage() {
         </div>
       </div>
 
+      {apiErrorMessage ? (
+        <div className="mb-4">
+          <Alert type="error" showIcon message={apiErrorMessage} className="!rounded-xl" />
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
         <StatCard label="Total Returns" value={kpis.totalReturns} hint="All product returns" icon={<ToolOutlined />} accent="bg-blue-50 text-blue-600" />
         <StatCard label="Pending QC" value={kpis.pendingQC} hint="Awaiting validation" icon={<ClockCircleOutlined />} accent="bg-orange-50 text-orange-600" />
@@ -403,7 +411,6 @@ export default function ProductReturnPage() {
               setIsSubmitOpen(true);
               form.setFieldsValue({
                 kanban: "KB-123456",
-                scrapType: "Product Return",
                 scrapQty: 0,
                 unit: "Pcs",
                 reworkQty: 0,
@@ -473,10 +480,11 @@ export default function ProductReturnPage() {
             rowKey="key"
             size="middle"
             pagination={false}
+            loading={pendingQuery.isFetching || historyQuery.isFetching}
             locale={{ emptyText: "No returns" }}
             onRow={(record) => ({
               onDoubleClick: () => {
-                openDetail(record.returnId);
+                openDetail(record.id);
               },
             })}
           />
@@ -502,9 +510,6 @@ export default function ProductReturnPage() {
           try {
             setSubmitLoading(true);
             const values = await form.validateFields();
-
-            const nextNo = rows.length + 1;
-            const nextReturnId = `RET-${String(nextNo).padStart(3, "0")}`;
             const dateReceived: unknown = values.dateReceived;
             let dateStr = "2024-12-16";
             if (dateReceived) {
@@ -520,27 +525,27 @@ export default function ProductReturnPage() {
               }
             }
 
-            const newRow: ProductReturnRow = {
-              key: nextReturnId.toLowerCase(),
-              returnId: nextReturnId,
-              date: dateStr,
-              partNo: values.partNo ?? "-",
-              partName: values.partName ?? "-",
+            await createProductReturn({
               kanban: values.kanban,
-              scrapQty: Number(values.scrapQty ?? 0),
-              reworkQty: Number(values.reworkQty ?? 0),
-              status: "Pending QC",
-              submittedBy: "Admin PPIC",
+              uniq: values.uniqId,
+              part_no: values.partNo,
+              part_name: values.partName,
               model: values.model,
-              dnNumber: values.dnNumber,
+              packing_number: values.packingNumber,
+              dn_number: values.dnNumber,
+              date_received: dateStr,
+              quantity_scrap: Number(values.scrapQty ?? 0),
               weight: values.weight,
-              scrapType: values.scrapType,
-            };
+              unit: values.unit,
+              quantity_rework: Number(values.reworkQty ?? 0),
+              submitted_by: "Admin PPIC",
+            }).unwrap();
 
-            setRows((prev) => [newRow, ...prev]);
             setTab("pending");
             setIsSubmitOpen(false);
             message.success("Submitted to QC");
+            pendingQuery.refetch();
+            historyQuery.refetch();
           } finally {
             setSubmitLoading(false);
           }
@@ -568,7 +573,7 @@ export default function ProductReturnPage() {
               />
             </Form.Item>
 
-            <Form.Item label="Uniq ID" name="uniqId">
+            <Form.Item label="Uniq ID" name="uniqId" rules={[{ required: true, message: "Select uniq" }]}>
               <Select
                 placeholder="Choose uniq"
                 allowClear
@@ -612,8 +617,8 @@ export default function ProductReturnPage() {
             <DatePicker className="!w-full" />
           </Form.Item>
 
-          <Form.Item label="Scrap Type" name="scrapType" rules={[{ required: true }]}>
-            <Select disabled options={[{ label: "Product Return", value: "Product Return" }]} />
+          <Form.Item label="Scrap Type">
+            <Input value="Product Return" disabled />
           </Form.Item>
 
           <Form.Item label="Quantity of Scrap" name="scrapQty" rules={[{ required: true, message: "Enter scrap qty" }]}>
@@ -641,97 +646,6 @@ export default function ProductReturnPage() {
             className="!rounded-lg"
           />
         </Form>
-      </Modal>
-
-      <Modal
-        open={detailOpen}
-        onCancel={() => setDetailOpen(false)}
-        width={520}
-        footer={null}
-        destroyOnClose
-        title={
-          <div>
-            <div className="text-sm font-bold text-slate-900">
-              Product Return Details{detailRow ? ` - ${detailRow.returnId}` : ""}
-            </div>
-            <div className="text-xs text-slate-500 mt-0.5">Complete information about this product return</div>
-          </div>
-        }
-      >
-        {!detailRow ? (
-          <div className="text-sm text-slate-500">No detail found</div>
-        ) : (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <div className="text-xs text-slate-500">Status</div>
-                <div className="text-sm text-slate-800 mt-1">{detailRow.status}</div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Return Date</div>
-                <div className="text-sm text-slate-800 mt-1">{detailRow.date}</div>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-sm font-semibold text-slate-900 mb-2">Product Information</div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <div className="text-xs text-slate-500">Part Name</div>
-                  <div className="text-sm text-slate-800 mt-1">{detailRow.partName}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Part Number</div>
-                  <div className="text-sm text-slate-800 mt-1">{detailRow.partNo}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Kanban</div>
-                  <div className="text-sm text-slate-800 mt-1">{detailRow.kanban}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Model</div>
-                  <div className="text-sm text-slate-800 mt-1">{detailRow.model ?? "-"}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">DN Number</div>
-                  <div className="text-sm text-slate-800 mt-1">{detailRow.dnNumber ?? "-"}</div>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-sm font-semibold text-slate-900 mb-2">Return Information</div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <div className="text-xs text-slate-500">Scrap Quantity</div>
-                  <div className="text-sm text-slate-800 mt-1">{detailRow.scrapQty} Pcs</div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Rework Quantity</div>
-                  <div className="text-sm text-slate-800 mt-1">{detailRow.reworkQty} Pcs</div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Weight</div>
-                  <div className="text-sm text-slate-800 mt-1">{typeof detailRow.weight === "number" ? `${detailRow.weight} Pcs` : "-"}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500">Scrap Type</div>
-                  <div className="text-sm text-slate-800 mt-1">{detailRow.scrapType ?? "Product Return"}</div>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-sm font-semibold text-slate-900 mb-2">Validation Information</div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <div className="text-xs text-slate-500">Submitted By</div>
-                  <div className="text-sm text-slate-800 mt-1">{detailRow.submittedBy}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </Modal>
     </div>
   );

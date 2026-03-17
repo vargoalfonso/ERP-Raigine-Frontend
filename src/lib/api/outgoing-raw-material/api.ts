@@ -5,12 +5,24 @@ export type BackendOutgoingRawMaterial = {
   id: string;
   uniq?: string;
   item_name?: string;
+  issued_to?: string;
+  destination?: string;
+  destination_location?: string;
   warehouse_code?: string;
+  packing_list_rm?: string;
+  reason?: string;
+  purpose?: string;
+  work_order_no?: string;
+  requested_by?: string;
+  transaction_id?: string;
   quantity?: number;
   unit_measurement?: string;
+  weight?: number;
+  stock_after?: number;
   date?: string;
   reference_no?: string;
   notes?: string;
+  remarks?: string;
   created_at?: string;
   updated_at?: string;
 };
@@ -18,12 +30,24 @@ export type BackendOutgoingRawMaterial = {
 export type OutgoingRawMaterialCreateRequest = {
   uniq?: string;
   item_name?: string;
+  issued_to?: string;
+  destination?: string;
+  destination_location?: string;
   warehouse_code?: string;
+  packing_list_rm?: string;
+  reason?: string;
+  purpose?: string;
+  work_order_no?: string;
+  requested_by?: string;
+  transaction_id?: string;
   quantity: number;
+  weight?: number;
   unit_measurement?: string;
+  stock_after?: number;
   date?: string;
   reference_no?: string;
   notes?: string;
+  remarks?: string;
 };
 
 export type OutgoingRawMaterialUpdateRequest = Partial<OutgoingRawMaterialCreateRequest>;
@@ -118,6 +142,22 @@ export const outgoingRawMaterialSlice = apiSlice.injectEndpoints({
         return ok({ id: r.id ?? "" }, r.message ?? "Updated");
       },
     }),
+
+    editOutgoingRawMaterial: builder.mutation<
+      ApiResponse<{ id: string }>,
+      { id: string; body: Partial<OutgoingRawMaterialCreateRequest> }
+    >({
+      query: ({ id, body }) => ({
+        url: `/api/outgoing-raw-material/${id}`,
+        method: "PATCH",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => {
+        const r = pickIdMessage(response);
+        return ok({ id: r.id ?? "" }, r.message ?? "Updated");
+      },
+    }),
   }),
 });
 
@@ -126,4 +166,5 @@ export const {
   useCreateOutgoingRawMaterialMutation,
   useDeleteOutgoingRawMaterialMutation,
   useUpdateOutgoingRawMaterialMutation,
+  useEditOutgoingRawMaterialMutation,
 } = outgoingRawMaterialSlice;

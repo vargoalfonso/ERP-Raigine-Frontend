@@ -1,10 +1,12 @@
 "use client";
 
 import React, { useMemo } from "react";
-import { Button, Card, Table, Tag } from "antd";
+import { Alert, Button, Card, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeftOutlined } from "@ant-design/icons";
+import { useDecideProductReturnMutation, useGetProductReturnByIdQuery } from "@/lib/api/product-return/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type LineRow = {
   key: string;
@@ -17,24 +19,49 @@ export default function ProductReturnDetailPage() {
   const params = useParams<{ id: string }>();
   const id = decodeURIComponent(params.id);
 
+  const detailQuery = useGetProductReturnByIdQuery(id);
+  const [decideProductReturn, { isLoading: decisionLoading }] = useDecideProductReturnMutation();
+
+  const record = detailQuery.data?.data;
+
+  const pickStr = (...candidates: unknown[]): string => {
+    for (const c of candidates) {
+      if (typeof c === "string" && c.trim()) return c;
+    }
+    return "";
+  };
+  const pickNum = (...candidates: unknown[]): number => {
+    for (const c of candidates) {
+      if (typeof c === "number" && Number.isFinite(c)) return c;
+      if (typeof c === "string" && c.trim() && Number.isFinite(Number(c))) return Number(c);
+    }
+    return 0;
+  };
+
   const status = useMemo(() => {
-    if (id === "RET-003") return "Rework Created";
-    if (id === "RET-002") return "QC Approved";
+    const raw = pickStr(record?.status);
+    const v = raw.toLowerCase();
+    if (v.includes("approve")) return "QC Approved";
+    if (v.includes("reject")) return "Rejected";
+    if (v.includes("rework")) return "Rework Created";
     return "Pending QC";
-  }, [id]);
+  }, [record?.status]);
 
   const summary = useMemo(
     () => ({
-      returnId: id,
-      date: id === "RET-004" ? "2024-12-16" : "2024-12-15",
-      partNo: id === "RET-004" ? "PN-78901" : "PN-45678",
-      partName: id === "RET-004" ? "Hydraulic Cylinder" : "Bearing Assembly",
-      kanban: id === "RET-004" ? "KB-456789" : "KB-123456",
-      scrapQty: id === "RET-004" ? "5 Pcs" : "25 Pcs",
-      reworkQty: id === "RET-004" ? "3 Pcs" : "20 Pcs",
-      submittedBy: id === "RET-004" ? "Sarah Williams" : "John Doe",
+      returnId: pickStr(record?.return_id, record?.returnId, record?.id, record?.uuid) || id,
+      date: (() => {
+        const d = pickStr(record?.date, record?.date_received, record?.dateReceived, record?.created_at, record?.createdAt);
+        return d && d.length >= 10 ? d.slice(0, 10) : d || "-";
+      })(),
+      partNo: pickStr(record?.part_no, record?.partNo, record?.part_number, record?.partNumber) || "-",
+      partName: pickStr(record?.part_name, record?.partName) || "-",
+      kanban: pickStr(record?.kanban) || "-",
+      scrapQty: `${pickNum(record?.quantity_scrap, record?.scrap_qty, record?.scrapQty, record?.scrap_quantity)} Pcs`,
+      reworkQty: `${pickNum(record?.quantity_rework, record?.rework_qty, record?.reworkQty, record?.rework_quantity)} Pcs`,
+      submittedBy: pickStr(record?.submitted_by, record?.submittedBy) || "-",
     }),
-    [id]
+    [id, record]
   );
 
   const rows = useMemo<LineRow[]>(
@@ -73,16 +100,67 @@ export default function ProductReturnDetailPage() {
             </div>
           </div>
         </div>
-        <Tag
-          color={status === "QC Approved" ? "green" : status === "Pending QC" ? "gold" : status === "Rework Created" ? "blue" : "red"}
-          className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
-        >
-          {status}
-        </Tag>
+        <div className="flex items-center gap-2">
+          {status === "Pending QC" ? (
+            <>
+              <Button
+                className="!rounded-lg !border-green-200 !text-green-700"
+                loading={decisionLoading}
+                onClick={() => {
+                  decideProductReturn({ id, decision: "approve" })
+                    .unwrap()
+                    .then(() => {
+                      message.success("Approved");
+                      router.push("/product-return");
+                    })
+                    .catch((e) => message.error(getApiErrorMessage(e, "Failed to approve")));
+                }}
+              >
+                ✓ Approve
+              </Button>
+              <Button
+                danger
+                className="!rounded-lg"
+                loading={decisionLoading}
+                onClick={() => {
+                  decideProductReturn({ id, decision: "reject" })
+                    .unwrap()
+                    .then(() => {
+                      message.success("Rejected");
+                      router.push("/product-return");
+                    })
+                    .catch((e) => message.error(getApiErrorMessage(e, "Failed to reject")));
+                }}
+              >
+                × Reject
+              </Button>
+            </>
+          ) : null}
+
+          <Tag
+            color={status === "QC Approved" ? "green" : status === "Pending QC" ? "gold" : status === "Rework Created" ? "blue" : "red"}
+            className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+          >
+            {status}
+          </Tag>
+        </div>
       </div>
 
+      {detailQuery.error ? (
+        <div className="mb-4">
+          <Alert type="error" showIcon message={getApiErrorMessage(detailQuery.error, "Failed to load detail")} className="!rounded-xl" />
+        </div>
+      ) : null}
+
       <Card className="!rounded-xl" bordered>
-        <Table<LineRow> dataSource={rows} columns={columns} rowKey="key" pagination={false} size="middle" />
+        <Table<LineRow>
+          dataSource={rows}
+          columns={columns}
+          rowKey="key"
+          pagination={false}
+          size="middle"
+          loading={detailQuery.isFetching}
+        />
       </Card>
     </div>
   );

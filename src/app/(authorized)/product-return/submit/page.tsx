@@ -3,13 +3,31 @@
 import React, { useMemo, useState } from "react";
 import { Button, Card, Form, Input, InputNumber, Select, message } from "antd";
 import { useRouter } from "next/navigation";
+import { useCreateProductReturnMutation } from "@/lib/api/product-return/api";
+import { getApiErrorMessage } from "@/lib/api/error";
+
+type SubmitReturnValues = {
+  uniq: string;
+  date: string;
+  partNo: string;
+  partName: string;
+  kanban: string;
+  scrapQty: number;
+  reworkQty: number;
+  submittedBy?: string;
+  notes?: string;
+  status?: string;
+};
 
 export default function SubmitProductReturnPage() {
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
+  const [form] = Form.useForm<SubmitReturnValues>();
+  const [createProductReturn] = useCreateProductReturnMutation();
 
   const initialValues = useMemo(
     () => ({
+      uniq: "KBN-001-2024",
       date: "2024-12-16",
       partNo: "PN-45678",
       partName: "Bearing Assembly",
@@ -36,13 +54,30 @@ export default function SubmitProductReturnPage() {
             type="primary"
             className="!rounded-lg"
             loading={submitting}
-            onClick={() => {
-              setSubmitting(true);
-              setTimeout(() => {
+            onClick={async () => {
+              try {
+                setSubmitting(true);
+                const values = await form.validateFields();
+                await createProductReturn({
+                  uniq: values.uniq,
+                  kanban: values.kanban,
+                  part_no: values.partNo,
+                  part_name: values.partName,
+                  date_received: values.date,
+                  quantity_scrap: Number(values.scrapQty ?? 0),
+                  unit: "Pcs",
+                  quantity_rework: Number(values.reworkQty ?? 0),
+                  submitted_by: values.submittedBy,
+                  notes: values.notes,
+                }).unwrap();
+
                 message.success("Product return submitted");
-                setSubmitting(false);
                 router.push("/product-return");
-              }, 600);
+              } catch (e) {
+                message.error(getApiErrorMessage(e, "Failed to submit"));
+              } finally {
+                setSubmitting(false);
+              }
             }}
           >
             Submit
@@ -51,7 +86,7 @@ export default function SubmitProductReturnPage() {
       </div>
 
       <Card className="!rounded-xl" bordered>
-        <Form layout="vertical" initialValues={initialValues}>
+        <Form form={form} layout="vertical" initialValues={initialValues}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Form.Item label="Date" name="date" rules={[{ required: true }]}
             >
@@ -67,6 +102,9 @@ export default function SubmitProductReturnPage() {
                   { label: "Rejected", value: "Rejected" },
                 ]}
               />
+            </Form.Item>
+            <Form.Item label="Uniq ID" name="uniq" rules={[{ required: true, message: "Uniq is required" }]}>
+              <Input className="!rounded-lg" />
             </Form.Item>
             <Form.Item label="Part No" name="partNo" rules={[{ required: true }]}>
               <Input className="!rounded-lg" />
