@@ -39,8 +39,21 @@ export default function LoginPage() {
       Cookies.set("Authorization", token, { expires: 7, path: "/", sameSite: "lax" });
       message.success("Login success");
       router.push("/dashboard");
-    } catch {
-      message.error("Login failed");
+    } catch (err) {
+      const maybeAny = err as {
+        status?: number | string;
+        data?: unknown;
+        error?: string;
+      };
+
+      const serverMessage =
+        (maybeAny?.data &&
+        typeof maybeAny.data === "object" &&
+        "message" in (maybeAny.data as Record<string, unknown>)
+          ? String((maybeAny.data as Record<string, unknown>).message)
+          : undefined) || undefined;
+
+      message.error(serverMessage || maybeAny?.error || "Login failed");
     }
   };
 

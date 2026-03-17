@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Form, Input, Modal, Select, Table, Tag, Typography, message } from "antd";
+import { Button, Form, Input, Modal, Select, Table, Tag, Typography, Upload, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   BulbOutlined,
@@ -11,6 +11,7 @@ import {
   EyeOutlined,
   PlusOutlined,
   RightOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useDeleteBomMutation, useGetBomTreeQuery, useUpdateBomMutation, type BackendBomNode } from "@/lib/api/bom/api";
@@ -37,6 +38,14 @@ type BomEditFormValues = {
   partName: string;
   partNumber?: string;
   status: BomStatus;
+};
+
+const getLevelNumber = (levelLabel: string): number => {
+  if (levelLabel === "Parent") return 0;
+  const m = /Level\s+(\d+)/i.exec(levelLabel);
+  if (!m) return 1;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : 1;
 };
 
 const mockBomData: BomRow[] = [
@@ -174,17 +183,41 @@ export default function BillOfMaterialPage() {
     return s.includes("inact") ? "Inactive" : "Active";
   };
 
+  const pickBackendImage = (node: BackendBomNode): string | undefined => {
+    const candidates = [
+      node.image_url,
+      (node as unknown as { image?: string }).image,
+      (node as unknown as { imageUrl?: string }).imageUrl,
+      (node as unknown as { image_path?: string }).image_path,
+      (node as unknown as { imagePath?: string }).imagePath,
+    ];
+    for (const c of candidates) {
+      const v = String(c ?? "").trim();
+      if (v && v !== "null" && v !== "undefined") return v;
+    }
+    return undefined;
+  };
+
+  const toggleExpanded = (key: React.Key) => {
+    setExpandedRowKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+  };
+
   const mapNode = (node: BackendBomNode, level: number): BomRow => {
-    const uniq = node.uniq ?? node.assembly_code ?? node.id;
+    const apiIdRaw = String(node.id ?? node.uuid ?? node._id ?? "").trim();
+    const apiId = apiIdRaw || undefined;
+    const uniqRaw = String(node.uniq ?? node.assembly_code ?? apiIdRaw ?? "").trim();
+    const uniq = uniqRaw || "-";
     const partName = node.part_name ?? "-";
     const partNumber = node.part_number ?? "-";
     const qpu = level === 0 ? "-" : `${node.qpu ?? 1} pcs`;
     const levelLabel = level === 0 ? "Parent" : `Level ${level}`;
-    const imageSrc = resolveImageSrc(node.image_url);
+    const imageSrc = resolveImageSrc(pickBackendImage(node));
 
     return {
-      key: node.id ?? uniq,
-      apiId: node.id,
+      key: apiId ?? uniq,
+      apiId,
       uniq,
       partName,
       partNumber,
@@ -214,15 +247,40 @@ export default function BillOfMaterialPage() {
       width: 140,
       render: (_: unknown, record: BomRow) => {
         const isParent = record.levelLabel === "Parent";
+        const canExpand = (record.children?.length ?? 0) > 0;
+        const isExpanded = expandedRowKeys.includes(record.key);
         return (
-          <span
-            className={
-              isParent
-                ? "inline-flex items-center rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white"
-                : "inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700"
-            }
-          >
-            {record.uniq}
+          <span className="inline-flex items-center gap-1">
+            {canExpand ? (
+              <button
+                type="button"
+                className="inline-flex items-center justify-center w-6 h-6 rounded hover:bg-gray-100"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleExpanded(record.key);
+                }}
+                aria-label={isExpanded ? "Collapse row" : "Expand row"}
+              >
+                <RightOutlined
+                  className={
+                    isExpanded
+                      ? "text-gray-600 rotate-90 transition-transform"
+                      : "text-gray-600 transition-transform"
+                  }
+                />
+              </button>
+            ) : (
+              <span className="inline-block w-6" />
+            )}
+            <span
+              className={
+                isParent
+                  ? "inline-flex items-center rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white"
+                  : "inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700"
+              }
+            >
+              {record.uniq}
+            </span>
           </span>
         );
       },
@@ -325,6 +383,21 @@ export default function BillOfMaterialPage() {
       width: 120,
       render: (_: unknown, record: BomRow) => (
         <div className="flex items-center gap-2">
+          <Upload
+            accept="image/*"
+            showUploadList={false}
+            beforeUpload={(file) => {
+              void uploadRowImage(record, file as File);
+              return false;
+            }}
+          >
+            <Button
+              type="text"
+              icon={<UploadOutlined />}
+              onClick={(e) => e.stopPropagation()}
+              aria-label={`Upload image for ${record.uniq}`}
+            />
+          </Upload>
           <Button
             type="text"
             icon={<EyeOutlined />}
@@ -413,6 +486,29 @@ export default function BillOfMaterialPage() {
   const closeDelete = () => {
     setDeleteOpen(false);
     setDeletingRow(null);
+  };
+
+  const uploadRowImage = async (record: BomRow, file: File) => {
+    if (!useApi) {
+      messageApi.info("Upload image is available only when API is enabled");
+      return;
+    }
+
+    if (!record.apiId) {
+      messageApi.error("Missing BOM id");
+      return;
+    }
+
+    try {
+      await updateBom({
+        id: record.apiId,
+        body: { imageFile: file },
+      }).unwrap();
+      messageApi.success("Image uploaded");
+      await refetchBomTree();
+    } catch (err) {
+      messageApi.error(getApiErrorMessage(err, "Failed to upload image"));
+    }
   };
 
   const confirmDelete = async () => {
@@ -538,31 +634,11 @@ export default function BillOfMaterialPage() {
               expandedRowKeys,
               onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
               rowExpandable: (record) => (record.children?.length ?? 0) > 0,
-              expandIcon: ({ expanded, onExpand, record }) => {
-                const canExpand = (record.children?.length ?? 0) > 0;
-                if (!canExpand) return <span className="inline-block w-4" />;
-
-                return (
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center w-6 h-6 rounded hover:bg-gray-100"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onExpand(record, e);
-                    }}
-                    aria-label={expanded ? "Collapse row" : "Expand row"}
-                  >
-                    <RightOutlined
-                      className={
-                        expanded
-                          ? "text-gray-600 rotate-90 transition-transform"
-                          : "text-gray-600 transition-transform"
-                      }
-                    />
-                  </button>
-                );
-              },
-              indentSize: 20,
+              // Put expand arrow in the UNIQ column (next to the badge)
+              showExpandColumn: false,
+              // We render the icon ourselves in the UNIQ column.
+              expandIcon: () => null,
+              indentSize: 56,
             }}
             onRow={(record) => ({
               onClick: () => {

@@ -112,6 +112,30 @@ const menuItems: MenuItem[] = [
         icon: MdGroup,
         href: "/master-supplier",
       },
+      {
+        id: "master-supplier-only",
+        label: "Supplier Only",
+        icon: MdGroup,
+        href: "/master-supplier?tab=only",
+      },
+      {
+        id: "master-supplier-raw",
+        label: "Supplier - Raw Material",
+        icon: MdScience,
+        href: "/master-supplier?tab=raw",
+      },
+      {
+        id: "master-supplier-indirect",
+        label: "Supplier - Indirect",
+        icon: MdScience,
+        href: "/master-supplier?tab=indirect",
+      },
+      {
+        id: "master-supplier-subcon",
+        label: "Supplier - Sub Con",
+        icon: MdScience,
+        href: "/master-supplier?tab=subcon",
+      },
     ],
   },
   {

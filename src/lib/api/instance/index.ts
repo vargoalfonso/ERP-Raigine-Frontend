@@ -1,4 +1,5 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
+import type { FetchArgs } from "@reduxjs/toolkit/query";
 
 export const getUserLocation = async () => {
   return new Promise<{ latitude: number; longitude: number }>(
@@ -54,8 +55,8 @@ export const generateHeaders = async ({
   const headers: Record<string, string> = {
     "User-Agent": deviceInfo.userAgent,
     "X-Device-Info": deviceInfo.deviceInfo,
-    "X-Longitude": location.latitude?.toString() ?? "",
-    "X-Latitude": location.longitude?.toString() ?? "",
+    "X-Longitude": location.longitude?.toString() ?? "",
+    "X-Latitude": location.latitude?.toString() ?? "",
     "X-Source-System": "web, mobile",
   };
 
@@ -74,17 +75,29 @@ export const generateHeaders = async ({
 };
 
 const rawBaseUrl = process.env.NEXT_PUBLIC_API_URL;
-export const apiBaseUrl = rawBaseUrl && rawBaseUrl !== "undefined" ? rawBaseUrl : "";
+export const apiBaseUrl =
+  rawBaseUrl && rawBaseUrl !== "undefined" ? rawBaseUrl.replace(/\/+$/, "") : "";
 
 const API_TIMEOUT_MS = 15_000;
 
 export const apiSlice = createApi({
   reducerPath: "api",
-  tagTypes: ["MasterSuppliers"],
+  tagTypes: ["MasterSuppliers", "ProductReturns"],
   // Prevent bursty background refetches on tab focus.
   // Keep explicit refetches and normal cache invalidation.
   refetchOnFocus: false,
-  baseQuery: async (args, api, extraOptions) => {
+  baseQuery: async (
+    args:
+      | string
+      | (FetchArgs & {
+          meta?: {
+            useAuthorization?: boolean;
+            contentType?: "application/json" | "multipart/form-data";
+          };
+        }),
+    api,
+    extraOptions
+  ) => {
     if (!apiBaseUrl) {
       return {
         error: {
@@ -95,10 +108,39 @@ export const apiSlice = createApi({
       } as const;
     }
 
+    const meta = typeof args === "string" ? undefined : args.meta;
     const { useAuthorization = false, contentType = "application/json" } =
-      args.meta || {};
+      meta || {};
 
     const headers = await generateHeaders({ useAuthorization, contentType });
+
+    // Backends are commonly mounted behind a reverse proxy at `/api`.
+    // Our endpoint definitions typically start with `/api/...`.
+    // If `NEXT_PUBLIC_API_URL` already ends with `/api`, avoid generating `/api/api/...`.
+    const normalizeUrl = (url: string) => {
+      if (!apiBaseUrl.endsWith("/api")) return url;
+      if (url === "/api") return "/";
+      if (url.startsWith("/api/")) return url.slice("/api".length);
+      return url;
+    };
+
+    const normalizedArgs = (() => {
+      if (typeof args === "string") return normalizeUrl(args);
+      if (args && typeof args === "object" && "url" in args) {
+        const maybeUrl = (args as { url?: unknown }).url;
+        if (typeof maybeUrl === "string") {
+          return { ...args, url: normalizeUrl(maybeUrl) };
+        }
+      }
+      return args;
+    })();
+
+    const argsForBaseQuery: string | FetchArgs = (() => {
+      if (typeof normalizedArgs === "string") return normalizedArgs;
+      const rest = { ...normalizedArgs } as FetchArgs & { meta?: unknown };
+      delete (rest as { meta?: unknown }).meta;
+      return rest;
+    })();
 
     const result = await fetchBaseQuery({
       baseUrl: apiBaseUrl,
@@ -106,7 +148,7 @@ export const apiSlice = createApi({
       headers: {
         ...headers,
       },
-    })(args, api, extraOptions);
+    })(argsForBaseQuery, api, extraOptions);
 
     return result;
   },
