@@ -15,6 +15,7 @@ import {
   Upload,
   message,
 } from "antd";
+import type { NamePath } from "antd/es/form/interface";
 import type { UploadFile } from "antd/es/upload/interface";
 import {
   ArrowLeftOutlined,
@@ -818,7 +819,7 @@ export default function CreateBomPage() {
                               <Button
                                 icon={<PlusOutlined />}
                                 onClick={() => {
-                                  const path: Array<string | number> = [
+                                  const path: NamePath = [
                                     "child_parts",
                                     childField.name,
                                     "child_parts",
@@ -1140,7 +1141,7 @@ export default function CreateBomPage() {
                                           <Button
                                             icon={<PlusOutlined />}
                                             onClick={() => {
-                                              const path: Array<string | number> = [
+                                              const path: NamePath = [
                                                 "child_parts",
                                                 childField.name,
                                                 "child_parts",
@@ -1357,7 +1358,7 @@ export default function CreateBomPage() {
                                                       <Button
                                                         icon={<PlusOutlined />}
                                                         onClick={() => {
-                                                          const path: Array<string | number> = [
+                                                          const path: NamePath = [
                                                             "child_parts",
                                                             childField.name,
                                                             "child_parts",
