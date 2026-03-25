@@ -5,62 +5,76 @@ import { Button, InputNumber, Pagination, Select, Table, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { DownloadOutlined, FileTextOutlined, ShoppingCartOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetProcurementDnBoardQuery } from "@/lib/api/procurement-dn/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type ProcurementTab = "raw" | "indirect" | "subcon";
 
 type DnRow = {
   key: string;
   period: string;
-  dnNumber: string;
   poNumber: string;
-  uniq: string;
   partner: string;
+  dnCreated: number;
+  dnIncoming: number;
   status: "Open" | "Closed" | "In Transit";
 };
 
 const formatNumber = (n: number) => new Intl.NumberFormat("en-US").format(n);
 
 const makeRows = (tab: ProcurementTab): DnRow[] => {
-  const prefix = tab === "raw" ? "RM" : tab === "indirect" ? "IRM" : "SC";
   const partner = tab === "subcon" ? "PT Subcon Partner" : "PT Steel Manufacturing";
   return [
     {
       key: `${tab}-1`,
       period: "2024-01",
-      dnNumber: `DN-${prefix}-2024-001`,
-      poNumber: `PO-${prefix}-2024-001`,
-      uniq: tab === "raw" ? "STKM550-001" : tab === "indirect" ? "GLOVES-001" : "SC-PART-001",
+      poNumber: `PO-${tab.toUpperCase()}-2024-001`,
       partner,
+      dnCreated: 10,
+      dnIncoming: 3,
       status: "In Transit",
     },
     {
       key: `${tab}-2`,
       period: "2024-01",
-      dnNumber: `DN-${prefix}-2024-002`,
-      poNumber: `PO-${prefix}-2024-002`,
-      uniq: tab === "raw" ? "NBR70-002" : tab === "indirect" ? "MASK-002" : "SC-PART-002",
+      poNumber: `PO-${tab.toUpperCase()}-2024-002`,
       partner,
+      dnCreated: 0,
+      dnIncoming: 0,
       status: "Open",
     },
     {
       key: `${tab}-3`,
       period: "2024-01",
-      dnNumber: `DN-${prefix}-2024-003`,
-      poNumber: `PO-${prefix}-2024-003`,
-      uniq: tab === "raw" ? "S45C-003" : tab === "indirect" ? "CLEANER-003" : "SC-PART-003",
+      poNumber: `PO-${tab.toUpperCase()}-2024-003`,
       partner,
+      dnCreated: 5,
+      dnIncoming: 5,
       status: "Closed",
     },
     {
       key: `${tab}-4`,
       period: "2024-01",
-      dnNumber: `DN-${prefix}-2024-004`,
-      poNumber: `PO-${prefix}-2024-004`,
-      uniq: tab === "raw" ? "AL6061-004" : tab === "indirect" ? "RAG-004" : "SC-PART-004",
+      poNumber: `PO-${tab.toUpperCase()}-2024-004`,
       partner,
+      dnCreated: 2,
+      dnIncoming: 0,
       status: "Open",
     },
   ];
+};
+
+const tabToCategory = (tab: ProcurementTab) => {
+  if (tab === "raw") return "RAW_MATERIAL" as const;
+  if (tab === "indirect") return "INDIRECT_RAW_MATERIAL" as const;
+  return "SUBCON" as const;
+};
+
+const computeStatus = (dnCreated: number, dnIncoming: number): DnRow["status"] => {
+  if (dnCreated > 0 && dnIncoming >= dnCreated) return "Closed";
+  if (dnCreated > 0 && dnIncoming > 0) return "In Transit";
+  return "Open";
 };
 
 export default function DnProcurementPage() {
@@ -101,7 +115,37 @@ function DnProcurementPageContent() {
     return "DN - Sub Con";
   }, [activeTab]);
 
-  const rows = useMemo(() => makeRows(activeTab), [activeTab]);
+  const apiEnabled = Boolean(apiBaseUrl);
+  const boardQuery = useGetProcurementDnBoardQuery(
+    apiEnabled ? { category: tabToCategory(activeTab) } : undefined,
+    { skip: !apiEnabled }
+  );
+
+  useEffect(() => {
+    if (!apiEnabled) return;
+    if (!boardQuery.error) return;
+    message.error(getApiErrorMessage(boardQuery.error, "Failed to load DN board"));
+  }, [apiEnabled, boardQuery.error]);
+
+  const rows = useMemo<DnRow[]>(() => {
+    if (!apiEnabled) return makeRows(activeTab);
+    const list = boardQuery.data?.data ?? [];
+    return list.map((r) => {
+      const key = r.po_id ?? r.id ?? "";
+      const dnCreated = Number(r.dn_created ?? 0);
+      const dnIncoming = Number(r.dn_incoming ?? 0);
+      const partner = activeTab === "subcon" ? r.subcon_name ?? r.supplier_name ?? "-" : r.supplier_name ?? "-";
+      return {
+        key,
+        period: r.month ?? "-",
+        poNumber: r.po_number ?? key,
+        partner,
+        dnCreated,
+        dnIncoming,
+        status: computeStatus(dnCreated, dnIncoming),
+      };
+    });
+  }, [activeTab, apiEnabled, boardQuery.data?.data]);
 
   const pagedRows = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -118,13 +162,6 @@ function DnProcurementPageContent() {
       render: (v: string) => <span className="text-xs text-gray-600">{v}</span>,
     },
     {
-      title: "DN Number",
-      dataIndex: "dnNumber",
-      key: "dnNumber",
-      width: 170,
-      render: (v: string) => <span className="text-sm font-medium text-gray-800">{v}</span>,
-    },
-    {
       title: "PO Number",
       dataIndex: "poNumber",
       key: "poNumber",
@@ -132,22 +169,27 @@ function DnProcurementPageContent() {
       render: (v: string) => <span className="text-sm text-gray-800">{v}</span>,
     },
     {
-      title: "Uniq",
-      dataIndex: "uniq",
-      key: "uniq",
-      width: 130,
-      render: (v: string) => (
-        <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
-          {v}
-        </span>
-      ),
-    },
-    {
       title: activeTab === "subcon" ? "SubCon" : "Supplier",
       dataIndex: "partner",
       key: "partner",
       width: 220,
       render: (v: string) => <span className="text-sm text-gray-800">{v}</span>,
+    },
+    {
+      title: "DN Created",
+      dataIndex: "dnCreated",
+      key: "dnCreated",
+      width: 110,
+      align: "right",
+      render: (v: number) => <span className="text-sm text-gray-800">{formatNumber(v)}</span>,
+    },
+    {
+      title: "DN Incoming",
+      dataIndex: "dnIncoming",
+      key: "dnIncoming",
+      width: 110,
+      align: "right",
+      render: (v: number) => <span className="text-sm text-gray-800">{formatNumber(v)}</span>,
     },
     {
       title: "Status",
@@ -175,7 +217,7 @@ function DnProcurementPageContent() {
             size="small"
             className="!rounded-lg"
             icon={<FileTextOutlined />}
-            onClick={() => message.info(`View DN: ${record.dnNumber}`)}
+            onClick={() => router.push(`/dn-management/detail/${encodeURIComponent(record.key)}?tab=${encodeURIComponent(activeTab)}`)}
           >
             View
           </Button>
@@ -199,10 +241,22 @@ function DnProcurementPageContent() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="text-2xl font-bold text-gray-900 mb-1">{pageTitle}</h1>
-              <p className="text-sm text-gray-500">Track DN creation, receiving status, and link back to PO (mock)</p>
+              <p className="text-sm text-gray-500">Track DN creation, receiving status, and link back to PO</p>
             </div>
             <div className="flex items-center gap-2">
-              <Button className="!rounded-lg" icon={<DownloadOutlined />} onClick={() => message.info("Generate DN report (mock)")}>
+              <Button
+                type="primary"
+                className="!rounded-lg"
+                icon={<ShoppingCartOutlined />}
+                onClick={() => router.push(`/dn-management/create?tab=${encodeURIComponent(activeTab)}`)}
+              >
+                Create DN
+              </Button>
+              <Button
+                className="!rounded-lg"
+                icon={<DownloadOutlined />}
+                onClick={() => message.info("Generate DN report is not implemented yet")}
+              >
                 Generate Report
               </Button>
             </div>
@@ -231,7 +285,7 @@ function DnProcurementPageContent() {
                 <div className="text-sm font-semibold text-gray-900">DN Monitoring Board</div>
               </div>
               <div className="text-sm text-gray-500 mt-1">Monitor delivery notes status and receiving progress</div>
-              <div className="mt-2 text-xs text-gray-500">{rows.length} delivery notes</div>
+              <div className="mt-2 text-xs text-gray-500">{rows.length} POs</div>
             </div>
           </div>
 
@@ -296,7 +350,9 @@ function DnProcurementPageContent() {
 
         <div className="mt-6 rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs text-gray-500 flex items-center gap-2">
           <FileTextOutlined />
-          <span>Note: This page is mock UI for procurement DN monitoring.</span>
+          <span>
+            Note: {apiEnabled ? "Using backend API (/api/procurement/dn/board)." : "Using mock data (NEXT_PUBLIC_API_URL is not set)."}
+          </span>
         </div>
       </div>
     </div>

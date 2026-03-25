@@ -183,7 +183,7 @@ export default function PrlManagementPage() {
   const [activeTab, setActiveTab] = useState<PrlTabId>("forecast-table");
   const [search, setSearch] = useState<string>("");
   const [periodFilter, setPeriodFilter] = useState<string>("current");
-  const [customerFilter, setCustomerFilter] = useState<string>("all");
+  const [customerFilter, setCustomerFilter] = useState<string>("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [excelModalOpen, setExcelModalOpen] = useState(false);
@@ -368,6 +368,7 @@ export default function PrlManagementPage() {
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const customerQ = customerFilter.trim().toLowerCase();
 
     return initialRows.filter((r) => {
       const matchesQuery =
@@ -377,18 +378,13 @@ export default function PrlManagementPage() {
         r.partNumber.toLowerCase().includes(q) ||
         r.productModel.toLowerCase().includes(q);
 
-      const matchesCustomer = customerFilter === "all" ? true : r.customer === customerFilter;
+      const matchesCustomer = !customerQ || r.customer.toLowerCase().includes(customerQ);
       const matchesPeriod = periodFilter === "current" ? true : r.period === periodFilter;
       const matchesType = typeFilter === "all" ? true : true; // placeholder for future type mapping
 
       return matchesQuery && matchesCustomer && matchesPeriod && matchesType;
     });
   }, [search, customerFilter, periodFilter, typeFilter]);
-
-  const customerOptions = useMemo(() => {
-    const uniqCustomers = Array.from(new Set(initialRows.map((r) => r.customer)));
-    return [{ label: "All Customers", value: "all" }, ...uniqCustomers.map((c) => ({ label: c, value: c }))];
-  }, []);
 
   const periodOptions = useMemo(
     () => [
@@ -682,7 +678,13 @@ export default function PrlManagementPage() {
 
           <div className="flex items-center gap-2">
             <Select value={periodFilter} onChange={setPeriodFilter} options={periodOptions} className="min-w-[160px]" />
-            <Select value={customerFilter} onChange={setCustomerFilter} options={customerOptions} className="min-w-[170px]" />
+            <Input
+              allowClear
+              value={customerFilter}
+              onChange={(e) => setCustomerFilter(e.target.value)}
+              placeholder="Customer Name"
+              className="!rounded-lg min-w-[170px]"
+            />
             <Select value={typeFilter} onChange={setTypeFilter} options={typeOptions} className="min-w-[130px]" />
           </div>
         </div>

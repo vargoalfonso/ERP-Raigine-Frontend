@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Button, Input, Select, Table, Tag, message } from "antd";
+import { Button, Input, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useRouter } from "next/navigation";
 import {
@@ -82,19 +82,7 @@ export default function CustomerPoDnSoPage() {
   const router = useRouter();
   const [tab, setTab] = useState<CustomerPoTabId>("dn");
   const [search, setSearch] = useState("");
-  const [customerFilter, setCustomerFilter] = useState<string>("all");
-
-  const customerOptions = useMemo(
-    () => [
-      { label: "All Customers", value: "all" },
-      { label: "Toyota Motor Company", value: "toyota" },
-      { label: "Honda Motor", value: "honda" },
-      { label: "Nissan Global", value: "nissan" },
-      { label: "Ford Motor Company", value: "ford" },
-      { label: "General Motors", value: "gm" },
-    ],
-    []
-  );
+  const [customerFilter, setCustomerFilter] = useState<string>("");
 
   const dnRows = useMemo<DnRow[]>(
     () => [
@@ -224,8 +212,9 @@ export default function CustomerPoDnSoPage() {
 
   const filteredDnRows = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const customerQ = customerFilter.trim().toLowerCase();
     return dnRows.filter((r) => {
-      const passCustomer = customerFilter === "all" || r.customer.toLowerCase().includes(customerFilter);
+      const passCustomer = !customerQ || r.customer.toLowerCase().includes(customerQ);
       const passSearch =
         !q ||
         r.dnNumber.toLowerCase().includes(q) ||
@@ -237,8 +226,9 @@ export default function CustomerPoDnSoPage() {
 
   const filteredPoRows = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const customerQ = customerFilter.trim().toLowerCase();
     return poRows.filter((r) => {
-      const passCustomer = customerFilter === "all" || r.customer.toLowerCase().includes(customerFilter);
+      const passCustomer = !customerQ || r.customer.toLowerCase().includes(customerQ);
       const passSearch = !q || r.poNumber.toLowerCase().includes(q) || r.customer.toLowerCase().includes(q);
       return passCustomer && passSearch;
     });
@@ -246,8 +236,9 @@ export default function CustomerPoDnSoPage() {
 
   const filteredSoRows = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const customerQ = customerFilter.trim().toLowerCase();
     return soRows.filter((r) => {
-      const passCustomer = customerFilter === "all" || r.customer.toLowerCase().includes(customerFilter);
+      const passCustomer = !customerQ || r.customer.toLowerCase().includes(customerQ);
       const passSearch = !q || r.soNumber.toLowerCase().includes(q) || r.customer.toLowerCase().includes(q);
       return passCustomer && passSearch;
     });
@@ -553,11 +544,12 @@ export default function CustomerPoDnSoPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Select
+            <Input
+              allowClear
               value={customerFilter}
-              onChange={setCustomerFilter}
-              options={customerOptions}
-              className="min-w-[180px]"
+              onChange={(e) => setCustomerFilter(e.target.value)}
+              placeholder="Customer Name"
+              className="!rounded-lg min-w-[180px]"
             />
             <Button className="!rounded-lg" icon={<DownloadOutlined />} onClick={() => message.info("Export")}
             >

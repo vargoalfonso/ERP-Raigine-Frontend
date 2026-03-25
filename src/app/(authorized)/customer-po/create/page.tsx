@@ -92,15 +92,6 @@ export default function CreateCustomerOrderPage() {
     },
   ]);
 
-  const customerOptions = useMemo(
-    () => [
-      { label: "Toyota Motor Company", value: "Toyota Motor Company" },
-      { label: "Honda Motor", value: "Honda Motor" },
-      { label: "Nissan Global", value: "Nissan Global" },
-    ],
-    []
-  );
-
   const uniqOptions = useMemo(
     () => [
       { label: "LV-001", value: "LV-001" },
@@ -311,9 +302,8 @@ export default function CreateCustomerOrderPage() {
           }
         >
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <Form.Item label="Customer Name" name="customerName" rules={[{ required: true, message: "Select Customer" }]}
-            >
-              <Select placeholder="Select Customer" options={customerOptions} />
+            <Form.Item label="Customer Name" name="customerName" rules={[{ required: true, message: "Input Customer Name" }]}>
+              <Input placeholder="Input Customer Name" allowClear />
             </Form.Item>
 
             <Form.Item label="Contact Person" name="contactPerson" rules={[{ required: true, message: "Input Contact Person" }]}

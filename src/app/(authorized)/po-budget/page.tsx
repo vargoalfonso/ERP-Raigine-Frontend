@@ -253,15 +253,6 @@ export default function PoBudgetPage() {
     return rowsByTab[activeTab];
   }, [rowsByTab, activeTab]);
 
-  const customerOptions = useMemo(
-    () => [
-      { label: "Toyota Motor Indonesia", value: "Toyota Motor Indonesia" },
-      { label: "Honda Manufacturing", value: "Honda Manufacturing" },
-      { label: "Nissan Global", value: "Nissan Global" },
-    ],
-    []
-  );
-
   const supplierOptions = useMemo(
     () => [
       { label: "PT Steel Indonesia", value: "PT Steel Indonesia" },
@@ -882,12 +873,12 @@ export default function PoBudgetPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <div className="text-xs text-gray-600 mb-1">Customer Name</div>
-            <Select
-              value={addForm.customer || undefined}
-              onChange={(v) => setAddForm((p) => ({ ...p, customer: v }))}
-              options={customerOptions}
-              placeholder="Select customer"
-              className="w-full"
+            <Input
+              allowClear
+              value={addForm.customer}
+              onChange={(e) => setAddForm((p) => ({ ...p, customer: e.target.value }))}
+              placeholder="Input customer"
+              className="!rounded-lg"
             />
           </div>
           <div>

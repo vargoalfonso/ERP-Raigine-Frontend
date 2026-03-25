@@ -1,10 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
-import { Button, Table, Tag } from "antd";
+import { useEffect, useMemo } from "react";
+import { Button, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { LeftOutlined } from "@ant-design/icons";
 import { useParams, useRouter } from "next/navigation";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetProcurementPoByIdQuery } from "@/lib/api/procurement-po/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type PoItemRow = {
   key: string;
@@ -92,6 +95,10 @@ function buildMock(id: string) {
     totalQuantity: 3000,
     dnCreated: 10,
     dnIncoming: 3,
+    status: "-",
+    expectedArrival: "-",
+    dateIncoming: "-",
+    notes: "-",
     items,
   };
 }
@@ -101,7 +108,40 @@ export default function PoProcurementDetailPage() {
   const params = useParams<{ id: string }>();
   const id = decodeURIComponent(params?.id ?? "PO-RM-XXX");
 
-  const detail = useMemo(() => buildMock(id), [id]);
+  const apiEnabled = Boolean(apiBaseUrl);
+  const poQuery = useGetProcurementPoByIdQuery(id, { skip: !apiEnabled });
+
+  useEffect(() => {
+    if (!apiEnabled) return;
+    if (!poQuery.error) return;
+    message.error(getApiErrorMessage(poQuery.error, "Failed to load PO detail"));
+  }, [apiEnabled, poQuery.error]);
+
+  const detail = useMemo(() => {
+    if (!apiEnabled) return buildMock(id);
+    const po = poQuery.data?.data;
+    if (!po) return buildMock(id);
+
+    const supplier = po.po_category === "SUBCON" ? po.subcon_name ?? po.supplier_name : po.supplier_name;
+
+    return {
+      period: po.month ?? "-",
+      poNumber: po.po_number ?? po.id,
+      poBudgetNumber: po.data_order ?? "-",
+      totalBudgetPo: Number(po.total_po ?? 0),
+      supplier: supplier ?? "-",
+      totalQuantity: Number(po.total_po ?? 0),
+      dnCreated: Number(po.dn_created ?? 0),
+      dnIncoming: Number(po.dn_incoming ?? 0),
+      status: po.status ?? "-",
+      expectedArrival: po.expected_arrival ?? "-",
+      dateIncoming: po.date_incoming ?? "-",
+      notes: po.notes ?? "-",
+      items: [] as PoItemRow[],
+    };
+  }, [apiEnabled, id, poQuery.data?.data]);
+
+  const items = apiEnabled ? detail.items : detail.items;
 
   const columns: ColumnsType<PoItemRow> = [
     { title: "Uniq", dataIndex: "uniq", key: "uniq", width: 90 },
@@ -148,7 +188,10 @@ export default function PoProcurementDetailPage() {
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 max-w-6xl mx-auto">
         <div>
           <div className="text-lg font-bold text-gray-900">Details &amp; History Logs</div>
-          <div className="text-xs text-gray-500 mt-1">Complete PO Raw Material Information for {detail.poNumber}</div>
+          <div className="text-xs text-gray-500 mt-1">
+            Complete PO Raw Material Information for {detail.poNumber}
+            {apiEnabled && poQuery.isFetching && <span className="ml-2 text-gray-400">(Loading…)</span>}
+          </div>
         </div>
 
         <div className="mt-4 border-b border-gray-100">
@@ -183,6 +226,27 @@ export default function PoProcurementDetailPage() {
           <div>
             <div className="text-xs text-gray-500">Total Quantity</div>
             <div className="text-sm font-medium text-gray-900">{formatNumber(detail.totalQuantity)}</div>
+
+          {apiEnabled && (
+            <>
+              <div>
+                <div className="text-xs text-gray-500">Date Incoming</div>
+                <div className="text-sm font-medium text-gray-900">{detail.dateIncoming}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">Expected Arrival</div>
+                <div className="text-sm font-medium text-gray-900">{detail.expectedArrival}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">Status</div>
+                <div className="text-sm font-medium text-gray-900">{detail.status}</div>
+              </div>
+              <div className="md:col-span-3">
+                <div className="text-xs text-gray-500">Notes</div>
+                <div className="text-sm font-medium text-gray-900">{detail.notes}</div>
+              </div>
+            </>
+          )}
           </div>
 
           <div>
@@ -203,13 +267,19 @@ export default function PoProcurementDetailPage() {
         <div className="mt-5 overflow-hidden rounded-xl border border-gray-100">
           <Table<PoItemRow>
             columns={columns}
-            dataSource={detail.items}
+            dataSource={items}
             rowKey="key"
             size="middle"
             pagination={false}
             scroll={{ x: "max-content" }}
           />
         </div>
+
+        {apiEnabled && items.length === 0 && (
+          <div className="mt-3 text-xs text-gray-500">
+            Item rows are not provided by this endpoint.
+          </div>
+        )}
 
         <div className="mt-4 flex items-center justify-end">
           <Button className="!rounded-lg" onClick={() => router.push("/po-procurement")}

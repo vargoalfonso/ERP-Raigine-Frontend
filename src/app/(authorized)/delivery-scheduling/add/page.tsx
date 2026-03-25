@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Button, InputNumber, Select, Table, Tag, message } from "antd";
+import { Button, Input, InputNumber, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   ArrowLeftOutlined,
@@ -74,11 +74,6 @@ export default function AddNewDeliverySchedulePage() {
       },
     ],
     []
-  );
-
-  const customerOptions = useMemo(
-    () => [{ label: "Select Customer", value: "" }, ...Array.from(new Set(dnRefs.map((d) => d.customer))).map((c) => ({ label: c, value: c }))],
-    [dnRefs]
   );
 
   const dnRefOptions = useMemo(() => [{ label: "Select DN Number", value: "" }, ...dnRefs.map((d) => ({ label: d.label, value: d.value }))], [dnRefs]);
@@ -198,10 +193,11 @@ export default function AddNewDeliverySchedulePage() {
             </div>
             <div className="flex items-center gap-4 md:justify-end">
               <div className="w-28 text-sm text-gray-600">Customer</div>
-              <Select
+              <Input
+                allowClear
                 value={customer}
-                onChange={(v) => setCustomer(v)}
-                options={customerOptions}
+                onChange={(e) => setCustomer(e.target.value)}
+                placeholder="Customer Name"
                 className="!rounded-lg"
                 style={{ width: 260 }}
               />
@@ -221,7 +217,7 @@ export default function AddNewDeliverySchedulePage() {
           <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-6">
             <div>
               <div className="text-xs font-semibold text-gray-500">Customer</div>
-              <div className="text-sm text-gray-900 mt-1">{selectedRef?.customer ?? "-"}</div>
+              <div className="text-sm text-gray-900 mt-1">{customer || "-"}</div>
             </div>
             <div>
               <div className="text-xs font-semibold text-gray-500">Delivery Schedule</div>

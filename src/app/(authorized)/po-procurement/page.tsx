@@ -13,6 +13,9 @@ import {
   WarningOutlined,
 } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetProcurementPoBoardQuery } from "@/lib/api/procurement-po/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type ProcurementTab = "raw" | "indirect" | "subcon";
 
@@ -180,6 +183,8 @@ function PoProcurementPageContent() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
+  const apiEnabled = Boolean(apiBaseUrl);
+
   useEffect(() => {
     const tab = searchParams.get("tab");
     if (tab === "raw" || tab === "indirect" || tab === "subcon") {
@@ -205,7 +210,38 @@ function PoProcurementPageContent() {
     []
   );
 
-  const rows = rowsByTab[activeTab];
+  const category = useMemo(() => {
+    if (activeTab === "raw") return "RAW_MATERIAL" as const;
+    if (activeTab === "indirect") return "INDIRECT_RAW_MATERIAL" as const;
+    return "SUBCON" as const;
+  }, [activeTab]);
+
+  const monthFilter = searchParams.get("month") ?? undefined;
+  const supplierFilter = searchParams.get("supplier") ?? undefined;
+  const subconFilter = searchParams.get("subcon") ?? undefined;
+
+  const poBoardQuery = useGetProcurementPoBoardQuery(
+    { category, month: monthFilter, supplier: supplierFilter, subcon: subconFilter },
+    { skip: !apiEnabled }
+  );
+
+  const rows = useMemo<PoRow[]>(() => {
+    if (!apiEnabled) return rowsByTab[activeTab];
+    const list = poBoardQuery.data?.data ?? [];
+    return list.map((r) => {
+      const supplierName = activeTab === "subcon" ? r.subcon_name ?? r.supplier_name : r.supplier_name;
+      return {
+        key: r.po_id ?? r.id,
+        period: r.month ?? "-",
+        poNumber: r.po_number ?? String(r.po_id ?? r.id),
+        budgetIdr: Number(r.total_po ?? 0),
+        qtyDelivered: Number(r.total_incoming ?? 0),
+        uniq: r.data_order ?? r.po_category ?? "-",
+        supplier: supplierName ?? "-",
+        dnCreated: Number(r.dn_created ?? 0),
+      };
+    });
+  }, [activeTab, apiEnabled, poBoardQuery.data?.data, rowsByTab]);
 
   const poBadgeByNumber = useMemo(() => {
     const map = new Map<string, number>();
@@ -219,10 +255,19 @@ function PoProcurementPageContent() {
     return map;
   }, [rows]);
 
-  const totalPOs = 4;
-  const activeSuppliers = 4;
-  const totalPoValue = 190_000;
-  const lateDeliveries = 1;
+  const totalPOs = rows.length;
+  const activeSuppliers = useMemo(() => new Set(rows.map((r) => r.supplier).filter((s) => s && s !== "-")).size, [rows]);
+  const totalPoValue = useMemo(() => rows.reduce((sum, r) => sum + (r.budgetIdr || 0), 0), [rows]);
+  const lateDeliveries = useMemo(() => {
+    if (!apiEnabled) return 1;
+    return (poBoardQuery.data?.data ?? []).filter((r) => Number(r.po_alert ?? 0) > 0).length;
+  }, [apiEnabled, poBoardQuery.data?.data]);
+
+  useEffect(() => {
+    if (!apiEnabled) return;
+    if (!poBoardQuery.error) return;
+    message.error(getApiErrorMessage(poBoardQuery.error, "Failed to load PO board"));
+  }, [apiEnabled, poBoardQuery.error]);
 
   const pagedRows = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -258,11 +303,11 @@ function PoProcurementPageContent() {
       },
     },
     {
-      title: "Total Budget PO",
+      title: "Total PO",
       dataIndex: "budgetIdr",
       key: "budgetIdr",
       width: 170,
-      render: (v: number) => <span className="text-sm text-gray-800">{formatIdr(v)}</span>,
+      render: (v: number) => <span className="text-sm text-gray-800">{formatNumber(v)}</span>,
     },
     {
       title: "Uniq",
@@ -449,6 +494,7 @@ function PoProcurementPageContent() {
                 Track PO totals, incoming deliveries, and supplier performance with DN monitoring
               </div>
               <div className="mt-2 text-xs text-gray-500">{rows.length} purchase orders</div>
+              {apiEnabled && poBoardQuery.isFetching && <div className="mt-1 text-xs text-gray-400">Loading from API…</div>}
             </div>
 
             <Button

@@ -5,7 +5,6 @@ import {
   Button,
   Input,
   Modal,
-  Select,
   Table,
   Tag,
   message,
@@ -79,7 +78,7 @@ export default function DeliverySchedulingPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>("schedule");
   const [query, setQuery] = useState("");
-  const [customer, setCustomer] = useState<string>("Customers");
+  const [customer, setCustomer] = useState<string>("");
 
   const [approveAllOpen, setApproveAllOpen] = useState(false);
   const [approveAllTargetDay, setApproveAllTargetDay] = useState<string>("");
@@ -197,16 +196,15 @@ export default function DeliverySchedulingPage() {
     []
   );
 
-  const flatRows = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
-
   const filteredGroups = useMemo(() => {
     if (activeTab !== "schedule") return [];
 
     const q = query.trim().toLowerCase();
+    const customerQ = customer.trim().toLowerCase();
     return groups
       .map((g) => {
         const rows = g.rows.filter((r) => {
-          const inCustomer = customer === "Customers" || r.customer === customer;
+          const inCustomer = !customerQ || r.customer.toLowerCase().includes(customerQ);
           if (!inCustomer) return false;
           if (!q) return true;
           const haystack = `${r.customer} ${r.poDnName} ${r.uniq} ${r.partName} ${r.partNo} ${r.model} ${r.dnNumber}`.toLowerCase();
@@ -216,15 +214,6 @@ export default function DeliverySchedulingPage() {
       })
       .filter((g) => g.rows.length > 0);
   }, [activeTab, groups, query, customer]);
-
-  const customerOptions = useMemo(() => {
-    const base = activeTab === "dn" ? dnRows.map((r) => r.customer) : flatRows.map((r) => r.customer);
-    const unique = Array.from(new Set(base));
-    return [
-      { label: "Customers", value: "Customers" },
-      ...unique.map((c) => ({ label: c, value: c })),
-    ];
-  }, [activeTab, dnRows, flatRows]);
 
   const dnCounts = useMemo(() => {
     const total = dnRows.length;
@@ -237,8 +226,9 @@ export default function DeliverySchedulingPage() {
   const filteredDnRows = useMemo(() => {
     if (activeTab !== "dn") return [];
     const q = query.trim().toLowerCase();
+    const customerQ = customer.trim().toLowerCase();
     return dnRows.filter((r) => {
-      const inCustomer = customer === "Customers" || r.customer === customer;
+      const inCustomer = !customerQ || r.customer.toLowerCase().includes(customerQ);
       if (!inCustomer) return false;
       if (!q) return true;
       const haystack = `${r.dnNumber} ${r.customer} ${r.customerPo} ${r.uniq} ${r.partTitle} ${r.partNo} ${r.qrCode} ${r.packingList}`.toLowerCase();
@@ -578,7 +568,14 @@ export default function DeliverySchedulingPage() {
           />
 
           <div className="flex items-center gap-2">
-            <Select value={customer} onChange={setCustomer} options={customerOptions} className="!rounded-lg" style={{ width: 180 }} />
+            <Input
+              allowClear
+              value={customer}
+              onChange={(e) => setCustomer(e.target.value)}
+              placeholder="Customer Name"
+              className="!rounded-lg"
+              style={{ width: 180 }}
+            />
             <Button className="!rounded-lg" icon={<DownloadOutlined />} onClick={() => message.info("Export (mock)")}>Export</Button>
           </div>
         </div>

@@ -1,11 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Button, DatePicker, Input, Select, Table, Tag, message } from "antd";
+import { Button, DatePicker, Input, InputNumber, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { LeftOutlined, PlusOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import dayjs, { Dayjs } from "dayjs";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useCreateProcurementPoMutation } from "@/lib/api/procurement-po/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type PoItemRow = {
   key: string;
@@ -26,10 +29,21 @@ const formatIdr = (n: number) => `${formatNumber(n)} IDR`;
 export default function CreatePoProcurementPage() {
   const router = useRouter();
 
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [createPo, createPoState] = useCreateProcurementPoMutation();
+
   const [period, setPeriod] = useState<Dayjs | null>(dayjs("2024-01-01"));
-  const [totalIncoming, setTotalIncoming] = useState<string>("245");
-  const [dnCreated, setDnCreated] = useState<string>("12");
-  const [dnIncoming, setDnIncoming] = useState<string>("4");
+
+  const [poCategory, setPoCategory] = useState<"RAW_MATERIAL" | "INDIRECT_RAW_MATERIAL" | "SUBCON">("RAW_MATERIAL");
+  const [poNumber, setPoNumber] = useState<string>("");
+  const [supplierName, setSupplierName] = useState<string>("PT ABC");
+  const [subconName, setSubconName] = useState<string>("");
+  const [dataOrder, setDataOrder] = useState<string>("");
+  const [dateIncoming, setDateIncoming] = useState<Dayjs | null>(dayjs());
+  const [expectedArrival, setExpectedArrival] = useState<Dayjs | null>(null);
+  const [totalPo, setTotalPo] = useState<number>(0);
+  const [status, setStatus] = useState<string>("Open");
+  const [notes, setNotes] = useState<string>("");
 
   const [poBudget, setPoBudget] = useState<string | undefined>(undefined);
   const [poSequence, setPoSequence] = useState<string | undefined>(undefined);
@@ -177,9 +191,44 @@ export default function CreatePoProcurementPage() {
     message.success("PO generated (mock)");
   };
 
-  const handleSave = () => {
-    message.success("PO saved (mock)");
-    router.push("/po-procurement");
+  const handleSave = async () => {
+    if (!poNumber.trim()) {
+      message.error("PO Number is required");
+      return;
+    }
+    if (!period) {
+      message.error("Period is required");
+      return;
+    }
+
+    if (!apiEnabled) {
+      message.success("PO saved (mock)");
+      router.push("/po-procurement");
+      return;
+    }
+
+    try {
+      const created = await createPo({
+        po_category: poCategory,
+        month: period.format("YYYY-MM"),
+        po_number: poNumber.trim(),
+        supplier_name: supplierName.trim() || undefined,
+        subcon_name: poCategory === "SUBCON" ? (subconName.trim() || undefined) : undefined,
+        data_order: dataOrder.trim() || undefined,
+        date_incoming: dateIncoming ? dateIncoming.format("YYYY-MM-DD") : undefined,
+        total_po: Number.isFinite(totalPo) ? totalPo : undefined,
+        expected_arrival: expectedArrival ? expectedArrival.format("YYYY-MM-DD") : undefined,
+        status: status.trim() || undefined,
+        notes: notes.trim() || undefined,
+      }).unwrap();
+
+      message.success("PO created");
+      const createdId = created.data?.id;
+      if (createdId) router.push(`/po-procurement/detail/${encodeURIComponent(createdId)}`);
+      else router.push("/po-procurement");
+    } catch (e) {
+      message.error(getApiErrorMessage(e, "Failed to create PO"));
+    }
   };
 
   return (
@@ -198,7 +247,7 @@ export default function CreatePoProcurementPage() {
           <Button className="!rounded-lg" onClick={() => router.push("/po-procurement")}>
             Cancel
           </Button>
-          <Button type="primary" className="!rounded-lg" onClick={handleSave}>
+          <Button type="primary" className="!rounded-lg" onClick={handleSave} loading={createPoState.isLoading}>
             Save PO
           </Button>
         </div>
@@ -234,17 +283,75 @@ export default function CreatePoProcurementPage() {
                 className="w-full !rounded-lg"
               />
             </div>
+
             <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">Total Incoming</div>
-              <Input value={totalIncoming} onChange={(e) => setTotalIncoming(e.target.value)} className="!rounded-lg" />
+              <div className="text-xs font-semibold text-gray-700 mb-1">PO Category</div>
+              <Select
+                value={poCategory}
+                onChange={setPoCategory}
+                options={[
+                  { label: "RAW_MATERIAL", value: "RAW_MATERIAL" },
+                  { label: "INDIRECT_RAW_MATERIAL", value: "INDIRECT_RAW_MATERIAL" },
+                  { label: "SUBCON", value: "SUBCON" },
+                ]}
+                className="w-full"
+              />
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">PO Number</div>
+              <Input value={poNumber} onChange={(e) => setPoNumber(e.target.value)} className="!rounded-lg" placeholder="PO-001" />
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">Status</div>
+              <Select
+                value={status}
+                onChange={setStatus}
+                options={[{ label: "Open", value: "Open" }, { label: "Closed", value: "Closed" }]}
+                className="w-full"
+              />
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">Supplier Name</div>
+              <Input value={supplierName} onChange={(e) => setSupplierName(e.target.value)} className="!rounded-lg" placeholder="PT ABC" />
+            </div>
+
+            {poCategory === "SUBCON" ? (
+              <div>
+                <div className="text-xs font-semibold text-gray-700 mb-1">Subcon Name</div>
+                <Input value={subconName} onChange={(e) => setSubconName(e.target.value)} className="!rounded-lg" placeholder="Vendor Subcon" />
+              </div>
+            ) : (
+              <div />
+            )}
+
+            <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">Data Order</div>
+              <Input value={dataOrder} onChange={(e) => setDataOrder(e.target.value)} className="!rounded-lg" placeholder="DO-001" />
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">Total PO</div>
+              <InputNumber value={totalPo} onChange={(v) => setTotalPo(Number(v ?? 0))} className="w-full !rounded-lg" min={0} />
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">Date Incoming</div>
+              <DatePicker value={dateIncoming} onChange={(v) => setDateIncoming(v)} className="w-full !rounded-lg" />
             </div>
             <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">DN Created</div>
-              <Input value={dnCreated} onChange={(e) => setDnCreated(e.target.value)} className="!rounded-lg" />
+              <div className="text-xs font-semibold text-gray-700 mb-1">Expected Arrival</div>
+              <DatePicker value={expectedArrival} onChange={(v) => setExpectedArrival(v)} className="w-full !rounded-lg" />
             </div>
-            <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">DN Incoming</div>
-              <Input value={dnIncoming} onChange={(e) => setDnIncoming(e.target.value)} className="!rounded-lg" />
+            <div className="md:col-span-2">
+              <div className="text-xs font-semibold text-gray-700 mb-1">Notes</div>
+              <Input value={notes} onChange={(e) => setNotes(e.target.value)} className="!rounded-lg" placeholder="sample row" />
             </div>
           </div>
         </div>

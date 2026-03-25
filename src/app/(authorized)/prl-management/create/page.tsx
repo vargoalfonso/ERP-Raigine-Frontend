@@ -52,15 +52,6 @@ export default function AddForecastPage() {
   const router = useRouter();
   const [entries, setEntries] = useState<ForecastEntry[]>([newEntry()]);
 
-  const customerOptions = useMemo(
-    () => [
-      { label: "Toyota Motor Corp", value: "Toyota Motor Corp" },
-      { label: "Honda Manufacturing", value: "Honda Manufacturing" },
-      { label: "Nissan Global", value: "Nissan Global" },
-    ],
-    []
-  );
-
   const periodOptions = useMemo(
     () => [
       { label: "2024-Q1", value: "2024-Q1" },
@@ -161,12 +152,11 @@ export default function AddForecastPage() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div>
                   <div className="text-xs font-semibold text-gray-700 mb-1">Customer Name</div>
-                  <Select
-                    value={entry.customer}
-                    onChange={(v) => updateEntry(entry.id, { customer: v })}
-                    options={customerOptions}
-                    placeholder="Select customer"
-                    className="w-full"
+                  <Input
+                    value={entry.customer ?? ""}
+                    onChange={(e) => updateEntry(entry.id, { customer: e.target.value })}
+                    placeholder="Input customer name"
+                    className="!rounded-lg"
                     allowClear
                   />
                 </div>

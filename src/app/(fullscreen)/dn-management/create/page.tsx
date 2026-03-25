@@ -1,13 +1,16 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { Suspense, useMemo, useState } from "react";
 import { Button, Card, DatePicker, Input, InputNumber, Select, Tag, message } from "antd";
 import { LeftOutlined, SaveOutlined, PlusOutlined, QrcodeOutlined } from "@ant-design/icons";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
 import { decodeBarcodePayload } from "@/lib/utils/barcodePayload";
 import ScanQrModal from "@/components/ScanQrModal";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useCreateProcurementDnMutation } from "@/lib/api/procurement-dn/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type Step1Data = {
   period?: string;
@@ -106,7 +109,21 @@ function nextDnCode() {
 }
 
 export default function DnRawMaterialCreatePage() {
+  return (
+    <Suspense fallback={null}>
+      <DnRawMaterialCreatePageContent />
+    </Suspense>
+  );
+}
+
+function DnRawMaterialCreatePageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const tab = searchParams.get("tab");
+  const backTo = tab ? `/dn-procurement?tab=${encodeURIComponent(tab)}` : "/dn-management";
+
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [createDn, createDnState] = useCreateProcurementDnMutation();
 
   const [step1, setStep1] = useState<Step1Data>({
     period: "01/2024",
@@ -248,9 +265,55 @@ export default function DnRawMaterialCreatePage() {
     setDraft({});
   };
 
-  const onSave = () => {
-    message.success("DN Raw Material saved");
-    router.push("/dn-management");
+  const onSave = async () => {
+    if (!apiEnabled) {
+      message.success("DN Raw Material saved");
+      router.push(backTo);
+      return;
+    }
+
+    const poId = step1.poNumber ?? "";
+    if (!poId) {
+      message.error("PO Number (PO ID) is required");
+      return;
+    }
+    if (items.length === 0) {
+      message.error("At least 1 item is required");
+      return;
+    }
+
+    const deliveryDate =
+      items
+        .map((i) => i.dateIncoming)
+        .filter((d): d is Dayjs => Boolean(d))
+        .sort((a, b) => a.valueOf() - b.valueOf())[0] ?? dayjs();
+
+    try {
+      const res = await createDn({
+        po_id: poId,
+        dn_number: dnCode,
+        delivery_date: deliveryDate.format("YYYY-MM-DD"),
+        notes: "packing list",
+        items: items.map((i) => ({
+          uniq: i.uniq,
+          qty: i.orderQty,
+          uom: i.uom,
+          spec_material: i.materialInfo?.code ? String(i.materialInfo.code) : undefined,
+          packing: i.packingNumber,
+          pcs_kanban: i.pcsPerKanban,
+        })),
+      }).unwrap();
+
+      const createdId = res.data?.id;
+      message.success("DN created");
+      if (createdId) {
+        router.push(`/dn-management/detail/${encodeURIComponent(String(createdId))}${tab ? `?tab=${encodeURIComponent(tab)}` : ""}`);
+      } else {
+        router.push(backTo);
+      }
+    } catch (e) {
+      message.error(getApiErrorMessage(e, "Failed to create DN"));
+    }
   };
 
   const applyScan = (raw: string) => {
@@ -295,15 +358,15 @@ export default function DnRawMaterialCreatePage() {
           <div className="flex items-center justify-between gap-4">
             <button
               className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
-              onClick={() => router.push("/dn-management")}
+              onClick={() => router.push(backTo)}
             >
               <LeftOutlined />
               <span>Back to DN Raw Material</span>
             </button>
 
             <div className="flex items-center gap-2">
-              <Button onClick={() => router.push("/dn-management")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
+              <Button onClick={() => router.push(backTo)}>Cancel</Button>
+              <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={createDnState.isLoading}>
                 Save DN Raw Material
               </Button>
             </div>

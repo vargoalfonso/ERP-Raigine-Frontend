@@ -44,6 +44,7 @@ const getPageTitle = (pathname: string): string => {
     "/sub-con-materials/detail": "SubCon Stock In Vendor Details",
     "/dn-management": "DN Management",
     "/dn-management/detail": "DN Raw Material Details",
+    "/dn-procurement": "DN - Procurement",
     "/stock-opname": "Stock Opname",
   };
 
