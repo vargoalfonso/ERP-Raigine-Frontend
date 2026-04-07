@@ -2,6 +2,8 @@ import { apiSlice } from "@/lib/api/instance";
 import { unwrapBackendData } from "@/lib/api/utils/unwrap";
 import type { ApiResponse, DataArray, DataObject } from "@/types";
 
+const TAG = "ProcurementPos" as const;
+
 export type ProcurementPoCategory = "RAW_MATERIAL" | "INDIRECT_RAW_MATERIAL" | "SUBCON";
 
 export type ProcurementPoRecord = {
@@ -60,9 +62,36 @@ export type CreateProcurementPoRequest = {
 	data_order?: string;
 	date_incoming?: string;
 	total_po?: number;
+	total_budget_po?: number;
+	total_incoming?: number;
+	dn_created?: number;
+	dn_incoming?: number;
 	expected_arrival?: string;
 	status?: string;
 	notes?: string;
+
+	// Item-ish fields (optional, commonly used by UI)
+	uniq?: string;
+	spec_material?: string;
+	uom?: string;
+	weigh_kg?: number;
+	packing?: string;
+	pcs_kanban?: number;
+
+	// Budget linkage
+	po_budget_id?: number;
+	po_budget_number?: string;
+};
+
+export type BulkCreateProcurementPoResult = {
+	count: number;
+	ids: string[];
+};
+
+const getCategoryListEndpoint = (category?: ProcurementPoCategory) => {
+	if (category === "INDIRECT_RAW_MATERIAL") return "/api/procurement/po-indirectrm";
+	if (category === "SUBCON") return "/api/procurement/po-subcon";
+	return "/api/procurement/po-rm";
 };
 
 const ok = <T>(data: T, message = "OK"): ApiResponse<T> => ({
@@ -127,7 +156,6 @@ const toBoardRow = (raw: unknown): ProcurementPoBoardRow => {
 const toQueryString = (filters?: ProcurementPoFilters): string => {
 	if (!filters) return "";
 	const params = new URLSearchParams();
-	if (filters.category) params.set("category", filters.category);
 	if (filters.month) params.set("month", filters.month);
 	if (filters.supplier) params.set("supplier", filters.supplier);
 	if (filters.subcon) params.set("subcon", filters.subcon);
@@ -135,45 +163,61 @@ const toQueryString = (filters?: ProcurementPoFilters): string => {
 	return qs ? `?${qs}` : "";
 };
 
-export const procurementPoApiSlice = apiSlice.injectEndpoints({
+export const procurementPoApiSlice = apiSlice
+	.enhanceEndpoints({ addTagTypes: [TAG] })
+	.injectEndpoints({
 	endpoints: (builder) => ({
 		getProcurementPoBoard: builder.query<ApiResponse<DataArray<ProcurementPoBoardRow>>, ProcurementPoFilters | void>({
 			query: (filters) => ({
-				url: `/api/procurement/po/board${toQueryString(filters || undefined)}`,
+				url: `${getCategoryListEndpoint(filters?.category)}${toQueryString(filters || undefined)}`,
 				method: "GET",
 				meta: { useAuthorization: true, contentType: "application/json" },
 			}),
 			transformResponse: (response: unknown) => {
 				const unwrapped = unwrapBackendData<unknown>(response);
-				const list = Array.isArray(unwrapped) ? unwrapped : [];
+				const list = Array.isArray(unwrapped)
+					? unwrapped
+					: unwrapped && typeof unwrapped === "object" && Array.isArray((unwrapped as Record<string, unknown>).data)
+						? ((unwrapped as Record<string, unknown>).data as unknown[])
+						: [];
 				return ok((list as unknown[]).map(toBoardRow));
 			},
+			providesTags: [{ type: TAG, id: "BOARD" }],
 		}),
 
 		listProcurementPos: builder.query<ApiResponse<DataArray<ProcurementPoRecord>>, ProcurementPoFilters | void>({
 			query: (filters) => ({
-				url: `/api/procurement/po${toQueryString(filters || undefined)}`,
+				url: `${getCategoryListEndpoint(filters?.category)}${toQueryString(filters || undefined)}`,
 				method: "GET",
 				meta: { useAuthorization: true, contentType: "application/json" },
 			}),
 			transformResponse: (response: unknown) => {
 				const unwrapped = unwrapBackendData<unknown>(response);
-				const list = Array.isArray(unwrapped) ? unwrapped : [];
+				const list = Array.isArray(unwrapped)
+					? unwrapped
+					: unwrapped && typeof unwrapped === "object" && Array.isArray((unwrapped as Record<string, unknown>).data)
+						? ((unwrapped as Record<string, unknown>).data as unknown[])
+						: [];
 				return ok((list as unknown[]).map(toPo));
 			},
+			providesTags: [{ type: TAG, id: "LIST" }],
 		}),
 
 		createProcurementPo: builder.mutation<ApiResponse<DataObject<ProcurementPoRecord>>, CreateProcurementPoRequest>({
 			query: (body) => ({
-				url: "/api/procurement/po",
+				url: "/api/procurement/po-rm",
 				method: "POST",
 				body,
 				meta: { useAuthorization: true, contentType: "application/json" },
 			}),
 			transformResponse: (response: unknown) => ok(toPo(unwrapBackendData(response)), "Created"),
+			invalidatesTags: [{ type: TAG, id: "LIST" }, { type: TAG, id: "BOARD" }],
 		}),
 
-		bulkCreateProcurementPos: builder.mutation<ApiResponse<DataArray<ProcurementPoRecord>>, CreateProcurementPoRequest[]>({
+		bulkCreateProcurementPos: builder.mutation<
+			ApiResponse<DataObject<BulkCreateProcurementPoResult>>,
+			CreateProcurementPoRequest[] | { items: CreateProcurementPoRequest[] }
+		>({
 			query: (body) => ({
 				url: "/api/procurement/po/bulk",
 				method: "POST",
@@ -182,9 +226,15 @@ export const procurementPoApiSlice = apiSlice.injectEndpoints({
 			}),
 			transformResponse: (response: unknown) => {
 				const unwrapped = unwrapBackendData<unknown>(response);
-				const list = Array.isArray(unwrapped) ? unwrapped : [];
-				return ok((list as unknown[]).map(toPo), "Created");
+				if (unwrapped && typeof unwrapped === "object") {
+					const r = unwrapped as Record<string, unknown>;
+					const ids = Array.isArray(r.ids) ? r.ids.map((v) => String(v)) : [];
+					const count = typeof r.count === "number" ? r.count : ids.length;
+					return ok({ count, ids }, "Created");
+				}
+				return ok({ count: 0, ids: [] }, "Created");
 			},
+			invalidatesTags: [{ type: TAG, id: "LIST" }, { type: TAG, id: "BOARD" }],
 		}),
 
 		getProcurementPoById: builder.query<ApiResponse<DataObject<ProcurementPoRecord>>, string>({
@@ -194,6 +244,7 @@ export const procurementPoApiSlice = apiSlice.injectEndpoints({
 				meta: { useAuthorization: true, contentType: "application/json" },
 			}),
 			transformResponse: (response: unknown) => ok(toPo(unwrapBackendData(response))),
+			providesTags: (_res, _err, id) => [{ type: TAG, id }],
 		}),
 
 		patchProcurementPo: builder.mutation<ApiResponse<DataObject<ProcurementPoRecord>>, { id: string; body: Partial<CreateProcurementPoRequest> }>({
@@ -204,6 +255,7 @@ export const procurementPoApiSlice = apiSlice.injectEndpoints({
 				meta: { useAuthorization: true, contentType: "application/json" },
 			}),
 			transformResponse: (response: unknown) => ok(toPo(unwrapBackendData(response)), "Updated"),
+			invalidatesTags: (_res, _err, arg) => [{ type: TAG, id: "LIST" }, { type: TAG, id: "BOARD" }, { type: TAG, id: arg.id }],
 		}),
 
 		deleteProcurementPo: builder.mutation<ApiResponse<DataObject<{ id: string }>>, string>({
@@ -213,13 +265,15 @@ export const procurementPoApiSlice = apiSlice.injectEndpoints({
 				meta: { useAuthorization: true, contentType: "application/json" },
 			}),
 			transformResponse: (_response: unknown, _meta, arg) => ok({ id: arg }, "Deleted"),
+			invalidatesTags: (_res, _err, id) => [{ type: TAG, id: "LIST" }, { type: TAG, id: "BOARD" }, { type: TAG, id }],
 		}),
 	}),
-});
+	});
 
 export const {
 	useGetProcurementPoBoardQuery,
 	useListProcurementPosQuery,
+	useLazyListProcurementPosQuery,
 	useCreateProcurementPoMutation,
 	useBulkCreateProcurementPosMutation,
 	useGetProcurementPoByIdQuery,

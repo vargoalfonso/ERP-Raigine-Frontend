@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeftOutlined, EyeOutlined } from "@ant-design/icons";
 import { Button, Card, Table, Tabs, Tag } from "antd";
@@ -16,14 +16,6 @@ type DeliveryNoteLogRow = {
 };
 
 export default function SubConMaterialsDetailPage() {
-  return (
-    <Suspense fallback={null}>
-      <SubConMaterialsDetailPageContent />
-    </Suspense>
-  );
-}
-
-function SubConMaterialsDetailPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const uniq = searchParams.get("uniq") ?? "SUB-001";
@@ -104,7 +96,7 @@ function SubConMaterialsDetailPageContent() {
       title: "Action",
       key: "action",
       width: 80,
-      render: () => (
+      render: (_: unknown, record: DeliveryNoteLogRow) => (
         <Button
           type="text"
           icon={<EyeOutlined />}

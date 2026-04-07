@@ -116,7 +116,7 @@ const menuItems: MenuItem[] = [
         id: "master-supplier-only",
         label: "Supplier Only",
         icon: MdGroup,
-        href: "/master-supplier?tab=only",
+        href: "/master-supplier-only",
       },
       {
         id: "master-supplier-raw",

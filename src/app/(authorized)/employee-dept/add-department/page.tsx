@@ -4,6 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Form, Input, Select, message } from "antd";
 import { ArrowLeftOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import {
+  useCreateDepartmentMutation,
+  useGetDepartmentsQuery,
+  useGetEmployeesQuery,
+} from "@/lib/api/system-settings/api";
 
 type EmployeeRow = {
   key: string;
@@ -61,6 +68,14 @@ const nextDeptCode = (existing: DepartmentRow[]) => {
 export default function AddDepartmentPage() {
   const router = useRouter();
   const [form] = Form.useForm();
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [createDepartment, createDepartmentState] = useCreateDepartmentMutation();
+  const { data: departmentApiData = [] } = useGetDepartmentsQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const { data: employeesApiData = [] } = useGetEmployeesQuery(undefined, {
+    skip: !apiEnabled,
+  });
 
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [departments, setDepartments] = useState<DepartmentRow[]>([]);
@@ -95,18 +110,36 @@ export default function AddDepartmentPage() {
   }, [form, generatedCode]);
 
   const managerOptions = useMemo(
-    () => employees.map((e) => ({ label: e.name, value: e.name })),
-    [employees]
+    () =>
+      apiEnabled
+        ? employeesApiData.map((e) => ({ label: e.full_name, value: e.full_name }))
+        : employees.map((e) => ({ label: e.name, value: e.name })),
+    [apiEnabled, employees, employeesApiData]
   );
 
   const parentOptions = useMemo(
-    () => departments.map((d) => ({ label: d.name, value: d.name })),
-    [departments]
+    () =>
+      apiEnabled
+        ? departmentApiData.map((d) => ({ label: d.department_name, value: d.id }))
+        : departments.map((d) => ({ label: d.name, value: d.name })),
+    [apiEnabled, departmentApiData, departments]
   );
 
   const onCreate = async () => {
     try {
       const values = await form.validateFields();
+
+      if (apiEnabled) {
+        await createDepartment({
+          department_name: values.departmentName,
+          description: values.departmentDescription || null,
+          parent_department_id: values.parentDepartment || null,
+        }).unwrap();
+
+        message.success("Department created");
+        router.push("/employee-dept?tab=department");
+        return;
+      }
 
       const newDept: DepartmentRow = {
         key: `dept-${Date.now()}`,
@@ -124,8 +157,9 @@ export default function AddDepartmentPage() {
 
       message.success("Department created");
       router.push("/employee-dept?tab=department");
-    } catch {
-      // validation handled by form
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      message.error(getApiErrorMessage(err, "Failed to create department"));
     }
   };
 
@@ -147,7 +181,13 @@ export default function AddDepartmentPage() {
             >
               Cancel
             </Button>
-            <Button type="primary" className="!rounded-lg" icon={<SaveOutlined />} onClick={onCreate}>
+            <Button
+              type="primary"
+              className="!rounded-lg"
+              icon={<SaveOutlined />}
+              onClick={onCreate}
+              loading={createDepartmentState.isLoading}
+            >
               Create Department
             </Button>
           </div>

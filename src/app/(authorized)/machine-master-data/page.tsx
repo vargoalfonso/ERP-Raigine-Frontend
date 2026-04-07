@@ -14,14 +14,25 @@ import {
   PrinterOutlined,
 } from "@ant-design/icons";
 import { MdSettings, MdBuild } from "react-icons/md";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import {
+  getMachinePrintUrl,
+  getMachineQrCodeUrl,
+  useCreateMachineMutation,
+  useGetMachinesQuery,
+} from "@/lib/api/machines/api";
+import { useGetProcessesQuery } from "@/lib/api/system-settings/api";
 
 type MachineStatus = "Active" | "Maintenance";
 
 type MachineRow = {
   key: string;
+  id?: string;
   machineName: string;
   machineNumber: string;
   productionLine: string;
+  processId?: string;
   processName: string;
   capacity: number;
   status: MachineStatus;
@@ -31,54 +42,105 @@ type MachineFormValues = {
   machineName: string;
   machineNumber: string;
   productionLine: string;
-  processName: string;
+  processId: string;
   capacity: number;
 };
 
 const formatNumber = (n: number) => new Intl.NumberFormat("en-US").format(n);
 
 export default function MachineMasterDataPage() {
+  const apiEnabled = Boolean(apiBaseUrl);
   const [search, setSearch] = useState("");
   const [lineFilter, setLineFilter] = useState<string>("All Lines");
 
-  const [rows, setRows] = useState<MachineRow[]>([
+  const [mockRows, setMockRows] = useState<MachineRow[]>([
     {
       key: "PM-A1-001",
+      id: "PM-A1-001",
       machineName: "Press Machine A1",
       machineNumber: "PM-A1-001",
       productionLine: "Line A",
+      processId: "pressing",
       processName: "Pressing",
       capacity: 1000,
       status: "Active",
     },
     {
       key: "WR-B2-002",
+      id: "WR-B2-002",
       machineName: "Welding Robot B2",
       machineNumber: "WR-B2-002",
       productionLine: "Line B",
+      processId: "welding",
       processName: "Welding",
       capacity: 800,
       status: "Active",
     },
     {
       key: "CNC-C3-003",
+      id: "CNC-C3-003",
       machineName: "CNC Milling C3",
       machineNumber: "CNC-C3-003",
       productionLine: "Line C",
+      processId: "milling",
       processName: "Milling",
       capacity: 600,
       status: "Maintenance",
     },
     {
       key: "AS-D4-004",
+      id: "AS-D4-004",
       machineName: "Assembly Station D4",
       machineNumber: "AS-D4-004",
       productionLine: "Line D",
+      processId: "assembly",
       processName: "Assembly",
       capacity: 1200,
       status: "Active",
     },
   ]);
+
+  const { data: apiMachines = [] } = useGetMachinesQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const { data: processes = [] } = useGetProcessesQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const [createMachine, createMachineState] = useCreateMachineMutation();
+
+  const processNameById = useMemo(
+    () =>
+      new Map(
+        processes
+          .map((process) => [String(process.id ?? ""), String(process.process_name ?? "")] as const)
+          .filter((entry): entry is readonly [string, string] => Boolean(entry[0]) && Boolean(entry[1])),
+      ),
+    [processes],
+  );
+
+  const rows = useMemo<MachineRow[]>(() => {
+    if (!apiEnabled) return mockRows;
+
+    return apiMachines.map((machine, index) => {
+      const processName =
+        machine.process_name?.trim() ||
+        (machine.process_id ? processNameById.get(machine.process_id) : undefined) ||
+        "-";
+      const rawStatus = String(machine.status ?? "Active").toLowerCase();
+
+      return {
+        key: machine.id || machine.machine_number || `machine-${index + 1}`,
+        id: machine.id || machine.machine_number || `machine-${index + 1}`,
+        machineName: machine.machine_name || "-",
+        machineNumber: machine.machine_number || `MC-${index + 1}`,
+        productionLine: machine.production_line || "-",
+        processId: machine.process_id,
+        processName,
+        capacity: machine.machine_capacity ?? 0,
+        status: rawStatus.includes("maint") ? "Maintenance" : "Active",
+      };
+    });
+  }, [apiEnabled, apiMachines, mockRows, processNameById]);
 
   const totalMachines = rows.length;
   const activeMachines = rows.filter((r) => r.status === "Active").length;
@@ -123,15 +185,30 @@ export default function MachineMasterDataPage() {
     []
   );
 
-  const processOptions = useMemo(
-    () => [
-      { label: "Pressing", value: "Pressing" },
-      { label: "Welding", value: "Welding" },
-      { label: "Milling", value: "Milling" },
-      { label: "Assembly", value: "Assembly" },
-    ],
-    []
-  );
+  const processOptions = useMemo(() => {
+    if (!apiEnabled) {
+      return [
+        { label: "Pressing", value: "pressing" },
+        { label: "Welding", value: "welding" },
+        { label: "Milling", value: "milling" },
+        { label: "Assembly", value: "assembly" },
+      ];
+    }
+
+    return processes
+      .filter((process) => String(process.status ?? "").toLowerCase() !== "inactive")
+      .sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0))
+      .map((process) => {
+        const id = String(process.id ?? "").trim();
+        const name = String(process.process_name ?? "").trim();
+        const category = String(process.category ?? "").trim();
+        return {
+          value: id,
+          label: category ? `${name} (${category})` : name,
+        };
+      })
+      .filter((option) => Boolean(option.value) && Boolean(option.label));
+  }, [apiEnabled, processes]);
 
   const columns: ColumnsType<MachineRow> = [
     {
@@ -194,6 +271,9 @@ export default function MachineMasterDataPage() {
             className="!rounded-lg"
             icon={<QrcodeOutlined />}
             onClick={() => {
+              if (apiEnabled && record.id) {
+                window.open(getMachineQrCodeUrl(record.id), "_blank", "noopener,noreferrer");
+              }
               setBarcodeRow(record);
               setBarcodeOpen(true);
             }}
@@ -211,7 +291,7 @@ export default function MachineMasterDataPage() {
                   machineName: record.machineName,
                   machineNumber: record.machineNumber,
                   productionLine: record.productionLine,
-                  processName: record.processName,
+                  processId: record.processId,
                   capacity: record.capacity,
                 });
                 setEditOpen(true);
@@ -225,6 +305,10 @@ export default function MachineMasterDataPage() {
               className="!rounded-lg"
               icon={<DeleteOutlined />}
               onClick={() => {
+                if (apiEnabled) {
+                  message.info("Delete machine belum dihubungkan ke API");
+                  return;
+                }
                 Modal.confirm({
                   title: "Delete Machine?",
                   content: `Delete ${record.machineNumber}?`,
@@ -232,7 +316,7 @@ export default function MachineMasterDataPage() {
                   okButtonProps: { danger: true },
                   cancelText: "Cancel",
                   onOk: () => {
-                    setRows((prev) => prev.filter((r) => r.key !== record.key));
+                    setMockRows((prev) => prev.filter((r) => r.key !== record.key));
                     message.success("Machine deleted");
                   },
                 });
@@ -250,22 +334,54 @@ export default function MachineMasterDataPage() {
       const key = values.machineNumber.trim();
       if (!key) return;
 
-      if (mode === "add" && rows.some((r) => r.machineNumber.toLowerCase() === key.toLowerCase())) {
+      if (!apiEnabled && mode === "add" && rows.some((r) => r.machineNumber.toLowerCase() === key.toLowerCase())) {
         message.error("Machine Number already exists");
+        return;
+      }
+
+      const processName =
+        processNameById.get(values.processId) ??
+        processOptions.find((option) => option.value === values.processId)?.label ??
+        "-";
+
+      if (apiEnabled && mode === "add") {
+        try {
+          await createMachine({
+            machine_name: values.machineName,
+            machine_number: values.machineNumber,
+            production_line: values.productionLine,
+            process_id: values.processId,
+            machine_capacity: values.capacity,
+          }).unwrap();
+
+          setAddOpen(false);
+          form.resetFields();
+          message.success("Machine added");
+          return;
+        } catch (error) {
+          message.error(getApiErrorMessage(error, "Failed to add machine"));
+          return;
+        }
+      }
+
+      if (apiEnabled && mode === "edit") {
+        message.info("Edit machine belum dihubungkan ke API");
         return;
       }
 
       const next: MachineRow = {
         key,
+        id: activeRow?.id ?? key,
         machineName: values.machineName,
         machineNumber: values.machineNumber,
         productionLine: values.productionLine,
-        processName: values.processName,
+        processId: values.processId,
+        processName,
         capacity: values.capacity,
         status: mode === "add" ? "Active" : (activeRow?.status ?? "Active"),
       };
 
-      setRows((prev) => {
+      setMockRows((prev) => {
         if (mode === "add") return [next, ...prev];
         if (!activeRow) return prev;
         return prev.map((r) => (r.key === activeRow.key ? next : r));
@@ -285,6 +401,11 @@ export default function MachineMasterDataPage() {
 
   const handlePrintBarcode = () => {
     if (!barcodeRow) return;
+
+    if (apiEnabled && barcodeRow.id) {
+      window.open(getMachinePrintUrl(barcodeRow.id), "_blank", "noopener,noreferrer");
+      return;
+    }
 
     const canvas = qrWrapperRef.current?.querySelector("canvas") as HTMLCanvasElement | null;
     const dataUrl = canvas?.toDataURL("image/png");
@@ -399,6 +520,7 @@ export default function MachineMasterDataPage() {
                   form.resetFields();
                   setAddOpen(true);
                 }}
+                loading={createMachineState.isLoading}
               >
                 Add Machine
               </Button>
@@ -515,7 +637,7 @@ export default function MachineMasterDataPage() {
                 optionFilterProp="label"
               />
             </Form.Item>
-            <Form.Item name="processName" label="Process Name" rules={[{ required: true, message: "Required" }]}>
+            <Form.Item name="processId" label="Process Name" rules={[{ required: true, message: "Required" }]}> 
               <Select
                 options={processOptions}
                 placeholder="Select process"
@@ -576,7 +698,7 @@ export default function MachineMasterDataPage() {
             <Form.Item name="productionLine" label="Production Line" rules={[{ required: true, message: "Required" }]}>
               <Select options={productionLineOptions} className="w-full" />
             </Form.Item>
-            <Form.Item name="processName" label="Process Name" rules={[{ required: true, message: "Required" }]}>
+            <Form.Item name="processId" label="Process Name" rules={[{ required: true, message: "Required" }]}> 
               <Select options={processOptions} className="w-full" />
             </Form.Item>
           </div>

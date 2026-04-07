@@ -46,8 +46,20 @@ export const getApiErrorMessage = (error: unknown, fallback: string): string => 
         }
       })();
 
+      const looksLikeHtml =
+        typeof dataText === "string" &&
+        (dataText.trim().startsWith("<!DOCTYPE") || dataText.trim().startsWith("<html"));
+
+      if (looksLikeHtml) {
+        return `${fallback} (status ${String(status)}): Received HTML instead of JSON. Check NEXT_PUBLIC_API_URL and the API path (/api/...).`;
+      }
+
       const base = `${fallback} (status ${String(status)})`;
-      return dataText ? `${base}: ${dataText}` : base;
+
+      // Avoid flooding UI with huge HTML/text payloads.
+      const clipped =
+        dataText && dataText.length > 280 ? `${dataText.slice(0, 280)}…` : dataText;
+      return clipped ? `${base}: ${clipped}` : base;
     }
   }
 

@@ -9,6 +9,7 @@ import { apiSlice } from "@/lib/api/instance";
 const ROUTES = {
   role: "/api/roles",
   employee: "/api/employees",
+  department: "/api/departments",
   accessControlMatrix: "/api/access-control",
   approvalWorkflow: "/api/approval-workflows",
   globalWorkingDays: "/api/global-parameters",
@@ -27,8 +28,24 @@ const normalizeArrayResponse = <T>(response: unknown): T[] => {
   if (response && typeof response === "object") {
     const maybeData = (response as Record<string, unknown>).data;
     if (Array.isArray(maybeData)) return maybeData as T[];
+    if (maybeData && typeof maybeData === "object") {
+      const nestedData = (maybeData as Record<string, unknown>).data;
+      if (Array.isArray(nestedData)) return nestedData as T[];
+    }
   }
   return [];
+};
+
+const normalizeObjectResponse = <T>(response: unknown): T | null => {
+  if (response && typeof response === "object") {
+    const maybeData = (response as Record<string, unknown>).data;
+    if (maybeData && typeof maybeData === "object") {
+      const nestedData = (maybeData as Record<string, unknown>).data;
+      if (nestedData && typeof nestedData === "object") return nestedData as T;
+      return maybeData as T;
+    }
+  }
+  return response && typeof response === "object" ? (response as T) : null;
 };
 
 export type StatusType = "Active" | "Inactive";
@@ -53,14 +70,44 @@ export type EmployeeRecord = {
   employee_id: string;
   full_name: string;
   email?: string | null;
+  phone_number?: string | null;
+  job_title?: string | null;
   status?: string;
+  unit_cost?: number | null;
+  role_id?: string | null;
+  department_id?: string | null;
 };
 
 export type CreateEmployeeRequest = {
   employee_id: string;
   full_name: string;
   email?: string | null;
+  phone_number?: string | null;
+  job_title?: string | null;
   status?: string;
+  unit_cost?: number | null;
+  role_id?: string | null;
+  department_id?: string | null;
+};
+
+export type DepartmentRecord = {
+  id: string;
+  department_name: string;
+  description?: string | null;
+  parent_department_id?: string | null;
+  parent_department?: {
+    id?: string;
+    department_name?: string;
+  } | null;
+  status?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type CreateDepartmentRequest = {
+  department_name: string;
+  description?: string | null;
+  parent_department_id?: string | null;
 };
 
 export type CreateAccessControlMatrixRequest = {
@@ -270,6 +317,41 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       transformResponse: (response: unknown) => normalizeArrayResponse<RoleRecord>(response),
     }),
 
+    getDepartments: builder.query<DepartmentRecord[], void>({
+      query: () => ({
+        url: `${ROUTES.department}/`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => normalizeArrayResponse<DepartmentRecord>(response),
+    }),
+
+    createDepartment: builder.mutation<{ message?: string; data?: DepartmentRecord }, CreateDepartmentRequest>({
+      query: (body) => ({
+        url: `${ROUTES.department}`,
+        method: "POST",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    updateDepartment: builder.mutation<{ message?: string; data?: DepartmentRecord }, { id: string; body: Partial<CreateDepartmentRequest> }>({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.department}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    deleteDepartment: builder.mutation<{ message?: string; id?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.department}/${id}`,
+        method: "DELETE",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
     getEmployees: builder.query<EmployeeRecord[], void>({
       query: () => ({
         url: `${ROUTES.employee}`,
@@ -277,6 +359,15 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) => normalizeArrayResponse<EmployeeRecord>(response),
+    }),
+
+    getEmployeeById: builder.query<EmployeeRecord | null, string>({
+      query: (id) => ({
+        url: `${ROUTES.employee}/${id}`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => normalizeObjectResponse<EmployeeRecord>(response),
     }),
 
     createEmployee: builder.mutation<{ message?: string; data?: EmployeeRecord }, CreateEmployeeRequest>({
@@ -773,7 +864,12 @@ export const {
   useUpdateRoleMutation,
   useDeleteRoleMutation,
   useGetRolesQuery,
+  useGetDepartmentsQuery,
+  useCreateDepartmentMutation,
+  useUpdateDepartmentMutation,
+  useDeleteDepartmentMutation,
   useGetEmployeesQuery,
+  useGetEmployeeByIdQuery,
   useCreateEmployeeMutation,
   useUpdateEmployeeMutation,
   useDeleteEmployeeMutation,

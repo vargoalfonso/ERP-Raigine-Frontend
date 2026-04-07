@@ -19,10 +19,6 @@ import {
   DeleteOutlined,
 } from "@ant-design/icons";
 import type { FormInstance } from "antd";
-import { apiBaseUrl } from "@/lib/api/instance";
-import { useGetBomTreeQuery } from "@/lib/api/bom/api";
-import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
-import { useCreateIndirectRawMaterialMutation } from "@/lib/api/indirect-raw-material/api";
 
 const { Title, Text } = Typography;
 
@@ -47,43 +43,17 @@ const IndirectRawMaterialFormCard = ({
   formRef,
   showRemove,
   onRemove,
-  uniqOptions,
-  partNumberByUniq,
-  partNameByUniq,
-  assemblyCodeByUniq,
 }: {
   entryNumber: number;
   formRef: React.MutableRefObject<FormInstance | null>;
   showRemove: boolean;
   onRemove: () => void;
-  uniqOptions: { label: string; value: string }[];
-  partNumberByUniq: Record<string, string | undefined>;
-  partNameByUniq: Record<string, string | undefined>;
-  assemblyCodeByUniq: Record<string, string | undefined>;
 }) => {
   const [form] = Form.useForm<IndirectRawMaterialFormData>();
-  const watchedPartNumber = Form.useWatch("partNumber", form);
-  const watchedPartName = Form.useWatch("partName", form);
 
   useEffect(() => {
     formRef.current = form;
   }, [form, formRef]);
-
-  const applyUniqDerivedFields = (uniq: string | undefined) => {
-    if (!uniq) return;
-
-    const partNumber = partNumberByUniq?.[uniq];
-    const partName = partNameByUniq?.[uniq];
-    const assemblyCode = assemblyCodeByUniq?.[uniq];
-    const currentWarehouse = form.getFieldValue("warehouseDestination");
-
-    form.setFieldsValue({
-      uniq,
-      partNumber: partNumber ?? uniq,
-      partName: partName ?? assemblyCode ?? uniq,
-      ...(currentWarehouse ? {} : { warehouseDestination: "WH-001" }),
-    });
-  };
 
   return (
     <Card>
@@ -118,40 +88,12 @@ const IndirectRawMaterialFormCard = ({
             label="Uniq"
             name="uniq"
             rules={[{ required: true, message: "Please input uniq!" }]}
-            extra={
-              watchedPartNumber || watchedPartName ? (
-                <div className="mt-1">
-                  {watchedPartNumber ? (
-                    <Text type="secondary">Part Number: {watchedPartNumber}</Text>
-                  ) : null}
-                  {watchedPartName ? (
-                    <div>
-                      <Text type="secondary">Part Name: {watchedPartName}</Text>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null
-            }
           >
-            <Select
-              placeholder="Select UNIQ from BOM"
-              size="large"
-              allowClear
-              showSearch
-              options={uniqOptions}
-              onChange={(value) => {
-                if (!value) {
-                  form.setFieldsValue({ uniq: undefined, partNumber: undefined, partName: undefined });
-                  return;
-                }
-                applyUniqDerivedFields(value);
-              }}
-              filterOption={(input, option) =>
-                String(option?.label ?? "")
-                  .toLowerCase()
-                  .includes(input.toLowerCase())
-              }
-            />
+            <Select placeholder="RM-001" size="large" allowClear>
+              <Select.Option value="RM-001">RM-001</Select.Option>
+              <Select.Option value="RM-002">RM-002</Select.Option>
+              <Select.Option value="RM-003">RM-003</Select.Option>
+            </Select>
           </Form.Item>
 
           <Form.Item
@@ -159,7 +101,7 @@ const IndirectRawMaterialFormCard = ({
             name="partNumber"
             rules={[{ required: true, message: "Please input part number!" }]}
           >
-            <Input placeholder="Auto from BOM" size="large" />
+            <Input placeholder="Automotive Stud" size="large" />
           </Form.Item>
 
           <Form.Item
@@ -167,7 +109,7 @@ const IndirectRawMaterialFormCard = ({
             name="partName"
             rules={[{ required: true, message: "Please input part name!" }]}
           >
-            <Input placeholder="Auto from BOM" size="large" />
+            <Input placeholder="Automatic Field" size="large" />
           </Form.Item>
 
           <Form.Item
@@ -175,10 +117,10 @@ const IndirectRawMaterialFormCard = ({
             name="warehouseDestination"
             rules={[{ required: true, message: "Please select warehouse!" }]}
           >
-            <Select placeholder="WH-001" size="large" allowClear>
-              <Select.Option value="WH-001">WH-001</Select.Option>
-              <Select.Option value="WH-002">WH-002</Select.Option>
-              <Select.Option value="WH-003">WH-003</Select.Option>
+            <Select placeholder="Automatic field" size="large" allowClear>
+              <Select.Option value="WH-A">WH-A</Select.Option>
+              <Select.Option value="WH-B">WH-B</Select.Option>
+              <Select.Option value="WH-C">WH-C</Select.Option>
             </Select>
           </Form.Item>
         </div>
@@ -223,19 +165,6 @@ export default function CreateIndirectRawMaterialPage() {
   const [loading, setLoading] = useState(false);
   const [entries, setEntries] = useState<FormEntry[]>([]);
 
-  const [createIndirectRawMaterial] = useCreateIndirectRawMaterialMutation();
-
-  const useApi = Boolean(apiBaseUrl);
-  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !useApi });
-  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
-  const uniqOptions = bomIndex.options.length
-    ? bomIndex.options
-    : [
-        { label: "RM-001", value: "RM-001" },
-        { label: "RM-002", value: "RM-002" },
-        { label: "RM-003", value: "RM-003" },
-      ];
-
   useEffect(() => {
     if (entries.length === 0) {
       setEntries([{ id: 1, key: "entry-1", formRef: { current: null } }]);
@@ -279,19 +208,6 @@ export default function CreateIndirectRawMaterialPage() {
         const form = entry.formRef.current;
         if (!form) continue;
         await form.validateFields();
-
-        const v = form.getFieldsValue();
-        if (useApi) {
-          await createIndirectRawMaterial({
-            uniq: v.uniq,
-            item_name: v.partName ?? v.uniq,
-            warehouse_code: v.warehouseDestination,
-            quantity: Number(v.addStock ?? 0),
-            unit_measurement: "pcs",
-            date: new Date().toISOString().slice(0, 10),
-            reference_no: v.deliveryNotesNumber || v.poNumber,
-          }).unwrap();
-        }
       }
 
       message.success("Indirect raw material saved");
@@ -356,10 +272,6 @@ export default function CreateIndirectRawMaterialPage() {
                 formRef={entry.formRef}
                 showRemove={entries.length > 1}
                 onRemove={() => removeEntry(entry.id)}
-                uniqOptions={uniqOptions}
-                partNumberByUniq={bomIndex.partNumberByUniq ?? {}}
-                partNameByUniq={bomIndex.partNameByUniq ?? {}}
-                assemblyCodeByUniq={bomIndex.assemblyCodeByUniq ?? {}}
               />
             </div>
           ))}

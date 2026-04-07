@@ -1,12 +1,12 @@
 /* eslint-disable @next/next/no-img-element */
 "use client";
 
-import { Card, Form, Input, message, Typography } from "antd";
+import Navbar from "@/components/login/Navbar";
+
+import { Button, Card, Form, Input, message, Typography } from "antd";
 import { useRouter } from "next/navigation";
 import React from "react";
 import Cookies from "js-cookie";
-import { apiBaseUrl } from "@/lib/api/instance";
-import { useLoginMutation } from "@/lib/api/auth/api";
 
 interface LoginFormValues {
   email: string;
@@ -17,44 +17,14 @@ const { Title, Link } = Typography;
 
 export default function LoginPage() {
   const router = useRouter();
-  const [login, { isLoading }] = useLoginMutation();
-  const apiEnabled = Boolean(apiBaseUrl);
 
   const handleLogin = async (values: LoginFormValues) => {
-    if (!apiEnabled) {
-      Cookies.set("Authorization", "DUMMY_TOKEN", { expires: 7, path: "/", sameSite: "lax" });
-      message.success("Login bypassed (DEV MODE - API disabled)");
-      router.push("/dashboard");
-      return;
-    }
+    // Simpan token dummy
+    Cookies.set("Authorization", "DUMMY_TOKEN", { expires: 7 });
 
-    try {
-      const res = await login({ email: values.email, password: values.password }).unwrap();
-      const token = res?.data?.token;
-      if (!token) {
-        message.error("Login success but token missing");
-        return;
-      }
+    message.success("Login bypassed (DEV MODE)");
 
-      Cookies.set("Authorization", token, { expires: 7, path: "/", sameSite: "lax" });
-      message.success("Login success");
-      router.push("/dashboard");
-    } catch (err) {
-      const maybeAny = err as {
-        status?: number | string;
-        data?: unknown;
-        error?: string;
-      };
-
-      const serverMessage =
-        (maybeAny?.data &&
-        typeof maybeAny.data === "object" &&
-        "message" in (maybeAny.data as Record<string, unknown>)
-          ? String((maybeAny.data as Record<string, unknown>).message)
-          : undefined) || undefined;
-
-      message.error(serverMessage || maybeAny?.error || "Login failed");
-    }
+    router.push("/dashboard");
   };
 
   return (
@@ -119,10 +89,9 @@ export default function LoginPage() {
             <Form.Item>
               <button
                 type="submit"
-                disabled={isLoading}
                 className={`w-full bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-blue-600 cursor-pointer`}
               >
-                {isLoading ? "Logging in..." : "Login"}
+                Login
               </button>
             </Form.Item>
           </Form>

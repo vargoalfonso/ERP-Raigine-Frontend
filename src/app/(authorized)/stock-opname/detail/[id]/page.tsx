@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { Button, Card, Table, Tabs, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -11,9 +11,16 @@ import {
   FileTextOutlined,
   HistoryOutlined,
 } from "@ant-design/icons";
+import { apiBaseUrl } from "@/lib/api/instance";
+import {
+  type StockOpnameDetailResponse,
+  useGetStockOpnameDetailQuery,
+  useSubmitStockOpnameMutation,
+} from "@/lib/api/stock-opname/api";
 
 type DetailLine = {
   key: string;
+  itemId: number;
   uniq: string;
   partNumber: string;
   partName: string;
@@ -68,6 +75,50 @@ function inventoryLabelFromId(opnameId: string) {
   return "Stock";
 }
 
+function normalizeStatusImpact(value?: string): DetailData["statusImpact"] {
+  const lower = (value ?? "").toLowerCase();
+  if (lower.includes("approved") || lower.includes("complete")) return "Approved";
+  if (lower.includes("waiting")) return "Waiting for Approval";
+  return "Pending Verification";
+}
+
+function mapDetailResponse(id: string, response: StockOpnameDetailResponse): DetailData {
+  const session = response.session;
+  const summary = session.summary;
+  return {
+    opnameId: session.opname_number || id,
+    period: session.period ?? "-",
+    uniqContext: response.items[0]?.uniq ?? session.location ?? "-",
+    statusImpact: normalizeStatusImpact(session.status_label ?? session.status),
+    systemQty: summary?.system_total ?? 0,
+    physicalQty: summary?.physical_total ?? 0,
+    costImpact: summary?.cost_impact ?? 0,
+    lines: response.items.map((item) => ({
+      key: String(item.id),
+      itemId: item.id,
+      uniq: item.uniq,
+      partNumber: item.part_number ?? "-",
+      partName: item.item_name ?? "-",
+      currentStock: item.system_quantity ?? 0,
+      countedQty: item.counted_quantity ?? 0,
+      userCounted: item.user_counter ?? "-",
+      decision:
+        item.verification_status === "verified"
+          ? "approved"
+          : item.verification_status === "rejected"
+          ? "rejected"
+          : undefined,
+    })),
+    logs: response.logs.map((log) => ({
+      key: String(log.id),
+      at: log.createdAt ?? "-",
+      by: log.performed_by ?? "-",
+      action: log.action ?? "-",
+      note: log.description,
+    })),
+  };
+}
+
 export default function StockOpnameDetailPage() {
   return (
     <Suspense fallback={null}>
@@ -80,11 +131,25 @@ function StockOpnameDetailPageContent() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const searchParams = useSearchParams();
+  const apiEnabled = Boolean(apiBaseUrl);
 
   const id = useMemo(() => decodeURIComponent(params?.id ?? ""), [params?.id]);
   const tab = (searchParams.get("tab") ?? "finished").toLowerCase();
 
-  const data = useMemo<DetailData>(() => {
+  const { data: detailResponse, isFetching, refetch } = useGetStockOpnameDetailQuery(
+    {
+      opname_number: id,
+      item_status: "all",
+      page: 1,
+      limit: 100,
+    },
+    {
+      skip: !apiEnabled || !id,
+    }
+  );
+  const [submitStockOpname, { isLoading: submitting }] = useSubmitStockOpnameMutation();
+
+  const fallbackData = useMemo<DetailData>(() => {
     // Mock based on screenshot (Finished Good)
     const base: DetailData = {
       opnameId: id || "SO-FG-012024",
@@ -97,6 +162,7 @@ function StockOpnameDetailPageContent() {
       lines: [
         {
           key: "l1",
+          itemId: 1,
           uniq: "FG-001",
           partNumber: "SP-001-A",
           partName: "Steel Plate",
@@ -106,6 +172,7 @@ function StockOpnameDetailPageContent() {
         },
         {
           key: "l2",
+          itemId: 2,
           uniq: "FG-001",
           partNumber: "SP-001-A",
           partName: "Steel Plate",
@@ -115,6 +182,7 @@ function StockOpnameDetailPageContent() {
         },
         {
           key: "l3",
+          itemId: 3,
           uniq: "FG-001",
           partNumber: "SP-001-A",
           partName: "Steel Plate",
@@ -220,7 +288,16 @@ function StockOpnameDetailPageContent() {
     return base;
   }, [id]);
 
+  const data = useMemo(
+    () => (apiEnabled && detailResponse ? mapDetailResponse(id, detailResponse) : fallbackData),
+    [apiEnabled, detailResponse, fallbackData, id]
+  );
+
   const [lines, setLines] = useState<DetailLine[]>(data.lines);
+
+  useEffect(() => {
+    setLines(data.lines);
+  }, [data.lines]);
 
   const v = useMemo(() => variance(data.systemQty, data.physicalQty), [data.physicalQty, data.systemQty]);
   const vColor = v.diff < 0 ? "text-red-600" : v.diff > 0 ? "text-green-600" : "text-slate-500";
@@ -233,6 +310,35 @@ function StockOpnameDetailPageContent() {
   }, [data.opnameId]);
 
   const detailCopyLabel = useMemo(() => inventoryLabelFromId(data.opnameId), [data.opnameId]);
+
+  const handleDecision = async (line: DetailLine, decision: "approved" | "rejected") => {
+    if (!apiEnabled || !detailResponse?.session.id) {
+      setLines((prev) => prev.map((x) => (x.key === line.key ? { ...x, decision } : x)));
+      message.success(decision === "approved" ? "Approved" : "Rejected");
+      return;
+    }
+
+    try {
+      await submitStockOpname({
+        opname_id: detailResponse.session.id,
+        action: decision === "approved" ? "approved" : "rejected",
+        verified_by: line.userCounted || null,
+        items: [
+          {
+            item_id: line.itemId,
+            verification_status: decision === "approved" ? "verified" : "rejected",
+            ...(decision === "rejected" ? { reject_reason: "Rejected from stock opname detail" } : {}),
+          },
+        ],
+      }).unwrap();
+
+      setLines((prev) => prev.map((x) => (x.key === line.key ? { ...x, decision } : x)));
+      message.success(decision === "approved" ? "Approved" : "Rejected");
+      await refetch();
+    } catch {
+      message.error(`Failed to ${decision === "approved" ? "approve" : "reject"} item`);
+    }
+  };
 
   const columns = useMemo<ColumnsType<DetailLine>>(
     () => [
@@ -270,10 +376,8 @@ function StockOpnameDetailPageContent() {
                 className="!rounded-lg"
                 icon={<CloseOutlined />}
                 disabled={decided === "approved"}
-                onClick={() => {
-                  setLines((prev) => prev.map((x) => (x.key === r.key ? { ...x, decision: "rejected" } : x)));
-                  message.success("Rejected");
-                }}
+                loading={submitting}
+                onClick={() => void handleDecision(r, "rejected")}
               >
                 Reject
               </Button>
@@ -281,10 +385,8 @@ function StockOpnameDetailPageContent() {
                 className="!rounded-lg !border-green-200 !text-green-700"
                 icon={<CheckOutlined />}
                 disabled={decided === "rejected"}
-                onClick={() => {
-                  setLines((prev) => prev.map((x) => (x.key === r.key ? { ...x, decision: "approved" } : x)));
-                  message.success("Approved");
-                }}
+                loading={submitting}
+                onClick={() => void handleDecision(r, "approved")}
               >
                 Approve
               </Button>
@@ -293,7 +395,7 @@ function StockOpnameDetailPageContent() {
         },
       },
     ],
-    []
+    [submitting]
   );
 
   return (
@@ -375,6 +477,7 @@ function StockOpnameDetailPageContent() {
                       dataSource={lines}
                       columns={columns}
                       rowKey="key"
+                      loading={isFetching}
                       pagination={false}
                       size="middle"
                     />

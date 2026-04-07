@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Button,
@@ -28,16 +28,31 @@ import {
   InfoCircleOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
+import { apiBaseUrl } from "@/lib/api/instance";
+import {
+  type StockInventoryType,
+  useCreateStockOpnameMutation,
+  useGetStockOpnameUomListQuery,
+  useLazySearchStockOpnameUniqQuery,
+} from "@/lib/api/stock-opname/api";
 
 type Method = "manual" | "bulk";
 
 type Entry = {
   id: string;
+  inventoryId?: string | null;
   uniq?: string;
   systemStock: number;
   countedQty?: number;
   userCounter?: string;
   uom?: string;
+};
+
+const TAB_TO_INVENTORY_TYPE: Record<string, StockInventoryType> = {
+  finished: "finished_good",
+  raw: "raw_material",
+  indirect: "indirect",
+  wip: "wip",
 };
 
 type BulkRow = {
@@ -71,8 +86,10 @@ export default function StockOpnameStartCountPage() {
 function StockOpnameStartCountPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const apiEnabled = Boolean(apiBaseUrl);
 
   const tab = (searchParams.get("tab") ?? "finished").toLowerCase();
+  const inventoryType = TAB_TO_INVENTORY_TYPE[tab] ?? "finished_good";
   const backLabel = useMemo(() => {
     if (tab === "raw") return "Back to Raw Materials";
     if (tab === "indirect") return "Back to Indirect Stock";
@@ -87,7 +104,14 @@ function StockOpnameStartCountPageContent() {
   const [bulkFileName, setBulkFileName] = useState<string | null>(null);
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
 
-  const uniqOptions = useMemo(
+  const [searchStockOpnameUniq, { data: uniqSearchResults = [], isFetching: uniqLoading }] =
+    useLazySearchStockOpnameUniqQuery();
+  const { data: apiUomList = [] } = useGetStockOpnameUomListQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const [createStockOpname, { isLoading: saving }] = useCreateStockOpnameMutation();
+
+  const fallbackUniqOptions = useMemo(
     () => [
       { label: "FG-001", value: "FG-001" },
       { label: "FG-002", value: "FG-002" },
@@ -118,7 +142,7 @@ function StockOpnameStartCountPageContent() {
     []
   );
 
-  const uomOptions = useMemo(
+  const fallbackUomOptions = useMemo(
     () => [
       { label: "Pcs", value: "Pcs" },
       { label: "Kg", value: "Kg" },
@@ -128,9 +152,43 @@ function StockOpnameStartCountPageContent() {
     []
   );
 
-  const [entries, setEntries] = useState<Entry[]>([
-    { id: toId("entry"), uniq: "FG-001", systemStock: 250, countedQty: 245, userCounter: "John Meijer" },
-  ]);
+  const uniqOptions = useMemo(
+    () =>
+      apiEnabled
+        ? uniqSearchResults.map((item) => ({
+            label: item.uniq,
+            value: item.uniq,
+          }))
+        : fallbackUniqOptions,
+    [apiEnabled, fallbackUniqOptions, uniqSearchResults]
+  );
+
+  const uniqLookup = useMemo(
+    () =>
+      new Map(
+        uniqSearchResults.map((item) => [item.uniq, item])
+      ),
+    [uniqSearchResults]
+  );
+
+  const uomOptions = useMemo(
+    () =>
+      apiEnabled
+        ? apiUomList.map((item) => ({ label: item, value: item }))
+        : fallbackUomOptions,
+    [apiEnabled, apiUomList, fallbackUomOptions]
+  );
+
+  const [entries, setEntries] = useState<Entry[]>(() =>
+    apiEnabled
+      ? [{ id: toId("entry"), systemStock: 0 }]
+      : [{ id: toId("entry"), uniq: "FG-001", systemStock: 250, countedQty: 245, userCounter: "John Meijer" }]
+  );
+
+  useEffect(() => {
+    if (!apiEnabled) return;
+    void searchStockOpnameUniq({ inventory_type: inventoryType, q: "", limit: 50 });
+  }, [apiEnabled, inventoryType, searchStockOpnameUniq]);
 
   const entryCountLabel = useMemo(() => {
     if (method === "bulk") return `${bulkRows.length || 0} entry`;
@@ -234,8 +292,42 @@ function StockOpnameStartCountPageContent() {
       }
     }
 
-    message.success("Stock Opname saved (mock)");
-    router.push("/stock-opname");
+    if (!apiEnabled) {
+      message.success("Stock Opname saved (mock)");
+      router.push("/stock-opname");
+      return;
+    }
+
+    try {
+      const items =
+        method === "manual"
+          ? entries.map((entry) => ({
+              inventory_id: entry.inventoryId ?? uniqLookup.get(entry.uniq ?? "")?.inventory_id ?? null,
+              counted_quantity: entry.countedQty ?? 0,
+              user_counter: entry.userCounter ?? null,
+              unit_measurement: entry.uom ?? null,
+            }))
+          : bulkRows.map((row) => ({
+              inventory_id: uniqLookup.get(row.uniq)?.inventory_id ?? null,
+              counted_quantity: row.countedQty,
+              user_counter: row.userCounted || null,
+              unit_measurement: null,
+            }));
+
+      await createStockOpname({
+        inventory_type: inventoryType,
+        period: period.format("MM/YYYY"),
+        method,
+        location: null,
+        remarks: null,
+        items,
+      }).unwrap();
+
+      message.success("Stock Opname saved successfully");
+      router.push("/stock-opname");
+    } catch {
+      message.error("Failed to save stock opname");
+    }
   }
 
   return (
@@ -255,7 +347,7 @@ function StockOpnameStartCountPageContent() {
           <Button className="!rounded-lg" onClick={() => router.push("/stock-opname")}>
             Cancel
           </Button>
-          <Button type="primary" className="!rounded-lg" icon={<SaveOutlined />} onClick={onSave}>
+          <Button type="primary" className="!rounded-lg" icon={<SaveOutlined />} loading={saving} onClick={onSave}>
             Save Stock Opname
           </Button>
         </div>
@@ -315,7 +407,7 @@ function StockOpnameStartCountPageContent() {
                 type="info"
                 showIcon
                 message="Bulk Upload selected"
-                description="Upload a template file to create stock opname entries in bulk (mock)."
+                description="Upload a template file to create stock opname entries in bulk."
               />
             </div>
           )}
@@ -386,7 +478,25 @@ function StockOpnameStartCountPageContent() {
                           placeholder="Select Uniq"
                           value={e.uniq}
                           options={uniqOptions}
+                          showSearch
+                          filterOption={false}
+                          loading={uniqLoading}
+                          onSearch={(value) => {
+                            if (!apiEnabled) return;
+                            void searchStockOpnameUniq({ inventory_type: inventoryType, q: value, limit: 50 });
+                          }}
                           onChange={(v) => {
+                            if (apiEnabled) {
+                              const selected = uniqLookup.get(v);
+                              setEntry(e.id, {
+                                uniq: v,
+                                inventoryId: selected?.inventory_id ?? null,
+                                systemStock: selected?.system_quantity ?? 0,
+                                uom: selected?.unit_measurement ?? undefined,
+                              });
+                              return;
+                            }
+
                             const sys = systemStockByUniq[v] ?? 0;
                             setEntry(e.id, { uniq: v, systemStock: sys });
                           }}

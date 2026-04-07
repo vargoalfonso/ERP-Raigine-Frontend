@@ -1,20 +1,19 @@
 "use client";
 
-import React, { Suspense, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Button, Card, DatePicker, Input, InputNumber, Select, Tag, message } from "antd";
-import { LeftOutlined, SaveOutlined, PlusOutlined, QrcodeOutlined } from "@ant-design/icons";
+import { LeftOutlined, SaveOutlined, PlusOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
-import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
-import { decodeBarcodePayload } from "@/lib/utils/barcodePayload";
-import ScanQrModal from "@/components/ScanQrModal";
+import type { Dayjs } from "dayjs";
 import { apiBaseUrl } from "@/lib/api/instance";
-import { useCreateProcurementDnMutation } from "@/lib/api/procurement-dn/api";
+import { type DnManagementType, useCreateDnManagementMutation } from "@/lib/api/dn-management/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 
 type Step1Data = {
   period?: string;
   poNumber?: string;
+  supplierId?: number;
   supplier?: string;
   totalPo?: number;
   totalIncoming?: number;
@@ -108,26 +107,30 @@ function nextDnCode() {
   return "DN-RM-2024-001";
 }
 
-export default function DnRawMaterialCreatePage() {
-  return (
-    <Suspense fallback={null}>
-      <DnRawMaterialCreatePageContent />
-    </Suspense>
-  );
-}
+const tabToType = (tab: string): DnManagementType => {
+  if (tab === "subcon") return "subcon";
+  if (tab === "indirect") return "indirect";
+  return "rm";
+};
 
-function DnRawMaterialCreatePageContent() {
+const typeCopy = (type: DnManagementType) => {
+  if (type === "subcon") return { label: "SubCon", title: "DN SubCon", back: "SubCon", codePrefix: "DN-SUB" };
+  if (type === "indirect") return { label: "Indirect Raw Material", title: "DN Indirect Raw Material", back: "Indirect Raw Material", codePrefix: "DN-IND" };
+  return { label: "Raw Material", title: "DN Raw Material", back: "Raw Material", codePrefix: "DN-RM" };
+};
+
+export default function DnRawMaterialCreatePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const tab = searchParams.get("tab");
-  const backTo = tab ? `/dn-procurement?tab=${encodeURIComponent(tab)}` : "/dn-management";
-
   const apiEnabled = Boolean(apiBaseUrl);
-  const [createDn, createDnState] = useCreateProcurementDnMutation();
+  const dnType = tabToType((searchParams.get("tab") ?? "raw").toLowerCase());
+  const copy = typeCopy(dnType);
+  const [createDnManagement, { isLoading: saving }] = useCreateDnManagementMutation();
 
   const [step1, setStep1] = useState<Step1Data>({
     period: "01/2024",
     poNumber: "PO-RM-2024-01",
+    supplierId: 1,
     supplier: "Autofilled",
     totalPo: 1000,
     totalIncoming: 950,
@@ -136,8 +139,6 @@ function DnRawMaterialCreatePageContent() {
   });
 
   const [draft, setDraft] = useState<Step2Draft>({});
-
-  const [scanOpen, setScanOpen] = useState(false);
 
   const [items, setItems] = useState<DnItemRow[]>(() => {
     const baseDate = undefined;
@@ -193,7 +194,7 @@ function DnRawMaterialCreatePageContent() {
     ];
   });
 
-  const dnCode = useMemo(() => nextDnCode(), []);
+  const dnCode = useMemo(() => `${copy.codePrefix}-${step1.period?.replace(/[^0-9A-Za-z]/g, "") ?? "202401"}-001`, [copy.codePrefix, step1.period]);
   const totalUniqChosen = useMemo(() => items.length, [items]);
 
   const onPickPo = (poValue: string) => {
@@ -266,89 +267,47 @@ function DnRawMaterialCreatePageContent() {
   };
 
   const onSave = async () => {
-    if (!apiEnabled) {
-      message.success("DN Raw Material saved");
-      router.push(backTo);
+    if (!step1.period || !step1.poNumber) {
+      message.error("Period and PO Number are required");
       return;
     }
 
-    const poId = step1.poNumber ?? "";
-    if (!poId) {
-      message.error("PO Number (PO ID) is required");
-      return;
-    }
     if (items.length === 0) {
-      message.error("At least 1 item is required");
+      message.error("Add at least one DN item first");
       return;
     }
 
-    const deliveryDate =
-      items
-        .map((i) => i.dateIncoming)
-        .filter((d): d is Dayjs => Boolean(d))
-        .sort((a, b) => a.valueOf() - b.valueOf())[0] ?? dayjs();
+    if (!apiEnabled) {
+      message.success(`${copy.title} saved`);
+      router.push(`/dn-procurement?tab=${dnType === "rm" ? "raw" : dnType}`);
+      return;
+    }
 
     try {
-      const res = await createDn({
-        po_id: poId,
-        dn_number: dnCode,
-        delivery_date: deliveryDate.format("YYYY-MM-DD"),
-        notes: "packing list",
-        items: items.map((i) => ({
-          uniq: i.uniq,
-          qty: i.orderQty,
-          uom: i.uom,
-          spec_material: i.materialInfo?.code ? String(i.materialInfo.code) : undefined,
-          packing: i.packingNumber,
-          pcs_kanban: i.pcsPerKanban,
+      await createDnManagement({
+        type: dnType,
+        period: step1.period,
+        po_number: step1.poNumber,
+        supplier_id: step1.supplierId ?? 1,
+        dn_type: copy.label,
+        total_po_qty: step1.totalPo ?? 0,
+        total_dn_created: step1.dnCreated ?? items.reduce((total, item) => total + item.orderQty, 0),
+        created_by: "System",
+        items: items.map((item) => ({
+          uniq: item.uniq,
+          order_qty: item.orderQty,
+          packing: item.packingNumber,
+          pcs_per_kanban: item.pcsPerKanban,
+          date_incoming: item.dateIncoming ? item.dateIncoming.format("YYYY-MM-DD") : dayjs().format("YYYY-MM-DD"),
+          qty_stated: item.orderQty,
         })),
       }).unwrap();
 
-      const createdId = res.data?.id;
-      message.success("DN created");
-      if (createdId) {
-        router.push(`/dn-management/detail/${encodeURIComponent(String(createdId))}${tab ? `?tab=${encodeURIComponent(tab)}` : ""}`);
-      } else {
-        router.push(backTo);
-      }
-    } catch (e) {
-      message.error(getApiErrorMessage(e, "Failed to create DN"));
+      message.success(`${copy.title} saved successfully`);
+      router.push(`/dn-procurement?tab=${dnType === "rm" ? "raw" : dnType}`);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, `Failed to save ${copy.title}`));
     }
-  };
-
-  const applyScan = (raw: string) => {
-    const result = decodeBarcodePayload(raw);
-    if (!result.ok) {
-      message.error(result.error);
-      return;
-    }
-
-    const payload = result.payload;
-    if (payload.t === "dn") {
-      setStep1((prev) => ({
-        ...prev,
-        period: payload.period ?? prev.period,
-        supplier: payload.supplier ?? prev.supplier,
-        totalPo: payload.totalPo ?? prev.totalPo,
-        totalIncoming: payload.totalIncoming ?? prev.totalIncoming,
-        dnCreated: payload.dnCreated ?? prev.dnCreated,
-        dnIncoming: payload.dnIncoming ?? prev.dnIncoming,
-      }));
-      message.success(`DN ${payload.dnNumber} loaded`);
-      return;
-    }
-
-    // dnItem
-    setDraft((prev) => ({
-      ...prev,
-      uniq: payload.uniq ?? prev.uniq,
-      orderQty: payload.orderQty ?? prev.orderQty,
-      uom: payload.uom ?? prev.uom,
-      packing: payload.packingNumber ?? prev.packing,
-      pcsPerKanban: payload.pcsPerKanban ?? prev.pcsPerKanban,
-      dateIncoming: payload.dateIncoming ? (dayjs(payload.dateIncoming).isValid() ? dayjs(payload.dateIncoming) : prev.dateIncoming) : prev.dateIncoming,
-    }));
-    message.success(`Item ${payload.uniq} loaded`);
   };
 
   return (
@@ -358,24 +317,24 @@ function DnRawMaterialCreatePageContent() {
           <div className="flex items-center justify-between gap-4">
             <button
               className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
-              onClick={() => router.push(backTo)}
+              onClick={() => router.push(`/dn-procurement?tab=${dnType === "rm" ? "raw" : dnType}`)}
             >
               <LeftOutlined />
-              <span>Back to DN Raw Material</span>
+              <span>Back to {copy.back}</span>
             </button>
 
             <div className="flex items-center gap-2">
-              <Button onClick={() => router.push(backTo)}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={createDnState.isLoading}>
-                Save DN Raw Material
+              <Button onClick={() => router.push(`/dn-procurement?tab=${dnType === "rm" ? "raw" : dnType}`)}>Cancel</Button>
+              <Button type="primary" icon={<SaveOutlined />} onClick={() => void onSave()} loading={saving}>
+                Save {copy.title}
               </Button>
             </div>
           </div>
 
           <div className="mt-2">
-            <div className="text-xl font-semibold text-gray-900">DN Raw Material Management</div>
+            <div className="text-xl font-semibold text-gray-900">{copy.title} Management</div>
             <div className="text-sm text-gray-500">
-              Initialize new DN Raw Material <span className="mx-2">•</span> 1 entry
+              Initialize new {copy.title} <span className="mx-2">•</span> 1 entry
             </div>
           </div>
         </div>
@@ -468,12 +427,7 @@ function DnRawMaterialCreatePageContent() {
                 <div className="text-base font-semibold text-gray-900">Step 2: Input Data</div>
                 <div className="text-sm text-gray-500">Input Data for each items</div>
               </div>
-              <div className="flex items-center gap-2">
-                <Button className="!rounded-lg" icon={<QrcodeOutlined />} onClick={() => setScanOpen(true)}>
-                  Scan
-                </Button>
-                <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">Entry 1</Tag>
-              </div>
+              <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">Entry 1</Tag>
             </div>
 
             <div className="mt-5 space-y-4">
@@ -611,13 +565,6 @@ function DnRawMaterialCreatePageContent() {
           </Card>
         </div>
       </div>
-
-      <ScanQrModal
-        open={scanOpen}
-        title={<span className="text-sm font-semibold">Scan QR</span>}
-        onClose={() => setScanOpen(false)}
-        onScanned={(value) => applyScan(value)}
-      />
     </div>
   );
 }

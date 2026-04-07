@@ -1,13 +1,9 @@
 "use client";
 
-import React, { Suspense, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeftOutlined, EyeOutlined } from "@ant-design/icons";
-import { Button, Card, Skeleton, Table, Tabs, Tag } from "antd";
-import { apiBaseUrl } from "@/lib/api/instance";
-import { useGetScrapStockByIdQuery } from "@/lib/api/scrap-stock/api";
-import { useGetBomTreeQuery } from "@/lib/api/bom/api";
-import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { Button, Card, Table, Tabs, Tag } from "antd";
 
 interface RowHistory {
   key: string;
@@ -20,62 +16,27 @@ interface RowHistory {
 }
 
 export default function ScrapStockDetailPage() {
-  return (
-    <Suspense fallback={null}>
-      <ScrapStockDetailPageContent />
-    </Suspense>
-  );
-}
-
-function ScrapStockDetailPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const id = searchParams.get("id") ?? "";
-
-  const useApi = Boolean(apiBaseUrl);
-  const { data: scrapRes, isFetching } = useGetScrapStockByIdQuery(id, {
-    skip: !useApi || !id,
-  });
-
-  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !useApi });
-  const bomUniqIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
-
-  const uniq = scrapRes?.data?.uniq ?? searchParams.get("uniq") ?? "-";
+  const uniq = searchParams.get("uniq") ?? "LV7-001";
 
   const [activeTab, setActiveTab] = useState("1");
 
   const detailInfo = useMemo(
     () => ({
       uniq,
-      partNumber:
-        (uniq !== "-" ? bomUniqIndex.partNumberByUniq[uniq] : undefined) ??
-        scrapRes?.data?.part_number ??
-        "-",
-      partName:
-        (uniq !== "-" ? bomUniqIndex.partNameByUniq[uniq] : undefined) ??
-        scrapRes?.data?.item_name ??
-        "-",
-      model:
-        (uniq !== "-" ? bomUniqIndex.assemblyCodeByUniq[uniq] : undefined) ??
-        "-",
-      dateReceived:
-        scrapRes?.data?.date_received ??
-        scrapRes?.data?.created_at ??
-        "-",
-      packingNumber: scrapRes?.data?.packing_number ?? "-",
-      scrapType: scrapRes?.data?.scrap_type ?? "-",
-      scrapReason: scrapRes?.data?.reasons ?? "-",
-      scrapQty: typeof scrapRes?.data?.scrap_qty === "number" ? scrapRes.data.scrap_qty : undefined,
-      quantity:
-        typeof scrapRes?.data?.quantity === "number"
-          ? scrapRes.data.quantity
-          : (scrapRes?.data?.scrap_qty ?? 0),
-      weight: typeof scrapRes?.data?.weight === "number" ? scrapRes.data.weight : undefined,
-      unitMeasurement: scrapRes?.data?.unit_measurement ?? "-",
-      validator: scrapRes?.data?.validator ?? "-",
-      status: "-",
+      partNumber: "EMA-001",
+      partName: "Engine Mount Assembly",
+      model: "Camry 2024",
+      dateReceived: "01/15/2024, 10:30",
+      packingNumber: "KBN-001-2024",
+      scrapType: "Setting Machine Scrap",
+      scrapReason: "Dump",
+      quantity: 50,
+      validator: "John Mejer",
+      status: "Open",
     }),
-    [bomUniqIndex, scrapRes?.data, uniq]
+    [uniq]
   );
 
   const historyData: RowHistory[] = [
@@ -153,11 +114,7 @@ function ScrapStockDetailPageContent() {
           type="text"
           icon={<EyeOutlined />}
           className="text-blue-600 hover:text-blue-800"
-          onClick={() =>
-            router.push(
-              `/scrap-stock/detail?id=${encodeURIComponent(id)}&uniq=${encodeURIComponent(record.uniq)}`
-            )
-          }
+          onClick={() => router.push(`/scrap-stock/detail?uniq=${encodeURIComponent(record.uniq)}`)}
         />
       ),
     },
@@ -180,12 +137,6 @@ function ScrapStockDetailPageContent() {
         <Card className="rounded-2xl shadow">
           <h2 className="text-xl font-bold">Details & History Log</h2>
           <p className="text-gray-400">Complete Scrap Stock Detail for {detailInfo.uniq}</p>
-
-          {useApi && (isFetching || !scrapRes?.data) ? (
-            <div className="mt-6">
-              <Skeleton active />
-            </div>
-          ) : null}
 
           <Tabs
             activeKey={activeTab}
@@ -238,13 +189,6 @@ function ScrapStockDetailPageContent() {
                       </div>
 
                       <div>
-                        <p className="text-gray-400">Scrap Qty</p>
-                        <Tag className="bg-blue-100 text-blue-600">
-                          {typeof detailInfo.scrapQty === "number" ? detailInfo.scrapQty : "-"}
-                        </Tag>
-                      </div>
-
-                      <div>
                         <p className="text-gray-400">Quantity</p>
                         <Tag className="bg-blue-100 text-blue-600">{detailInfo.quantity}</Tag>
                       </div>
@@ -252,18 +196,6 @@ function ScrapStockDetailPageContent() {
                       <div>
                         <p className="text-gray-400">Validator</p>
                         <p className="font-semibold">{detailInfo.validator}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Weight</p>
-                        <p className="font-semibold">
-                          {typeof detailInfo.weight === "number" ? detailInfo.weight : "-"}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Unit Measurement</p>
-                        <p className="font-semibold">{detailInfo.unitMeasurement}</p>
                       </div>
 
                       <div>
@@ -286,7 +218,7 @@ function ScrapStockDetailPageContent() {
                     <div style={{ overflowX: "auto" }}>
                       <Table<RowHistory>
                         columns={historyColumns}
-                        dataSource={useApi ? [] : historyData}
+                        dataSource={historyData}
                         pagination={false}
                         rowKey="key"
                         locale={{ emptyText: "No history data" }}

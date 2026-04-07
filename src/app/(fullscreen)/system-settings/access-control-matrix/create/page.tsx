@@ -4,20 +4,13 @@ import React, { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { Button, Card, Form, Input, Select, message } from "antd";
-import { apiBaseUrl } from "@/lib/api/instance";
-import {
-  useCreateAccessControlMatrixMutation,
-  useGetEmployeesQuery,
-  useGetRolesQuery,
-} from "@/lib/api/system-settings/api";
-import { getApiErrorMessage } from "@/lib/api/error";
 
 type UserAccessEntry = {
   key: string;
   fullName?: string;
   employeeId?: string;
   department?: string;
-  roleId?: string;
+  role?: string;
 };
 
 const departmentOptions = [
@@ -28,42 +21,20 @@ const departmentOptions = [
   "Procurement",
 ].map((v) => ({ label: v, value: v }));
 
-const employeeIdOptionsFallback = ["EMP-001", "EMP-002", "EMP-003", "EMP-004", "EMP-005"].map(
+const roleOptions = [
+  "Supervisor",
+  "QC Inspector",
+  "Warehouse Manager",
+  "Production Planner",
+  "Buyer",
+].map((v) => ({ label: v, value: v }));
+
+const employeeIdOptions = ["EMP-001", "EMP-002", "EMP-003", "EMP-004", "EMP-005"].map(
   (v) => ({ label: v, value: v })
 );
 
 export default function AddUserAccessControlPage() {
   const router = useRouter();
-
-  const apiEnabled = Boolean(apiBaseUrl);
-  const [createAccessControlMatrix, { isLoading: isSaving }] =
-    useCreateAccessControlMatrixMutation();
-
-  const { data: rolesData } = useGetRolesQuery(undefined, { skip: !apiEnabled });
-  const { data: employeesData } = useGetEmployeesQuery(undefined, { skip: !apiEnabled });
-
-  const roleOptions = useMemo(
-    () => (rolesData ?? []).map((r) => ({ label: r.name, value: r.id })),
-    [rolesData]
-  );
-
-  const employees = useMemo(() => employeesData ?? [], [employeesData]);
-  const employeeUuidByCode = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const employee of employees) {
-      map.set(employee.employee_id, employee.id);
-    }
-    return map;
-  }, [employees]);
-
-  const employeeOptions = useMemo(() => {
-    if (!employees.length) return apiEnabled ? [] : employeeIdOptionsFallback;
-    return employees.map((e) => ({
-      label: e.employee_id,
-      value: e.employee_id,
-      title: e.full_name,
-    }));
-  }, [apiEnabled, employees]);
 
   const [entries, setEntries] = useState<UserAccessEntry[]>([{ key: "1" }]);
   const [forms] = useState(() => new Map<string, ReturnType<typeof Form.useForm>[0]>());
@@ -74,7 +45,7 @@ export default function AddUserAccessControlPage() {
         !!entry.fullName &&
         !!entry.employeeId &&
         !!entry.department &&
-        !!entry.roleId;
+        !!entry.role;
       return count + (isComplete ? 1 : 0);
     }, 0);
   }, [entries]);
@@ -96,31 +67,8 @@ export default function AddUserAccessControlPage() {
       }
     }
 
-    if (!apiEnabled) {
-      message.success("User access saved");
-      router.push("/system-settings");
-      return;
-    }
-
-    try {
-      for (const entry of entries) {
-        const selectedEmployeeCodeOrId = entry.employeeId!;
-        const resolvedEmployeeUuid =
-          employeeUuidByCode.get(selectedEmployeeCodeOrId) ?? selectedEmployeeCodeOrId;
-
-        await createAccessControlMatrix({
-          full_name: entry.fullName!,
-          employee_id: resolvedEmployeeUuid,
-          department: entry.department!,
-          role_id: entry.roleId!,
-        }).unwrap();
-      }
-
-      message.success("User access saved");
-      router.push("/system-settings");
-    } catch (err: unknown) {
-      message.error(getApiErrorMessage(err, "Failed to save user access"));
-    }
+    message.success("User access saved");
+    router.push("/system-settings");
   };
 
   return (
@@ -149,7 +97,7 @@ export default function AddUserAccessControlPage() {
 
           <div className="flex items-center gap-2">
             <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-            <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={isSaving}>
+            <Button type="primary" icon={<SaveOutlined />} onClick={handleSave}>
               Save User Access
             </Button>
           </div>
@@ -160,7 +108,7 @@ export default function AddUserAccessControlPage() {
         <div className="border border-blue-100 bg-blue-50 rounded-2xl p-5">
           <div className="text-blue-700 font-semibold">Multiple User Access</div>
           <div className="text-blue-700/80 text-sm mt-1">
-            Add new users to the system quickly and securely. Each user will be granted access based on the role you assign. You can add more users using the &quot;Add Another User&quot; button.
+            Add new users to the system quickly and securely. Each user will be granted access based on the role you assign. You can add more users using the "Add Another User" button.
           </div>
         </div>
 
@@ -183,8 +131,6 @@ export default function AddUserAccessControlPage() {
                 entry={entry}
                 onChange={(patch) => setEntryPatch(entry.key, patch)}
                 onFormReady={(form) => forms.set(entry.key, form)}
-                roleOptions={roleOptions}
-                employeeOptions={employeeOptions}
               />
             </div>
           </Card>
@@ -223,14 +169,10 @@ function UserEntryForm({
   entry,
   onChange,
   onFormReady,
-  roleOptions,
-  employeeOptions,
 }: {
   entry: UserAccessEntry;
   onChange: (patch: Partial<UserAccessEntry>) => void;
   onFormReady: (form: ReturnType<typeof Form.useForm>[0]) => void;
-  roleOptions: { label: string; value: string }[];
-  employeeOptions: { label: string; value: string }[];
 }) {
   const [form] = Form.useForm();
 
@@ -247,7 +189,7 @@ function UserEntryForm({
         fullName: entry.fullName,
         employeeId: entry.employeeId,
         department: entry.department,
-        roleId: entry.roleId,
+        role: entry.role,
       }}
       onValuesChange={(_, values) => {
         onChange(values);
@@ -261,10 +203,10 @@ function UserEntryForm({
         <Form.Item label="Employee ID" name="employeeId" rules={[{ required: true }]}>
           <Select
             placeholder="Select employee"
-            options={employeeOptions}
+            options={employeeIdOptions}
             showSearch
             filterOption={(input, option) =>
-              `${String(option?.label ?? "")} ${String((option as { title?: string } | undefined)?.title ?? "")}`
+              String(option?.label ?? "")
                 .toLowerCase()
                 .includes(input.toLowerCase())
             }
@@ -275,8 +217,8 @@ function UserEntryForm({
           <Select placeholder="Select department" options={departmentOptions} />
         </Form.Item>
 
-        <Form.Item label="Role" name="roleId" rules={[{ required: true }]}>
-          <Select placeholder="Select Role" options={roleOptions} showSearch optionFilterProp="label" />
+        <Form.Item label="Role" name="role" rules={[{ required: true }]}>
+          <Select placeholder="Select Role" options={roleOptions} />
         </Form.Item>
       </div>
     </Form>

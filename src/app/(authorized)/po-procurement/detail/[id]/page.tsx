@@ -9,6 +9,15 @@ import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetProcurementPoByIdQuery } from "@/lib/api/procurement-po/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 
+type UnknownRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+
+const isMissingRouteError = (error: unknown): boolean => {
+  if (!isRecord(error)) return false;
+  return (error as UnknownRecord).status === 404;
+};
+
 type PoItemRow = {
   key: string;
   uniq: string;
@@ -111,14 +120,20 @@ export default function PoProcurementDetailPage() {
   const apiEnabled = Boolean(apiBaseUrl);
   const poQuery = useGetProcurementPoByIdQuery(id, { skip: !apiEnabled });
 
+  const procurementApiAvailable = apiEnabled && !isMissingRouteError(poQuery.error);
+
   useEffect(() => {
     if (!apiEnabled) return;
     if (!poQuery.error) return;
+    if (isMissingRouteError(poQuery.error)) {
+      message.warning("Procurement PO API route is not available on this backend yet; showing mock data.");
+      return;
+    }
     message.error(getApiErrorMessage(poQuery.error, "Failed to load PO detail"));
   }, [apiEnabled, poQuery.error]);
 
   const detail = useMemo(() => {
-    if (!apiEnabled) return buildMock(id);
+    if (!procurementApiAvailable) return buildMock(id);
     const po = poQuery.data?.data;
     if (!po) return buildMock(id);
 
@@ -139,9 +154,9 @@ export default function PoProcurementDetailPage() {
       notes: po.notes ?? "-",
       items: [] as PoItemRow[],
     };
-  }, [apiEnabled, id, poQuery.data?.data]);
+  }, [procurementApiAvailable, id, poQuery.data?.data]);
 
-  const items = apiEnabled ? detail.items : detail.items;
+  const items = detail.items;
 
   const columns: ColumnsType<PoItemRow> = [
     { title: "Uniq", dataIndex: "uniq", key: "uniq", width: 90 },

@@ -2,20 +2,13 @@
   "name": "mrp-frontend",
   "version": "0.1.0",
   "private": true,
-  "engines": {
-    "node": ">=18.18.0"
-  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "lint": "next lint",
-    "lint:fix": "next lint --fix",
-    "start": "next start",
-    "smoke:api": "node scripts/smoke-api.mjs"
+    "start": "next start"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.2",
-    "@zxing/browser": "^0.1.5",
     "antd": "^5.27.3",
     "axios": "^1.12.2",
     "js-cookie": "^3.0.5",

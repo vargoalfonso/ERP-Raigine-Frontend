@@ -1,73 +1,36 @@
-# MRP / ERP Frontend
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
-Next.js (App Router) frontend for the MRP/ERP UI.
+## Getting Started
 
-## Prerequisites
-
-- Node.js 18+ (recommended: latest LTS)
-- npm (or any compatible package manager)
-
-## Setup
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-## Environment Variables
-
-This app expects an API base URL:
-
-- `NEXT_PUBLIC_API_URL` (required) — used as the base URL for API requests.
-
-Create a `.env.local` file in the project root:
-
-```bash
-NEXT_PUBLIC_API_URL=http://localhost:8080
-```
-
-Adjust the URL to match your backend.
-
-Note: some deployments mount the backend behind a reverse proxy at `/api`.
-
-- If your backend is reachable at `http://HOST/api/...`, you may set `NEXT_PUBLIC_API_URL` to `http://HOST/api`.
-- If your backend is reachable at `http://HOST/...` and routes already include `/api/...`, set `NEXT_PUBLIC_API_URL` to `http://HOST`.
-
-This frontend normalizes the URL to avoid accidental `/api/api/...` requests.
-
-Optional (recommended for production): keep the debug smoke-test page disabled.
-
-```bash
-# Enable /api-smoke route (debug only)
-ENABLE_API_SMOKE=false
-
-# Block common crawlers/bots (recommended)
-BLOCK_BOTS=true
-```
-
-If your backend expects a different login identifier field (e.g. `username` instead of `email`), set:
-
-```bash
-NEXT_PUBLIC_AUTH_LOGIN_FIELD=username
-```
-
-## Run (Development)
+First, run the development server:
 
 ```bash
 npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
 ```
 
-Open http://localhost:3000
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-## Build & Run (Production)
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
-```bash
-npm run build
-npm run start
-```
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-## Troubleshooting
+## Learn More
 
-- If you see network/API errors, verify `NEXT_PUBLIC_API_URL` is set correctly.
-- If login or authorized pages redirect unexpectedly, clear site cookies and try again.
+To learn more about Next.js, take a look at the following resources:
+
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+
+## Deploy on Vercel
+
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.

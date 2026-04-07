@@ -13,13 +13,6 @@ import {
 } from "antd";
 import { ArrowLeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
-import { apiBaseUrl } from "@/lib/api/instance";
-import { useGetBomTreeQuery } from "@/lib/api/bom/api";
-import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
-import { useCreateScrapStockMutation } from "@/lib/api/scrap-stock/api";
-import { getApiErrorMessage } from "@/lib/api/error";
-import { useMemo } from "react";
-import { useGetTypeParametersQuery } from "@/lib/api/system-settings/api";
 
 const { Title } = Typography;
 
@@ -29,7 +22,6 @@ type ScrapEntry = {
   dateReceived?: Dayjs;
   scrapType?: string;
   scrapReason?: string;
-  validator?: string;
   quantity?: number;
   weight?: number;
   uom?: string;
@@ -39,7 +31,7 @@ type ScrapStockCreateForm = {
   entries: ScrapEntry[];
 };
 
-const fallbackUniqOptions = [
+const uniqOptions = [
   { label: "LV-001", value: "LV-001" },
   { label: "LV-002", value: "LV-002" },
   { label: "LV-003", value: "LV-003" },
@@ -51,7 +43,7 @@ const packingOptions = [
   { label: "WH-FG-031", value: "WH-FG-031" },
 ];
 
-const DEFAULT_SCRAP_TYPE_OPTIONS = [
+const scrapTypeOptions = [
   { label: "Setting Machine Scrap", value: "Setting Machine Scrap" },
   { label: "Process Scrap", value: "Process Scrap" },
   { label: "Product Return Scrap", value: "Product Return Scrap" },
@@ -76,7 +68,6 @@ function isEntryComplete(entry: ScrapEntry) {
       entry.dateReceived &&
       entry.scrapType &&
       entry.scrapReason &&
-      entry.validator &&
       typeof entry.quantity === "number" &&
       typeof entry.weight === "number" &&
       entry.uom
@@ -88,36 +79,6 @@ export default function CreateScrapStockPage() {
   const [messageApi, contextHolder] = message.useMessage();
   const [form] = Form.useForm<ScrapStockCreateForm>();
 
-  const useApi = Boolean(apiBaseUrl);
-  const [createScrapStock, { isLoading: isSaving }] = useCreateScrapStockMutation();
-  const { data: typeParams } = useGetTypeParametersQuery(undefined, {
-    skip: !useApi,
-    refetchOnMountOrArgChange: true,
-  });
-  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !useApi });
-  const bomUniqIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
-  const uniqOptions = useMemo(() => {
-    return bomUniqIndex.options.length ? bomUniqIndex.options : fallbackUniqOptions;
-  }, [bomUniqIndex.options]);
-
-  const scrapTypeOptions = useMemo(() => {
-    if (!useApi) return DEFAULT_SCRAP_TYPE_OPTIONS;
-
-    const candidates = (typeParams ?? [])
-      .filter((p) => String(p?.status ?? "").toLowerCase() !== "inactive")
-      .filter((p) => {
-        const code = String(p?.type_code ?? "").trim().toLowerCase();
-        const name = String(p?.type_name ?? "").trim().toLowerCase();
-        return code.startsWith("scrap") || name.includes("scrap");
-      })
-      .map((p) => String(p?.type_name ?? p?.type_code ?? "").trim())
-      .filter(Boolean);
-
-    const uniq = Array.from(new Set(candidates)).sort((a, b) => a.localeCompare(b));
-    if (uniq.length === 0) return DEFAULT_SCRAP_TYPE_OPTIONS;
-    return uniq.map((v) => ({ label: v, value: v }));
-  }, [typeParams, useApi]);
-
   const watchedEntries = Form.useWatch("entries", form);
   const entries = watchedEntries ?? [];
   const entryCount = Math.max(entries.length, 1);
@@ -126,36 +87,10 @@ export default function CreateScrapStockPage() {
   const handleSave = async () => {
     try {
       await form.validateFields();
-
-      const values = form.getFieldsValue();
-      const entriesToSave = (values.entries ?? []).filter(isEntryComplete);
-
-      if (useApi) {
-        for (const entry of entriesToSave) {
-          await createScrapStock({
-            uniq: entry.uniq,
-            item_name: entry.uniq ? bomUniqIndex.partNameByUniq[entry.uniq] : undefined,
-            part_number: entry.uniq ? bomUniqIndex.partNumberByUniq[entry.uniq] : undefined,
-            packing_number: entry.packingNumber!,
-            date_received: entry.dateReceived!.format("YYYY-MM-DD"),
-            scrap_type: entry.scrapType!,
-            scrap_qty: entry.quantity!,
-            validator: entry.validator,
-            quantity: entry.quantity!,
-            weight: entry.weight,
-            unit_measurement: entry.uom,
-            reasons: entry.scrapReason,
-          }).unwrap();
-        }
-      }
-
       messageApi.success("Scrap Stock Database saved");
       router.push("/scrap-stock");
-    } catch (err: unknown) {
+    } catch {
       // validation errors shown by antd
-      if (useApi) {
-        messageApi.error(getApiErrorMessage(err, "Failed to save scrap stock"));
-      }
     }
   };
 
@@ -185,7 +120,7 @@ export default function CreateScrapStockPage() {
 
           <div className="flex items-center gap-3">
             <Button onClick={() => router.push("/scrap-stock")}>Cancel</Button>
-            <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={isSaving}>
+            <Button type="primary" icon={<SaveOutlined />} onClick={handleSave}>
               Save Scrap Stock Database
             </Button>
           </div>
@@ -261,21 +196,6 @@ export default function CreateScrapStockPage() {
                         rules={[{ required: true, message: "Select reason" }]}
                       >
                         <Select placeholder="Select Reason" options={scrapReasonOptions} />
-                      </Form.Item>
-
-                      <Form.Item
-                        name={[field.name, "validator"]}
-                        label="Validator"
-                        rules={[{ required: true, message: "Select validator" }]}
-                      >
-                        <Select
-                          placeholder="Select Validator"
-                          options={[
-                            { label: "auditor1", value: "auditor1" },
-                            { label: "auditor2", value: "auditor2" },
-                          ]}
-                          showSearch
-                        />
                       </Form.Item>
 
                       <Form.Item

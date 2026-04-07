@@ -1,10 +1,17 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Button, Modal, Segmented, Table, Tag } from "antd";
+import { Button, Modal, Segmented, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { ClockCircleOutlined, FileTextOutlined } from "@ant-design/icons";
 import { MdLightbulbOutline, MdSettings, MdSwapVert } from "react-icons/md";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import {
+  useGetMachinePatternsQuery,
+  useGetPrlHistoryQuery,
+  useGetPrlLogsByUniqQuery,
+} from "@/lib/api/prl-log/api";
 
 type HistoryTabId = "prl-history" | "machine-pattern";
 
@@ -51,8 +58,19 @@ export default function PrlPatternHistoryPage() {
   const [activeTab, setActiveTab] = useState<HistoryTabId>("prl-history");
   const [detailOpen, setDetailOpen] = useState(false);
   const [selectedUniq, setSelectedUniq] = useState<string | null>(null);
+  const apiEnabled = Boolean(apiBaseUrl);
 
-  const prlHistoryRows = useMemo<PrlHistoryRow[]>(
+  const prlHistoryQuery = useGetPrlHistoryQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const machinePatternQuery = useGetMachinePatternsQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const uniqLogsQuery = useGetPrlLogsByUniqQuery(selectedUniq ?? "", {
+    skip: !apiEnabled || !detailOpen || !selectedUniq,
+  });
+
+  const fallbackPrlHistoryRows = useMemo<PrlHistoryRow[]>(
     () => [
       {
         key: "1",
@@ -86,7 +104,7 @@ export default function PrlPatternHistoryPage() {
     []
   );
 
-  const machinePatternRows = useMemo<MachinePatternRow[]>(
+  const fallbackMachinePatternRows = useMemo<MachinePatternRow[]>(
     () => [
       {
         key: "m1",
@@ -119,7 +137,7 @@ export default function PrlPatternHistoryPage() {
     []
   );
 
-  const uniqLogDetailsMap = useMemo<Record<string, UniqLogDetails>>(
+  const fallbackUniqLogDetailsMap = useMemo<Record<string, UniqLogDetails>>(
     () => ({
       "LV7-001": {
         uniq: "LV7-001",
@@ -196,7 +214,91 @@ export default function PrlPatternHistoryPage() {
     []
   );
 
+  const prlHistoryRows = useMemo<PrlHistoryRow[]>(() => {
+    if (!apiEnabled) return fallbackPrlHistoryRows;
+    const list = prlHistoryQuery.data;
+    if (!list?.length) return fallbackPrlHistoryRows;
+
+    return list.map((row, index) => ({
+      key: `${row.item_uniq_code ?? "uniq"}-${row.period ?? index}-${index}`,
+      period: row.period ?? "-",
+      uniq: row.item_uniq_code ?? "-",
+      machinePattern:
+        [row.product_details?.part_name, row.product_details?.part_number]
+          .filter(Boolean)
+          .join(" • ") || "-",
+      productionOutput: Number(row.delivery_quantity ?? row.quantity ?? 0),
+    }));
+  }, [apiEnabled, fallbackPrlHistoryRows, prlHistoryQuery.data]);
+
+  const machinePatternRows = useMemo<MachinePatternRow[]>(() => {
+    if (!apiEnabled) return fallbackMachinePatternRows;
+    const list = machinePatternQuery.data;
+    if (!list?.length) return fallbackMachinePatternRows;
+
+    return list.map((row, index) => {
+      const rawPattern = String(row.machine_pattern ?? "-");
+      const [pattern, ...restSteps] = rawPattern.split(":");
+      const steps = restSteps.join(":").trim() || rawPattern;
+
+      return {
+        key: `${row.uniq ?? "machine"}-${row.period ?? index}-${index}`,
+        uniq: row.uniq ?? "-",
+        pattern: pattern.trim() || rawPattern,
+        steps,
+        avgCycleTime: row.period ?? "-",
+        output: Number(row.production_output ?? 0),
+        status: Number(row.production_output ?? 0) > 0 ? "Stable" : "Watch",
+      };
+    });
+  }, [apiEnabled, fallbackMachinePatternRows, machinePatternQuery.data]);
+
+  const uniqLogDetailsMap = useMemo<Record<string, UniqLogDetails>>(() => {
+    if (!apiEnabled) return fallbackUniqLogDetailsMap;
+    if (!selectedUniq) return fallbackUniqLogDetailsMap;
+
+    const logs = uniqLogsQuery.data;
+    if (!logs?.length) return fallbackUniqLogDetailsMap;
+
+    const timeline: LogTimelineItem[] = logs.map((log, index) => ({
+      key: `${log.id}-${index}`,
+      title: log.action ?? "Activity",
+      timestamp: log.created_at ?? "-",
+      description:
+        log.old_value && log.new_value
+          ? `Changed value from ${log.old_value} to ${log.new_value}`
+          : log.action ?? "No description available",
+      actor: log.user_name ?? "System",
+      oldValue: log.old_value,
+      newValue: log.new_value,
+    }));
+
+    const lastUpdated = logs[0]?.created_at ?? "-";
+
+    return {
+      ...fallbackUniqLogDetailsMap,
+      [selectedUniq]: {
+        uniq: selectedUniq,
+        totalLogs: logs.length,
+        lastUpdated,
+        timeline,
+      },
+    };
+  }, [apiEnabled, fallbackUniqLogDetailsMap, selectedUniq, uniqLogsQuery.data]);
+
   const selectedDetails = selectedUniq ? uniqLogDetailsMap[selectedUniq] : undefined;
+
+  React.useEffect(() => {
+    if (!apiEnabled) return;
+    const activeError = activeTab === "prl-history" ? prlHistoryQuery.error : machinePatternQuery.error;
+    if (!activeError) return;
+    message.error(getApiErrorMessage(activeError, "Failed to load PRL pattern history"));
+  }, [activeTab, apiEnabled, machinePatternQuery.error, prlHistoryQuery.error]);
+
+  React.useEffect(() => {
+    if (!apiEnabled || !uniqLogsQuery.error || !detailOpen) return;
+    message.error(getApiErrorMessage(uniqLogsQuery.error, "Failed to load UNIQ log details"));
+  }, [apiEnabled, detailOpen, uniqLogsQuery.error]);
 
   const openUniqDetail = (uniq: string) => {
     setSelectedUniq(uniq);
@@ -380,7 +482,7 @@ export default function PrlPatternHistoryPage() {
           </div>
         }
         width={560}
-        destroyOnClose
+        destroyOnHidden
         title={
           <div className="flex items-center gap-2">
             <FileTextOutlined className="text-blue-600" />

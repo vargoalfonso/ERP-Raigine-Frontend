@@ -7,6 +7,14 @@ import {
   SaveOutlined,
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import {
+  useCreateEmployeeMutation,
+  useGetDepartmentsQuery,
+  useGetEmployeesQuery,
+  useGetRolesQuery,
+} from "@/lib/api/system-settings/api";
 
 type EmployeeRow = {
   key: string;
@@ -68,6 +76,17 @@ const nextEmployeeId = (existing: EmployeeRow[]) => {
 export default function AddEmployeePage() {
   const router = useRouter();
   const [form] = Form.useForm();
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [createEmployee, createEmployeeState] = useCreateEmployeeMutation();
+  const { data: employeesApiData = [] } = useGetEmployeesQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const { data: departmentsApiData = [] } = useGetDepartmentsQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const { data: rolesApiData = [] } = useGetRolesQuery(undefined, {
+    skip: !apiEnabled,
+  });
 
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [departments, setDepartments] = useState<DepartmentRow[]>([]);
@@ -97,21 +116,40 @@ export default function AddEmployeePage() {
 
   const generatedEmpId = useMemo(() => nextEmployeeId(employees), [employees]);
 
+  const generatedApiEmpId = useMemo(() => {
+    if (!apiEnabled) return generatedEmpId;
+    const nums = employeesApiData
+      .map((e) => e.employee_id)
+      .map((id) => {
+        const match = String(id).match(/(\d+)$/);
+        return match ? Number(match[1]) : null;
+      })
+      .filter((n): n is number => typeof n === "number" && Number.isFinite(n));
+
+    const next = (nums.length ? Math.max(...nums) : 0) + 1;
+    return `EMP-2026-${String(next).padStart(3, "0")}`;
+  }, [apiEnabled, employeesApiData, generatedEmpId]);
+
   useEffect(() => {
-    form.setFieldsValue({ empId: generatedEmpId });
-  }, [form, generatedEmpId]);
+    form.setFieldsValue({ empId: generatedApiEmpId });
+  }, [form, generatedApiEmpId]);
 
   const departmentOptions = useMemo(
-    () => departments.map((d) => ({ label: d.name, value: d.name })),
-    [departments]
+    () =>
+      apiEnabled
+        ? departmentsApiData.map((d) => ({ label: d.department_name, value: d.id }))
+        : departments.map((d) => ({ label: d.name, value: d.name })),
+    [apiEnabled, departments, departmentsApiData]
   );
 
   const supervisorOptions = useMemo(
     () => [
-      ...employees.map((e) => ({ label: e.name, value: e.name })),
+      ...(apiEnabled
+        ? employeesApiData.map((e) => ({ label: e.full_name, value: e.full_name }))
+        : employees.map((e) => ({ label: e.name, value: e.name }))),
       { label: "Top Level", value: "Top Level" },
     ],
-    [employees]
+    [apiEnabled, employees, employeesApiData]
   );
 
   const employmentStatusOptions = [
@@ -128,9 +166,32 @@ export default function AddEmployeePage() {
     { label: "Director", value: "Director" },
   ];
 
+  const roleOptions = useMemo(
+    () => rolesApiData.map((r) => ({ label: r.name, value: r.id })),
+    [rolesApiData]
+  );
+
   const onCreate = async () => {
     try {
       const values = await form.validateFields();
+
+      if (apiEnabled) {
+        await createEmployee({
+          employee_id: values.empId,
+          full_name: values.fullName,
+          email: values.workEmail || null,
+          phone_number: values.phoneNumber || null,
+          job_title: values.jobTitle || null,
+          status: values.employmentStatus || "Active",
+          unit_cost: values.unitCost != null ? Number(values.unitCost) : null,
+          role_id: values.roleId || null,
+          department_id: values.departmentId || null,
+        }).unwrap();
+
+        message.success("Employee created");
+        router.push("/employee-dept");
+        return;
+      }
 
       const isManager =
         values.positionRole === "Manager" ||
@@ -159,8 +220,9 @@ export default function AddEmployeePage() {
 
       message.success("Employee created");
       router.push("/employee-dept");
-    } catch {
-      // validation handled by form
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      message.error(getApiErrorMessage(err, "Failed to create employee"));
     }
   };
 
@@ -182,7 +244,13 @@ export default function AddEmployeePage() {
             >
               Cancel
             </Button>
-            <Button type="primary" className="!rounded-lg" icon={<SaveOutlined />} onClick={onCreate}>
+            <Button
+              type="primary"
+              className="!rounded-lg"
+              icon={<SaveOutlined />}
+              onClick={onCreate}
+              loading={createEmployeeState.isLoading}
+            >
               Create Employee
             </Button>
           </div>
@@ -228,13 +296,28 @@ export default function AddEmployeePage() {
               <Form.Item name="jobTitle" label="Job Title" rules={[{ required: true, message: "Enter job title" }]}>
                 <Input className="!rounded-lg" placeholder="Enter job title" />
               </Form.Item>
-              <Form.Item name="department" label="Department" rules={[{ required: true, message: "Select department" }]}>
+              <Form.Item
+                name={apiEnabled ? "departmentId" : "department"}
+                label="Department"
+                rules={[{ required: true, message: "Select department" }]}
+              >
                 <Select className="!rounded-lg" placeholder="Select department" options={departmentOptions} />
               </Form.Item>
 
-              <Form.Item name="positionRole" label="Position/Role" rules={[{ required: true, message: "Select position" }]}>
-                <Select className="!rounded-lg" placeholder="Select position" options={positionOptions} />
-              </Form.Item>
+              {apiEnabled ? (
+                <Form.Item name="roleId" label="Role">
+                  <Select
+                    className="!rounded-lg"
+                    placeholder="Select role (optional)"
+                    options={roleOptions}
+                    allowClear
+                  />
+                </Form.Item>
+              ) : (
+                <Form.Item name="positionRole" label="Position/Role" rules={[{ required: true, message: "Select position" }]}> 
+                  <Select className="!rounded-lg" placeholder="Select position" options={positionOptions} />
+                </Form.Item>
+              )}
               <Form.Item name="reportsTo" label="Reports To" rules={[{ required: true, message: "Select supervisor" }]}>
                 <Select className="!rounded-lg" placeholder="Select supervisor" options={supervisorOptions} />
               </Form.Item>

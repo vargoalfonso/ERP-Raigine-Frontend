@@ -14,7 +14,6 @@ import {
   Divider,
   Radio,
 } from "antd";
-import type { RadioChangeEvent } from "antd";
 import {
   UploadOutlined,
   DownloadOutlined,
@@ -220,7 +219,7 @@ export default function BulkFinishedGoodsPage() {
           const dataLines = lines.slice(1);
           const parsed: RowData[] = dataLines.map((line, idx) => {
             const cols = line.split(",").map((c) => c.trim());
-            const obj: Record<string, string> = {};
+            const obj: any = {};
             headers.forEach((h, i) => {
               obj[h] = cols[i] ?? "";
             });
@@ -262,7 +261,7 @@ export default function BulkFinishedGoodsPage() {
         const parsed = await parseCSV(file);
         setRows(parsed);
         message.success(`Parsed ${parsed.length} rows from CSV`);
-      } catch {
+      } catch (err) {
         message.error("Failed to parse CSV file");
         setRows([]);
       }
@@ -321,7 +320,7 @@ export default function BulkFinishedGoodsPage() {
     router.push("/raw-materials/create");
   };
 
-  const handleModeChange = (e: RadioChangeEvent) => {
+  const handleModeChange = (e: any) => {
     const value = e.target.value as "manual" | "bulk";
     setMode(value);
     if (value === "bulk") {

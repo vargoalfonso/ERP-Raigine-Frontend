@@ -17,12 +17,21 @@ import {
   SaveOutlined,
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import dayjs, { type Dayjs } from "dayjs";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { useGetProcessesQuery } from "@/lib/api/system-settings/api";
+import { useCreateWorkOrderMutation } from "@/lib/api/work-orders/api";
 
 type WorkOrderType = "New" | "Additional" | "Rework" | "Assembly";
 
 type UniqOption = {
   uniq: string;
   partName: string;
+  partNumber?: string;
+  model?: string;
   uom: string;
   processes: string[];
 };
@@ -31,6 +40,8 @@ type UniqLine = {
   id: string;
   uniq?: string;
   partName?: string;
+  partNumber?: string;
+  model?: string;
   qty?: number;
   uom?: string;
   process?: string;
@@ -52,15 +63,47 @@ const nextKanbanNumber = (index: number) => `KBN-AUTO-${String(index + 1).padSta
 export default function CreateWorkOrderPage() {
   const router = useRouter();
   const [form] = Form.useForm();
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [createWorkOrder, createWorkOrderState] = useCreateWorkOrderMutation();
 
   const [woNumber] = useState(() => nextWoNumber());
   const [lines, setLines] = useState<UniqLine[]>([{ id: "l-1", kanbanNumber: nextKanbanNumber(0) }]);
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const { data: processRecords = [] } = useGetProcessesQuery(undefined, {
+    skip: !apiEnabled,
+  });
 
-  const uniqOptions: UniqOption[] = [
+  const fallbackUniqOptions: UniqOption[] = [
     { uniq: "LV7-001", partName: "Engine Mount Assembly", uom: "pcs", processes: ["Cutting", "Welding", "QC"] },
     { uniq: "LV7-002", partName: "Engine Mount Base", uom: "pcs", processes: ["Milling", "QC"] },
     { uniq: "LV8-003", partName: "Suspension Arm", uom: "pcs", processes: ["Forging", "Machining", "QC"] },
   ];
+
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomTreeRes?.data ?? []),
+    [bomTreeRes?.data]
+  );
+
+  const processNameOptions = useMemo(() => {
+    const names = processRecords
+      .map((item) => item.process_name)
+      .filter((value): value is string => Boolean(value));
+    return Array.from(new Set(names));
+  }, [processRecords]);
+
+  const uniqOptions = useMemo<UniqOption[]>(() => {
+    if (!bomIndex.options.length) return fallbackUniqOptions;
+    return bomIndex.options.map((option) => ({
+      uniq: option.value,
+      partName: bomIndex.partNameByUniq[option.value] ?? "",
+      partNumber: bomIndex.partNumberByUniq[option.value] ?? "",
+      model: bomIndex.assemblyCodeByUniq[option.value] ?? "",
+      uom: "pcs",
+      processes: processNameOptions,
+    }));
+  }, [bomIndex, processNameOptions]);
 
   const uniqSelectOptions = useMemo(
     () => uniqOptions.map((u) => ({ label: u.uniq, value: u.uniq })),
@@ -95,6 +138,8 @@ export default function CreateWorkOrderPage() {
     updateLine(id, {
       uniq,
       partName: found?.partName,
+      partNumber: found?.partNumber,
+      model: found?.model,
       uom: found?.uom,
       process: undefined,
     });
@@ -119,13 +164,41 @@ export default function CreateWorkOrderPage() {
         return;
       }
 
-      message.success("Work order created (mock)");
+      if (!apiEnabled) {
+        message.success("Work order created (mock)");
+        router.push("/work-orders");
+        return;
+      }
+
+      const targetDate = values.woTargetDate as Dayjs;
+      const created = await createWorkOrder({
+        wo_type: String(values.woType),
+        target_date: dayjs(targetDate).format("YYYY-MM-DD"),
+        items: lines.map((line) => ({
+          item_uniq_code: String(line.uniq ?? "").trim(),
+          quantity: Number(line.qty ?? 0),
+          uom: String(line.uom ?? "pcs"),
+          process_name: String(line.process ?? ""),
+        })),
+      }).unwrap();
+
+      message.success("Work order created successfully");
+      if (created.id) {
+        router.push(`/work-orders/detail/${encodeURIComponent(created.id)}`);
+        return;
+      }
+
       router.push("/work-orders");
 
       // values + lines are available here if later you want persistence.
       void values;
-    } catch {
-      // validation handled by form
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) {
+        return;
+      }
+      if (err) {
+        message.error(getApiErrorMessage(err, "Failed to create work order"));
+      }
     }
   };
 
@@ -148,7 +221,13 @@ export default function CreateWorkOrderPage() {
             <Button className="!rounded-lg" onClick={() => router.push("/work-orders")}>
               Cancel
             </Button>
-            <Button type="primary" className="!rounded-lg" icon={<SaveOutlined />} onClick={onCreate}>
+            <Button
+              type="primary"
+              className="!rounded-lg"
+              icon={<SaveOutlined />}
+              onClick={onCreate}
+              loading={createWorkOrderState.isLoading}
+            >
               Create Work Order
             </Button>
           </div>
@@ -230,7 +309,7 @@ export default function CreateWorkOrderPage() {
               <div className="divide-y divide-gray-100">
                 {lines.map((l, idx) => {
                   const selectedUniq = uniqOptions.find((u) => u.uniq === l.uniq);
-                  const processOptions = (selectedUniq?.processes || []).map((p) => ({ label: p, value: p }));
+                  const processOptions = (selectedUniq?.processes.length ? selectedUniq.processes : processNameOptions).map((p) => ({ label: p, value: p }));
 
                   return (
                     <div key={l.id} className="px-4 py-3 grid grid-cols-12 gap-3 items-center">
@@ -244,7 +323,14 @@ export default function CreateWorkOrderPage() {
                         />
                       </div>
                       <div className="col-span-3">
-                        <Input className="!rounded-lg" value={l.partName} placeholder="Auto-filled" disabled />
+                        <Input className="!rounded-lg" value={l.partName} placeholder="Auto-filled from BOM" disabled />
+                        {l.partNumber || l.model ? (
+                          <div className="mt-1 text-[11px] text-gray-400">
+                            {[l.partNumber ? `Part No: ${l.partNumber}` : "", l.model ? `Model: ${l.model}` : ""]
+                              .filter(Boolean)
+                              .join(" • ")}
+                          </div>
+                        ) : null}
                       </div>
                       <div className="col-span-1">
                         <InputNumber
@@ -275,7 +361,7 @@ export default function CreateWorkOrderPage() {
                           value={l.process}
                           options={processOptions}
                           onChange={(v) => updateLine(l.id, { process: v })}
-                          disabled={!l.uniq}
+                          disabled={!l.uniq || !processOptions.length}
                         />
                       </div>
                       <div className="col-span-2">
