@@ -1,7 +1,10 @@
 "use client";
 
 import StatsCard from "@/components/StatsCard";
-import { Card } from "antd";
+import { Alert, Card } from "antd";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetDashboardOverviewQuery } from "@/lib/api/dashboard/api";
 import {
   BarChart,
   Bar,
@@ -13,46 +16,49 @@ import {
   Line,
 } from "recharts";
 
-const data = [
-  {
-    name: "Jan",
-    uv: 4000,
-    pv: 4400,
-    amt: 2400,
-  },
-  {
-    name: "Feb",
-    uv: 8000,
-    pv: 5398,
-    amt: 2210,
-  },
-  {
-    name: "Mar",
-    uv: 7000,
-    pv: 9800,
-    amt: 2290,
-  },
-  {
-    name: "Apr",
-    uv: 6780,
-    pv: 6908,
-    amt: 2000,
-  },
-  {
-    name: "May",
-    uv: 5890,
-    pv: 6800,
-    amt: 2181,
-  },
-  {
-    name: "Jun",
-    uv: 6390,
-    pv: 7800,
-    amt: 2500,
-  },
-];
+const formatDelta = (delta?: number | null, direction?: string) => {
+  if (typeof delta === "number" && Number.isFinite(delta)) {
+    const prefix = delta > 0 ? "+" : "";
+    return `${prefix}${delta}% vs last period`;
+  }
+
+  if (direction === "flat") return "Flat vs last period";
+  return undefined;
+};
+
+const toMonthLabel = (bucket?: string) => {
+  if (!bucket) return "-";
+  const parsed = new Date(`${bucket}-01T00:00:00`);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleDateString("en-US", { month: "short" });
+  }
+  return bucket;
+};
 
 export default function Dashboard() {
+  const apiEnabled = Boolean(apiBaseUrl);
+  const dashboardQuery = useGetDashboardOverviewQuery(undefined, { skip: !apiEnabled });
+  const overview = dashboardQuery.data?.data;
+  const delivery = overview?.delivery;
+  const production = overview?.production;
+  const currentProduction = overview?.current_production;
+  const procurement = overview?.procurement;
+  const dashboardError = dashboardQuery.error ? getApiErrorMessage(dashboardQuery.error, "Failed to load dashboard overview") : "";
+
+  const deliveryChartData =
+    delivery?.series?.map((item) => ({
+      name: toMonthLabel(item.bucket),
+      scheduled: item.scheduled ?? item.total ?? 0,
+      shipped: item.shipped ?? item.scheduled ?? 0,
+    })) ?? [];
+
+  const productionChartData =
+    production?.uniq_progress?.slice(0, 6).map((item) => ({
+      name: item.uniq ?? "-",
+      plan: item.target_qty ?? 0,
+      actual: item.produced_qty ?? 0,
+    })) ?? [];
+
   // Icons for stats cards
   const truckIcon = (
     <svg
@@ -158,44 +164,55 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {!apiEnabled ? (
+        <Alert
+          type="warning"
+          showIcon
+          className="mb-6"
+          message="Dashboard API is not configured. Set NEXT_PUBLIC_API_URL to your backend base URL."
+        />
+      ) : dashboardError ? (
+        <Alert type="error" showIcon className="mb-6" message={dashboardError} />
+      ) : null}
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <StatsCard
           title="Total Deliveries"
-          value="156"
-          subtitle="148 on time"
-          change="+12% vs last month"
-          changeType="positive"
+          value={delivery?.total ?? 0}
+          subtitle={`${delivery?.on_time ?? 0} on time`}
+          change={formatDelta(delivery?.trend?.delta_pct, delivery?.trend?.direction)}
+          changeType={(delivery?.trend?.delta_pct ?? 0) < 0 ? "negative" : "positive"}
           icon={truckIcon}
           bgColor="bg-blue-50"
           textColor="text-blue-600"
         />
         <StatsCard
           title="Current Production"
-          value="145"
-          subtitle="12 active WOs"
-          change="+21% vs last month"
-          changeType="positive"
+          value={currentProduction?.running_machines ?? 0}
+          subtitle={`${currentProduction?.active_wo_count ?? 0} active WOs`}
+          change={formatDelta(currentProduction?.trend?.delta_pct, currentProduction?.trend?.direction)}
+          changeType={(currentProduction?.trend?.delta_pct ?? 0) < 0 ? "negative" : "positive"}
           icon={productionIcon}
           bgColor="bg-green-50"
           textColor="text-green-600"
         />
         <StatsCard
           title="Total Production"
-          value="2340"
-          subtitle="87 completed today"
-          change="+8.5% vs last month"
-          changeType="positive"
+          value={production?.good_qty ?? 0}
+          subtitle={`${production?.completed_today ?? 0} completed today`}
+          change={formatDelta(production?.trend?.delta_pct, production?.trend?.direction)}
+          changeType={(production?.trend?.delta_pct ?? 0) < 0 ? "negative" : "positive"}
           icon={totalProductionIcon}
           bgColor="bg-purple-50"
           textColor="text-purple-600"
         />
         <StatsCard
           title="PO & Raw Material"
-          value="48"
-          subtitle="15 buy recommendations"
-          change="+4 vs last month"
-          changeType="positive"
+          value={procurement?.open_po_count ?? 0}
+          subtitle={`${procurement?.buy_recommendations ?? 0} buy recommendations`}
+          change={formatDelta(procurement?.trend?.delta_pct, procurement?.trend?.direction)}
+          changeType={(procurement?.trend?.delta_pct ?? 0) < 0 ? "negative" : "positive"}
           icon={rawMaterialIcon}
           bgColor="bg-orange-50"
           textColor="text-orange-600"
@@ -233,14 +250,14 @@ export default function Dashboard() {
         >
           <ResponsiveContainer width="100%" height={250}>
             <BarChart
-              data={data}
+              data={deliveryChartData}
               margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
             >
               <XAxis dataKey="name" />
               <YAxis />
               <Tooltip />
-              <Bar dataKey="uv" fill="#3B82F6" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="pv" fill="#00C950" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="scheduled" fill="#3B82F6" radius={[4, 4, 0, 0]} name="Scheduled" />
+              <Bar dataKey="shipped" fill="#00C950" radius={[4, 4, 0, 0]} name="Shipped" />
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -274,14 +291,7 @@ export default function Dashboard() {
         >
           <ResponsiveContainer width="100%" height={250}>
             <LineChart
-              data={[
-                { name: "Mon", plan: 200, actual: 180 },
-                { name: "Tue", plan: 210, actual: 190 },
-                { name: "Wed", plan: 190, actual: 185 },
-                { name: "Thu", plan: 220, actual: 195 },
-                { name: "Fri", plan: 240, actual: 230 },
-                { name: "Sat", plan: 180, actual: 160 },
-              ]}
+              data={productionChartData}
               margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
             >
               <XAxis dataKey="name" />

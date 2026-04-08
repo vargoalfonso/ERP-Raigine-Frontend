@@ -73,12 +73,23 @@ export const generateHeaders = async ({
   return headers;
 };
 
-export const apiBaseUrl = `${process.env.NEXT_PUBLIC_API_URL}`;
+const rawApiBaseUrl = process.env.NEXT_PUBLIC_API_URL?.trim() ?? "";
+
+export const apiBaseUrl = rawApiBaseUrl.replace(/\/$/, "");
 
 export const apiSlice = createApi({
   reducerPath: "api",
   refetchOnFocus: true,
   baseQuery: async (args, api, extraOptions) => {
+    if (!apiBaseUrl) {
+      return {
+        error: {
+          status: "FETCH_ERROR",
+          error: "NEXT_PUBLIC_API_URL is not configured",
+        },
+      };
+    }
+
     const { useAuthorization = false, contentType = "application/json" } =
       args.meta || {};
 

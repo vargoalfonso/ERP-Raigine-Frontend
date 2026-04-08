@@ -26,6 +26,13 @@ export const getApiErrorMessage = (error: unknown, fallback: string): string => 
     const directError = getStringField(error, "error");
     if (directError) return status ? `${directError} (status ${String(status)})` : directError;
 
+    if (status === "FETCH_ERROR") {
+      const networkError = getStringField(error, "error") || getStringField(error, "message");
+      return networkError
+        ? `${fallback}: ${networkError}. Check NEXT_PUBLIC_API_URL, API server availability, and browser CORS settings.`
+        : `${fallback}: network request failed. Check NEXT_PUBLIC_API_URL, API server availability, and browser CORS settings.`;
+    }
+
     const data = (error as UnknownRecord).data;
     const dataMessage = getStringField(data, "message");
     if (dataMessage) return status ? `${dataMessage} (status ${String(status)})` : dataMessage;

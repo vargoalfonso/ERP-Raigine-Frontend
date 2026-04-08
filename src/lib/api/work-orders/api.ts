@@ -103,6 +103,7 @@ export type WorkOrderItemRecord = {
   quantity: number;
   uom: string;
   process_name: string;
+  kanban_number?: string;
   status?: string;
   part_name?: string;
   part_number?: string;
@@ -152,6 +153,7 @@ const toWorkOrderItem = (raw: unknown): WorkOrderItemRecord => {
     uom: getString(record, ["uom", "unit", "unit_measurement"]) ?? "pcs",
     process_name:
       getString(record, ["process_name", "process", "processName"]) ?? "",
+    kanban_number: getString(record, ["kanban_number", "kanbanNumber"]),
     status: getString(record, ["status", "item_status"]),
     part_name: getString(record, ["part_name", "item_name", "product_name", "partName"]),
     part_number: getString(record, ["part_number", "part_no", "partNumber"]),
