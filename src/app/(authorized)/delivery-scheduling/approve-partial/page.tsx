@@ -34,7 +34,7 @@ const formatDateMMDDYYYY = (iso: string) => {
 
 export default function ApprovePartialDeliverySchedulePage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
       <ApprovePartialDeliverySchedulePageContent />
     </Suspense>
   );

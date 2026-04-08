@@ -249,7 +249,7 @@ export const procurementDnApiSlice = apiSlice.injectEndpoints({
       query: (dnId) => ({
         url: `/api/procurement/dn/${encodeURIComponent(dnId)}/packing-list`,
         method: "GET",
-        responseHandler: (response) => response.text(),
+        responseHandler: (response: Response) => response.text(),
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) => ok(String(response ?? "")),

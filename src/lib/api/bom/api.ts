@@ -4,14 +4,14 @@ import type { ApiResponse } from "@/types";
 export type BomStatus = "Active" | "Inactive";
 
 export type BackendBomNode = {
-  description: any;
-  quantity: any;
-  material_code: any;
-  unit_measurement: any;
-  process_routes: any;
-  material_specifications: any;
-  created_at: any;
-  updated_at: any;
+  description?: unknown;
+  quantity?: unknown;
+  material_code?: unknown;
+  unit_measurement?: unknown;
+  process_routes?: unknown;
+  material_specifications?: unknown;
+  created_at?: unknown;
+  updated_at?: unknown;
   // Some backends use `uuid` instead of `id`.
   id?: string;
   uuid?: string;

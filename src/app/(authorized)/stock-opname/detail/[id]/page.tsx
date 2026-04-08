@@ -121,7 +121,7 @@ function mapDetailResponse(id: string, response: StockOpnameDetailResponse): Det
 
 export default function StockOpnameDetailPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
       <StockOpnameDetailPageContent />
     </Suspense>
   );

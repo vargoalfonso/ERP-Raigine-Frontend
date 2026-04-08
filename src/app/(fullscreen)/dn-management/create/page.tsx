@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { Suspense, useMemo, useState } from "react";
 import { Button, Card, DatePicker, Input, InputNumber, Select, Tag, message } from "antd";
 import { LeftOutlined, SaveOutlined, PlusOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -119,7 +119,7 @@ const typeCopy = (type: DnManagementType) => {
   return { label: "Raw Material", title: "DN Raw Material", back: "Raw Material", codePrefix: "DN-RM" };
 };
 
-export default function DnRawMaterialCreatePage() {
+function DnRawMaterialCreatePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const apiEnabled = Boolean(apiBaseUrl);
@@ -566,5 +566,13 @@ export default function DnRawMaterialCreatePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function DnRawMaterialCreatePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <DnRawMaterialCreatePageContent />
+    </Suspense>
   );
 }

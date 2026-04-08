@@ -1047,13 +1047,6 @@ export default function WorkOrdersPage() {
                 ) : null}
                 <Button
                   type="primary"
-                    onClick={() => {
-                      if (apiEnabled && r.id) {
-                        router.push(`/work-orders/detail/${encodeURIComponent(r.id)}`);
-                        return;
-                      }
-                      message.info(`View ${r.woNumber} (mock)`);
-                    }}
                   icon={<PlusOutlined />}
                   onClick={() => router.push("/work-orders/create")}
                 >
