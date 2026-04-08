@@ -3,15 +3,26 @@
 import React, { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Button, Input, Select, Tag, message } from "antd";
+import { Button, Input, Select, Tag, Upload, message } from "antd";
 import {
   ArrowLeftOutlined,
+  FileExcelOutlined,
   PlusOutlined,
   SaveOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import {
+  useBulkCreatePrlForecastsMutation,
+  useUploadPrlExcelMutation,
+} from "@/lib/api/prl/api";
 
 type ForecastEntry = {
   id: string;
+  customerId?: string;
   customer?: string;
   period?: string;
   uniq: string;
@@ -24,6 +35,7 @@ type ForecastEntry = {
 function newEntry(seed?: Partial<ForecastEntry>): ForecastEntry {
   return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    customerId: seed?.customerId,
     customer: seed?.customer,
     period: seed?.period,
     uniq: seed?.uniq ?? "",
@@ -36,7 +48,10 @@ function newEntry(seed?: Partial<ForecastEntry>): ForecastEntry {
 
 function isComplete(entry: ForecastEntry): boolean {
   const quantityValue = Number(entry.quantity);
+  const customerIdValue = Number(entry.customerId);
   return (
+    Number.isFinite(customerIdValue) &&
+    customerIdValue > 0 &&
     !!entry.customer &&
     !!entry.period &&
     entry.uniq.trim().length > 0 &&
@@ -51,6 +66,31 @@ function isComplete(entry: ForecastEntry): boolean {
 export default function AddForecastPage() {
   const router = useRouter();
   const [entries, setEntries] = useState<ForecastEntry[]>([newEntry()]);
+  const [entryMode, setEntryMode] = useState<"manual" | "bulk">("manual");
+
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [bulkCreate, bulkCreateState] = useBulkCreatePrlForecastsMutation();
+  const [uploadExcel, uploadExcelState] = useUploadPrlExcelMutation();
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
+    skip: !apiEnabled,
+  });
+
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomTreeRes?.data ?? []),
+    [bomTreeRes?.data]
+  );
+
+  const uniqOptions = useMemo(
+    () =>
+      bomIndex.options.length
+        ? bomIndex.options
+        : [
+            { label: "LV-001", value: "LV-001" },
+            { label: "LV-002", value: "LV-002" },
+            { label: "LV-003", value: "LV-003" },
+          ],
+    [bomIndex.options]
+  );
 
   const periodOptions = useMemo(
     () => [
@@ -71,17 +111,78 @@ export default function AddForecastPage() {
     setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   };
 
+  const handleUniqChange = (id: string, uniq?: string) => {
+    const nextUniq = String(uniq ?? "");
+    const partName = bomIndex.partNameByUniq[nextUniq] ?? "";
+    const partNumber = bomIndex.partNumberByUniq[nextUniq] ?? "";
+    const productModel = bomIndex.assemblyCodeByUniq[nextUniq] ?? "";
+
+    updateEntry(id, {
+      uniq: nextUniq,
+      productModel,
+      partName,
+      partNumber,
+    });
+  };
+
   const addAnother = () => {
     setEntries((prev) => [...prev, newEntry()]);
   };
 
-  const saveAll = () => {
+  const saveAll = async () => {
     if (completeCount !== entries.length) {
       message.error("Please complete all entries before saving");
       return;
     }
-    message.success(`Saved ${entries.length} forecast entries`);
-    router.push("/prl-management");
+
+    if (!apiEnabled) {
+      message.success(`Saved ${entries.length} forecast entries`);
+      router.push("/prl-management");
+      return;
+    }
+
+    try {
+      await bulkCreate(
+        entries.map((e) => ({
+          customer_id: Number(e.customerId),
+          item_uniq_code: e.uniq.trim(),
+          quantity: Number(e.quantity),
+          period: String(e.period),
+          full_name: e.customer,
+        }))
+      ).unwrap();
+
+      message.success(`Saved ${entries.length} forecast entries`);
+      router.push("/prl-management");
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to save forecasts"));
+    }
+  };
+
+  const handleUploadExcel = async (file: File) => {
+    const isExcel =
+      file.name.toLowerCase().endsWith(".xlsx") ||
+      file.name.toLowerCase().endsWith(".xls");
+
+    if (!isExcel) {
+      message.error("Please upload an Excel file (.xlsx/.xls)");
+      return Upload.LIST_IGNORE;
+    }
+
+    if (!apiEnabled) {
+      message.success(`Uploaded ${file.name}`);
+      return false;
+    }
+
+    try {
+      await uploadExcel(file).unwrap();
+      message.success(`Uploaded ${file.name}`);
+      router.push("/prl-management");
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Excel upload failed"));
+    }
+
+    return false;
   };
 
   return (
@@ -98,29 +199,116 @@ export default function AddForecastPage() {
               Back to PRL Management
             </Link>
             <div className="mt-2">
-              <h1 className="text-2xl font-bold text-gray-900">Add Multiple Forecasts</h1>
+              <h1 className="text-2xl font-bold text-gray-900">
+                {entryMode === "manual" ? "Add Multiple Forecasts" : "Bulk Forecast Operation"}
+              </h1>
               <div className="text-sm text-gray-500">
-                Create multiple forecast entries in bulk <span className="mx-2">•</span> {entries.length} entry
-+                {entries.length > 1 ? "ies" : ""}
+                {entryMode === "manual" ? (
+                  <>
+                    Create multiple forecast entries in bulk <span className="mx-2">•</span> {entries.length} entr{entries.length > 1 ? "ies" : "y"}
+                  </>
+                ) : (
+                  <>Upload Excel forecast file through <span className="mx-2">•</span> /api/prl/upload-excel</>
+                )}
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
             <Button className="!rounded-lg" onClick={() => router.push("/prl-management")}>Cancel</Button>
-            <Button
-              type="primary"
-              className="!rounded-lg"
-              icon={<SaveOutlined />}
-              onClick={saveAll}
-            >
-              Save All Forecasts
-            </Button>
+            {entryMode === "manual" ? (
+              <Button
+                type="primary"
+                className="!rounded-lg"
+                icon={<SaveOutlined />}
+                onClick={saveAll}
+                loading={bulkCreateState.isLoading}
+              >
+                Save All Forecasts
+              </Button>
+            ) : null}
           </div>
         </div>
       </div>
 
       <div className="p-6">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
+          <div className="inline-flex rounded-lg bg-gray-50 p-1 border border-gray-100">
+            <button
+              type="button"
+              onClick={() => setEntryMode("manual")}
+              className={
+                "px-4 py-2 text-sm font-medium rounded-md transition-colors " +
+                (entryMode === "manual"
+                  ? "bg-white shadow-sm text-gray-900"
+                  : "text-gray-600 hover:text-gray-900")
+              }
+            >
+              Manual Entry
+            </button>
+            <button
+              type="button"
+              onClick={() => setEntryMode("bulk")}
+              className={
+                "px-4 py-2 text-sm font-medium rounded-md transition-colors " +
+                (entryMode === "bulk"
+                  ? "bg-white shadow-sm text-gray-900"
+                  : "text-gray-600 hover:text-gray-900")
+              }
+            >
+              Bulk Operation
+            </button>
+          </div>
+        </div>
+
+        {entryMode === "bulk" ? (
+          <div className="space-y-6">
+            <div className="bg-blue-50/60 rounded-xl border border-blue-100 p-4">
+              <div className="flex items-start gap-3">
+                <FileExcelOutlined className="mt-0.5 text-blue-700" />
+                <div>
+                  <div className="text-sm font-semibold text-blue-800">Bulk Forecast Upload</div>
+                  <div className="text-xs text-blue-700 mt-1">
+                    Use Excel upload for bulk operation. File will be sent to `POST /api/prl/upload-excel`.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <div className="text-base font-semibold text-gray-900">Upload Excel File</div>
+              <div className="text-sm text-gray-500 mt-1">
+                Upload forecast data in one go using Excel template.
+              </div>
+
+              <div className="mt-4">
+                <Upload.Dragger
+                  name="file"
+                  multiple={false}
+                  showUploadList={false}
+                  beforeUpload={(file) => handleUploadExcel(file as File)}
+                  disabled={uploadExcelState.isLoading}
+                >
+                  <div className="py-8">
+                    <UploadOutlined className="text-3xl text-gray-400 mb-3" />
+                    <div className="text-sm font-semibold text-gray-900">Upload Excel File</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      Drag and drop your Excel file here, or click to browse.
+                    </div>
+                    <Button
+                      className="!rounded-lg mt-4"
+                      type="primary"
+                      loading={uploadExcelState.isLoading}
+                    >
+                      Choose File
+                    </Button>
+                  </div>
+                </Upload.Dragger>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
         {/* Info card */}
         <div className="bg-blue-50/60 rounded-xl border border-blue-100 p-4 mb-6">
           <div className="flex items-start gap-3">
@@ -151,6 +339,18 @@ export default function AddForecastPage() {
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div>
+                  <div className="text-xs font-semibold text-gray-700 mb-1">Customer ID</div>
+                  <Input
+                    value={entry.customerId ?? ""}
+                    onChange={(e) => updateEntry(entry.id, { customerId: e.target.value.replace(/[^0-9]/g, "") })}
+                    placeholder="Input customer ID (number)"
+                    className="!rounded-lg"
+                    inputMode="numeric"
+                    allowClear
+                  />
+                </div>
+
+                <div>
                   <div className="text-xs font-semibold text-gray-700 mb-1">Customer Name</div>
                   <Input
                     value={entry.customer ?? ""}
@@ -175,11 +375,19 @@ export default function AddForecastPage() {
 
                 <div>
                   <div className="text-xs font-semibold text-gray-700 mb-1">Uniq (Product Code)</div>
-                  <Input
+                  <Select
                     value={entry.uniq}
-                    onChange={(e) => updateEntry(entry.id, { uniq: e.target.value })}
-                    placeholder="e.g., LV7-001"
-                    className="!rounded-lg"
+                    onChange={(value) => handleUniqChange(entry.id, value)}
+                    options={uniqOptions}
+                    placeholder="Select uniq from BOM"
+                    className="w-full"
+                    showSearch
+                    allowClear
+                    filterOption={(input, option) =>
+                      String(option?.label ?? "")
+                        .toLowerCase()
+                        .includes(input.toLowerCase())
+                    }
                   />
                 </div>
 
@@ -187,9 +395,9 @@ export default function AddForecastPage() {
                   <div className="text-xs font-semibold text-gray-700 mb-1">Product Model</div>
                   <Input
                     value={entry.productModel}
-                    onChange={(e) => updateEntry(entry.id, { productModel: e.target.value })}
-                    placeholder="e.g., Camry 2024"
+                    placeholder="Auto-filled from uniq"
                     className="!rounded-lg"
+                    readOnly
                   />
                 </div>
 
@@ -197,9 +405,9 @@ export default function AddForecastPage() {
                   <div className="text-xs font-semibold text-gray-700 mb-1">Part Name</div>
                   <Input
                     value={entry.partName}
-                    onChange={(e) => updateEntry(entry.id, { partName: e.target.value })}
-                    placeholder="e.g., Engine Mount Bracket"
+                    placeholder="Auto-filled from uniq"
                     className="!rounded-lg"
+                    readOnly
                   />
                 </div>
 
@@ -207,9 +415,9 @@ export default function AddForecastPage() {
                   <div className="text-xs font-semibold text-gray-700 mb-1">Part Number</div>
                   <Input
                     value={entry.partNumber}
-                    onChange={(e) => updateEntry(entry.id, { partNumber: e.target.value })}
-                    placeholder="e.g., EM-001-LV7"
+                    placeholder="Auto-filled from uniq"
                     className="!rounded-lg"
+                    readOnly
                   />
                 </div>
 
@@ -264,6 +472,8 @@ export default function AddForecastPage() {
             </div>
           </div>
         </div>
+          </>
+        )}
       </div>
     </div>
   );

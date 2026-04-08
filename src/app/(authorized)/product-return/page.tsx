@@ -1,5 +1,6 @@
 "use client";
 
+import { apiBaseUrl } from "@/lib/api/instance";
 import React, { useMemo, useState } from "react";
 import {
   Alert,
@@ -32,6 +33,8 @@ import {
   useGetProductReturnPendingQuery,
 } from "@/lib/api/product-return/api";
 import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 
 type ReturnTab = "pending" | "qc" | "history";
 
@@ -90,6 +93,7 @@ function StatCard(props: {
 
 export default function ProductReturnPage() {
   const router = useRouter();
+  const apiEnabled = Boolean(apiBaseUrl);
   const [tab, setTab] = useState<ReturnTab>("pending");
   const [isSubmitOpen, setIsSubmitOpen] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
@@ -99,6 +103,14 @@ export default function ProductReturnPage() {
 
   const pendingQuery = useGetProductReturnPendingQuery();
   const historyQuery = useGetProductReturnHistoryQuery();
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
+    skip: !apiEnabled,
+  });
+
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomTreeRes?.data ?? []),
+    [bomTreeRes?.data],
+  );
 
   const apiErrorMessage = useMemo(() => {
     const err = pendingQuery.error ?? historyQuery.error;
@@ -184,8 +196,18 @@ export default function ProductReturnPage() {
   }, [pendingQuery.data, historyQuery.data, tab]);
 
   const uniqCatalog = useMemo(
-    () =>
-      [
+    () => {
+      if (bomIndex.uniqs.length > 0) {
+        return bomIndex.uniqs.map((uniqId) => ({
+          uniqId,
+          partNo: bomIndex.partNumberByUniq[uniqId] ?? "",
+          partName: bomIndex.partNameByUniq[uniqId] ?? "",
+          model: bomIndex.assemblyCodeByUniq[uniqId] ?? "",
+          packingNumber: bomIndex.packingNumberByUniq[uniqId] ?? "",
+        }));
+      }
+
+      return [
         {
           uniqId: "KBN-001-2024",
           partNo: "PN-45678",
@@ -200,8 +222,15 @@ export default function ProductReturnPage() {
           model: "MDL-HC-02",
           packingNumber: "PK-003344",
         },
-      ] as const,
-    []
+      ];
+    },
+    [
+      bomIndex.assemblyCodeByUniq,
+      bomIndex.partNameByUniq,
+      bomIndex.partNumberByUniq,
+      bomIndex.packingNumberByUniq,
+      bomIndex.uniqs,
+    ],
   );
 
   const pendingRows = useMemo(() => rows.filter((r) => r.status === "Pending QC"), [rows]);
@@ -501,7 +530,7 @@ export default function ProductReturnPage() {
           </div>
         }
         width={520}
-        destroyOnClose
+        destroyOnHidden
         maskClosable={!submitLoading}
         okText="Submit to QC"
         cancelText="Cancel"
@@ -578,6 +607,12 @@ export default function ProductReturnPage() {
                 placeholder="Choose uniq"
                 allowClear
                 options={uniqCatalog.map((u) => ({ label: u.uniqId, value: u.uniqId }))}
+                showSearch
+                filterOption={(input, option) =>
+                  String(option?.label ?? "")
+                    .toLowerCase()
+                    .includes(input.toLowerCase())
+                }
                 onChange={(v) => {
                   const found = uniqCatalog.find((x) => x.uniqId === v);
                   if (!found) {
@@ -595,16 +630,16 @@ export default function ProductReturnPage() {
             </Form.Item>
 
             <Form.Item label="Part Number" name="partNo">
-              <Input placeholder="Auto-filled by uniq chosen" />
+              <Input placeholder="Auto-filled by BOM" readOnly />
             </Form.Item>
             <Form.Item label="Part Name" name="partName">
-              <Input placeholder="Auto-filled by uniq chosen" />
+              <Input placeholder="Auto-filled by BOM" readOnly />
             </Form.Item>
             <Form.Item label="Model" name="model">
-              <Input placeholder="Auto-filled by uniq chosen" />
+              <Input placeholder="Auto-filled by BOM" readOnly />
             </Form.Item>
             <Form.Item label="Packing Number" name="packingNumber">
-              <Input placeholder="Auto-filled by uniq chosen" />
+              <Input placeholder="Auto-filled by BOM" readOnly />
             </Form.Item>
             <Form.Item label="DN Number" name="dnNumber">
               <Select placeholder="Input DN number" options={[{ label: "DN-0001", value: "DN-0001" }, { label: "DN-0002", value: "DN-0002" }]} />

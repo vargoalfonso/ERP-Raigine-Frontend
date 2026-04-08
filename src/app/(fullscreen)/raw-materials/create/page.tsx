@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Input,
@@ -10,10 +10,11 @@ import {
   Card,
   Button,
   InputNumber,
+  DatePicker,
+  Table,
   message,
   Radio,
 } from "antd";
-import type { RadioChangeEvent } from "antd";
 import type { FormInstance } from "antd";
 import {
   ArrowLeftOutlined,
@@ -23,9 +24,6 @@ import {
 } from "@ant-design/icons";
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
-import { apiBaseUrl } from "@/lib/api/instance";
-import { useGetBomTreeQuery } from "@/lib/api/bom/api";
-import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import {
   useCreateRawMaterialMutation,
   useUpdateRawMaterialMutation,
@@ -40,6 +38,7 @@ import {
 import { validateRawMaterialData } from "@/lib/api/raw-materials/utils";
 
 const { Option } = Select;
+const { TextArea } = Input;
 const { Title, Text } = Typography;
 
 interface RawMaterialFormData {
@@ -76,6 +75,16 @@ interface FormEntry {
   formRef?: React.MutableRefObject<FormInstance | null>;
 }
 
+type IndirectMaterialRow = {
+  entryId: number;
+  uniq?: string;
+  category?: string;
+  master_list_supplier_id?: string;
+  warehouse_id?: string;
+  stock?: number;
+  unit?: string;
+};
+
 // Component untuk render single form
 const RawMaterialForm = ({
   entryNumber,
@@ -96,18 +105,6 @@ const RawMaterialForm = ({
 }) => {
   const [form] = Form.useForm();
   const [mounted, setMounted] = useState(false);
-  const useApi = Boolean(apiBaseUrl);
-  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !useApi });
-  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
-  const watchedPartNumber = Form.useWatch("code", form);
-  const watchedPartName = Form.useWatch("name", form);
-  const uniqOptions = bomIndex.options.length
-    ? bomIndex.options
-    : [
-        { label: "LV-001", value: "LV-001" },
-        { label: "LV-002", value: "LV-002" },
-        { label: "LV-003", value: "LV-003" },
-      ];
 
   // Set mounted state
   useEffect(() => {
@@ -133,25 +130,6 @@ const RawMaterialForm = ({
   if (!mounted) {
     return null;
   }
-
-  const applyUniqDerivedFields = (uniq: string | undefined) => {
-    if (!uniq) return;
-
-    const partNumber = bomIndex.partNumberByUniq?.[uniq];
-    const partName = bomIndex.partNameByUniq?.[uniq];
-    const assemblyCode = bomIndex.assemblyCodeByUniq?.[uniq];
-
-    const currentWarehouse = form.getFieldValue("warehouse_id");
-    const nextWarehouse = currentWarehouse ? undefined : "WH-001";
-
-    form.setFieldsValue({
-      uniq,
-      code: partNumber ?? uniq,
-      name: partName ?? assemblyCode ?? uniq,
-      quality_status: form.getFieldValue("quality_status") ?? "pending",
-      ...(nextWarehouse ? { warehouse_id: nextWarehouse } : {}),
-    });
-  };
 
   return (
     <Card>
@@ -187,57 +165,18 @@ const RawMaterialForm = ({
       </div>
 
       <Form form={form} layout="vertical" onFinish={onFinish}>
-        {/* Hidden required fields (auto-filled from BOM/ defaults) */}
-        <Form.Item name="code" hidden rules={[{ required: true }]}>
-          <Input />
-        </Form.Item>
-        <Form.Item name="name" hidden rules={[{ required: true }]}>
-          <Input />
-        </Form.Item>
-        <Form.Item name="quality_status" hidden initialValue="pending" rules={[{ required: true }]}>
-          <Input />
-        </Form.Item>
-
-        {/* Row 1: Uniq, Type, Source, Warehouse (match screenshot) */}
+        {/* Row 1: Uniq, Type, Source, Warehouse */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Form.Item
             label="Uniq"
             name="uniq"
-            rules={[{ required: true, message: "Please select uniq!" }]}
-            extra={
-              watchedPartNumber || watchedPartName ? (
-                <div className="mt-1">
-                  {watchedPartNumber ? (
-                    <Text type="secondary">Part Number: {watchedPartNumber}</Text>
-                  ) : null}
-                  {watchedPartName ? (
-                    <div>
-                      <Text type="secondary">Part Name: {watchedPartName}</Text>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null
-            }
+            rules={[{ required: true, message: "Please input uniq!" }]}
           >
-            <Select
-              placeholder="Select UNIQ from BOM"
-              size="large"
-              allowClear
-              showSearch
-              options={uniqOptions}
-              onChange={(value) => {
-                if (!value) {
-                  form.setFieldsValue({ uniq: undefined, code: undefined, name: undefined });
-                  return;
-                }
-                applyUniqDerivedFields(value);
-              }}
-              filterOption={(input, option) =>
-                String(option?.label ?? "")
-                  .toLowerCase()
-                  .includes(input.toLowerCase())
-              }
-            />
+            <Select placeholder="LV-001" size="large" allowClear>
+              <Option value="LV-001">LV-001</Option>
+              <Option value="LV-002">LV-002</Option>
+              <Option value="LV-003">LV-003</Option>
+            </Select>
           </Form.Item>
 
           <Form.Item
@@ -272,14 +211,14 @@ const RawMaterialForm = ({
             rules={[{ required: true, message: "Please select warehouse!" }]}
           >
             <Select placeholder="WH-001" size="large" allowClear>
-              <Option value="WH-001">WH-001</Option>
-              <Option value="WH-002">WH-002</Option>
-              <Option value="WH-003">WH-003</Option>
+              <Option value="warehouse1">WH-001</Option>
+              <Option value="warehouse2">WH-002</Option>
+              <Option value="warehouse3">WH-003</Option>
             </Select>
           </Form.Item>
         </div>
 
-        {/* Row 2: Stock, Unit, Weight (match screenshot) */}
+        {/* Row 2: Stock, Unit, Weight */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Form.Item
             label="Stock"
@@ -329,19 +268,12 @@ const RawMaterialForm = ({
 };
 
 export default function CreateRawMaterialPage() {
-  return (
-    <Suspense fallback={null}>
-      <CreateRawMaterialPageContent />
-    </Suspense>
-  );
-}
-
-function CreateRawMaterialPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [formEntries, setFormEntries] = useState<FormEntry[]>([]);
+  const [indirectRows, setIndirectRows] = useState<IndirectMaterialRow[]>([]);
 
   // Initialize first form entry
   useEffect(() => {
@@ -364,9 +296,8 @@ function CreateRawMaterialPageContent() {
   const itemId = searchParams.get("id");
 
   // Get data for edit mode
-  const { data: existingData } = useGetRawMaterialByIdQuery(itemId || "", {
-    skip: !isEditMode || !itemId,
-  });
+  const { data: existingData, isLoading: isLoadingData } =
+    useGetRawMaterialByIdQuery(itemId || "", { skip: !isEditMode || !itemId });
 
   const getInitialValues = (): RawMaterialFormData | undefined => {
     // Return initial values for edit mode
@@ -375,7 +306,6 @@ function CreateRawMaterialPageContent() {
       return {
         warehouse_id: data.warehouse_id,
         master_list_supplier_id: data.master_list_supplier_id,
-        uniq: data.uniq,
         code: data.code,
         name: data.name,
         category: data.category,
@@ -403,7 +333,7 @@ function CreateRawMaterialPageContent() {
     return undefined;
   };
 
-  const handleSubmitForm = async (values: RawMaterialFormData): Promise<boolean> => {
+  const handleSubmitForm = async (values: RawMaterialFormData) => {
     try {
       console.log("handleSubmitForm called with values:", values);
       console.log("isEditMode:", isEditMode);
@@ -422,7 +352,7 @@ function CreateRawMaterialPageContent() {
       const validation = validateRawMaterialData(validationData);
       if (!validation.isValid) {
         message.error(validation.errors.join(", "));
-        return false;
+        return;
       }
 
       if (isEditMode && itemId) {
@@ -464,7 +394,6 @@ function CreateRawMaterialPageContent() {
       } else {
         // Create new raw material
         const createData: CreateRawMaterialRequest = {
-          uniq: values.uniq,
           code: values.code!,
           name: values.name!,
           category: values.category,
@@ -492,19 +421,17 @@ function CreateRawMaterialPageContent() {
       }
 
       // Don't navigate immediately - let handleSubmitAll handle navigation
-      return true;
     } catch (error: unknown) {
       // console.error("Error saving raw material:", error);
       message.error(
         (error as { data?: { message?: string } })?.data?.message ||
           "Failed to save raw material"
       );
-      return false;
     }
   };
 
   const handleAddAnotherEntry = async () => {
-    // When user clicks Add, validate the current form and append a new entry
+    // When user clicks Add, capture current form values into the right-side list
     const currentEntry = formEntries[formEntries.length - 1];
     const currentForm = currentEntry?.formRef?.current;
 
@@ -515,6 +442,25 @@ function CreateRawMaterialPageContent() {
 
     try {
       await currentForm.validateFields();
+      const values = currentForm.getFieldsValue() as RawMaterialFormData;
+
+      setIndirectRows((prev) => {
+        const nextRow: IndirectMaterialRow = {
+          entryId: currentEntry.id,
+          uniq: values.uniq,
+          category: values.category,
+          master_list_supplier_id: values.master_list_supplier_id,
+          warehouse_id: values.warehouse_id,
+          stock: values.stock,
+          unit: values.unit,
+        };
+
+        const exists = prev.some((r) => r.entryId === currentEntry.id);
+        if (exists) {
+          return prev.map((r) => (r.entryId === currentEntry.id ? nextRow : r));
+        }
+        return [...prev, nextRow];
+      });
 
       const newId = formEntries.length + 1;
       const newFormRef = { current: null };
@@ -533,9 +479,14 @@ function CreateRawMaterialPageContent() {
     }
   };
 
+  const handleRemoveIndirectRow = (entryId: number) => {
+    setIndirectRows((prev) => prev.filter((r) => r.entryId !== entryId));
+    // Keep the UI consistent: removing from the right also removes the matching left form.
+    setFormEntries((prev) => prev.filter((entry) => entry.id !== entryId));
+  };
   const [mode, setMode] = useState<"manual" | "bulk">("manual");
 
-  const handleModeChange = (e: RadioChangeEvent) => {
+  const handleModeChange = (e: any) => {
     const value = e.target.value as "manual" | "bulk";
     setMode(value);
     if (value === "bulk") {
@@ -566,11 +517,7 @@ function CreateRawMaterialPageContent() {
 
             // Submit this form's data
             console.log(`Submitting form ${entry.id} with values:`, values);
-            const ok = await handleSubmitForm(values);
-            if (!ok) {
-              setLoading(false);
-              return;
-            }
+            await handleSubmitForm(values);
           } catch (validationError) {
             console.error(
               `Validation failed for form ${entry.id}:`,
@@ -586,7 +533,7 @@ function CreateRawMaterialPageContent() {
       }
 
       // Navigate back to raw materials list after all forms are submitted
-      router.push("/raw-materials");
+      // router.push("/raw-materials");
     } catch (error) {
       console.error("Error submitting forms:", error);
       message.error("Failed to submit forms");
@@ -713,7 +660,7 @@ function CreateRawMaterialPageContent() {
           </div>
 
           {/* Right: Indirect Material Raw */}
-          {/* {!isEditMode && (
+          {!isEditMode && (
             <Card className="h-fit">
               <div className="flex items-start justify-between">
                 <div>
@@ -735,15 +682,6 @@ function CreateRawMaterialPageContent() {
                   dataSource={indirectRows}
                   locale={{ emptyText: "No materials added" }}
                   columns={[
-                    {
-                      title: "Warehouse",
-                      dataIndex: "warehouse_id",
-                      key: "warehouse_id",
-                      width: 110,
-                      render: (v: string | undefined) => (
-                        <span className="font-mono text-xs">{v ?? "-"}</span>
-                      ),
-                    },
                     {
                       title: "Uniq",
                       dataIndex: "uniq",
@@ -789,7 +727,7 @@ function CreateRawMaterialPageContent() {
                 />
               </div>
             </Card>
-          )} */}
+          )}
         </div>
       </div>
 

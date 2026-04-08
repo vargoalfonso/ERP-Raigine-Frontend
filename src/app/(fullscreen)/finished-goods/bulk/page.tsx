@@ -14,7 +14,6 @@ import {
   Divider,
   Radio,
 } from "antd";
-import type { RadioChangeEvent } from "antd";
 import {
   UploadOutlined,
   DownloadOutlined,
@@ -26,7 +25,6 @@ import type {
   UploadChangeParam,
   UploadFile,
 } from "antd/es/upload/interface";
-import { generateNextWorkOrderNumber } from "@/lib/utils/workOrder";
 
 const { Title, Text } = Typography;
 const { Dragger } = Upload;
@@ -104,22 +102,7 @@ export default function BulkFinishedGoodsPage() {
 
   useEffect(() => {
     /* otomatis isi saat pertama buka biar gampang testing */
-    // Ensure WO numbers use the standard format.
-    const seed = generateNextWorkOrderNumber();
-    const m = seed.match(/^(WO-[0-9]{6}-)([0-9]{3})$/);
-    const prefix = m?.[1];
-    const base = m ? Number(m[2]) : 1;
-    setRows(
-      sampleRows.map((r, idx) => {
-        const nextWo = prefix
-          ? `${prefix}${String(base + idx).padStart(3, "0")}`
-          : generateNextWorkOrderNumber();
-        return {
-          ...r,
-          wo_number: nextWo,
-        };
-      })
-    );
+    setRows(sampleRows);
   }, []);
   // Columns for preview table
   const columns = [
@@ -207,7 +190,7 @@ export default function BulkFinishedGoodsPage() {
       "Steel Plate",
       "Camry 2024",
       "250",
-      "WO-ddmmyy-001",
+      "WO-2024-001",
       "WH-FG-202",
     ];
     const csv = [header.join(","), sample.join(",")].join("\n");
@@ -236,7 +219,7 @@ export default function BulkFinishedGoodsPage() {
           const dataLines = lines.slice(1);
           const parsed: RowData[] = dataLines.map((line, idx) => {
             const cols = line.split(",").map((c) => c.trim());
-            const obj: Record<string, string> = {};
+            const obj: any = {};
             headers.forEach((h, i) => {
               obj[h] = cols[i] ?? "";
             });
@@ -247,7 +230,7 @@ export default function BulkFinishedGoodsPage() {
               part_name: obj["part_name"] ?? "",
               model: obj["model"] ?? "",
               stock: Number(obj["stock"] ?? 0),
-              wo_number: (obj["wo_number"] ?? "").trim() || generateNextWorkOrderNumber(),
+              wo_number: obj["wo_number"] ?? "",
               warehouse: obj["warehouse"] ?? "",
             };
           });
@@ -278,7 +261,7 @@ export default function BulkFinishedGoodsPage() {
         const parsed = await parseCSV(file);
         setRows(parsed);
         message.success(`Parsed ${parsed.length} rows from CSV`);
-      } catch {
+      } catch (err) {
         message.error("Failed to parse CSV file");
         setRows([]);
       }
@@ -337,7 +320,7 @@ export default function BulkFinishedGoodsPage() {
     router.push("/finished-goods/create");
   };
 
-  const handleModeChange = (e: RadioChangeEvent) => {
+  const handleModeChange = (e: any) => {
     const value = e.target.value as "manual" | "bulk";
     setMode(value);
     if (value === "bulk") {

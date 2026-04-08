@@ -2,9 +2,21 @@
 
 import React, { useMemo, useState } from "react";
 import StatsCard from "@/components/StatsCard";
-import { Button, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, message } from "antd";
+import { Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { CopyOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
+import { CopyOutlined, DeleteOutlined, EditOutlined, PlusOutlined, PrinterOutlined } from "@ant-design/icons";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { type MachineRecord, useGetMachinesQuery } from "@/lib/api/machines/api";
+import {
+  type ProductionDashboardSummaryCards,
+  useGetFinishedGoodsDashboardQuery,
+  useGetOutputMachineDashboardQuery,
+  useGetRuntimeDashboardQuery,
+  useGetSummaryStrokeDashboardQuery,
+  useGetWipDashboardQuery,
+} from "@/lib/api/production-dashboard/api";
+import { useGetWorkOrdersQuery } from "@/lib/api/work-orders/api";
 
 type ProductionViewId =
   | "finished-goods"
@@ -81,25 +93,29 @@ type RuntimeRow = {
   setQcTimeMin: number;
 };
 
-type IssueType = "Machine Breakdown" | "Material Shortage";
+type IssueType = "Machine Breakdown" | "Material Shortage" | "Machine Shortage" | "Quality Issue" | "Setup Delay" | "Other";
 
 type IssuesRow = {
   key: string;
   reportDate: string;
+  reportMonth: string;
   woNumber: string;
   productionLine: string;
+  machineId: string;
   machineNumber: string;
   issue: IssueType;
   timeSpentMin: number;
+  woId?: string;
 };
 
 type TaskPriority = "High" | "Medium";
-type TaskStatus = "Pending" | "In Progress";
-type TaskType = "Additional" | "Assembly";
+type TaskStatus = "Pending" | "In Progress" | "Completed";
+type TaskType = "Additional" | "Assembly" | "New" | "Rework";
 
 type IncomingTaskRow = {
   key: string;
   taskDate: string;
+  reportMonth: string;
   woNumber: string;
   productName: string;
   woType: TaskType;
@@ -107,6 +123,128 @@ type IncomingTaskRow = {
   targetQty: number;
   priority: TaskPriority;
   status: TaskStatus;
+  completionWo: string;
+  productionLine: string;
+  machineNumber: string;
+  woId?: string;
+  kanbanNumbers: string[];
+};
+
+type DashboardSummaryCardItem = {
+  title: string;
+  value: number;
+  icon: React.ReactNode;
+  bgColor: string;
+  textColor: string;
+};
+
+const toNumber = (value: unknown): number => {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const toText = (value: unknown, fallback = "-"): string => {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return fallback;
+};
+
+const formatDateCell = (value: unknown): string => {
+  if (typeof value !== "string" || !value.trim()) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(date);
+};
+
+const formatMonthCell = (value: unknown): string => {
+  if (typeof value !== "string" || !value.trim()) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(date);
+};
+
+const deriveMonthLabel = (value: string): string => {
+  const isoMonth = formatMonthCell(value);
+  if (isoMonth !== "-") return isoMonth;
+
+  const match = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return "-";
+  const [, day, month, year] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(date);
+};
+
+const parseDateValue = (value: unknown): Date | null => {
+  if (typeof value !== "string" || !value.trim()) return null;
+
+  const direct = new Date(value);
+  if (!Number.isNaN(direct.getTime())) return direct;
+
+  const match = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!match) return null;
+  const [, day, month, year] = match;
+  const fallback = new Date(Number(year), Number(month) - 1, Number(day));
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+};
+
+const getTodayInputValue = (): string =>
+  new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  }).format(new Date());
+
+const calculateAgingDays = (targetDate: string | undefined, createdAt: string | undefined): number | null => {
+  const referenceDate = parseDateValue(targetDate) ?? parseDateValue(createdAt);
+  if (!referenceDate) return null;
+
+  const today = new Date();
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const startOfReference = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), referenceDate.getDate());
+  const diffMs = startOfToday.getTime() - startOfReference.getTime();
+  return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+};
+
+const openPrintWindow = (title: string, body: string) => {
+  if (typeof window === "undefined") return;
+  const popup = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
+  if (!popup) {
+    message.warning("Popup blocked. Izinkan popup untuk print.");
+    return;
+  }
+
+  popup.document.write(`
+    <html>
+      <head>
+        <title>${title}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
+          h1 { font-size: 20px; margin-bottom: 12px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+          th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; font-size: 12px; }
+          th { background: #f3f4f6; }
+        </style>
+      </head>
+      <body>
+        ${body}
+      </body>
+    </html>
+  `);
+  popup.document.close();
+  popup.focus();
+  popup.print();
+};
+
+const emptySummaryCards: ProductionDashboardSummaryCards = {
+  fg_output: 0,
+  wip_output: 0,
+  total_ng: 0,
+  total_rework: 0,
 };
 
 const views: Array<{ id: ProductionViewId; label: string; icon: React.ReactNode; activeIconBg: string }> = [
@@ -301,8 +439,10 @@ const initialIssuesData: IssuesRow[] = [
   {
     key: "1",
     reportDate: "10/1/2025",
+    reportMonth: "October 2025",
     woNumber: "WO-001",
     productionLine: "Line A",
+    machineId: "machine-1",
     machineNumber: "Press Machine A1",
     issue: "Machine Breakdown",
     timeSpentMin: 45,
@@ -310,8 +450,10 @@ const initialIssuesData: IssuesRow[] = [
   {
     key: "2",
     reportDate: "10/1/2025",
+    reportMonth: "October 2025",
     woNumber: "WO-003",
     productionLine: "Line B",
+    machineId: "machine-2",
     machineNumber: "Welding Machine B2",
     issue: "Material Shortage",
     timeSpentMin: 30,
@@ -322,6 +464,7 @@ const initialIncomingTasksData: IncomingTaskRow[] = [
   {
     key: "1",
     taskDate: "10/2/2025",
+    reportMonth: "October 2025",
     woNumber: "WO-005",
     productName: "Control Arm",
     woType: "Additional",
@@ -329,10 +472,15 @@ const initialIncomingTasksData: IncomingTaskRow[] = [
     targetQty: 1000,
     priority: "High",
     status: "Pending",
+    completionWo: "0%",
+    productionLine: "Line A",
+    machineNumber: "Press Machine A1",
+    kanbanNumbers: [],
   },
   {
     key: "2",
     taskDate: "10/2/2025",
+    reportMonth: "October 2025",
     woNumber: "WO-006",
     productName: "Bracket Assembly",
     woType: "Assembly",
@@ -340,6 +488,10 @@ const initialIncomingTasksData: IncomingTaskRow[] = [
     targetQty: 500,
     priority: "Medium",
     status: "In Progress",
+    completionWo: "50%",
+    productionLine: "Line B",
+    machineNumber: "Welding Machine B2",
+    kanbanNumbers: [],
   },
 ];
 
@@ -351,28 +503,199 @@ export default function ProductionDashboardPage() {
   const [lineFilter, setLineFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
 
+  const apiEnabled = Boolean(apiBaseUrl);
+  const fgDashboardQuery = useGetFinishedGoodsDashboardQuery(undefined, { skip: !apiEnabled });
+  const wipDashboardQuery = useGetWipDashboardQuery(undefined, { skip: !apiEnabled });
+  const outputMachineDashboardQuery = useGetOutputMachineDashboardQuery(undefined, { skip: !apiEnabled });
+  const summaryStrokeDashboardQuery = useGetSummaryStrokeDashboardQuery(undefined, { skip: !apiEnabled });
+  const runtimeDashboardQuery = useGetRuntimeDashboardQuery(undefined, { skip: !apiEnabled });
+  const workOrdersQuery = useGetWorkOrdersQuery(undefined, { skip: !apiEnabled });
+  const machinesQuery = useGetMachinesQuery(undefined, { skip: !apiEnabled });
+
+  const workOrders = workOrdersQuery.data ?? [];
+  const machines = machinesQuery.data ?? [];
+
+  const machinesById = useMemo(() => new Map(machines.map((machine) => [machine.id, machine])), [machines]);
+  const firstMachineByProcess = useMemo(() => {
+    const map = new Map<string, MachineRecord>();
+    machines.forEach((machine) => {
+      const process = toText(machine.process_name, "").toLowerCase();
+      if (process && !map.has(process)) {
+        map.set(process, machine);
+      }
+    });
+    return map;
+  }, [machines]);
+
+  const fgSummaryCards = fgDashboardQuery.data?.data.summary_cards ?? emptySummaryCards;
+  const wipSummaryCards = wipDashboardQuery.data?.data.summary_cards ?? fgSummaryCards;
+  const outputSummaryCards = outputMachineDashboardQuery.data?.data.summary_cards ?? fgSummaryCards;
+  const summaryStrokeCards = summaryStrokeDashboardQuery.data?.data.summary_cards ?? fgSummaryCards;
+  const runtimeSummaryCards = runtimeDashboardQuery.data?.data.summary_cards ?? fgSummaryCards;
+
+  const finishedGoodsRows = useMemo<FinishedGoodsRow[]>(() => {
+    return (fgDashboardQuery.data?.data.table_data ?? []).map((row, index) => ({
+      key: toText(row.id, String(index + 1)),
+      reportDate: formatDateCell(row.report_date),
+      uniq: toText(row.uniq),
+      productName: toText(row.product_name, "Unknown Product"),
+      shift: toText(row.shift, "-") ,
+      woNumber: toText(row.wo_number),
+      fgOutput: toNumber(row.fg_output),
+      ngSetting: toNumber(row.ng_setting),
+      ngProcess: toNumber(row.ng_process),
+      rework: toNumber(row.rework),
+      scrap: toNumber(row.scrap),
+    }));
+  }, [fgDashboardQuery.data?.data.table_data]);
+
+  const wipRows = useMemo<WipRow[]>(() => {
+    return (wipDashboardQuery.data?.data.table_data ?? []).map((row, index) => ({
+      key: toText(row.id, String(index + 1)),
+      reportDate: formatDateCell(row.report_date),
+      uniq: toText(row.uniq),
+      productName: toText(row.product_name, "Unknown Product"),
+      shift: toText(row.shift, "-"),
+      processName: toText(row.process_name),
+      woNumber: toText(row.wo_number),
+      wipOutput: toNumber(row.wip_output),
+      ngSetting: toNumber(row.ng_setting),
+      ngProcess: toNumber(row.ng_process),
+      rework: toNumber(row.rework),
+      scrap: toNumber(row.scrap),
+    }));
+  }, [wipDashboardQuery.data?.data.table_data]);
+
+  const outputPerMachineRows = useMemo<OutputPerMachineRow[]>(() => {
+    return (outputMachineDashboardQuery.data?.data.table_data ?? []).map((row, index) => ({
+      key: toText(row.id, String(index + 1)),
+      reportDate: formatDateCell(row.report_date),
+      lineProcess: toText(row.line_process),
+      machineName: toText(row.machine_name),
+      uniq: toText(row.uniq),
+      shift: toText(row.shift, "-"),
+      woNumber: toText(row.wo_number),
+      productOutput: toNumber(row.product_output),
+      ngSetting: toNumber(row.ng_setting),
+      ngProcess: toNumber(row.ng_process),
+      rework: toNumber(row.rework),
+      scrap: toNumber(row.scrap),
+    }));
+  }, [outputMachineDashboardQuery.data?.data.table_data]);
+
+  const summaryStrokeRows = useMemo<SummaryStrokeRow[]>(() => {
+    return (summaryStrokeDashboardQuery.data?.data.table_data ?? []).map((row, index) => ({
+      key: toText(row.id, String(index + 1)),
+      reportDate: formatDateCell(row.report_date),
+      productionLine: toText(row.production_line),
+      stroke: toNumber(row.stroke),
+      productionOutput: toNumber(row.production_output),
+      machineTimeMin: toNumber(row.machine_time_min),
+      dandoriTimeMin: toNumber(row.dandori_time_min),
+      setQcTimeMin: toNumber(row.set_qc_time_min),
+    }));
+  }, [summaryStrokeDashboardQuery.data?.data.table_data]);
+
+  const runtimeRows = useMemo<RuntimeRow[]>(() => {
+    return (runtimeDashboardQuery.data?.data.table_data ?? []).map((row, index) => ({
+      key: toText(row.id, String(index + 1)),
+      reportDate: formatDateCell(row.report_date),
+      woNumber: toText(row.wo_number),
+      productionLine: toText(row.production_line),
+      machineNumber: toText(row.machine_number),
+      totalMachineTimeMin: toNumber(row.total_machine_time_min),
+      dandoriTimeMin: toNumber(row.dandori_time_min),
+      setQcTimeMin: toNumber(row.set_qc_time_min),
+    }));
+  }, [runtimeDashboardQuery.data?.data.table_data]);
+
   const [issuesRows, setIssuesRows] = useState<IssuesRow[]>(initialIssuesData);
   const [isIssuesModalOpen, setIsIssuesModalOpen] = useState(false);
   const [editingIssueKey, setEditingIssueKey] = useState<string | null>(null);
   const [issuesForm] = Form.useForm<{
     woNumber: string;
     productionLine: string;
-    machineNumber: string;
+    machineId: string;
     issue: IssueType;
     timeSpentMin: number;
     reportDate: string;
   }>();
 
+  const selectedIssueProductionLine = Form.useWatch("productionLine", issuesForm);
+
+  const workOrderRelations = useMemo(() => {
+    return new Map(
+      workOrders.map((wo) => {
+        const firstProcess = wo.items.find((item) => item.process_name)?.process_name?.trim().toLowerCase();
+        const relatedMachine = firstProcess ? firstMachineByProcess.get(firstProcess) : undefined;
+
+        return [
+          wo.wo_number,
+          {
+            machineId: relatedMachine?.id ?? "",
+            machineNumber: relatedMachine?.machine_number ?? "-",
+            productionLine: relatedMachine?.production_line ?? "",
+          },
+        ] as const;
+      })
+    );
+  }, [firstMachineByProcess, workOrders]);
+
+  const workOrderOptions = useMemo(
+    () =>
+      workOrders
+        .filter((wo) => wo.wo_number)
+        .map((wo) => ({
+          label: wo.wo_number,
+          value: wo.wo_number,
+        })),
+    [workOrders]
+  );
+
+  const productionLineOptionsForIssues = useMemo(() => {
+    const values = Array.from(new Set(machines.map((machine) => machine.production_line).filter(Boolean)));
+    return values.map((value) => ({ label: value, value }));
+  }, [machines]);
+
+  const machineOptionsForIssues = useMemo(() => {
+    const source = selectedIssueProductionLine
+      ? machines.filter((machine) => machine.production_line === selectedIssueProductionLine)
+      : machines;
+
+    return source
+      .filter((machine) => machine.id && machine.machine_number)
+      .map((machine) => ({
+        label: machine.machine_number,
+        value: machine.id,
+      }));
+  }, [machines, selectedIssueProductionLine]);
+
+  const issueTypeOptions: Array<{ label: string; value: IssueType }> = [
+    { label: "Machine Breakdown", value: "Machine Breakdown" },
+    { label: "Material Shortage", value: "Material Shortage" },
+    { label: "Machine Shortage", value: "Machine Shortage" },
+    { label: "Quality Issue", value: "Quality Issue" },
+    { label: "Setup Delay", value: "Setup Delay" },
+    { label: "Other", value: "Other" },
+  ];
+
   const openCreateIssue = () => {
     setEditingIssueKey(null);
     issuesForm.resetFields();
+
+    const defaultWoNumber = workOrderOptions[0]?.value ?? initialIssuesData[0]?.woNumber ?? "";
+    const relatedWorkOrder = workOrderRelations.get(defaultWoNumber);
+    const fallbackMachine = relatedWorkOrder?.machineId
+      ? machinesById.get(relatedWorkOrder.machineId)
+      : machines[0];
+
     issuesForm.setFieldsValue({
-      woNumber: "WO-1234",
-      productionLine: "Line A - Prod",
-      machineNumber: "Press Machine A1",
+      woNumber: defaultWoNumber,
+      productionLine: relatedWorkOrder?.productionLine ?? fallbackMachine?.production_line ?? "",
+      machineId: relatedWorkOrder?.machineId ?? fallbackMachine?.id ?? "",
       issue: "Machine Breakdown",
       timeSpentMin: 0,
-      reportDate: "",
+      reportDate: getTodayInputValue(),
     });
     setIsIssuesModalOpen(true);
   };
@@ -382,7 +705,7 @@ export default function ProductionDashboardPage() {
     issuesForm.setFieldsValue({
       woNumber: row.woNumber,
       productionLine: row.productionLine,
-      machineNumber: row.machineNumber,
+      machineId: row.machineId,
       issue: row.issue,
       timeSpentMin: row.timeSpentMin,
       reportDate: row.reportDate,
@@ -396,146 +719,243 @@ export default function ProductionDashboardPage() {
 
   const onSubmitIssue = async () => {
     const values = await issuesForm.validateFields();
+    const selectedMachine = machinesById.get(values.machineId);
+    const reportMonth = deriveMonthLabel(values.reportDate);
+
+    const nextRow: IssuesRow = {
+      key: editingIssueKey ?? `${Date.now()}`,
+      woNumber: values.woNumber,
+      productionLine: values.productionLine,
+      machineId: values.machineId,
+      machineNumber: selectedMachine?.machine_number ?? "-",
+      issue: values.issue,
+      timeSpentMin: values.timeSpentMin,
+      reportDate: values.reportDate,
+      reportMonth,
+    };
 
     if (editingIssueKey) {
-      setIssuesRows((prev) =>
-        prev.map((r) =>
-          r.key === editingIssueKey
-            ? {
-                ...r,
-                woNumber: values.woNumber,
-                productionLine: values.productionLine,
-                machineNumber: values.machineNumber,
-                issue: values.issue,
-                timeSpentMin: values.timeSpentMin,
-                reportDate: values.reportDate,
-              }
-            : r
-        )
-      );
+      setIssuesRows((prev) => prev.map((row) => (row.key === editingIssueKey ? nextRow : row)));
       message.success("Issue updated");
     } else {
-      const nextKey = `${Date.now()}`;
-      setIssuesRows((prev) => [
-        ...prev,
-        {
-          key: nextKey,
-          woNumber: values.woNumber,
-          productionLine: values.productionLine,
-          machineNumber: values.machineNumber,
-          issue: values.issue,
-          timeSpentMin: values.timeSpentMin,
-          reportDate: values.reportDate,
-        },
-      ]);
+      setIssuesRows((prev) => [...prev, nextRow]);
       message.success("Issue created");
     }
 
     closeIssuesModal();
   };
 
-  const [incomingTasksRows, setIncomingTasksRows] = useState<IncomingTaskRow[]>(initialIncomingTasksData);
-  const [isIncomingTasksDrawerOpen, setIsIncomingTasksDrawerOpen] = useState(false);
-  const [editingIncomingTaskKey, setEditingIncomingTaskKey] = useState<string | null>(null);
-  const [incomingTasksForm] = Form.useForm<{
-    taskDate: string;
-    woNumber: string;
-    productName: string;
-    woType: TaskType;
-    aging: string;
-    targetQty: number;
-    priority: TaskPriority;
-    status: TaskStatus;
-  }>();
+  const incomingTasksRows = useMemo<IncomingTaskRow[]>(() => {
+    if (!workOrders.length) return initialIncomingTasksData;
 
-  const openCreateIncomingTask = () => {
-    setEditingIncomingTaskKey(null);
-    incomingTasksForm.resetFields();
-    incomingTasksForm.setFieldsValue({
-      taskDate: "",
-      woNumber: "WO-005",
-      productName: "",
-      woType: "Additional",
-      aging: "",
-      targetQty: 0,
-      priority: "High",
-      status: "Pending",
-    });
-    setIsIncomingTasksDrawerOpen(true);
-  };
-
-  const openEditIncomingTask = (row: IncomingTaskRow) => {
-    setEditingIncomingTaskKey(row.key);
-    incomingTasksForm.setFieldsValue({
-      taskDate: row.taskDate,
-      woNumber: row.woNumber,
-      productName: row.productName,
-      woType: row.woType,
-      aging: row.aging,
-      targetQty: row.targetQty,
-      priority: row.priority,
-      status: row.status,
-    });
-    setIsIncomingTasksDrawerOpen(true);
-  };
-
-  const closeIncomingTasksDrawer = () => {
-    setIsIncomingTasksDrawerOpen(false);
-  };
-
-  const onSubmitIncomingTask = async () => {
-    const values = await incomingTasksForm.validateFields();
-
-    if (editingIncomingTaskKey) {
-      setIncomingTasksRows((prev) =>
-        prev.map((r) =>
-          r.key === editingIncomingTaskKey
-            ? {
-                ...r,
-                taskDate: values.taskDate,
-                woNumber: values.woNumber,
-                productName: values.productName,
-                woType: values.woType,
-                aging: values.aging,
-                targetQty: values.targetQty,
-                priority: values.priority,
-                status: values.status,
-              }
-            : r
+    return [...workOrders]
+      .map((wo, index) => {
+      const firstItem = wo.items[0];
+      const processKey = firstItem?.process_name?.trim().toLowerCase();
+      const relatedMachine = processKey ? firstMachineByProcess.get(processKey) : undefined;
+      const taskDateValue = wo.target_date ?? wo.created_at ?? "";
+      const taskDate = formatDateCell(taskDateValue);
+      const reportMonth = deriveMonthLabel(taskDateValue);
+      const uniqTotal = wo.uniq_total ?? wo.items.length;
+      const uniqClosed = wo.uniq_closed ?? 0;
+      const agingDays = typeof wo.aging_days === "number" ? wo.aging_days : calculateAgingDays(wo.target_date, wo.created_at);
+      const kanbanNumbers = Array.from(
+        new Set(wo.items.map((item) => item.kanban_number).filter((value): value is string => Boolean(value)))
+      ).sort((left, right) => left.localeCompare(right));
+      const productNames = Array.from(
+        new Set(
+          wo.items
+            .map((item) => item.part_name?.trim() || item.item_uniq_code?.trim())
+            .filter((value): value is string => Boolean(value))
         )
-      );
-      message.success("Task updated");
-    } else {
-      const nextKey = `${Date.now()}`;
-      setIncomingTasksRows((prev) => [
-        ...prev,
-        {
-          key: nextKey,
-          taskDate: values.taskDate,
-          woNumber: values.woNumber,
-          productName: values.productName,
-          woType: values.woType,
-          aging: values.aging,
-          targetQty: values.targetQty,
-          priority: values.priority,
-          status: values.status,
-        },
-      ]);
-      message.success("Task created");
-    }
+      ).sort((left, right) => left.localeCompare(right));
+      const normalizedWoType = wo.wo_type.trim().toLowerCase();
+      const normalizedStatus = (wo.status ?? "").trim().toLowerCase();
+      const normalizedApprovalStatus = (wo.approval_status ?? "").trim().toLowerCase();
+      const taskType: TaskType = normalizedWoType.includes("rework")
+        ? "Rework"
+        : normalizedWoType.includes("assembly")
+          ? "Assembly"
+          : normalizedWoType.includes("additional")
+            ? "Additional"
+            : "New";
+      const status: TaskStatus =
+        uniqTotal > 0 && uniqClosed >= uniqTotal
+          ? "Completed"
+          : normalizedStatus.includes("complete") || normalizedStatus.includes("closed") || normalizedStatus.includes("done")
+          ? "Completed"
+          : normalizedStatus.includes("progress")
+            || normalizedStatus.includes("process")
+            ? "In Progress"
+            : "Pending";
+      const priority: TaskPriority =
+        status === "Completed"
+          ? "Medium"
+          : normalizedApprovalStatus.includes("pending") || normalizedApprovalStatus.includes("reject") || (agingDays ?? 0) >= 3
+            ? "High"
+            : "Medium";
 
-    closeIncomingTasksDrawer();
-  };
+      return {
+        key: wo.id || `${index + 1}`,
+        taskDate,
+        reportMonth,
+        woNumber: wo.wo_number,
+        productName: productNames.join(", ") || "-",
+        woType: taskType,
+        aging: typeof agingDays === "number" ? `${agingDays} day${agingDays === 1 ? "" : "s"}` : "-",
+        targetQty: wo.items.reduce((total, item) => total + item.quantity, 0),
+        completionWo: `${uniqClosed}/${uniqTotal}`,
+        productionLine: relatedMachine?.production_line ?? "-",
+        machineNumber: relatedMachine?.machine_number ?? "-",
+        priority,
+        status,
+        woId: wo.id,
+        kanbanNumbers,
+      };
+    })
+      .sort((left, right) => {
+        const leftPriority = left.priority === "High" ? 0 : 1;
+        const rightPriority = right.priority === "High" ? 0 : 1;
+        if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+
+        const leftDate = parseDateValue(left.taskDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        const rightDate = parseDateValue(right.taskDate)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        return leftDate - rightDate;
+      });
+  }, [firstMachineByProcess, workOrders]);
+
+  const issuesSummaryCards = useMemo<ProductionDashboardSummaryCards>(() => {
+    return {
+      fg_output: issuesRows.length,
+      wip_output: issuesRows.reduce((total, row) => total + row.timeSpentMin, 0),
+      total_ng: new Set(issuesRows.map((row) => row.machineId).filter(Boolean)).size,
+      total_rework: new Set(issuesRows.map((row) => row.woNumber).filter(Boolean)).size,
+    };
+  }, [issuesRows]);
+
+  const incomingTasksSummaryCards = useMemo<ProductionDashboardSummaryCards>(() => {
+    return {
+      fg_output: incomingTasksRows.length,
+      wip_output: incomingTasksRows.reduce((total, row) => total + row.targetQty, 0),
+      total_ng: incomingTasksRows.filter((row) => row.priority === "High").length,
+      total_rework: incomingTasksRows.filter((row) => row.status === "Completed").length,
+    };
+  }, [incomingTasksRows]);
+
+  const issueDateOptions = useMemo(() => {
+    const values = Array.from(new Set(issuesRows.map((row) => row.reportDate).filter(Boolean)));
+    return [{ label: "All Date", value: "all" }, ...values.map((value) => ({ label: value, value }))];
+  }, [issuesRows]);
+
+  const issueMonthOptions = useMemo(() => {
+    const values = Array.from(new Set(issuesRows.map((row) => row.reportMonth).filter((value) => value && value !== "-")));
+    return [{ label: "All Month", value: "all" }, ...values.map((value) => ({ label: value, value }))];
+  }, [issuesRows]);
+
+  const issueLineOptions = useMemo(() => {
+    const values = Array.from(new Set(issuesRows.map((row) => row.productionLine).filter((value) => value && value !== "-")));
+    return [{ label: "All Line", value: "all" }, ...values.map((value) => ({ label: value, value }))];
+  }, [issuesRows]);
+
+  const issueMachineOptions = useMemo(() => {
+    const values = Array.from(new Set(issuesRows.map((row) => row.machineNumber).filter((value) => value && value !== "-")));
+    return [{ label: "All Machine", value: "all" }, ...values.map((value) => ({ label: value, value }))];
+  }, [issuesRows]);
+
+  const incomingDateOptions = useMemo(() => {
+    const values = Array.from(new Set(incomingTasksRows.map((row) => row.taskDate).filter(Boolean)));
+    return [{ label: "All Date", value: "all" }, ...values.map((value) => ({ label: value, value }))];
+  }, [incomingTasksRows]);
+
+  const incomingMonthOptions = useMemo(() => {
+    const values = Array.from(
+      new Set(incomingTasksRows.map((row) => row.reportMonth).filter((value) => value && value !== "-"))
+    );
+    return [{ label: "All Month", value: "all" }, ...values.map((value) => ({ label: value, value }))];
+  }, [incomingTasksRows]);
+
+  const incomingLineOptions = useMemo(() => {
+    const values = Array.from(
+      new Set(incomingTasksRows.map((row) => row.productionLine).filter((value) => value && value !== "-"))
+    );
+    return [{ label: "All Line", value: "all" }, ...values.map((value) => ({ label: value, value }))];
+  }, [incomingTasksRows]);
+
+  const incomingMachineOptions = useMemo(() => {
+    const values = Array.from(
+      new Set(incomingTasksRows.map((row) => row.machineNumber).filter((value) => value && value !== "-"))
+    );
+    return [{ label: "All Machine", value: "all" }, ...values.map((value) => ({ label: value, value }))];
+  }, [incomingTasksRows]);
 
   const selectedViewLabel = useMemo(
     () => views.find((v) => v.id === selectedView)?.label ?? "Finished Goods",
     [selectedView]
   );
 
+  const selectedSummaryCards = useMemo(() => {
+    if (selectedView === "wip") return wipSummaryCards;
+    if (selectedView === "output-per-machine") return outputSummaryCards;
+    if (selectedView === "summary-stroke") return summaryStrokeCards;
+    if (selectedView === "runtime") return runtimeSummaryCards;
+    if (selectedView === "issues") return issuesSummaryCards;
+    if (selectedView === "incoming-tasks") return incomingTasksSummaryCards;
+    return fgSummaryCards;
+  }, [fgSummaryCards, incomingTasksSummaryCards, issuesSummaryCards, outputSummaryCards, runtimeSummaryCards, selectedView, summaryStrokeCards, wipSummaryCards]);
+
+  const currentApiMessage = useMemo(() => {
+    if (!apiEnabled) return "NEXT_PUBLIC_API_URL belum dikonfigurasi.";
+    if (selectedView === "finished-goods") {
+      if (fgDashboardQuery.error) return getApiErrorMessage(fgDashboardQuery.error, "Failed to load FG dashboard");
+      if (fgDashboardQuery.data?.status === "error") return fgDashboardQuery.data.message;
+    }
+    if (selectedView === "wip") {
+      if (wipDashboardQuery.error) return getApiErrorMessage(wipDashboardQuery.error, "Failed to load WIP dashboard");
+      if (wipDashboardQuery.data?.status === "error") return wipDashboardQuery.data.message;
+    }
+    if (selectedView === "output-per-machine") {
+      if (outputMachineDashboardQuery.error) return getApiErrorMessage(outputMachineDashboardQuery.error, "Failed to load output per machine dashboard");
+      if (outputMachineDashboardQuery.data?.status === "error") return outputMachineDashboardQuery.data.message;
+    }
+    if (selectedView === "summary-stroke") {
+      if (summaryStrokeDashboardQuery.error) return getApiErrorMessage(summaryStrokeDashboardQuery.error, "Failed to load summary stroke dashboard");
+      if (summaryStrokeDashboardQuery.data?.status === "error") return summaryStrokeDashboardQuery.data.message;
+    }
+    if (selectedView === "runtime") {
+      if (runtimeDashboardQuery.error) return getApiErrorMessage(runtimeDashboardQuery.error, "Failed to load runtime dashboard");
+      if (runtimeDashboardQuery.data?.status === "error") return runtimeDashboardQuery.data.message;
+    }
+    if (selectedView === "issues" || selectedView === "incoming-tasks") {
+      if (workOrdersQuery.error) return getApiErrorMessage(workOrdersQuery.error, "Failed to load work orders");
+      if (machinesQuery.error) return getApiErrorMessage(machinesQuery.error, "Failed to load machine master");
+    }
+    return "";
+  }, [
+    apiEnabled,
+    fgDashboardQuery.data?.message,
+    fgDashboardQuery.data?.status,
+    fgDashboardQuery.error,
+    outputMachineDashboardQuery.data?.message,
+    outputMachineDashboardQuery.data?.status,
+    outputMachineDashboardQuery.error,
+    runtimeDashboardQuery.data?.message,
+    runtimeDashboardQuery.data?.status,
+    runtimeDashboardQuery.error,
+    machinesQuery.error,
+    selectedView,
+    workOrdersQuery.error,
+    summaryStrokeDashboardQuery.data?.message,
+    summaryStrokeDashboardQuery.data?.status,
+    summaryStrokeDashboardQuery.error,
+    wipDashboardQuery.data?.message,
+    wipDashboardQuery.data?.status,
+    wipDashboardQuery.error,
+  ]);
+
   const filteredFinishedGoods = useMemo(() => {
     const q = search.trim().toLowerCase();
 
-    return finishedGoodsData.filter((row) => {
+    return finishedGoodsRows.filter((row) => {
       const matchesQuery =
         !q ||
         row.uniq.toLowerCase().includes(q) ||
@@ -547,12 +967,12 @@ export default function ProductionDashboardPage() {
 
       return matchesQuery && matchesDate && matchesShift;
     });
-  }, [search, dateFilter, shiftFilter]);
+  }, [finishedGoodsRows, search, dateFilter, shiftFilter]);
 
   const filteredWip = useMemo(() => {
     const q = search.trim().toLowerCase();
 
-    return wipData.filter((row) => {
+    return wipRows.filter((row) => {
       const matchesQuery =
         !q ||
         row.uniq.toLowerCase().includes(q) ||
@@ -565,12 +985,12 @@ export default function ProductionDashboardPage() {
 
       return matchesQuery && matchesDate && matchesShift;
     });
-  }, [search, dateFilter, shiftFilter]);
+  }, [wipRows, search, dateFilter, shiftFilter]);
 
   const filteredOutputPerMachine = useMemo(() => {
     const q = search.trim().toLowerCase();
 
-    return outputPerMachineData.filter((row) => {
+    return outputPerMachineRows.filter((row) => {
       const matchesQuery =
         !q ||
         row.uniq.toLowerCase().includes(q) ||
@@ -583,12 +1003,12 @@ export default function ProductionDashboardPage() {
 
       return matchesQuery && matchesDate && matchesShift;
     });
-  }, [search, dateFilter, shiftFilter]);
+  }, [outputPerMachineRows, search, dateFilter, shiftFilter]);
 
   const filteredSummaryStroke = useMemo(() => {
     const q = search.trim().toLowerCase();
 
-    return summaryStrokeData.filter((row) => {
+    return summaryStrokeRows.filter((row) => {
       const matchesQuery =
         !q || row.productionLine.toLowerCase().includes(q) || row.reportDate.toLowerCase().includes(q);
 
@@ -597,12 +1017,12 @@ export default function ProductionDashboardPage() {
 
       return matchesQuery && matchesDate && matchesLine;
     });
-  }, [search, dateFilter, lineFilter]);
+  }, [summaryStrokeRows, search, dateFilter, lineFilter]);
 
   const filteredRuntime = useMemo(() => {
     const q = search.trim().toLowerCase();
 
-    return runtimeData.filter((row) => {
+    return runtimeRows.filter((row) => {
       const matchesQuery =
         !q ||
         row.woNumber.toLowerCase().includes(q) ||
@@ -615,7 +1035,7 @@ export default function ProductionDashboardPage() {
 
       return matchesQuery && matchesDate && matchesLine;
     });
-  }, [search, dateFilter, lineFilter]);
+  }, [runtimeRows, search, dateFilter, lineFilter]);
 
   const filteredIssues = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -628,12 +1048,14 @@ export default function ProductionDashboardPage() {
         row.machineNumber.toLowerCase().includes(q) ||
         row.issue.toLowerCase().includes(q);
 
-      const matchesDate = dateFilter === "all" ? true : true;
+      const matchesDate = dateFilter === "all" ? true : row.reportDate === dateFilter;
+      const matchesMonth = typeFilter === "all" ? true : row.reportMonth === typeFilter;
       const matchesLine = lineFilter === "all" ? true : row.productionLine === lineFilter;
+      const matchesMachine = shiftFilter === "all" ? true : row.machineNumber === shiftFilter;
 
-      return matchesQuery && matchesDate && matchesLine;
+      return matchesQuery && matchesDate && matchesMonth && matchesLine && matchesMachine;
     });
-  }, [issuesRows, search, dateFilter, lineFilter]);
+  }, [issuesRows, search, dateFilter, typeFilter, lineFilter, shiftFilter]);
 
   const filteredIncomingTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -645,12 +1067,14 @@ export default function ProductionDashboardPage() {
         row.productName.toLowerCase().includes(q) ||
         row.taskDate.toLowerCase().includes(q);
 
-      const matchesDate = dateFilter === "all" ? true : true;
-      const matchesType = typeFilter === "all" ? true : row.woType === typeFilter;
+      const matchesDate = dateFilter === "all" ? true : row.taskDate === dateFilter;
+      const matchesMonth = typeFilter === "all" ? true : row.reportMonth === typeFilter;
+      const matchesLine = lineFilter === "all" ? true : row.productionLine === lineFilter;
+      const matchesMachine = shiftFilter === "all" ? true : row.machineNumber === shiftFilter;
 
-      return matchesQuery && matchesDate && matchesType;
+      return matchesQuery && matchesDate && matchesMonth && matchesLine && matchesMachine;
     });
-  }, [incomingTasksRows, search, dateFilter, typeFilter]);
+  }, [incomingTasksRows, search, dateFilter, typeFilter, lineFilter, shiftFilter]);
 
   const finishedGoodsColumns: ColumnsType<FinishedGoodsRow> = [
     { title: "Report Date", dataIndex: "reportDate", key: "reportDate" },
@@ -904,6 +1328,9 @@ export default function ProductionDashboardPage() {
     { title: "Product Name", dataIndex: "productName", key: "productName" },
     { title: "WO Type", dataIndex: "woType", key: "woType" },
     { title: "Aging", dataIndex: "aging", key: "aging" },
+    { title: "Completion WO", dataIndex: "completionWo", key: "completionWo" },
+    { title: "Production Line", dataIndex: "productionLine", key: "productionLine" },
+    { title: "Machine Number", dataIndex: "machineNumber", key: "machineNumber" },
     {
       title: "Target Qty",
       dataIndex: "targetQty",
@@ -949,40 +1376,50 @@ export default function ProductionDashboardPage() {
         <Space size={10}>
           <button
             type="button"
-            className="text-gray-500 hover:text-gray-800"
-            onClick={() => openEditIncomingTask(record)}
-            aria-label="Edit"
+            className="text-blue-600 hover:text-blue-800"
+            onClick={() => {
+              openPrintWindow(
+                `WO ${record.woNumber}`,
+                [
+                  `WO Number: ${record.woNumber}`,
+                  `WO Type: ${record.woType}`,
+                  `Task Date: ${record.taskDate}`,
+                  `Product Name: ${record.productName}`,
+                  `Production Line: ${record.productionLine}`,
+                  `Machine Number: ${record.machineNumber}`,
+                  `Target Qty: ${record.targetQty}`,
+                  `Completion WO: ${record.completionWo}`,
+                ].join("<br />")
+              );
+            }}
+            aria-label="Print Work Order"
           >
-            <EditOutlined />
+            <PrinterOutlined />
           </button>
           <button
             type="button"
-            className="text-gray-500 hover:text-gray-800"
+            className="text-gray-500 hover:text-gray-800 disabled:text-gray-300"
             onClick={() => {
-              const nextKey = `${Date.now()}`;
-              setIncomingTasksRows((prev) => [
-                ...prev,
-                {
-                  ...record,
-                  key: nextKey,
-                },
-              ]);
-              message.success("Task duplicated");
+              if (!record.kanbanNumbers.length) {
+                message.info("Kanban number belum tersedia untuk WO ini");
+                return;
+              }
+
+              openPrintWindow(
+                `Kanban ${record.woNumber}`,
+                [
+                  `WO Number: ${record.woNumber}`,
+                  `Kanban: ${record.kanbanNumbers.join(", ")}`,
+                  `Production Line: ${record.productionLine}`,
+                  `Machine Number: ${record.machineNumber}`,
+                ].join("<br />")
+              );
             }}
-            aria-label="Duplicate"
+            aria-label="Print Kanban"
+            disabled={!record.kanbanNumbers.length}
           >
             <CopyOutlined />
           </button>
-          <Popconfirm
-            title="Delete this task?"
-            okText="Delete"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => setIncomingTasksRows((prev) => prev.filter((r) => r.key !== record.key))}
-          >
-            <button type="button" className="text-red-500 hover:text-red-700" aria-label="Delete">
-              <DeleteOutlined />
-            </button>
-          </Popconfirm>
         </Space>
       ),
     },
@@ -1061,6 +1498,32 @@ export default function ProductionDashboardPage() {
     filteredFinishedGoods,
   ]);
 
+  const shiftOptions = useMemo(() => {
+    const source =
+      selectedView === "finished-goods"
+        ? filteredFinishedGoods.map((row) => row.shift)
+        : selectedView === "wip"
+          ? filteredWip.map((row) => row.shift)
+          : selectedView === "output-per-machine"
+            ? filteredOutputPerMachine.map((row) => row.shift)
+            : [];
+
+    const values = Array.from(new Set(source.filter((value) => value && value !== "-")));
+    return [{ label: "All Shifts", value: "all" }, ...values.map((value) => ({ label: value, value }))];
+  }, [filteredFinishedGoods, filteredOutputPerMachine, filteredWip, selectedView]);
+
+  const lineOptions = useMemo(() => {
+    const source =
+      selectedView === "summary-stroke"
+        ? filteredSummaryStroke.map((row) => row.productionLine)
+        : selectedView === "runtime"
+          ? filteredRuntime.map((row) => row.productionLine)
+          : filteredIssues.map((row) => row.productionLine);
+
+    const values = Array.from(new Set(source.filter((value) => value && value !== "-")));
+    return [{ label: "All Line", value: "all" }, ...values.map((value) => ({ label: value, value }))];
+  }, [filteredIssues, filteredRuntime, filteredSummaryStroke, selectedView]);
+
   const cubeIcon = (
     <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path
@@ -1098,42 +1561,50 @@ export default function ProductionDashboardPage() {
     </svg>
   );
 
+  const summaryCardItems = useMemo<DashboardSummaryCardItem[]>(() => {
+    if (selectedView === "issues") {
+      return [
+        { title: "Total Issues", value: toNumber(selectedSummaryCards.fg_output), icon: warningIcon, bgColor: "bg-red-50", textColor: "text-red-600" },
+        { title: "Downtime (min)", value: toNumber(selectedSummaryCards.wip_output), icon: heartbeatIcon, bgColor: "bg-orange-50", textColor: "text-orange-600" },
+        { title: "Affected Machines", value: toNumber(selectedSummaryCards.total_ng), icon: cubeIcon, bgColor: "bg-blue-50", textColor: "text-blue-600" },
+        { title: "Affected WO", value: toNumber(selectedSummaryCards.total_rework), icon: trendIcon, bgColor: "bg-green-50", textColor: "text-green-600" },
+      ];
+    }
+
+    if (selectedView === "incoming-tasks") {
+      return [
+        { title: "Total Tasks", value: toNumber(selectedSummaryCards.fg_output), icon: cubeIcon, bgColor: "bg-blue-50", textColor: "text-blue-600" },
+        { title: "Target Qty", value: toNumber(selectedSummaryCards.wip_output), icon: heartbeatIcon, bgColor: "bg-green-50", textColor: "text-green-600" },
+        { title: "High Priority", value: toNumber(selectedSummaryCards.total_ng), icon: warningIcon, bgColor: "bg-red-50", textColor: "text-red-600" },
+        { title: "Completed WO", value: toNumber(selectedSummaryCards.total_rework), icon: trendIcon, bgColor: "bg-orange-50", textColor: "text-orange-600" },
+      ];
+    }
+
+    return [
+      { title: "FG Output", value: toNumber(selectedSummaryCards.fg_output), icon: cubeIcon, bgColor: "bg-blue-50", textColor: "text-blue-600" },
+      { title: "WIP Output", value: toNumber(selectedSummaryCards.wip_output), icon: heartbeatIcon, bgColor: "bg-green-50", textColor: "text-green-600" },
+      { title: "Total NG", value: toNumber(selectedSummaryCards.total_ng), icon: warningIcon, bgColor: "bg-red-50", textColor: "text-red-600" },
+      { title: "Total Rework", value: toNumber(selectedSummaryCards.total_rework), icon: trendIcon, bgColor: "bg-orange-50", textColor: "text-orange-600" },
+    ];
+  }, [cubeIcon, heartbeatIcon, selectedSummaryCards, selectedView, trendIcon, warningIcon]);
+
   return (
     <div className="p-6 bg-gray-50 min-h-full">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-        <StatsCard
-          title="FG Output"
-          value={500}
-          subtitle=""
-          icon={cubeIcon}
-          bgColor="bg-blue-50"
-          textColor="text-blue-600"
-        />
-        <StatsCard
-          title="WIP Output"
-          value={300}
-          subtitle=""
-          icon={heartbeatIcon}
-          bgColor="bg-green-50"
-          textColor="text-green-600"
-        />
-        <StatsCard
-          title="Total NG"
-          value={20}
-          subtitle=""
-          icon={warningIcon}
-          bgColor="bg-red-50"
-          textColor="text-red-600"
-        />
-        <StatsCard
-          title="Total Rework"
-          value={5}
-          subtitle=""
-          icon={trendIcon}
-          bgColor="bg-orange-50"
-          textColor="text-orange-600"
-        />
+        {summaryCardItems.map((card) => (
+          <StatsCard
+            key={card.title}
+            title={card.title}
+            value={card.value}
+            subtitle=""
+            icon={card.icon}
+            bgColor={card.bgColor}
+            textColor={card.textColor}
+          />
+        ))}
       </div>
+
+      {currentApiMessage ? <Alert type="warning" showIcon className="mb-6 !rounded-xl" message={currentApiMessage} /> : null}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-4">
@@ -1200,11 +1671,6 @@ export default function ProductionDashboardPage() {
                     Add New
                   </Button>
                 )}
-                {selectedView === "incoming-tasks" && (
-                  <Button type="primary" icon={<PlusOutlined />} onClick={openCreateIncomingTask}>
-                    Add New
-                  </Button>
-                )}
               </div>
             </div>
 
@@ -1232,9 +1698,7 @@ export default function ProductionDashboardPage() {
                 <div className="flex items-center gap-3">
                   {(selectedView === "finished-goods" ||
                     selectedView === "summary-stroke" ||
-                    selectedView === "runtime" ||
-                    selectedView === "issues" ||
-                    selectedView === "incoming-tasks") && (
+                    selectedView === "runtime") && (
                     <Select
                       value={dateFilter}
                       onChange={(v) => setDateFilter(v)}
@@ -1243,42 +1707,69 @@ export default function ProductionDashboardPage() {
                     />
                   )}
 
-                  {selectedView === "incoming-tasks" ? (
-                    <Select
-                      value={typeFilter}
-                      onChange={(v) => setTypeFilter(v)}
-                      options={[
-                        { label: "All Type", value: "all" },
-                        { label: "Additional", value: "Additional" },
-                        { label: "Assembly", value: "Assembly" },
-                      ]}
-                      style={{ width: 140 }}
-                    />
+                  {selectedView === "issues" ? (
+                    <>
+                      <Select
+                        value={dateFilter}
+                        onChange={(v) => setDateFilter(v)}
+                        options={issueDateOptions}
+                        style={{ width: 150 }}
+                      />
+                      <Select
+                        value={typeFilter}
+                        onChange={(v) => setTypeFilter(v)}
+                        options={issueMonthOptions}
+                        style={{ width: 170 }}
+                      />
+                      <Select
+                        value={lineFilter}
+                        onChange={(v) => setLineFilter(v)}
+                        options={issueLineOptions}
+                        style={{ width: 160 }}
+                      />
+                      <Select
+                        value={shiftFilter}
+                        onChange={(v) => setShiftFilter(v)}
+                        options={issueMachineOptions}
+                        style={{ width: 180 }}
+                      />
+                    </>
+                  ) : selectedView === "incoming-tasks" ? (
+                    <>
+                      <Select
+                        value={dateFilter}
+                        onChange={(v) => setDateFilter(v)}
+                        options={incomingDateOptions}
+                        style={{ width: 150 }}
+                      />
+                      <Select
+                        value={typeFilter}
+                        onChange={(v) => setTypeFilter(v)}
+                        options={incomingMonthOptions}
+                        style={{ width: 170 }}
+                      />
+                      <Select
+                        value={lineFilter}
+                        onChange={(v) => setLineFilter(v)}
+                        options={incomingLineOptions}
+                        style={{ width: 160 }}
+                      />
+                      <Select
+                        value={shiftFilter}
+                        onChange={(v) => setShiftFilter(v)}
+                        options={incomingMachineOptions}
+                        style={{ width: 180 }}
+                      />
+                    </>
                   ) : (
                     <Select
-                      value={
-                        selectedView === "summary-stroke" || selectedView === "runtime" || selectedView === "issues"
-                          ? lineFilter
-                          : shiftFilter
-                      }
+                      value={selectedView === "summary-stroke" || selectedView === "runtime" ? lineFilter : shiftFilter}
                       onChange={(v) =>
-                        selectedView === "summary-stroke" || selectedView === "runtime" || selectedView === "issues"
+                        selectedView === "summary-stroke" || selectedView === "runtime"
                           ? setLineFilter(v)
                           : setShiftFilter(v)
                       }
-                      options={
-                        selectedView === "summary-stroke" || selectedView === "runtime" || selectedView === "issues"
-                          ? [
-                              { label: "All Line", value: "all" },
-                              { label: "Line A", value: "Line A" },
-                              { label: "Line B", value: "Line B" },
-                            ]
-                          : [
-                              { label: "All Shifts", value: "all" },
-                              { label: "Shift 1", value: "Shift 1" },
-                              { label: "Shift 2", value: "Shift 2" },
-                            ]
-                      }
+                      options={selectedView === "summary-stroke" || selectedView === "runtime" ? lineOptions : shiftOptions}
                       style={{ width: 140 }}
                     />
                   )}
@@ -1311,11 +1802,15 @@ export default function ProductionDashboardPage() {
                   rules={[{ required: true, message: "Work Order Number is required" }]}
                 >
                   <Select
-                    options={[
-                      { label: "WO-1234", value: "WO-1234" },
-                      { label: "WO-001", value: "WO-001" },
-                      { label: "WO-003", value: "WO-003" },
-                    ]}
+                    options={workOrderOptions}
+                    onChange={(value) => {
+                      const related = workOrderRelations.get(value);
+                      if (!related) return;
+                      issuesForm.setFieldsValue({
+                        productionLine: related.productionLine,
+                        machineId: related.machineId,
+                      });
+                    }}
                   />
                 </Form.Item>
 
@@ -1324,28 +1819,15 @@ export default function ProductionDashboardPage() {
                   label="Production Line"
                   rules={[{ required: true, message: "Production Line is required" }]}
                 >
-                  <Select
-                    options={[
-                      { label: "Line A - Prod", value: "Line A - Prod" },
-                      { label: "Line A", value: "Line A" },
-                      { label: "Line B", value: "Line B" },
-                    ]}
-                  />
+                  <Select options={productionLineOptionsForIssues} />
                 </Form.Item>
 
                 <Form.Item
-                  name="machineNumber"
+                  name="machineId"
                   label="Machine"
                   rules={[{ required: true, message: "Machine is required" }]}
                 >
-                  <Select
-                    options={[
-                      { label: "Press Machine A1", value: "Press Machine A1" },
-                      { label: "Welding Machine B2", value: "Welding Machine B2" },
-                      { label: "MCH-4", value: "MCH-4" },
-                      { label: "MCH-3", value: "MCH-3" },
-                    ]}
-                  />
+                  <Select options={machineOptionsForIssues} />
                 </Form.Item>
 
                 <Form.Item
@@ -1353,13 +1835,7 @@ export default function ProductionDashboardPage() {
                   label="Production Issue"
                   rules={[{ required: true, message: "Production Issue is required" }]}
                 >
-                  <Select
-                    options={[
-                      { label: "Machine Breakdown", value: "Machine Breakdown" },
-                      { label: "Material Shortage", value: "Material Shortage" },
-                      { label: "Machine Shortage", value: "Machine Shortage" },
-                    ]}
-                  />
+                  <Select options={issueTypeOptions} />
                 </Form.Item>
 
                 <Form.Item
@@ -1380,112 +1856,15 @@ export default function ProductionDashboardPage() {
               </Form>
             </Modal>
 
-            <Drawer
-              title={
-                <div>
-                  <div className="text-sm font-semibold text-gray-900">
-                    {editingIncomingTaskKey ? "Edit - Incoming Tasks" : "Add New - Incoming Tasks"}
-                  </div>
-                  <div className="text-xs text-gray-500">Create a new record</div>
-                </div>
-              }
-              open={isIncomingTasksDrawerOpen}
-              onClose={closeIncomingTasksDrawer}
-              width={420}
-              destroyOnClose
-              footer={
-                <div className="flex items-center justify-end gap-2">
-                  <Button onClick={closeIncomingTasksDrawer}>Cancel</Button>
-                  <Button type="primary" onClick={onSubmitIncomingTask}>
-                    {editingIncomingTaskKey ? "Save" : "Create"}
-                  </Button>
-                </div>
-              }
-            >
-              <Form form={incomingTasksForm} layout="vertical">
-                <Form.Item
-                  name="taskDate"
-                  label="Task Date"
-                  rules={[{ required: true, message: "Task Date is required" }]}
-                >
-                  <Input placeholder="dd/mm/yyyy" />
-                </Form.Item>
-
-                <Form.Item
-                  name="woNumber"
-                  label="WO Number"
-                  rules={[{ required: true, message: "WO Number is required" }]}
-                >
-                  <Select
-                    options={[
-                      { label: "WO-005", value: "WO-005" },
-                      { label: "WO-006", value: "WO-006" },
-                      { label: "WO-001", value: "WO-001" },
-                    ]}
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  name="productName"
-                  label="Product Name"
-                  rules={[{ required: true, message: "Product Name is required" }]}
-                >
-                  <Input />
-                </Form.Item>
-
-                <Form.Item name="woType" label="WO Type" rules={[{ required: true, message: "WO Type is required" }]}>
-                  <Select
-                    options={[
-                      { label: "Additional", value: "Additional" },
-                      { label: "Assembly", value: "Assembly" },
-                    ]}
-                  />
-                </Form.Item>
-
-                <Form.Item name="aging" label="Aging" rules={[{ required: true, message: "Aging is required" }]}>
-                  <Input placeholder="e.g. 2 days" />
-                </Form.Item>
-
-                <Form.Item
-                  name="targetQty"
-                  label="Target Qty"
-                  rules={[{ required: true, message: "Target Qty is required" }]}
-                >
-                  <InputNumber className="w-full" min={0} />
-                </Form.Item>
-
-                <Form.Item
-                  name="priority"
-                  label="Priority"
-                  rules={[{ required: true, message: "Priority is required" }]}
-                >
-                  <Select
-                    options={[
-                      { label: "High", value: "High" },
-                      { label: "Medium", value: "Medium" },
-                    ]}
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  name="status"
-                  label="Status"
-                  rules={[{ required: true, message: "Status is required" }]}
-                >
-                  <Select
-                    options={[
-                      { label: "Pending", value: "Pending" },
-                      { label: "In Progress", value: "In Progress" },
-                    ]}
-                  />
-                </Form.Item>
-              </Form>
-            </Drawer>
-
             <div className="px-5 pb-5">
               <Table
                 columns={tableConfig.columns as unknown as ColumnsType<object>}
                 dataSource={tableConfig.data as unknown as object[]}
+                locale={{
+                  emptyText: currentApiMessage
+                    ? "No data available for this view"
+                    : "No production dashboard data found",
+                }}
                 pagination={false}
                 bordered
                 size="middle"

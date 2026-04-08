@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Button, Input, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useRouter } from "next/navigation";
@@ -19,11 +19,20 @@ import {
   MdOutlineTrendingDown,
   MdOutlineWarningAmber,
 } from "react-icons/md";
+import { apiBaseUrl } from "@/lib/api/instance";
+import {
+  type StockInventoryType,
+  type StockOpnameListRecord,
+  useDeleteStockOpnameMutation,
+  useGetStockOpnameListQuery,
+  useGetStockOpnameSummaryQuery,
+} from "@/lib/api/stock-opname/api";
 
 type StockTab = "finished" | "raw" | "indirect" | "wip";
 
 type StockOpnameRow = {
   key: string;
+  apiId?: number;
   opnameId: string;
   period: string;
   location: string;
@@ -38,6 +47,61 @@ type StockOpnameRow = {
   countedAt?: string;
   impact?: "Adjusted" | "Pending";
 };
+
+const DEFAULT_PERIOD = "01/2024";
+
+const TAB_TO_INVENTORY_TYPE: Record<StockTab, StockInventoryType> = {
+  finished: "finished_good",
+  raw: "raw_material",
+  indirect: "indirect",
+  wip: "wip",
+};
+
+function normalizeStatus(value?: string): StockOpnameRow["status"] {
+  const lower = (value ?? "").toLowerCase();
+  if (lower.includes("approved") || lower.includes("complete")) return "Completed";
+  if (lower.includes("waiting") || lower.includes("pending verification")) return "Pending Verification";
+  if (lower.includes("pending")) return "Pending Verification";
+  return "In Progress";
+}
+
+function normalizeApproval(value?: string): StockOpnameRow["approval"] {
+  const lower = (value ?? "").toLowerCase();
+  if (lower.includes("approved")) return "Approved";
+  if (lower.includes("waiting") || lower.includes("pending")) return "Waiting for Approval";
+  return "-";
+}
+
+function mapRecordToRow(record: StockOpnameListRecord): StockOpnameRow {
+  const systemQty = record.system_total ?? record.summary?.system_total ?? 0;
+  const physicalQty = record.physical_total ?? record.summary?.physical_total ?? 0;
+  const impactSource = record.ui_impact ?? record.impact;
+  const statusSource = record.ui_status ?? record.status_label ?? record.status;
+  const approvalSource = record.status_label ?? record.status ?? record.decision_status;
+
+  return {
+    key: record.opname_number || String(record.id),
+    apiId: record.id,
+    opnameId: record.opname_number,
+    period: record.period ?? DEFAULT_PERIOD,
+    location: record.location ?? "-",
+    systemQty,
+    physicalQty,
+    status: normalizeStatus(statusSource),
+    approval: normalizeApproval(approvalSource),
+    costImpact: record.cost_impact ?? record.summary?.cost_impact ?? 0,
+    itemName: record.opname_number,
+    itemCode: record.inventory_type,
+    countedBy: undefined,
+    countedAt: record.period,
+    impact:
+      (impactSource ?? "").toLowerCase().includes("waiting") ||
+      (impactSource ?? "").toLowerCase().includes("pending") ||
+      (impactSource ?? "").toLowerCase().includes("none")
+        ? "Pending"
+        : "Adjusted",
+  };
+}
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
@@ -75,12 +139,34 @@ function StatCard(props: {
 
 export default function StockOpnamePage() {
   const router = useRouter();
+  const apiEnabled = Boolean(apiBaseUrl);
   const [tab, setTab] = useState<StockTab>("finished");
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [scanMode, setScanMode] = useState(false);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(20);
+  const inventoryType = TAB_TO_INVENTORY_TYPE[tab];
+
+  useEffect(() => {
+    setPage(1);
+  }, [tab]);
+
+  const { data: summaryData } = useGetStockOpnameSummaryQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const { data: listData, isFetching: listLoading } = useGetStockOpnameListQuery(
+    {
+      inventory_type: inventoryType,
+      period: DEFAULT_PERIOD,
+      page,
+      limit: pageSize,
+    },
+    {
+      skip: !apiEnabled,
+    }
+  );
+  const [deleteStockOpname, { isLoading: deleting }] = useDeleteStockOpnameMutation();
 
   const tabs = useMemo(
     () => [
@@ -236,7 +322,10 @@ export default function StockOpnamePage() {
     []
   );
 
-  const allRows = useMemo(() => rowsByTab[tab], [rowsByTab, tab]);
+  const allRows = useMemo(() => {
+    if (apiEnabled) return (listData?.rows ?? []).map(mapRecordToRow);
+    return rowsByTab[tab];
+  }, [apiEnabled, listData?.rows, rowsByTab, tab]);
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -263,6 +352,19 @@ export default function StockOpnamePage() {
   }, [allRows, search, typeFilter]);
 
   const kpis = useMemo(() => {
+    if (apiEnabled && summaryData) {
+      const listCostImpact = (listData?.rows ?? []).reduce(
+        (total, row) => total + (row.cost_impact ?? row.summary?.cost_impact ?? 0),
+        0
+      );
+
+      return {
+        totalRecords: summaryData.total_records,
+        completed: summaryData.completed,
+        withVariance: summaryData.with_variance,
+        costImpact: listCostImpact,
+      };
+    }
     const all = Object.values(rowsByTab).flat();
     const completed = all.filter((r) => r.status === "Completed").length;
     const withVariance = all.filter((r) => variance(r.systemQty, r.physicalQty).diff !== 0).length;
@@ -273,7 +375,21 @@ export default function StockOpnamePage() {
       withVariance,
       costImpact,
     };
-  }, [rowsByTab]);
+  }, [apiEnabled, listData?.rows, rowsByTab, summaryData]);
+
+  const handleDelete = async (row: StockOpnameRow) => {
+    if (!apiEnabled || !row.apiId) {
+      message.info(`Delete ${row.opnameId}`);
+      return;
+    }
+
+    try {
+      await deleteStockOpname(row.apiId).unwrap();
+      message.success(`Deleted ${row.opnameId}`);
+    } catch {
+      message.error(`Failed to delete ${row.opnameId}`);
+    }
+  };
 
   const columns = useMemo<ColumnsType<StockOpnameRow>>(
     () => {
@@ -320,7 +436,8 @@ export default function StockOpnamePage() {
               danger
               className="!rounded-lg"
               icon={<DeleteOutlined />}
-              onClick={() => message.info(`Delete ${r.opnameId}`)}
+              loading={deleting}
+              onClick={() => void handleDelete(r)}
             />
           </div>
         ),
@@ -485,7 +602,7 @@ export default function StockOpnamePage() {
         actionsCol,
       ];
     },
-    [router, tab]
+    [deleting, router, tab]
   );
 
   const itemsCounted = useMemo(() => filteredRows.length, [filteredRows.length]);
@@ -604,10 +721,11 @@ export default function StockOpnamePage() {
             columns={columns}
             rowKey="key"
             size="middle"
+            loading={listLoading}
             pagination={{
               current: page,
               pageSize,
-              total: 521390,
+              total: apiEnabled ? (listData?.total ?? filteredRows.length) : 521390,
               showSizeChanger: true,
               showQuickJumper: true,
               showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} Results`,

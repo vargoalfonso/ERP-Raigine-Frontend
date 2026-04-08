@@ -4,9 +4,6 @@ import React, { useMemo, useState } from "react";
 import { Button, Card, Input, InputNumber, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
-import { apiBaseUrl } from "@/lib/api/instance";
-import { useCreateProcessMutation } from "@/lib/api/system-settings/api";
-import { getApiErrorMessage } from "@/lib/api/error";
 
 type StatusType = "Active" | "Inactive";
 
@@ -35,7 +32,7 @@ const STATUS_OPTIONS = [
 function makeEntry(idx: number): Entry {
   return {
     id: `entry-${idx}`,
-    processCode: "",
+    processCode: "Auto Generated",
     category: undefined,
     processName: undefined,
     sequence: undefined,
@@ -46,9 +43,6 @@ function makeEntry(idx: number): Entry {
 
 export default function ProcessCreatePage() {
   const router = useRouter();
-
-  const apiEnabled = Boolean(apiBaseUrl);
-  const [createProcess, { isLoading: isSaving }] = useCreateProcessMutation();
 
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
 
@@ -62,7 +56,6 @@ export default function ProcessCreatePage() {
   };
 
   const validateEntry = (e: Entry) => {
-    if (!e.processCode?.trim()) return "Process Code is required";
     if (!e.category) return "Category is required";
     if (!e.processName) return "Process Name is required";
     if (e.sequence === undefined || e.sequence === null) return "Sequence is required";
@@ -74,7 +67,7 @@ export default function ProcessCreatePage() {
     setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
   };
 
-  const onSave = async () => {
+  const onSave = () => {
     for (const e of entries) {
       const err = validateEntry(e);
       if (err) {
@@ -83,28 +76,8 @@ export default function ProcessCreatePage() {
       }
     }
 
-    if (!apiEnabled) {
-      message.success("Process saved");
-      router.push("/system-settings");
-      return;
-    }
-
-    try {
-      for (const e of entries) {
-        await createProcess({
-          process_code: e.processCode.trim(),
-          category: e.category!,
-          process_name: e.processName!,
-          sequence: e.sequence!,
-        }).unwrap();
-        updateEntry(e.id, { created: true });
-      }
-
-      message.success("Process saved");
-      router.push("/system-settings");
-    } catch (err: unknown) {
-      message.error(getApiErrorMessage(err, "Failed to save process"));
-    }
+    message.success("Process saved");
+    router.push("/system-settings");
   };
 
   return (
@@ -122,7 +95,7 @@ export default function ProcessCreatePage() {
 
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={isSaving}>
+              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
                 Save Parameter
               </Button>
             </div>
@@ -153,11 +126,7 @@ export default function ProcessCreatePage() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                   <div>
                     <div className="text-sm text-gray-700 mb-2">Process Code</div>
-                    <Input
-                      value={e.processCode}
-                      onChange={(ev) => updateEntry(e.id, { processCode: ev.target.value, created: false })}
-                      placeholder="e.g. PRS-001"
-                    />
+                    <Input value={e.processCode} disabled />
                   </div>
 
                   <div>

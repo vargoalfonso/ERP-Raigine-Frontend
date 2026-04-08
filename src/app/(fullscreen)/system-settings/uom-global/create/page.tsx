@@ -4,9 +4,6 @@ import React, { useMemo, useState } from "react";
 import { Button, Card, Input, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
-import { apiBaseUrl } from "@/lib/api/instance";
-import { useCreateUomMutation } from "@/lib/api/system-settings/api";
-import { getApiErrorMessage } from "@/lib/api/error";
 
 type StatusType = "Active" | "Inactive";
 
@@ -46,9 +43,6 @@ function makeEntry(idx: number): Entry {
 export default function UomGlobalCreatePage() {
   const router = useRouter();
 
-  const apiEnabled = Boolean(apiBaseUrl);
-  const [createUom, { isLoading: isSaving }] = useCreateUomMutation();
-
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
 
   const completeCount = useMemo(
@@ -72,7 +66,7 @@ export default function UomGlobalCreatePage() {
     setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
   };
 
-  const onSave = async () => {
+  const onSave = () => {
     for (const e of entries) {
       const err = validateEntry(e);
       if (err) {
@@ -81,28 +75,8 @@ export default function UomGlobalCreatePage() {
       }
     }
 
-    if (!apiEnabled) {
-      message.success("UoM parameter saved");
-      router.push("/system-settings");
-      return;
-    }
-
-    try {
-      for (const e of entries) {
-        await createUom({
-          code: e.typeCode!,
-          name: e.typeName!,
-          category: e.category!,
-        }).unwrap();
-
-        updateEntry(e.id, { created: true });
-      }
-
-      message.success("UoM parameter saved");
-      router.push("/system-settings");
-    } catch (err: unknown) {
-      message.error(getApiErrorMessage(err, "Failed to save UoM parameter"));
-    }
+    message.success("UoM parameter saved");
+    router.push("/system-settings");
   };
 
   return (
@@ -120,7 +94,7 @@ export default function UomGlobalCreatePage() {
 
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={isSaving}>
+              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
                 Save Parameter
               </Button>
             </div>

@@ -75,7 +75,7 @@ export default function CreateSupplierOnlyPage() {
   }, [form, nextCode]);
 
   const backToList = () => {
-    router.push("/master-supplier?tab=only");
+    router.push("/master-supplier-only");
   };
 
   const onSave = async () => {

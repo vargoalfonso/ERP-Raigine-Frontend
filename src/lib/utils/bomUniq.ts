@@ -5,6 +5,11 @@ type BomNodeLike = {
   part_name?: unknown;
   part_number?: unknown;
   assembly_code?: unknown;
+  packing_number?: unknown;
+  packingNumber?: unknown;
+  packing_no?: unknown;
+  packingNo?: unknown;
+  kanban?: unknown;
   children?: unknown;
 };
 
@@ -21,6 +26,7 @@ export type BomUniqIndex = {
   partNameByUniq: Record<string, string>;
   partNumberByUniq: Record<string, string>;
   assemblyCodeByUniq: Record<string, string>;
+  packingNumberByUniq: Record<string, string>;
 };
 
 export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
@@ -28,6 +34,7 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
   const partNameByUniq: Record<string, string> = {};
   const partNumberByUniq: Record<string, string> = {};
   const assemblyCodeByUniq: Record<string, string> = {};
+  const packingNumberByUniq: Record<string, string> = {};
 
   const visit = (node: unknown) => {
     const n = asNodeLike(node);
@@ -37,11 +44,23 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
     const partName = typeof n.part_name === "string" ? n.part_name.trim() : "";
     const partNumber = typeof n.part_number === "string" ? n.part_number.trim() : "";
     const assemblyCode = typeof n.assembly_code === "string" ? n.assembly_code.trim() : "";
+    const packingNumberCandidate = [
+      n.packing_number,
+      n.packingNumber,
+      n.packing_no,
+      n.packingNo,
+      n.kanban,
+    ].find((value) => typeof value === "string" && value.trim());
+    const packingNumber =
+      typeof packingNumberCandidate === "string" ? packingNumberCandidate.trim() : "";
     if (uniq) {
       uniqSet.add(uniq);
       if (partName && !partNameByUniq[uniq]) partNameByUniq[uniq] = partName;
       if (partNumber && !partNumberByUniq[uniq]) partNumberByUniq[uniq] = partNumber;
       if (assemblyCode && !assemblyCodeByUniq[uniq]) assemblyCodeByUniq[uniq] = assemblyCode;
+      if (packingNumber && !packingNumberByUniq[uniq]) {
+        packingNumberByUniq[uniq] = packingNumber;
+      }
     }
 
     const children = n.children;
@@ -58,5 +77,12 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
 
   const uniqs = Array.from(uniqSet).sort((a, b) => a.localeCompare(b));
   const options = uniqs.map((u) => ({ label: u, value: u }));
-  return { uniqs, options, partNameByUniq, partNumberByUniq, assemblyCodeByUniq };
+  return {
+    uniqs,
+    options,
+    partNameByUniq,
+    partNumberByUniq,
+    assemblyCodeByUniq,
+    packingNumberByUniq,
+  };
 };

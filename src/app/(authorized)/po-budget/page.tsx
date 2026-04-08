@@ -1,6 +1,24 @@
 "use client";
-
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
 import React, { useMemo, useState } from "react";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import {
+  useGetPoBudgetListQuery,
+  useAddPoBudgetEntryMutation,
+  type PoBudgetType,
+  PoBudgetEntryRequest,
+} from "@/lib/api/po-budget/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import {
+  useListMasterSuppliersQuery,
+  type MasterSupplierRecord,
+} from "@/lib/api/master-supplier/api";
+import {
+  useListSuppliersQuery,
+  type SupplierRecord,
+} from "@/lib/api/suppliers/api";
+const useApi = Boolean(apiBaseUrl);
 import {
   Button,
   Input,
@@ -71,8 +89,73 @@ type PoBudgetRow = {
   approval: "Approved" | "Pending";
 };
 
+type SupplierOption = {
+  value: string;
+  label: string;
+  supplierName: string;
+  supplierId?: string;
+};
+
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function resolveSupplierName(
+  supplierValue: unknown,
+  supplierNameByCode: Map<string, string>,
+) {
+  if (typeof supplierValue === "string") {
+    return supplierNameByCode.get(supplierValue) ?? supplierValue;
+  }
+
+  if (isRecord(supplierValue)) {
+    if (
+      typeof supplierValue.supplier_name === "string" &&
+      supplierValue.supplier_name.trim()
+    ) {
+      return supplierValue.supplier_name;
+    }
+
+    if (
+      typeof supplierValue.supplier_code === "string" &&
+      supplierValue.supplier_code.trim()
+    ) {
+      return (
+        supplierNameByCode.get(supplierValue.supplier_code) ??
+        supplierValue.supplier_code
+      );
+    }
+  }
+
+  return "-";
+}
+
+function resolveSupplierBudgetTab(supplier: MasterSupplierRecord): BudgetTabId {
+  const rawValue = String(
+    supplier.type ?? supplier.rawMaterialType ?? supplier.material_category ?? "",
+  ).toLowerCase();
+
+  if (rawValue.includes("subcon") || rawValue.includes("sub-con")) {
+    return "subcon";
+  }
+
+  if (rawValue.includes("consum") || rawValue.includes("indirect")) {
+    return "indirect";
+  }
+
+  return "raw";
+}
+
+function resolveSupplierOnlyBudgetTab(supplier: SupplierRecord): BudgetTabId {
+  const rawValue = String(supplier.material_category ?? "").toLowerCase();
+
+  if (rawValue.includes("sub") && rawValue.includes("con")) return "subcon";
+  if (rawValue.includes("indirect")) return "indirect";
+  return "raw";
 }
 
 function StatCard(props: {
@@ -101,6 +184,12 @@ function StatCard(props: {
 }
 
 export default function PoBudgetPage() {
+  const { data: bomTreeRes } = useGetBomTreeQuery();
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomTreeRes?.data ?? []),
+    [bomTreeRes?.data]
+  );
+
   const [activeTab, setActiveTab] = useState<BudgetTabId>("raw");
 
   const initialRawRows = useMemo<PoBudgetRow[]>(
@@ -144,7 +233,7 @@ export default function PoBudgetPage() {
         approval: "Pending",
       },
     ],
-    []
+    [],
   );
 
   const initialSubconRows = useMemo<PoBudgetRow[]>(
@@ -169,7 +258,7 @@ export default function PoBudgetPage() {
         approval: "Approved",
       },
     ],
-    []
+    [],
   );
 
   const initialIndirectRows = useMemo<PoBudgetRow[]>(
@@ -213,14 +302,32 @@ export default function PoBudgetPage() {
         approval: "Approved",
       },
     ],
-    []
+    [],
   );
 
-  const [rowsByTab, setRowsByTab] = useState<Record<BudgetTabId, PoBudgetRow[]>>({
-    raw: initialRawRows,
-    subcon: initialSubconRows,
-    indirect: initialIndirectRows,
+  const {
+    data: rawListRes = { data: [] as PoBudgetRow[] },
+  } = useGetPoBudgetListQuery("raw-material" as PoBudgetType, {
+    skip: !useApi,
   });
+  const {
+    data: subconListRes = { data: [] as PoBudgetRow[] },
+  } = useGetPoBudgetListQuery("subcon" as PoBudgetType, {
+    skip: !useApi,
+  });
+  const {
+    data: indirectListRes = { data: [] as PoBudgetRow[] },
+  } = useGetPoBudgetListQuery("indirect" as PoBudgetType, {
+    skip: !useApi,
+  });
+
+  const [addEntry] = useAddPoBudgetEntryMutation();
+
+  const rowsByTab = useMemo(() => ({
+    raw: rawListRes.data,
+    subcon: subconListRes.data,
+    indirect: indirectListRes.data,
+  }), [rawListRes.data, subconListRes.data, indirectListRes.data]);
 
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState({
@@ -230,6 +337,7 @@ export default function PoBudgetPage() {
     partName: "",
     partNumber: "",
     supplier: "",
+    supplierId: "",
     salesPlan: 0,
     purchaseRequest: 0,
     po1Pct: 60,
@@ -239,28 +347,116 @@ export default function PoBudgetPage() {
   });
 
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkPrlId, setBulkPrlId] = useState<string>("PRL-2024-001 - Toyota Motor Indonesia");
+  const [bulkPrlId, setBulkPrlId] = useState<string>(
+    "PRL-2024-001 - Toyota Motor Indonesia",
+  );
   const [bulkBudgetType, setBulkBudgetType] = useState<BulkBudgetType>("adhoc");
   const [bulkPeriod, setBulkPeriod] = useState<string | undefined>(undefined);
   const [bulkPo1Pct, setBulkPo1Pct] = useState<number>(60);
   const [bulkPo2Pct, setBulkPo2Pct] = useState<number>(40);
 
   const [addSupplierOpen, setAddSupplierOpen] = useState(false);
-  const [addSupplierItemKey, setAddSupplierItemKey] = useState<string | null>(null);
-  const [addSupplierForm, setAddSupplierForm] = useState<{ supplier?: string; qty?: number }>({});
+  const [addSupplierItemKey, setAddSupplierItemKey] = useState<string | null>(
+    null,
+  );
+  const { data: masterSupplierList = [] } = useListMasterSuppliersQuery(undefined, {
+    skip: !useApi,
+  });
+  const { data: supplierOnlyList = [] } = useListSuppliersQuery(undefined, {
+    skip: !useApi,
+  });
+  const [addSupplierForm, setAddSupplierForm] = useState<{
+    supplier?: string;
+    qty?: number;
+  }>({});
+
+  const supplierNameByCode = useMemo(
+    () =>
+      new Map(
+        masterSupplierList
+          .flatMap((supplier) => {
+            const supplierName =
+              typeof supplier.supplier_name === "string" ? supplier.supplier_name : "";
+            if (!supplierName) return [] as Array<readonly [string, string]>;
+
+            return [supplier.supplier_code, supplier.id, supplier.supplier_name]
+              .map((value) => (value === undefined || value === null ? "" : String(value)))
+              .filter(Boolean)
+              .map((value) => [value, supplierName] as const);
+          })
+          .filter(
+            (
+              entry,
+            ): entry is readonly [string, string] =>
+              Boolean(entry[0]) && Boolean(entry[1]),
+          ),
+      ),
+    [masterSupplierList],
+  );
+
+  const supplierOptions = useMemo<SupplierOption[]>(() => {
+    const deduped = new Map<string, SupplierOption>();
+
+    supplierOnlyList
+      .filter((supplier) => {
+        const status = String(supplier.status ?? "active").toLowerCase();
+        return status === "active" || !status;
+      })
+      .filter((supplier) => resolveSupplierOnlyBudgetTab(supplier) === activeTab)
+      .forEach((supplier) => {
+        const supplierName =
+          typeof supplier.supplier_name === "string" ? supplier.supplier_name.trim() : "";
+        if (!supplierName) return;
+        const supplierId = supplier.id == null ? undefined : String(supplier.id);
+        const key = supplierId || supplierName.toLowerCase();
+        deduped.set(key, {
+          value: supplierName,
+          label: supplierName,
+          supplierName,
+          supplierId,
+        });
+      });
+
+    return Array.from(deduped.values()).sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
+  }, [activeTab, supplierOnlyList]);
 
   const filteredRows = useMemo(() => {
-    return rowsByTab[activeTab];
-  }, [rowsByTab, activeTab]);
+    const sourceRows = rowsByTab[activeTab].length
+      ? rowsByTab[activeTab]
+      : activeTab === "raw"
+        ? initialRawRows
+        : activeTab === "subcon"
+          ? initialSubconRows
+          : initialIndirectRows;
 
-  const supplierOptions = useMemo(
-    () => [
-      { label: "PT Steel Indonesia", value: "PT Steel Indonesia" },
-      { label: "PT Metal Works", value: "PT Metal Works" },
-      { label: "PT Subcon Partner", value: "PT Subcon Partner" },
-    ],
-    []
-  );
+    return sourceRows.map((row, index) => ({
+      ...row,
+      productModel:
+        row.productModel || bomIndex.assemblyCodeByUniq[row.uniq] || "-",
+      partName: row.partName || bomIndex.partNameByUniq[row.uniq] || "-",
+      supplier: resolveSupplierName(row.supplier as unknown, supplierNameByCode),
+      key:
+        row.key ||
+        [
+          activeTab,
+          row.uniq || "item",
+          row.customer || "customer",
+          row.period || "period",
+          index,
+        ].join("-"),
+    }));
+  }, [
+    rowsByTab,
+    activeTab,
+    supplierNameByCode,
+    bomIndex.assemblyCodeByUniq,
+    bomIndex.partNameByUniq,
+    initialRawRows,
+    initialSubconRows,
+    initialIndirectRows,
+  ]);
 
   const periodOptions = useMemo(
     () => [
@@ -269,16 +465,25 @@ export default function PoBudgetPage() {
       { label: "December 2025", value: "December 2025" },
       { label: "January 2026", value: "January 2026" },
     ],
-    []
+    [],
   );
 
   const prlOptions = useMemo(
     () => [
-      { label: "PRL-2024-001 - Toyota Motor Indonesia", value: "PRL-2024-001 - Toyota Motor Indonesia" },
-      { label: "PRL-2024-002 - Honda Manufacturing", value: "PRL-2024-002 - Honda Manufacturing" },
-      { label: "PRL-2024-003 - Nissan Global", value: "PRL-2024-003 - Nissan Global" },
+      {
+        label: "PRL-2024-001 - Toyota Motor Indonesia",
+        value: "PRL-2024-001 - Toyota Motor Indonesia",
+      },
+      {
+        label: "PRL-2024-002 - Honda Manufacturing",
+        value: "PRL-2024-002 - Honda Manufacturing",
+      },
+      {
+        label: "PRL-2024-003 - Nissan Global",
+        value: "PRL-2024-003 - Nissan Global",
+      },
     ],
-    []
+    [],
   );
 
   const initialBulkItems = useMemo<BulkItemRow[]>(
@@ -328,23 +533,29 @@ export default function PoBudgetPage() {
         suppliers: [{ id: "s1", supplier: "PT Steel Indonesia", qty: 5000 }],
       },
     ],
-    []
+    [],
   );
 
   const [bulkItems, setBulkItems] = useState<BulkItemRow[]>(initialBulkItems);
 
   const activeAddSupplierItem = useMemo(
     () => bulkItems.find((it) => it.key === addSupplierItemKey),
-    [bulkItems, addSupplierItemKey]
+    [bulkItems, addSupplierItemKey],
   );
 
   const addSupplierBudget = activeAddSupplierItem?.quantity ?? 0;
   const addSupplierAllocated = useMemo(() => {
     if (!activeAddSupplierItem) return 0;
-    return activeAddSupplierItem.suppliers.reduce((sum, s) => sum + Number(s.qty || 0), 0);
+    return activeAddSupplierItem.suppliers.reduce(
+      (sum, s) => sum + Number(s.qty || 0),
+      0,
+    );
   }, [activeAddSupplierItem]);
 
-  const addSupplierRemaining = Math.max(0, addSupplierBudget - addSupplierAllocated);
+  const addSupplierRemaining = Math.max(
+    0,
+    addSupplierBudget - addSupplierAllocated,
+  );
 
   const openBulkPoBudget = () => {
     setBulkItems(initialBulkItems);
@@ -356,35 +567,52 @@ export default function PoBudgetPage() {
     setBulkOpen(true);
   };
 
-  const bulkUpdateSupplier = (itemKey: string, supplierId: string, patch: Partial<BulkSupplierLine>) => {
+  const bulkUpdateSupplier = (
+    itemKey: string,
+    supplierId: string,
+    patch: Partial<BulkSupplierLine>,
+  ) => {
     setBulkItems((prev) =>
       prev.map((it) => {
         if (it.key !== itemKey) return it;
-        const nextSuppliers = it.suppliers.map((s) => (s.id === supplierId ? { ...s, ...patch } : s));
+        const nextSuppliers = it.suppliers.map((s) =>
+          s.id === supplierId ? { ...s, ...patch } : s,
+        );
 
         // Ensure supplier qty total cannot exceed item quantity.
-        const total = nextSuppliers.reduce((sum, s) => sum + Number(s.qty || 0), 0);
+        const total = nextSuppliers.reduce(
+          (sum, s) => sum + Number(s.qty || 0),
+          0,
+        );
         if (total > it.quantity) {
           const over = total - it.quantity;
           // Reduce the last edited supplier by the overage.
           const adjusted = nextSuppliers.map((s) => ({ ...s }));
           const idx = adjusted.findIndex((s) => s.id === supplierId);
           if (idx >= 0) {
-            adjusted[idx].qty = Math.max(0, Number(adjusted[idx].qty || 0) - over);
+            adjusted[idx].qty = Math.max(
+              0,
+              Number(adjusted[idx].qty || 0) - over,
+            );
           }
-          message.warning("Total supplier quantities cannot exceed item quantity");
+          message.warning(
+            "Total supplier quantities cannot exceed item quantity",
+          );
           return { ...it, suppliers: adjusted };
         }
 
         return { ...it, suppliers: nextSuppliers };
-      })
+      }),
     );
   };
 
   const bulkAddSupplierLine = (itemKey: string) => {
     const target = bulkItems.find((it) => it.key === itemKey);
     if (!target) return;
-    const allocated = target.suppliers.reduce((sum, s) => sum + Number(s.qty || 0), 0);
+    const allocated = target.suppliers.reduce(
+      (sum, s) => sum + Number(s.qty || 0),
+      0,
+    );
     const remaining = Math.max(0, target.quantity - allocated);
     setAddSupplierItemKey(itemKey);
     setAddSupplierForm({ supplier: undefined, qty: remaining });
@@ -406,7 +634,10 @@ export default function PoBudgetPage() {
 
     const target = bulkItems.find((it) => it.key === addSupplierItemKey);
     if (!target) return;
-    const allocated = target.suppliers.reduce((sum, s) => sum + Number(s.qty || 0), 0);
+    const allocated = target.suppliers.reduce(
+      (sum, s) => sum + Number(s.qty || 0),
+      0,
+    );
     if (allocated + qty > target.quantity) {
       message.warning("Total quantity cannot exceed budget");
       return;
@@ -416,8 +647,11 @@ export default function PoBudgetPage() {
       prev.map((it) => {
         if (it.key !== addSupplierItemKey) return it;
         const nextId = `s${it.suppliers.length + 1}`;
-        return { ...it, suppliers: [...it.suppliers, { id: nextId, supplier, qty }] };
-      })
+        return {
+          ...it,
+          suppliers: [...it.suppliers, { id: nextId, supplier, qty }],
+        };
+      }),
     );
 
     setAddSupplierOpen(false);
@@ -428,12 +662,17 @@ export default function PoBudgetPage() {
       prev.map((it) => {
         if (it.key !== itemKey) return it;
         const qty = Math.max(0, Number(nextQty || 0));
-        const total = it.suppliers.reduce((sum, s) => sum + Number(s.qty || 0), 0);
+        const total = it.suppliers.reduce(
+          (sum, s) => sum + Number(s.qty || 0),
+          0,
+        );
         if (total > qty) {
-          message.warning("Total supplier quantities cannot exceed item quantity");
+          message.warning(
+            "Total supplier quantities cannot exceed item quantity",
+          );
         }
         return { ...it, quantity: qty };
-      })
+      }),
     );
   };
 
@@ -447,7 +686,8 @@ export default function PoBudgetPage() {
   };
 
   const addSubtitle = useMemo(() => {
-    if (activeTab === "raw") return "Enter the PO budget details for raw material";
+    if (activeTab === "raw")
+      return "Enter the PO budget details for raw material";
     if (activeTab === "subcon") return "Enter the PO budget details for subcon";
     return "Enter the PO budget details for indirect";
   }, [activeTab]);
@@ -464,42 +704,53 @@ export default function PoBudgetPage() {
     return Math.round((pr * pct) / 100);
   }, [addForm.purchaseRequest, addForm.po2Pct]);
 
-  const saveAddBudget = () => {
-    if (!addForm.customer || !addForm.uniq) {
-      message.warning("Please fill Customer Name and Uniq (Product Code)");
+  const getApiType = (tab: BudgetTabId): PoBudgetType => {
+    if (tab === "raw") return "raw-material";
+    if (tab === "subcon") return "subcon";
+    return "indirect";
+  };
+
+  const saveAddBudget = async () => {
+    if (!addForm.customer || !addForm.uniq || !addForm.supplier) {
+      message.warning("Please fill Customer Name, Uniq, and Supplier Name");
       return;
     }
 
-    const prlGuess = Math.max(0, Math.round((Number(addForm.salesPlan || 0) + Number(addForm.purchaseRequest || 0)) / 2));
+    const prlGuess = Math.max(
+      0,
+      Math.round(
+        (Number(addForm.salesPlan || 0) +
+          Number(addForm.purchaseRequest || 0)) /
+          2,
+      ),
+    );
     const totalPo = computedPo1Units + computedPo2Units;
     const apoPrl = Math.max(0, Math.abs(totalPo - prlGuess));
 
-    const newRow: PoBudgetRow = {
-      key: `${addForm.uniq}-${Date.now()}`,
-      uniq: addForm.uniq,
-      customer: addForm.customer,
-      productModel: addForm.productModel || "-",
-      partName: addForm.partName || "-",
-      supplier: addForm.supplier || "-",
-      type: "Adhoc",
-      salesPlan: Number(addForm.salesPlan || 0),
-      pr: Number(addForm.purchaseRequest || 0),
-      po1: computedPo1Units,
-      po2: computedPo2Units,
-      prl: prlGuess,
-      totalPo,
-      apoPrl,
+    const payload: PoBudgetEntryRequest = {
+      customer_name: addForm.customer,
+      item_uniq_code: addForm.uniq,
+      supplier_name: addForm.supplier,
+      supplier_id: 1,
       period: addForm.period,
-      status: "pending",
-      approval: "Pending",
+      sales_plan_qty: Number(addForm.salesPlan || 0),
+      pr_qty: Number(addForm.purchaseRequest || 0),
+      prl_qty: prlGuess,
+      po1_percent: Number(addForm.po1Pct || 0),
+      po2_percent: Number(addForm.po2Pct || 0),
     };
 
-    setRowsByTab((prev) => ({
-      ...prev,
-      [activeTab]: [newRow, ...prev[activeTab]],
-    }));
-    message.success("Budget entry saved");
-    setAddOpen(false);
+    try {
+      await addEntry({
+        type: getApiType(activeTab),
+        body: payload,
+      }).unwrap();
+      message.success("Budget entry saved");
+      setAddOpen(false);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, "Failed to save budget entry"));
+      console.error(error);
+    }
   };
 
   const columns = useMemo<ColumnsType<PoBudgetRow>>(
@@ -508,31 +759,41 @@ export default function PoBudgetPage() {
         title: "Uniq",
         dataIndex: "uniq",
         key: "uniq",
-        render: (v: string) => <span className="text-sm font-semibold text-gray-800">{v}</span>,
+        render: (v: string) => (
+          <span className="text-sm font-semibold text-gray-800">{v}</span>
+        ),
       },
       {
         title: "Customer",
         dataIndex: "customer",
         key: "customer",
-        render: (v: string) => <span className="text-sm text-gray-700">{v}</span>,
+        render: (v: string) => (
+          <span className="text-sm text-gray-700">{v}</span>
+        ),
       },
       {
         title: "Product Model",
         dataIndex: "productModel",
         key: "productModel",
-        render: (v: string) => <span className="text-sm text-gray-700">{v}</span>,
+        render: (v: string) => (
+          <span className="text-sm text-gray-700">{v}</span>
+        ),
       },
       {
         title: "Part Name",
         dataIndex: "partName",
         key: "partName",
-        render: (v: string) => <span className="text-sm text-gray-700">{v}</span>,
+        render: (v: string) => (
+          <span className="text-sm text-gray-700">{v}</span>
+        ),
       },
       {
         title: "Supplier",
         dataIndex: "supplier",
         key: "supplier",
-        render: (v: string) => <span className="text-sm text-gray-700">{v}</span>,
+        render: (v: string) => (
+          <span className="text-sm text-gray-700">{v}</span>
+        ),
       },
       {
         title: "Type",
@@ -540,7 +801,10 @@ export default function PoBudgetPage() {
         key: "type",
         render: (v: string) =>
           v ? (
-            <Tag color="purple" className="!rounded-md !px-2 !py-0.5 !text-xs !font-semibold">
+            <Tag
+              color="purple"
+              className="!rounded-md !px-2 !py-0.5 !text-xs !font-semibold"
+            >
               {v}
             </Tag>
           ) : (
@@ -552,55 +816,73 @@ export default function PoBudgetPage() {
         dataIndex: "salesPlan",
         key: "salesPlan",
         align: "right",
-        render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
+        render: (v: number) => (
+          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+        ),
       },
       {
         title: "PR",
         dataIndex: "pr",
         key: "pr",
         align: "right",
-        render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
+        render: (v: number) => (
+          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+        ),
       },
       {
         title: "PO1",
         dataIndex: "po1",
         key: "po1",
         align: "right",
-        render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
+        render: (v: number) => (
+          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+        ),
       },
       {
         title: "PO2",
         dataIndex: "po2",
         key: "po2",
         align: "right",
-        render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
+        render: (v: number) => (
+          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+        ),
       },
       {
         title: "PRL",
         dataIndex: "prl",
         key: "prl",
         align: "right",
-        render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
+        render: (v: number) => (
+          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+        ),
       },
       {
         title: "Total PO",
         dataIndex: "totalPo",
         key: "totalPo",
         align: "right",
-        render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
+        render: (v: number) => (
+          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+        ),
       },
       {
         title: "APO-PRL",
         dataIndex: "apoPrl",
         key: "apoPrl",
         align: "right",
-        render: (v: number) => <span className="text-sm font-semibold text-orange-600">{formatNumber(v)}</span>,
+        render: (v: number) => (
+          <span className="text-sm font-semibold text-orange-600">
+            {formatNumber(v)}
+          </span>
+        ),
       },
       {
         title: "Period",
         dataIndex: "period",
         key: "period",
-        render: (v: string) => <span className="text-sm text-gray-700">{v}</span>,
+        render: (v: string) => (
+          <span className="text-sm text-gray-700">{v}</span>
+        ),
       },
       {
         title: "Status",
@@ -660,7 +942,7 @@ export default function PoBudgetPage() {
         ),
       },
     ],
-    []
+    [],
   );
 
   const tabOptions = useMemo(
@@ -669,22 +951,34 @@ export default function PoBudgetPage() {
       { label: "Subcon Budget", value: "subcon" },
       { label: "Indirect Budget", value: "indirect" },
     ],
-    []
+    [],
   );
 
   const bulkColumns = useMemo<ColumnsType<BulkItemRow>>(
     () => [
       { title: "PRL ID", dataIndex: "prlId", key: "prlId", width: 120 },
       { title: "UNIQ", dataIndex: "uniq", key: "uniq", width: 90 },
-      { title: "Part Name", dataIndex: "partName", key: "partName", width: 160 },
-      { title: "Part Number", dataIndex: "partNumber", key: "partNumber", width: 120 },
+      {
+        title: "Part Name",
+        dataIndex: "partName",
+        key: "partName",
+        width: 160,
+      },
+      {
+        title: "Part Number",
+        dataIndex: "partNumber",
+        key: "partNumber",
+        width: 120,
+      },
       {
         title: "Weight (kg)",
         dataIndex: "weightKg",
         key: "weightKg",
         width: 110,
         align: "right",
-        render: (v: number) => <span className="text-sm text-gray-700">{v}</span>,
+        render: (v: number) => (
+          <span className="text-sm text-gray-700">{v}</span>
+        ),
       },
       {
         title: "Quantity (Editable)",
@@ -705,14 +999,19 @@ export default function PoBudgetPage() {
         dataIndex: "existingRawMaterial",
         key: "existingRawMaterial",
         width: 140,
-        render: (v: string) => <span className="text-sm text-gray-700">{v}</span>,
+        render: (v: string) => (
+          <span className="text-sm text-gray-700">{v}</span>
+        ),
       },
       {
         title: "Suppliers",
         key: "suppliers",
         width: 320,
         render: (_, r) => {
-          const total = r.suppliers.reduce((sum, s) => sum + Number(s.qty || 0), 0);
+          const total = r.suppliers.reduce(
+            (sum, s) => sum + Number(s.qty || 0),
+            0,
+          );
           const over = total > r.quantity;
           return (
             <div className="space-y-2">
@@ -720,7 +1019,9 @@ export default function PoBudgetPage() {
                 <div key={s.id} className="flex items-center gap-2">
                   <Select
                     value={s.supplier}
-                    onChange={(v) => bulkUpdateSupplier(r.key, s.id, { supplier: v })}
+                    onChange={(v) =>
+                      bulkUpdateSupplier(r.key, s.id, { supplier: v })
+                    }
                     options={supplierOptions}
                     className="w-[170px]"
                     size="small"
@@ -728,13 +1029,19 @@ export default function PoBudgetPage() {
                   <InputNumber
                     min={0}
                     value={s.qty}
-                    onChange={(v) => bulkUpdateSupplier(r.key, s.id, { qty: Number(v || 0) })}
+                    onChange={(v) =>
+                      bulkUpdateSupplier(r.key, s.id, { qty: Number(v || 0) })
+                    }
                     className="w-[90px]"
                     size="small"
                   />
                 </div>
               ))}
-              <div className={"text-[11px] " + (over ? "text-red-600" : "text-gray-500")}>
+              <div
+                className={
+                  "text-[11px] " + (over ? "text-red-600" : "text-gray-500")
+                }
+              >
                 Total: {formatNumber(total)} / {formatNumber(r.quantity)}
               </div>
             </div>
@@ -746,13 +1053,17 @@ export default function PoBudgetPage() {
         key: "actions",
         width: 120,
         render: (_, r) => (
-          <Button size="small" className="!rounded-lg" onClick={() => bulkAddSupplierLine(r.key)}>
+          <Button
+            size="small"
+            className="!rounded-lg"
+            onClick={() => bulkAddSupplierLine(r.key)}
+          >
             + Add Supplier
           </Button>
         ),
       },
     ],
-    [supplierOptions]
+    [supplierOptions],
   );
 
   return (
@@ -760,9 +1071,12 @@ export default function PoBudgetPage() {
       <div className="mb-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">PO Budget Management</h1>
+            <h1 className="text-2xl font-bold text-gray-900 mb-1">
+              PO Budget Management
+            </h1>
             <p className="text-sm text-gray-500">
-              Manage PO budget for creating Purchase Orders across Raw Material, Subcon, and Indirect categories
+              Manage PO budget for creating Purchase Orders across Raw Material,
+              Subcon, and Indirect categories
             </p>
           </div>
 
@@ -852,10 +1166,12 @@ export default function PoBudgetPage() {
         open={addOpen}
         onCancel={() => setAddOpen(false)}
         width={640}
-        destroyOnClose
+        destroyOnHidden
         title={
           <div>
-            <div className="text-sm font-semibold text-gray-900">Add New PO Budget Entry</div>
+            <div className="text-sm font-semibold text-gray-900">
+              Add New PO Budget Entry
+            </div>
             <div className="text-xs text-gray-500 mt-1">{addSubtitle}</div>
           </div>
         }
@@ -864,7 +1180,11 @@ export default function PoBudgetPage() {
             <Button className="!rounded-lg" onClick={() => setAddOpen(false)}>
               Cancel
             </Button>
-            <Button type="primary" className="!rounded-lg" onClick={saveAddBudget}>
+            <Button
+              type="primary"
+              className="!rounded-lg"
+              onClick={saveAddBudget}
+            >
               Save Budget Entry
             </Button>
           </div>
@@ -876,18 +1196,42 @@ export default function PoBudgetPage() {
             <Input
               allowClear
               value={addForm.customer}
-              onChange={(e) => setAddForm((p) => ({ ...p, customer: e.target.value }))}
+              onChange={(e) =>
+                setAddForm((p) => ({ ...p, customer: e.target.value }))
+              }
               placeholder="Input customer"
               className="!rounded-lg"
             />
           </div>
           <div>
-            <div className="text-xs text-gray-600 mb-1">Uniq (Product Code)</div>
-            <Input
+            <div className="text-xs text-gray-600 mb-1">
+              Uniq (Product Code)
+            </div>
+            <Select
+              showSearch
+              placeholder="Select UNIQ"
+              className="rounded-lg w-full font-black"
+              options={bomIndex.options}
               value={addForm.uniq}
-              onChange={(e) => setAddForm((p) => ({ ...p, uniq: e.target.value }))}
-              placeholder="e.g., RM-001"
-              className="!rounded-lg"
+              filterOption={(input, option) =>
+                String(option?.label ?? "")
+                  .toLowerCase()
+                  .includes(input.toLowerCase())
+              }
+              onChange={(value) => {
+                const partName = bomIndex.partNameByUniq[String(value)] ?? "";
+                const partNumber = bomIndex.partNumberByUniq[String(value)] ?? "";
+                const productModel =
+                  bomIndex.assemblyCodeByUniq[String(value)] ?? "";
+
+                setAddForm((prev) => ({
+                  ...prev,
+                  uniq: String(value),
+                  productModel,
+                  partName,
+                  partNumber,
+                }));
+              }}
             />
           </div>
 
@@ -895,7 +1239,9 @@ export default function PoBudgetPage() {
             <div className="text-xs text-gray-600 mb-1">Product Model</div>
             <Input
               value={addForm.productModel}
-              onChange={(e) => setAddForm((p) => ({ ...p, productModel: e.target.value }))}
+              onChange={(e) =>
+                setAddForm((p) => ({ ...p, productModel: e.target.value }))
+              }
               placeholder="Enter product model"
               className="!rounded-lg"
             />
@@ -904,7 +1250,9 @@ export default function PoBudgetPage() {
             <div className="text-xs text-gray-600 mb-1">Part Name</div>
             <Input
               value={addForm.partName}
-              onChange={(e) => setAddForm((p) => ({ ...p, partName: e.target.value }))}
+              onChange={(e) =>
+                setAddForm((p) => ({ ...p, partName: e.target.value }))
+              }
               placeholder="Enter part name"
               className="!rounded-lg"
             />
@@ -914,7 +1262,9 @@ export default function PoBudgetPage() {
             <div className="text-xs text-gray-600 mb-1">Part Number</div>
             <Input
               value={addForm.partNumber}
-              onChange={(e) => setAddForm((p) => ({ ...p, partNumber: e.target.value }))}
+              onChange={(e) =>
+                setAddForm((p) => ({ ...p, partNumber: e.target.value }))
+              }
               placeholder="Enter part number"
               className="!rounded-lg"
             />
@@ -923,7 +1273,16 @@ export default function PoBudgetPage() {
             <div className="text-xs text-gray-600 mb-1">Supplier Name</div>
             <Select
               value={addForm.supplier || undefined}
-              onChange={(v) => setAddForm((p) => ({ ...p, supplier: v }))}
+              onChange={(v, option) => {
+                const selected = Array.isArray(option)
+                  ? undefined
+                  : (option as SupplierOption | undefined);
+                setAddForm((p) => ({
+                  ...p,
+                  supplier: selected?.supplierName ?? selected?.label ?? String(v ?? ""),
+                  supplierId: selected?.supplierId ?? "",
+                }));
+              }}
               options={supplierOptions}
               placeholder="Select supplier"
               className="w-full"
@@ -935,30 +1294,41 @@ export default function PoBudgetPage() {
             <InputNumber
               min={0}
               value={addForm.salesPlan}
-              onChange={(v) => setAddForm((p) => ({ ...p, salesPlan: Number(v || 0) }))}
+              onChange={(v) =>
+                setAddForm((p) => ({ ...p, salesPlan: Number(v || 0) }))
+              }
               className="w-full !rounded-lg"
             />
           </div>
           <div>
-            <div className="text-xs text-gray-600 mb-1">Purchase Request (Units)</div>
+            <div className="text-xs text-gray-600 mb-1">
+              Purchase Request (Units)
+            </div>
             <InputNumber
               min={0}
               value={addForm.purchaseRequest}
-              onChange={(v) => setAddForm((p) => ({ ...p, purchaseRequest: Number(v || 0) }))}
+              onChange={(v) =>
+                setAddForm((p) => ({ ...p, purchaseRequest: Number(v || 0) }))
+              }
               className="w-full !rounded-lg"
             />
           </div>
 
           <div className="md:col-span-2">
             <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4">
-              <div className="text-sm font-semibold text-gray-900">Purchase Order Calculation</div>
+              <div className="text-sm font-semibold text-gray-900">
+                Purchase Order Calculation
+              </div>
               <div className="text-xs text-blue-700 mt-1">
-                PO amounts are calculated based on parameterized % of PR (kanban packing logic)
+                PO amounts are calculated based on parameterized % of PR (kanban
+                packing logic)
               </div>
 
               <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <div className="text-xs text-gray-600 mb-1">PO1 (% of PR)</div>
+                  <div className="text-xs text-gray-600 mb-1">
+                    PO1 (% of PR)
+                  </div>
                   <div className="flex items-center gap-2">
                     <InputNumber
                       min={0}
@@ -975,11 +1345,15 @@ export default function PoBudgetPage() {
                     />
                     <span className="text-xs text-gray-500">%</span>
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">Units: {formatNumber(computedPo1Units)}</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Units: {formatNumber(computedPo1Units)}
+                  </div>
                 </div>
 
                 <div>
-                  <div className="text-xs text-gray-600 mb-1">PO2 (% of PR)</div>
+                  <div className="text-xs text-gray-600 mb-1">
+                    PO2 (% of PR)
+                  </div>
                   <div className="flex items-center gap-2">
                     <InputNumber
                       min={0}
@@ -996,14 +1370,18 @@ export default function PoBudgetPage() {
                     />
                     <span className="text-xs text-gray-500">%</span>
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">Units: {formatNumber(computedPo2Units)}</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Units: {formatNumber(computedPo2Units)}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
           <div>
-            <div className="text-xs text-gray-600 mb-1">PRL (from PRL & Master Data)</div>
+            <div className="text-xs text-gray-600 mb-1">
+              PRL (from PRL & Master Data)
+            </div>
             <Input value={addForm.prl} disabled className="!rounded-lg" />
           </div>
           <div>
@@ -1022,14 +1400,17 @@ export default function PoBudgetPage() {
         open={bulkOpen}
         onCancel={() => setBulkOpen(false)}
         width={980}
-        destroyOnClose
+        destroyOnHidden
         title={
           <div className="flex items-center gap-2">
             <span className="text-blue-600">+</span>
             <div>
-              <div className="text-sm font-semibold text-gray-900">Add New PO Budget</div>
+              <div className="text-sm font-semibold text-gray-900">
+                Add New PO Budget
+              </div>
               <div className="text-xs text-gray-500 mt-1">
-                Select PRL, configure quantities and suppliers, then set period and PO calculation
+                Select PRL, configure quantities and suppliers, then set period
+                and PO calculation
               </div>
             </div>
           </div>
@@ -1049,12 +1430,16 @@ export default function PoBudgetPage() {
           <div className="rounded-xl border border-blue-200 bg-white p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-gray-900">Step 1: Choose PRL</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Step 1: Choose PRL
+                </div>
                 <div className="text-xs text-gray-500 mt-1">
                   Select Production Requirement List to generate PO Budget
                 </div>
               </div>
-              <Tag className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">Required</Tag>
+              <Tag className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+                Required
+              </Tag>
             </div>
 
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1068,7 +1453,9 @@ export default function PoBudgetPage() {
                 />
               </div>
               <div>
-                <div className="text-xs text-gray-600 mb-1">PO Budget Type:</div>
+                <div className="text-xs text-gray-600 mb-1">
+                  PO Budget Type:
+                </div>
                 <Select
                   value={bulkBudgetType}
                   onChange={(v) => setBulkBudgetType(v as BulkBudgetType)}
@@ -1085,19 +1472,24 @@ export default function PoBudgetPage() {
           <div className="rounded-xl border border-green-200 bg-white p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-gray-900">Step 2: Configure Items & Suppliers</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Step 2: Configure Items & Suppliers
+                </div>
                 <div className="text-xs text-gray-500 mt-1">
                   Edit quantities and add multiple suppliers for each item
                 </div>
               </div>
-              <Tag color="green" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+              <Tag
+                color="green"
+                className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+              >
                 {bulkItems.length} Items
               </Tag>
             </div>
 
             <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-xs text-blue-700">
-              <b>Note:</b> You can edit quantity for each item and add multiple suppliers. Total supplier quantities
-              cannot exceed item quantity.
+              <b>Note:</b> You can edit quantity for each item and add multiple
+              suppliers. Total supplier quantities cannot exceed item quantity.
             </div>
 
             <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
@@ -1115,10 +1507,17 @@ export default function PoBudgetPage() {
           <div className="rounded-xl border border-purple-200 bg-white p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-gray-900">Step 3: Period & Purchase Order Calculation</div>
-                <div className="text-xs text-gray-500 mt-1">Set period and configure PO split percentages</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Step 3: Period & Purchase Order Calculation
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Set period and configure PO split percentages
+                </div>
               </div>
-              <Tag color="purple" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+              <Tag
+                color="purple"
+                className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+              >
                 Final Step
               </Tag>
             </div>
@@ -1136,14 +1535,19 @@ export default function PoBudgetPage() {
               </div>
 
               <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4">
-                <div className="text-sm font-semibold text-gray-900">Purchase Order Calculation</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Purchase Order Calculation
+                </div>
                 <div className="text-xs text-blue-700 mt-1">
-                  PO amounts are calculated based on parameterized % of PR (kanban packing logic)
+                  PO amounts are calculated based on parameterized % of PR
+                  (kanban packing logic)
                 </div>
 
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <div>
-                    <div className="text-xs text-gray-600 mb-1">PO1 (% of PR)</div>
+                    <div className="text-xs text-gray-600 mb-1">
+                      PO1 (% of PR)
+                    </div>
                     <div className="flex items-center gap-2">
                       <InputNumber
                         min={0}
@@ -1161,7 +1565,9 @@ export default function PoBudgetPage() {
                     </div>
                   </div>
                   <div>
-                    <div className="text-xs text-gray-600 mb-1">PO2 (% of PR)</div>
+                    <div className="text-xs text-gray-600 mb-1">
+                      PO2 (% of PR)
+                    </div>
                     <div className="flex items-center gap-2">
                       <InputNumber
                         min={0}
@@ -1189,21 +1595,31 @@ export default function PoBudgetPage() {
         open={addSupplierOpen}
         onCancel={() => setAddSupplierOpen(false)}
         width={520}
-        destroyOnClose
+        destroyOnHidden
         title={
           <div>
-            <div className="text-sm font-semibold text-gray-900">Add Supplier</div>
+            <div className="text-sm font-semibold text-gray-900">
+              Add Supplier
+            </div>
             <div className="text-xs text-gray-500 mt-1">
-              Add another supplier for this item. Total quantity cannot exceed budget.
+              Add another supplier for this item. Total quantity cannot exceed
+              budget.
             </div>
           </div>
         }
         footer={
           <div className="flex items-center justify-end gap-2">
-            <Button className="!rounded-lg" onClick={() => setAddSupplierOpen(false)}>
+            <Button
+              className="!rounded-lg"
+              onClick={() => setAddSupplierOpen(false)}
+            >
               Cancel
             </Button>
-            <Button type="primary" className="!rounded-lg" onClick={confirmAddSupplier}>
+            <Button
+              type="primary"
+              className="!rounded-lg"
+              onClick={confirmAddSupplier}
+            >
               Add Supplier
             </Button>
           </div>
@@ -1214,7 +1630,9 @@ export default function PoBudgetPage() {
             <div className="text-xs text-gray-600 mb-1">Supplier Name</div>
             <Select
               value={addSupplierForm.supplier}
-              onChange={(v) => setAddSupplierForm((p) => ({ ...p, supplier: v }))}
+              onChange={(v) =>
+                setAddSupplierForm((p) => ({ ...p, supplier: v }))
+              }
               options={supplierOptions}
               placeholder="Select supplier"
               className="w-full"
@@ -1227,12 +1645,15 @@ export default function PoBudgetPage() {
               min={0}
               max={addSupplierRemaining}
               value={addSupplierForm.qty}
-              onChange={(v) => setAddSupplierForm((p) => ({ ...p, qty: Number(v || 0) }))}
+              onChange={(v) =>
+                setAddSupplierForm((p) => ({ ...p, qty: Number(v || 0) }))
+              }
               placeholder="Enter quantity"
               className="w-full"
             />
             <div className="text-[11px] text-gray-500 mt-1">
-              Budget: {formatNumber(addSupplierBudget)} | Allocated: {formatNumber(addSupplierAllocated)}
+              Budget: {formatNumber(addSupplierBudget)} | Allocated:{" "}
+              {formatNumber(addSupplierAllocated)}
             </div>
           </div>
         </div>

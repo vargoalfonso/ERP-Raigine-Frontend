@@ -3,12 +3,20 @@
 import { useMemo, useState } from "react";
 import { Button, DatePicker, Form, Input, InputNumber, Select, message } from "antd";
 import { useRouter } from "next/navigation";
+import dayjs, { type Dayjs } from "dayjs";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetAllRawMaterialsQuery } from "@/lib/api/raw-materials/api";
+import { useCreateRmProcessingWorkOrderMutation } from "@/lib/api/work-orders/api";
 
 type RmOption = {
   uniq: string;
   name: string;
   partName: string;
   partNumber: string;
+  model?: string;
+  gradeSize?: string;
+  unit?: string;
   label: string;
   value: string;
 };
@@ -21,17 +29,25 @@ const buildPackingNumber = () => {
 export default function CreateRmProcessingWoPage() {
   const router = useRouter();
   const [form] = Form.useForm();
-  const [loading, setLoading] = useState(false);
+  const apiEnabled = Boolean(apiBaseUrl);
   const [packingNumber] = useState(buildPackingNumber);
   const { TextArea } = Input;
+  const [createRmProcessingWorkOrder, createRmProcessingState] = useCreateRmProcessingWorkOrderMutation();
+  const { data: rawMaterialsRes } = useGetAllRawMaterialsQuery(
+    { currentPage: 1, pageSize: 200 },
+    { skip: !apiEnabled, refetchOnMountOrArgChange: true }
+  );
 
-  const rmOptions: RmOption[] = useMemo(
+  const fallbackOptions: RmOption[] = useMemo(
     () => [
       {
         uniq: "UNIQ-1234",
         name: "Steel Coil SPHC 1.2mm",
         partName: "Steel Coil",
         partNumber: "RM-ST-001",
+        model: "SPHC",
+        gradeSize: "SPHC 1.2 mm x 4 ft x 8 ft",
+        unit: "pcs",
         label: "UNIQ-1234 - Steel Coil SPHC 1.2mm",
         value: "UNIQ-1234",
       },
@@ -40,6 +56,9 @@ export default function CreateRmProcessingWoPage() {
         name: "Base Resin (PP) 25kg",
         partName: "Polypropylene Resin",
         partNumber: "RM-RS-011",
+        model: "PP",
+        gradeSize: null as unknown as string,
+        unit: "kg",
         label: "UNIQ-2231 - Base Resin (PP) 25kg",
         value: "UNIQ-2231",
       },
@@ -48,12 +67,31 @@ export default function CreateRmProcessingWoPage() {
         name: "Rubber Compound A",
         partName: "Rubber Compound",
         partNumber: "RM-RB-007",
+        model: "Compound A",
+        gradeSize: null as unknown as string,
+        unit: "kg",
         label: "UNIQ-7781 - Rubber Compound A",
         value: "UNIQ-7781",
       },
     ],
     []
   );
+
+  const rmOptions: RmOption[] = useMemo(() => {
+    const list = rawMaterialsRes?.data ?? [];
+    if (!list.length) return fallbackOptions;
+    return list.map((item) => ({
+      uniq: item.uniq,
+      name: item.name,
+      partName: item.part_name ?? item.name,
+      partNumber: item.part_no ?? item.code,
+      model: item.model ?? undefined,
+      gradeSize: item.notes ?? null ?? undefined,
+      unit: item.unit ?? "pcs",
+      label: `${item.uniq} - ${item.name}`,
+      value: item.uniq,
+    }));
+  }, [fallbackOptions, rawMaterialsRes?.data]);
 
   const modelOptions = [
     { label: "SPHC", value: "SPHC" },
@@ -73,6 +111,8 @@ export default function CreateRmProcessingWoPage() {
     form.setFieldsValue({
       partName: found.partName,
       partNumber: found.partNumber,
+      model: found.model,
+      gradeSize: found.gradeSize,
       targetMaterialUniq: value,
     });
   };
@@ -80,15 +120,29 @@ export default function CreateRmProcessingWoPage() {
   const onCreate = async () => {
     try {
       const values = await form.validateFields();
-      setLoading(true);
-      await new Promise((r) => setTimeout(r, 400));
-      message.success("RM Processing WO created (mock)");
-      void values;
+      if (!apiEnabled) {
+        message.success("RM Processing WO created (mock)");
+        void values;
+        router.push("/work-orders");
+        return;
+      }
+
+      await createRmProcessingWorkOrder({
+        source_material_uniq: values.sourceMaterial ?? null,
+        target_material_uniq: values.targetMaterialUniq ?? null,
+        part_name: values.partName ?? null,
+        model_grade: values.gradeSize ?? values.model ?? null,
+        input_qty: values.qtyInput != null ? Number(values.qtyInput) : null,
+        output_qty: values.qtyOutput != null ? Number(values.qtyOutput) : null,
+        date_issued: values.dateIssued ? dayjs(values.dateIssued as Dayjs).format("YYYY-MM-DD") : null,
+        remarks: values.remarks ?? null,
+      }).unwrap();
+
+      message.success("RM Processing WO created successfully");
       router.push("/work-orders");
-    } catch {
-      // validation errors already shown
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      message.error(getApiErrorMessage(err, "Failed to create RM processing work order"));
     }
   };
 
@@ -109,7 +163,12 @@ export default function CreateRmProcessingWoPage() {
             <Button className="!rounded-lg" onClick={() => router.push("/work-orders")}>
               Cancel
             </Button>
-            <Button type="primary" className="!rounded-lg" onClick={onCreate} loading={loading}>
+            <Button
+              type="primary"
+              className="!rounded-lg"
+              onClick={onCreate}
+              loading={createRmProcessingState.isLoading}
+            >
               Create RM Processing WO
             </Button>
           </div>
@@ -162,7 +221,7 @@ export default function CreateRmProcessingWoPage() {
               </Form.Item>
 
               <Form.Item name="model" label="Model" rules={[{ required: true, message: "Select model/type" }]}>
-                <Select className="!rounded-lg" placeholder="Select model/type" options={modelOptions} />
+                <Select className="!rounded-lg" placeholder="Select model/type" options={modelOptions} allowClear />
               </Form.Item>
 
               <Form.Item name="gradeSize" label="Grade / Size" rules={[{ required: true, message: "Enter grade/size" }]}>

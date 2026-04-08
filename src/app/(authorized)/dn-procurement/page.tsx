@@ -3,11 +3,20 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { Button, InputNumber, Pagination, Select, Table, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { DownloadOutlined, FileTextOutlined, ShoppingCartOutlined } from "@ant-design/icons";
+import { DownloadOutlined, FileTextOutlined, ShoppingCartOutlined, WarningOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
-import { useGetProcurementDnBoardQuery } from "@/lib/api/procurement-dn/api";
+import { type DnManagementType, useGetDnManagementByTypeQuery } from "@/lib/api/dn-management/api";
 import { getApiErrorMessage } from "@/lib/api/error";
+
+type UnknownRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+
+const isMissingRouteError = (error: unknown): boolean => {
+  if (!isRecord(error)) return false;
+  return (error as UnknownRecord).status === 404;
+};
 
 type ProcurementTab = "raw" | "indirect" | "subcon";
 
@@ -18,6 +27,8 @@ type DnRow = {
   partner: string;
   dnCreated: number;
   dnIncoming: number;
+  openDn: number;
+  dnAlert?: number;
   status: "Open" | "Closed" | "In Transit";
 };
 
@@ -33,6 +44,8 @@ const makeRows = (tab: ProcurementTab): DnRow[] => {
       partner,
       dnCreated: 10,
       dnIncoming: 3,
+      openDn: 7,
+      dnAlert: 0,
       status: "In Transit",
     },
     {
@@ -42,6 +55,8 @@ const makeRows = (tab: ProcurementTab): DnRow[] => {
       partner,
       dnCreated: 0,
       dnIncoming: 0,
+      openDn: 0,
+      dnAlert: 0,
       status: "Open",
     },
     {
@@ -51,6 +66,8 @@ const makeRows = (tab: ProcurementTab): DnRow[] => {
       partner,
       dnCreated: 5,
       dnIncoming: 5,
+      openDn: 0,
+      dnAlert: 0,
       status: "Closed",
     },
     {
@@ -60,15 +77,17 @@ const makeRows = (tab: ProcurementTab): DnRow[] => {
       partner,
       dnCreated: 2,
       dnIncoming: 0,
+      openDn: 2,
+      dnAlert: 0,
       status: "Open",
     },
   ];
 };
 
-const tabToCategory = (tab: ProcurementTab) => {
-  if (tab === "raw") return "RAW_MATERIAL" as const;
-  if (tab === "indirect") return "INDIRECT_RAW_MATERIAL" as const;
-  return "SUBCON" as const;
+const tabToType = (tab: ProcurementTab): DnManagementType => {
+  if (tab === "raw") return "rm";
+  if (tab === "indirect") return "indirect";
+  return "subcon";
 };
 
 const computeStatus = (dnCreated: number, dnIncoming: number): DnRow["status"] => {
@@ -116,36 +135,46 @@ function DnProcurementPageContent() {
   }, [activeTab]);
 
   const apiEnabled = Boolean(apiBaseUrl);
-  const boardQuery = useGetProcurementDnBoardQuery(
-    apiEnabled ? { category: tabToCategory(activeTab) } : undefined,
+  const boardQuery = useGetDnManagementByTypeQuery(
+    apiEnabled ? tabToType(activeTab) : ("rm" as DnManagementType),
     { skip: !apiEnabled }
   );
+
+  const procurementApiAvailable = apiEnabled && !isMissingRouteError(boardQuery.error);
 
   useEffect(() => {
     if (!apiEnabled) return;
     if (!boardQuery.error) return;
+    if (isMissingRouteError(boardQuery.error)) {
+      message.warning("Procurement DN API route is not available on this backend yet; showing mock data.");
+      return;
+    }
     message.error(getApiErrorMessage(boardQuery.error, "Failed to load DN board"));
   }, [apiEnabled, boardQuery.error]);
 
   const rows = useMemo<DnRow[]>(() => {
-    if (!apiEnabled) return makeRows(activeTab);
-    const list = boardQuery.data?.data ?? [];
+    if (!procurementApiAvailable) return makeRows(activeTab);
+    const list = boardQuery.data ?? [];
     return list.map((r) => {
-      const key = r.po_id ?? r.id ?? "";
-      const dnCreated = Number(r.dn_created ?? 0);
-      const dnIncoming = Number(r.dn_incoming ?? 0);
-      const partner = activeTab === "subcon" ? r.subcon_name ?? r.supplier_name ?? "-" : r.supplier_name ?? "-";
+      const dnNumber = r.dn_number ?? r.id;
+      const dnCreated = Number(r.total_dn_created ?? 0);
+      const dnIncoming = r.items.reduce((total, item) => total + Number(item.qty_stated ?? 0), 0);
+      const totalPo = Number(r.total_po_qty ?? 0);
+      const openDn = Math.max(totalPo - dnCreated, 0);
+      const partner = r.supplier_name ?? (r.supplier_id ? `Supplier #${r.supplier_id}` : "-");
       return {
-        key,
-        period: r.month ?? "-",
-        poNumber: r.po_number ?? key,
+        key: dnNumber,
+        period: r.period ?? "-",
+        poNumber: r.po_number ?? dnNumber,
         partner,
         dnCreated,
         dnIncoming,
+        openDn,
+        dnAlert: openDn > 0 ? 1 : 0,
         status: computeStatus(dnCreated, dnIncoming),
       };
     });
-  }, [activeTab, apiEnabled, boardQuery.data?.data]);
+  }, [activeTab, procurementApiAvailable, boardQuery.data]);
 
   const pagedRows = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -190,6 +219,30 @@ function DnProcurementPageContent() {
       width: 110,
       align: "right",
       render: (v: number) => <span className="text-sm text-gray-800">{formatNumber(v)}</span>,
+    },
+    {
+      title: "Open DN",
+      dataIndex: "openDn",
+      key: "openDn",
+      width: 110,
+      align: "right",
+      render: (v: number) => <span className="text-sm font-semibold text-gray-900">{formatNumber(v)}</span>,
+    },
+    {
+      title: "Alert",
+      dataIndex: "dnAlert",
+      key: "dnAlert",
+      width: 110,
+      render: (_: unknown, record) => {
+        const hasAlert = Number(record.dnAlert ?? 0) > 0;
+        if (!hasAlert) return <span className="text-xs text-gray-400">-</span>;
+        return (
+          <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700">
+            <WarningOutlined />
+            Late
+          </span>
+        );
+      },
     },
     {
       title: "Status",
@@ -351,7 +404,7 @@ function DnProcurementPageContent() {
         <div className="mt-6 rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs text-gray-500 flex items-center gap-2">
           <FileTextOutlined />
           <span>
-            Note: {apiEnabled ? "Using backend API (/api/procurement/dn/board)." : "Using mock data (NEXT_PUBLIC_API_URL is not set)."}
+            Note: {apiEnabled ? "Using backend API (/api/dn-management/type/{rm|indirect|subcon})." : "Using mock data (NEXT_PUBLIC_API_URL is not set)."}
           </span>
         </div>
       </div>

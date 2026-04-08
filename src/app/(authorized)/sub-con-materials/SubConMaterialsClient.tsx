@@ -542,7 +542,7 @@ export default function SubConMaterialsClient() {
         open={editOpen}
         onClose={closeEdit}
         width={420}
-        destroyOnClose
+        destroyOnHidden
         footer={
           <div className="flex items-center justify-end gap-2">
             <Button onClick={closeEdit}>Cancel</Button>

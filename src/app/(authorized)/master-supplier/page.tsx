@@ -1,14 +1,10 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Button,
-  Descriptions,
-  Form,
   Input,
-  InputNumber,
-  Modal,
   Select,
   Segmented,
   Table,
@@ -26,27 +22,13 @@ import {
   EditOutlined,
   DeleteOutlined,
 } from "@ant-design/icons";
-import { apiBaseUrl } from "@/lib/api/instance";
-import {
-  useDeleteMasterSupplierMutation,
-  useListMasterSuppliersQuery,
-  useUpdateMasterSupplierMutation,
-} from "@/lib/api/master-supplier/api";
-import {
-  type SupplierRecord as SupplierOnlyRecord,
-  useDeleteSupplierMutation,
-  useEditSupplierMutation,
-  useListSuppliersQuery,
-} from "@/lib/api/suppliers/api";
 
 type SupplierStatus = "Active" | "Inactive";
 
-type SupplierTab = "Supplier Only" | "Raw Material" | "Indirect Raw Material" | "SubCon";
+type SupplierTab = "Raw Material" | "Indirect Raw Material" | "SubCon";
 
 type SupplierRow = {
   key: string;
-  supplierId?: string | number;
-  supplierCode?: string;
   site: string;
   uniq: string;
   rawMaterialType: string;
@@ -63,41 +45,6 @@ type SupplierRow = {
   cycleDays: number;
   status: SupplierStatus;
   tab: SupplierTab;
-
-  // Supplier-only fields (from /api/suppliers)
-  contactPerson?: string;
-  contactNumber?: string;
-  emailAddress?: string;
-  materialCategory?: string;
-  city?: string;
-  province?: string;
-  country?: string;
-  fullAddress?: string;
-  taxIdNpwp?: string;
-  bankName?: string;
-  bankAccountNumber?: string;
-  bankAccountName?: string;
-  paymentTerms?: string;
-  deliveryLeadTimeDays?: number;
-};
-
-type SupplierOnlyEditForm = {
-  supplierName: string;
-  contactPerson: string;
-  contactNumber: string;
-  emailAddress: string;
-  materialCategory: string;
-  fullAddress: string;
-  city: string;
-  province: string;
-  country: string;
-  taxIdNpwp: string;
-  bankName: string;
-  bankAccountNumber: string;
-  bankAccountName: string;
-  paymentTerms: string;
-  deliveryLeadTimeDays: number;
-  status: SupplierStatus;
 };
 
 const ALL_ROWS: SupplierRow[] = [
@@ -178,223 +125,33 @@ const ALL_ROWS: SupplierRow[] = [
 ];
 
 const TAB_OPTIONS: SupplierTab[] = [
-  "Supplier Only",
   "Raw Material",
   "Indirect Raw Material",
   "SubCon",
 ];
 
 export default function MasterSupplierPage() {
-  return (
-    <Suspense fallback={<div className="p-6">Loading...</div>}>
-      <MasterSupplierClient />
-    </Suspense>
-  );
-}
-
-function MasterSupplierClient() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [messageApi, contextHolder] = message.useMessage();
-  const [activeTab, setActiveTab] = useState<SupplierTab>("Supplier Only");
+  const [activeTab, setActiveTab] = useState<SupplierTab>("Raw Material");
   const [searchValue, setSearchValue] = useState<string>("");
   const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined);
 
-  const [viewOpen, setViewOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [selectedRow, setSelectedRow] = useState<SupplierRow | null>(null);
-  const [editForm] = Form.useForm<SupplierOnlyEditForm>();
-
-  useEffect(() => {
-    const tab = String(searchParams.get("tab") ?? "").toLowerCase();
-    if (!tab) return;
-    if (tab === "only") {
-      setActiveTab("Supplier Only");
-      return;
-    }
-    if (tab === "raw") {
-      setActiveTab("Raw Material");
-      return;
-    }
-    if (tab === "indirect") {
-      setActiveTab("Indirect Raw Material");
-      return;
-    }
-    if (tab === "subcon" || tab === "sub-con") {
-      setActiveTab("SubCon");
-    }
-  }, [searchParams]);
-
-  const apiEnabled = Boolean(apiBaseUrl);
-  const useSupplierOnlyApi = apiEnabled && activeTab === "Supplier Only";
-
-  const { data: apiListMaster = [] } = useListMasterSuppliersQuery(undefined, {
-    skip: !apiEnabled || useSupplierOnlyApi,
-  });
-  const { data: apiListSuppliers = [] } = useListSuppliersQuery(undefined, {
-    skip: !apiEnabled || !useSupplierOnlyApi,
-  });
-
-  const [deleteMasterSupplier] = useDeleteMasterSupplierMutation();
-  const [updateMasterSupplier] = useUpdateMasterSupplierMutation();
-  const [deleteSupplier] = useDeleteSupplierMutation();
-  const [editSupplier, { isLoading: isEditingSupplier }] = useEditSupplierMutation();
-
-  const closeView = () => setViewOpen(false);
-  const closeEdit = () => setEditOpen(false);
-
-  const openView = useCallback((row: SupplierRow) => {
-    setSelectedRow(row);
-    setViewOpen(true);
-  }, []);
-
-  const openEdit = useCallback(
-    (row: SupplierRow) => {
-      setSelectedRow(row);
-      editForm.setFieldsValue({
-        supplierName: row.supplierName ?? "",
-        contactPerson: row.contactPerson ?? "",
-        contactNumber: row.contactNumber ?? "",
-        emailAddress: row.emailAddress ?? "",
-        materialCategory: row.materialCategory ?? row.rawMaterialType ?? "Raw Material",
-        fullAddress: row.fullAddress ?? "",
-        city: row.city ?? "",
-        province: row.province ?? "",
-        country: row.country ?? "Indonesia",
-        taxIdNpwp: row.taxIdNpwp ?? "",
-        bankName: row.bankName ?? "",
-        bankAccountNumber: row.bankAccountNumber ?? "",
-        bankAccountName: row.bankAccountName ?? "",
-        paymentTerms: row.paymentTerms ?? "",
-        deliveryLeadTimeDays: row.deliveryLeadTimeDays ?? row.cycleDays ?? 0,
-        status: row.status ?? "Active",
-      });
-      setEditOpen(true);
-    },
-    [editForm]
-  );
-
-  const rowsFromApiMaster: SupplierRow[] = useMemo(() => {
-    const toTab = (rawType?: unknown): SupplierTab => {
-      const t = String(rawType ?? "").toLowerCase();
-      if (t.includes("subcon") || t.includes("sub-con")) return "SubCon";
-      if (t.includes("consum")) return "Indirect Raw Material";
-      return "Raw Material";
-    };
-
-    return apiListMaster.map((r, idx) => {
-      const key = String(
-        (r.id ?? r.supplier_code ?? r.sebango ?? idx) as string | number
-      );
-
-      const cycleRaw = (r.customer_cycle ?? "") as string;
-      const cycleDays = Number.parseInt(cycleRaw, 10);
-
-      return {
-        key,
-        site: "Sebanggo",
-        uniq: String((r.uniq_code ?? r.uniq ?? "-") as string),
-        rawMaterialType: String((r.rawMaterialType ?? r.type ?? "-") as string),
-        type: String((r.type ?? "-") as string),
-        productModel: String((r.model ?? r.productModel ?? "-") as string),
-        partName: String((r.part_name ?? r.description ?? "-") as string),
-        partNumber: String((r.part_no ?? r.sebango ?? r.supplier_code ?? "-") as string),
-        gradeSize: String((r.size ?? r.gradeSize ?? "-") as string),
-        qtyPerKanban: Number((r.kanban_quantity ?? r.quantity ?? 0) as number),
-        uom: String((r.uom ?? "-") as string),
-        weightKg: Number((r.weight ?? r.weightKg ?? 0) as number),
-        location: String((r.location ?? "-") as string),
-        supplierName: String((r.supplier_name ?? r.supplierName ?? "-") as string),
-        cycleDays: Number.isFinite(cycleDays) ? cycleDays : 0,
-        status: (String(r.status ?? "Active") as SupplierStatus) ?? "Active",
-        tab: toTab(r.type),
-      } satisfies SupplierRow;
-    });
-  }, [apiListMaster]);
-
-  const rowsFromApiSuppliers: SupplierRow[] = useMemo(() => {
-    const toStatus = (s: unknown): SupplierStatus => {
-      const v = String(s ?? "Active");
-      return v.toLowerCase() === "inactive" ? "Inactive" : "Active";
-    };
-
-    return (apiListSuppliers as SupplierOnlyRecord[]).map((r, idx) => {
-      const id = (r.id ?? r.supplier_code ?? idx) as string | number;
-      const key = String(id);
-
-      const leadTime =
-        typeof r.delivery_lead_time_days === "number"
-          ? r.delivery_lead_time_days
-          : Number.parseInt(String(r.delivery_lead_time_days ?? ""), 10);
-
-      return {
-        key,
-        supplierId: r.id ?? r.supplier_code,
-        supplierCode: typeof r.supplier_code === "string" ? r.supplier_code : undefined,
-        site: "-",
-        uniq: "-",
-        rawMaterialType: String(r.material_category ?? "-") as string,
-        type: String(r.material_category ?? "-") as string,
-        productModel: "-",
-        partName: "-",
-        partNumber: String(r.supplier_code ?? r.id ?? "-") as string,
-        gradeSize: "-",
-        qtyPerKanban: 0,
-        uom: "-",
-        weightKg: 0,
-        location: "-",
-        supplierName: String(r.supplier_name ?? "-") as string,
-        cycleDays: Number.isFinite(leadTime) ? leadTime : 0,
-        status: toStatus(r.status),
-        tab: "Supplier Only",
-
-        contactPerson: typeof r.contact_person === "string" ? r.contact_person : undefined,
-        contactNumber: typeof r.contact_number === "string" ? r.contact_number : undefined,
-        emailAddress: typeof r.email_address === "string" ? r.email_address : undefined,
-        materialCategory: typeof r.material_category === "string" ? r.material_category : undefined,
-        city: typeof r.city === "string" ? r.city : undefined,
-        province: typeof r.province === "string" ? r.province : undefined,
-        country: typeof r.country === "string" ? r.country : undefined,
-        fullAddress: typeof r.full_address === "string" ? r.full_address : undefined,
-        taxIdNpwp: typeof r.tax_id_npwp === "string" ? r.tax_id_npwp : undefined,
-        bankName: typeof r.bank_name === "string" ? r.bank_name : undefined,
-        bankAccountNumber: typeof r.bank_account_number === "string" ? r.bank_account_number : undefined,
-        bankAccountName: typeof r.bank_account_name === "string" ? r.bank_account_name : undefined,
-        paymentTerms: typeof r.payment_terms === "string" ? r.payment_terms : undefined,
-        deliveryLeadTimeDays: Number.isFinite(leadTime) ? leadTime : undefined,
-      } satisfies SupplierRow;
-    });
-  }, [apiListSuppliers]);
-
-  const allRows = apiEnabled
-    ? activeTab === "Supplier Only"
-      ? rowsFromApiSuppliers
-      : rowsFromApiMaster
-    : ALL_ROWS;
-
   const typeOptions = useMemo(() => {
-    const scoped = activeTab === "Supplier Only" ? allRows : allRows.filter((r) => r.tab === activeTab);
     const unique = new Set(
-      scoped
-        .flatMap((r) => {
-          if (activeTab === "Supplier Only") return [r.rawMaterialType, r.type];
-          if (activeTab === "Indirect Raw Material") return [r.type];
-          return [r.rawMaterialType];
-        })
+      ALL_ROWS.filter((r) => r.tab === activeTab)
+        .map((r) => (activeTab === "Indirect Raw Material" ? r.type : r.rawMaterialType))
         .filter((v): v is string => Boolean(v && v !== "-"))
     );
     return Array.from(unique).sort();
-  }, [activeTab, allRows]);
+  }, [activeTab]);
 
   const filteredRows = useMemo(() => {
     const q = searchValue.trim().toLowerCase();
 
-    const scoped = activeTab === "Supplier Only" ? allRows : allRows.filter((row) => row.tab === activeTab);
-
-    return scoped
+    return ALL_ROWS.filter((row) => row.tab === activeTab)
       .filter((row) => {
         if (!typeFilter) return true;
-        if (activeTab === "Supplier Only") return row.type === typeFilter || row.rawMaterialType === typeFilter;
         if (activeTab === "Indirect Raw Material") return row.type === typeFilter;
         return row.rawMaterialType === typeFilter;
       })
@@ -411,18 +168,12 @@ function MasterSupplierClient() {
           row.location,
           row.supplierName,
           row.site,
-          row.contactPerson,
-          row.contactNumber,
-          row.emailAddress,
-          row.city,
-          row.province,
-          row.country,
         ]
           .join(" ")
           .toLowerCase();
         return haystack.includes(q);
       });
-  }, [activeTab, searchValue, typeFilter, allRows]);
+  }, [activeTab, searchValue, typeFilter]);
 
   const columns: ColumnsType<SupplierRow> = useMemo(() => {
     const commonActionsCol: ColumnsType<SupplierRow>[number] = {
@@ -437,145 +188,25 @@ function MasterSupplierClient() {
             icon={<EyeOutlined />}
             size="small"
             className="text-blue-600 hover:text-blue-800"
-            onClick={() => {
-              if (!apiEnabled) {
-                messageApi.info(`View ${record.partNumber}`);
-                return;
-              }
-              if (activeTab === "Supplier Only") {
-                openView(record);
-                return;
-              }
-              messageApi.info(
-                `Supplier: ${record.supplierName} | Code: ${record.key} | Sebango/Part: ${record.partNumber}`
-              );
-            }}
+            onClick={() => messageApi.info(`View ${record.partNumber}`)}
           />
           <Button
             type="text"
             icon={<EditOutlined />}
             size="small"
             className="text-green-600 hover:text-green-800"
-            onClick={async () => {
-              if (!apiEnabled) {
-                messageApi.info(`Edit ${record.partNumber}`);
-                return;
-              }
-
-              if (activeTab === "Supplier Only") {
-                openEdit(record);
-                return;
-              }
-
-              const nextDescription = window.prompt("Edit description", record.partName);
-              if (nextDescription == null) return;
-              try {
-                await updateMasterSupplier({ id: record.key, body: { description: nextDescription } }).unwrap();
-                messageApi.success("Updated");
-              } catch {
-                messageApi.error("Update failed");
-              }
-            }}
+            onClick={() => messageApi.info(`Edit ${record.partNumber}`)}
           />
           <Button
             type="text"
             icon={<DeleteOutlined />}
             size="small"
             className="text-red-600 hover:text-red-800"
-            onClick={async () => {
-              if (!apiEnabled) {
-                messageApi.info(`Delete ${record.partNumber}`);
-                return;
-              }
-              const ok = window.confirm("Delete this item?");
-              if (!ok) return;
-              try {
-                if (activeTab === "Supplier Only") {
-                  await deleteSupplier(record.supplierId ?? record.key).unwrap();
-                } else {
-                  await deleteMasterSupplier(record.key).unwrap();
-                }
-                messageApi.success("Deleted");
-              } catch {
-                messageApi.error("Delete failed");
-              }
-            }}
+            onClick={() => messageApi.info(`Delete ${record.partNumber}`)}
           />
         </div>
       ),
     };
-
-    if (activeTab === "Supplier Only") {
-      return [
-        {
-          title: "Supplier Code",
-          dataIndex: "supplierCode",
-          key: "supplierCode",
-          width: 140,
-          render: (value: string) => <span className="text-gray-700">{value || "-"}</span>,
-        },
-        {
-          title: "Supplier Name",
-          dataIndex: "supplierName",
-          key: "supplierName",
-          width: 220,
-          render: (value: string) => <span className="text-gray-900">{value}</span>,
-        },
-        {
-          title: "Category",
-          dataIndex: "materialCategory",
-          key: "materialCategory",
-          width: 160,
-          render: (value: string) => <span className="text-gray-700">{value || "-"}</span>,
-        },
-        {
-          title: "Contact",
-          dataIndex: "contactPerson",
-          key: "contactPerson",
-          width: 180,
-          render: (value: string, r: SupplierRow) => (
-            <div>
-              <div className="text-gray-900">{value || "-"}</div>
-              <div className="text-xs text-gray-500">{r.contactNumber || ""}</div>
-            </div>
-          ),
-        },
-        {
-          title: "Email",
-          dataIndex: "emailAddress",
-          key: "emailAddress",
-          width: 220,
-          render: (value: string) => <span className="text-gray-700">{value || "-"}</span>,
-        },
-        {
-          title: "Location",
-          key: "location",
-          width: 180,
-          render: (_: unknown, r: SupplierRow) => (
-            <span className="text-gray-700">{[r.city, r.province, r.country].filter(Boolean).join(", ") || "-"}</span>
-          ),
-        },
-        {
-          title: "Lead Time (Days)",
-          dataIndex: "deliveryLeadTimeDays",
-          key: "deliveryLeadTimeDays",
-          width: 140,
-          render: (value: number) => <span className="text-blue-600 font-semibold">{Number.isFinite(value) ? value : 0}</span>,
-        },
-        {
-          title: "Status",
-          dataIndex: "status",
-          key: "status",
-          width: 110,
-          render: (value: SupplierStatus) => (
-            <Tag color={value === "Active" ? "green" : "red"} className="!rounded-full">
-              {value}
-            </Tag>
-          ),
-        },
-        commonActionsCol,
-      ];
-    }
 
     if (activeTab === "Indirect Raw Material") {
       return [
@@ -788,186 +419,11 @@ function MasterSupplierClient() {
       },
       commonActionsCol,
     ];
-  }, [
-    activeTab,
-    apiEnabled,
-    deleteMasterSupplier,
-    deleteSupplier,
-    messageApi,
-    openEdit,
-    openView,
-    updateMasterSupplier,
-  ]);
-
-  const onSaveSupplierOnlyEdit = async () => {
-    if (!selectedRow) return;
-    try {
-      const v = await editForm.validateFields();
-      await editSupplier({
-        id: selectedRow.supplierId ?? selectedRow.key,
-        body: {
-          supplier_name: v.supplierName,
-          contact_person: v.contactPerson,
-          contact_number: v.contactNumber,
-          email_address: v.emailAddress,
-          material_category: v.materialCategory,
-          full_address: v.fullAddress,
-          city: v.city,
-          province: v.province,
-          country: v.country,
-          tax_id_npwp: v.taxIdNpwp,
-          bank_name: v.bankName,
-          bank_account_number: v.bankAccountNumber,
-          bank_account_name: v.bankAccountName,
-          payment_terms: v.paymentTerms,
-          delivery_lead_time_days: v.deliveryLeadTimeDays,
-          status: v.status,
-        },
-      }).unwrap();
-      messageApi.success("Updated");
-      closeEdit();
-    } catch {
-      messageApi.error("Update failed");
-    }
-  };
+  }, [activeTab, messageApi]);
 
   return (
     <div className="p-6 space-y-6">
       {contextHolder}
-
-      <Modal
-        open={viewOpen}
-        title="Supplier Details"
-        onCancel={closeView}
-        footer={[
-          <Button key="close" onClick={closeView}>
-            Close
-          </Button>,
-        ]}
-        width={720}
-      >
-        <Descriptions bordered column={1} size="small">
-          <Descriptions.Item label="Supplier Code">{selectedRow?.supplierCode ?? "-"}</Descriptions.Item>
-          <Descriptions.Item label="Supplier Name">{selectedRow?.supplierName ?? "-"}</Descriptions.Item>
-          <Descriptions.Item label="Category">{selectedRow?.materialCategory ?? selectedRow?.rawMaterialType ?? "-"}</Descriptions.Item>
-          <Descriptions.Item label="Status">{selectedRow?.status ?? "-"}</Descriptions.Item>
-          <Descriptions.Item label="Contact Person">{selectedRow?.contactPerson ?? "-"}</Descriptions.Item>
-          <Descriptions.Item label="Contact Number">{selectedRow?.contactNumber ?? "-"}</Descriptions.Item>
-          <Descriptions.Item label="Email">{selectedRow?.emailAddress ?? "-"}</Descriptions.Item>
-          <Descriptions.Item label="Address">{selectedRow?.fullAddress ?? "-"}</Descriptions.Item>
-          <Descriptions.Item label="City / Province / Country">
-            {[selectedRow?.city, selectedRow?.province, selectedRow?.country].filter(Boolean).join(", ") || "-"}
-          </Descriptions.Item>
-          <Descriptions.Item label="Tax ID (NPWP)">{selectedRow?.taxIdNpwp ?? "-"}</Descriptions.Item>
-          <Descriptions.Item label="Bank Name">{selectedRow?.bankName ?? "-"}</Descriptions.Item>
-          <Descriptions.Item label="Bank Account Number">{selectedRow?.bankAccountNumber ?? "-"}</Descriptions.Item>
-          <Descriptions.Item label="Bank Account Name">{selectedRow?.bankAccountName ?? "-"}</Descriptions.Item>
-          <Descriptions.Item label="Payment Terms">{selectedRow?.paymentTerms ?? "-"}</Descriptions.Item>
-          <Descriptions.Item label="Delivery Lead Time (Days)">
-            {typeof selectedRow?.deliveryLeadTimeDays === "number" ? selectedRow.deliveryLeadTimeDays : selectedRow?.cycleDays ?? 0}
-          </Descriptions.Item>
-        </Descriptions>
-      </Modal>
-
-      <Modal
-        open={editOpen}
-        title="Edit Supplier"
-        onCancel={closeEdit}
-        onOk={onSaveSupplierOnlyEdit}
-        okText="Save"
-        confirmLoading={isEditingSupplier}
-        width={720}
-      >
-        <Form form={editForm} layout="vertical" requiredMark={false}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Form.Item label="Supplier Name" name="supplierName" rules={[{ required: true, message: "Supplier name is required" }]}>
-              <Input className="!rounded-lg" />
-            </Form.Item>
-
-            <Form.Item label="Category" name="materialCategory" rules={[{ required: true, message: "Category is required" }]}>
-              <Select
-                className="!rounded-lg"
-                options={[
-                  { label: "Raw Materials", value: "Raw Material" },
-                  { label: "Indirect Material Raw", value: "Indirect Material Raw" },
-                  { label: "Sub Con Materials", value: "Sub Con Materials" },
-                ]}
-              />
-            </Form.Item>
-
-            <Form.Item label="Contact Person" name="contactPerson" rules={[{ required: true, message: "Contact person is required" }]}>
-              <Input className="!rounded-lg" />
-            </Form.Item>
-
-            <Form.Item label="Contact Number" name="contactNumber" rules={[{ required: true, message: "Contact number is required" }]}>
-              <Input className="!rounded-lg" />
-            </Form.Item>
-
-            <Form.Item label="Email Address" name="emailAddress" rules={[{ required: true, type: "email", message: "Valid email is required" }]}>
-              <Input className="!rounded-lg" />
-            </Form.Item>
-
-            <Form.Item label="Status" name="status" rules={[{ required: true }]}
-            >
-              <Select
-                className="!rounded-lg"
-                options={[
-                  { label: "Active", value: "Active" },
-                  { label: "Inactive", value: "Inactive" },
-                ]}
-              />
-            </Form.Item>
-          </div>
-
-          <Form.Item label="Full Address" name="fullAddress" rules={[{ required: true, message: "Address is required" }]}>
-            <Input className="!rounded-lg" />
-          </Form.Item>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Form.Item label="City" name="city" rules={[{ required: true, message: "City is required" }]}>
-              <Input className="!rounded-lg" />
-            </Form.Item>
-            <Form.Item label="Province" name="province" rules={[{ required: true, message: "Province is required" }]}>
-              <Input className="!rounded-lg" />
-            </Form.Item>
-            <Form.Item label="Country" name="country" rules={[{ required: true, message: "Country is required" }]}>
-              <Input className="!rounded-lg" />
-            </Form.Item>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Form.Item label="Tax ID (NPWP)" name="taxIdNpwp" rules={[{ required: true, message: "Tax ID is required" }]}>
-              <Input className="!rounded-lg" />
-            </Form.Item>
-            <Form.Item label="Bank Name" name="bankName" rules={[{ required: true, message: "Bank name is required" }]}>
-              <Input className="!rounded-lg" />
-            </Form.Item>
-            <Form.Item
-              label="Bank Account Number"
-              name="bankAccountNumber"
-              rules={[{ required: true, message: "Bank account number is required" }]}
-            >
-              <Input className="!rounded-lg" />
-            </Form.Item>
-            <Form.Item
-              label="Bank Account Name"
-              name="bankAccountName"
-              rules={[{ required: true, message: "Bank account name is required" }]}
-            >
-              <Input className="!rounded-lg" />
-            </Form.Item>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Form.Item label="Payment Terms" name="paymentTerms">
-              <Input className="!rounded-lg" />
-            </Form.Item>
-            <Form.Item label="Delivery Lead Time (Days)" name="deliveryLeadTimeDays" rules={[{ required: true, message: "Lead time is required" }]}>
-              <InputNumber className="!rounded-lg w-full" min={0} />
-            </Form.Item>
-          </div>
-        </Form>
-      </Modal>
 
       <div className="flex items-center justify-between">
         <div>
@@ -1019,16 +475,6 @@ function MasterSupplierClient() {
                 setActiveTab(tab);
                 setSearchValue("");
                 setTypeFilter(undefined);
-
-                const tabParam =
-                  tab === "Supplier Only"
-                    ? "only"
-                    : tab === "Raw Material"
-                      ? "raw"
-                      : tab === "Indirect Raw Material"
-                        ? "indirect"
-                        : "subcon";
-                router.replace(`/master-supplier?tab=${tabParam}`);
               }}
             />
 
@@ -1037,12 +483,8 @@ function MasterSupplierClient() {
                 type="primary"
                 icon={<PlusOutlined />}
                 onClick={() => {
-                  if (activeTab === "Supplier Only") {
-                    router.push("/master-supplier/only/create");
-                    return;
-                  }
-
-                  const section = activeTab === "Indirect Raw Material" ? "indirect" : "raw";
+                  const section =
+                    activeTab === "Indirect Raw Material" ? "indirect" : "raw";
                   router.push(`/master-supplier/create?section=${section}`);
                 }}
               >

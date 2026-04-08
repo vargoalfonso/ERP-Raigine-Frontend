@@ -17,6 +17,12 @@ import {
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import dayjs, { type Dayjs } from "dayjs";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { useListPrlForecastsQuery } from "@/lib/api/prl/api";
+import { useGenerateBulkWorkOrderMutation } from "@/lib/api/work-orders/api";
 
 type WorkOrderType = "New" | "Assembly" | "Rework" | "Additional";
 
@@ -51,11 +57,43 @@ export default function CreateBulkWorkOrderPage() {
   const router = useRouter();
   const [form] = Form.useForm();
   const { TextArea } = Input;
+  const apiEnabled = Boolean(apiBaseUrl);
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const prlListQuery = useListPrlForecastsQuery(undefined, { skip: !apiEnabled });
+  const [generateBulkWorkOrder, generateBulkState] = useGenerateBulkWorkOrderMutation();
 
-  const prlOptions: PrlOption[] = [
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomTreeRes?.data ?? []),
+    [bomTreeRes?.data]
+  );
+
+  const fallbackPrlOptions: PrlOption[] = [
     { label: "PRL-2024-001 - Toyota (Camry 2024)", value: "PRL-2024-001" },
     { label: "PRL-2024-002 - Honda (Civic 2024)", value: "PRL-2024-002" },
   ];
+
+  const prlSummaries = useMemo(() => {
+    const list = prlListQuery.data ?? [];
+    const map = new Map<string, { label: string; value: string; customerName: string | null; productModel: string | null }>();
+
+    list.forEach((item) => {
+      const prlId = item.prl_id ?? item.id;
+      if (!prlId || map.has(prlId)) return;
+      const customerName = item.customer?.customer_name ?? (item.customer_id != null ? `Customer #${item.customer_id}` : null);
+      const uniq = item.item_uniq_code ?? "";
+      const productModel = item.product_details?.description ?? bomIndex.assemblyCodeByUniq[uniq] ?? null;
+      map.set(prlId, {
+        value: prlId,
+        label: `${prlId}${customerName ? ` - ${customerName}` : ""}${productModel ? ` (${productModel})` : ""}`,
+        customerName,
+        productModel,
+      });
+    });
+
+    return Array.from(map.values());
+  }, [bomIndex.assemblyCodeByUniq, prlListQuery.data]);
+
+  const prlOptions: PrlOption[] = prlSummaries.length ? prlSummaries : fallbackPrlOptions;
 
   const approvalManagers = [
     { label: "Jane Smith - Operations Mgr", value: "Jane Smith - Operations Mgr" },
@@ -65,6 +103,12 @@ export default function CreateBulkWorkOrderPage() {
 
   const [items, setItems] = useState<PrlItem[]>([]);
   const [note, setNote] = useState("");
+  const selectedPrl = Form.useWatch("prl", form) as string | undefined;
+
+  const selectedPrlSummary = useMemo(
+    () => prlSummaries.find((item) => item.value === selectedPrl),
+    [prlSummaries, selectedPrl]
+  );
 
   const totals = useMemo(() => {
     const totalUniqs = items.length;
@@ -79,7 +123,27 @@ export default function CreateBulkWorkOrderPage() {
       return;
     }
 
-    // Mock PRL items
+    if (apiEnabled && prlListQuery.data?.length) {
+      const filtered = prlListQuery.data.filter((item) => (item.prl_id ?? item.id) === prl);
+      const mapped = filtered.map((item, index) => {
+        const uniq = item.item_uniq_code ?? "";
+        const qty = Number(item.quantity ?? 0);
+        return {
+          key: item.id || `${prl}-${uniq}-${index}`,
+          uniq,
+          partName: item.product_details?.part_name ?? bomIndex.partNameByUniq[uniq] ?? "-",
+          partNumber: item.product_details?.part_number ?? bomIndex.partNumberByUniq[uniq] ?? "-",
+          qty,
+          kanbanCount: qty > 0 ? Math.max(1, Math.ceil(qty / 100)) : 0,
+          targetDate: undefined,
+        } satisfies PrlItem;
+      });
+
+      setItems(mapped);
+      message.success("PRL items loaded");
+      return;
+    }
+
     const mock: PrlItem[] = [
       { key: "i-1", uniq: "LV7-001", partName: "Engine Mount Assembly", partNumber: "EM-001-A", qty: 500, kanbanCount: 5 },
       { key: "i-2", uniq: "LV8-002", partName: "Suspension Arm", partNumber: "SA-002-B", qty: 400, kanbanCount: 4 },
@@ -92,7 +156,16 @@ export default function CreateBulkWorkOrderPage() {
   };
 
   const updateItem = (key: string, patch: Partial<PrlItem>) => {
-    setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)));
+    setItems((prev) =>
+      prev.map((it) => {
+        if (it.key !== key) return it;
+        const next = { ...it, ...patch };
+        if (patch.qty != null) {
+          next.kanbanCount = patch.qty > 0 ? Math.max(1, Math.ceil(patch.qty / 100)) : 0;
+        }
+        return next;
+      })
+    );
   };
 
   const onGenerate = async () => {
@@ -113,10 +186,35 @@ export default function CreateBulkWorkOrderPage() {
         return;
       }
 
-      message.success("Bulk work order generated (mock)");
-      router.push(tabHint());
-    } catch {
-      // validation handled by form
+      if (!apiEnabled) {
+        message.success("Bulk work order generated (mock)");
+        router.push(tabHint());
+        return;
+      }
+
+      const generated = await generateBulkWorkOrder({
+        prl_reference: values.prl ?? null,
+        customer_name: selectedPrlSummary?.customerName ?? null,
+        product_model: selectedPrlSummary?.productModel ?? null,
+        wo_type: values.woType,
+        target_date: dayjs(bulkTargetDate).format("YYYY-MM-DD"),
+        items: items.map((it) => ({
+          uniq_code: it.uniq,
+          qty: Number(it.qty ?? 0),
+          kanban_count: Number.isFinite(Number(it.kanbanCount)) ? Number(it.kanbanCount) : null,
+          item_target_date: it.targetDate
+            ? dayjs(it.targetDate, "DD/MM/YYYY").format("YYYY-MM-DD")
+            : bulkTargetDate
+              ? dayjs(bulkTargetDate).format("YYYY-MM-DD")
+              : null,
+        })),
+      }).unwrap();
+
+      message.success("Bulk work order generated successfully");
+      router.push(generated.id ? `/work-orders/detail/${encodeURIComponent(generated.id)}` : tabHint());
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      message.error(getApiErrorMessage(err, "Failed to generate bulk work order"));
     }
   };
 
@@ -137,7 +235,13 @@ export default function CreateBulkWorkOrderPage() {
             <Button className="!rounded-lg" onClick={() => router.push("/work-orders")}>
               Cancel
             </Button>
-            <Button type="primary" className="!rounded-lg" icon={<SaveOutlined />} onClick={onGenerate}>
+            <Button
+              type="primary"
+              className="!rounded-lg"
+              icon={<SaveOutlined />}
+              onClick={onGenerate}
+              loading={generateBulkState.isLoading}
+            >
               Generate Bulk WO
             </Button>
           </div>
@@ -190,6 +294,12 @@ export default function CreateBulkWorkOrderPage() {
                 </Button>
               </div>
             </div>
+
+            {selectedPrlSummary ? (
+              <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-xs text-gray-600">
+                Customer: {selectedPrlSummary.customerName ?? "-"} <span className="mx-2">•</span> Product Model: {selectedPrlSummary.productModel ?? "-"}
+              </div>
+            ) : null}
           </div>
 
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">

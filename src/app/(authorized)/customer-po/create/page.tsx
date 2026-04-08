@@ -23,6 +23,13 @@ import {
   DeleteOutlined,
   PlusOutlined,
 } from "@ant-design/icons";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import {
+  useCreateCustomerPoMutation,
+  useCreateDeliveryNoteMutation,
+  useCreateSpecialOrderMutation,
+} from "@/lib/api/customer-orders/api";
 
 type OrderType = "dn" | "po" | "so";
 
@@ -58,6 +65,11 @@ function requiredPill() {
 export default function CreateCustomerOrderPage() {
   const router = useRouter();
   const [form] = Form.useForm();
+
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [createCustomerPo, createCustomerPoState] = useCreateCustomerPoMutation();
+  const [createDeliveryNote, createDeliveryNoteState] = useCreateDeliveryNoteMutation();
+  const [createSpecialOrder, createSpecialOrderState] = useCreateSpecialOrderMutation();
 
   const [orderType, setOrderType] = useState<OrderType>("dn");
   const [deliveryDate, setDeliveryDate] = useState<Dayjs | null>(null);
@@ -114,6 +126,7 @@ export default function CreateCustomerOrderPage() {
   );
 
   const customerName = Form.useWatch("customerName", form) as string | undefined;
+  const customerIdRaw = Form.useWatch("customerId", form) as string | undefined;
 
   const orderNumber = useMemo(() => {
     const code = customerCode(customerName ?? "");
@@ -219,9 +232,66 @@ export default function CreateCustomerOrderPage() {
         return;
       }
 
-      message.success(`Created ${orderType.toUpperCase()} for ${values.customerName}`);
+      const customerId = Number(String(values.customerId ?? "").trim());
+      if (!Number.isFinite(customerId) || customerId <= 0) {
+        message.error("Customer ID must be a positive number");
+        return;
+      }
+
+      if (!apiEnabled) {
+        message.success(`Created ${orderType.toUpperCase()} for ${values.customerName || `Customer #${customerId}`}`);
+        router.push("/customer-po");
+        return;
+      }
+
+      const dateStr = deliveryDate.format("YYYY-MM-DD");
+
+      if (orderType === "po") {
+        await createCustomerPo({
+          po_number: orderNumber,
+          customer_id: customerId,
+          contact_person: values.contactPerson,
+          delivery_address: values.deliveryAddress,
+          special_instructions: values.specialInstructions,
+          items: rows.map((r) => ({
+            item_uniq_code: r.uniq,
+            quantity: r.qty,
+            uom: "Pcs",
+            delivery_date: dateStr,
+          })),
+        }).unwrap();
+      } else if (orderType === "dn") {
+        await createDeliveryNote({
+          dn_number: orderNumber,
+          customer_id: customerId,
+          delivery_date: dateStr,
+          items: rows.map((r) => ({
+            item_uniq_code: r.uniq,
+            quantity: r.qty,
+            uom: "Pcs",
+          })),
+        }).unwrap();
+      } else {
+        await createSpecialOrder({
+          so_number: orderNumber,
+          customer_id: customerId,
+          order_date: dateStr,
+          special_instructions: values.specialInstructions,
+          items: rows.map((r) => ({
+            item_uniq_code: r.uniq,
+            quantity: r.qty,
+            uom: "Pcs",
+            target_date: dateStr,
+          })),
+        }).unwrap();
+      }
+
+      message.success(`Created ${orderType.toUpperCase()} for ${values.customerName || `Customer #${customerId}`}`);
       router.push("/customer-po");
-    } catch {
+    } catch (err) {
+      if (apiEnabled && err) {
+        message.error(getApiErrorMessage(err, "Failed to create order"));
+      }
       // Form will highlight missing fields
     }
   }
@@ -245,6 +315,7 @@ export default function CreateCustomerOrderPage() {
             Cancel
           </Button>
           <Button type="primary" className="!rounded-lg" onClick={onCreateOrder}
+            loading={createCustomerPoState.isLoading || createDeliveryNoteState.isLoading || createSpecialOrderState.isLoading}
           >
             Create Order
           </Button>
@@ -302,6 +373,23 @@ export default function CreateCustomerOrderPage() {
           }
         >
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Form.Item
+              label="Customer ID"
+              name="customerId"
+              rules={[{ required: true, message: "Input Customer ID" }]}
+            >
+              <Input
+                placeholder="Input Customer ID (number)"
+                inputMode="numeric"
+                onChange={(e) => {
+                  const next = e.target.value.replace(/[^0-9]/g, "");
+                  form.setFieldValue("customerId", next);
+                }}
+                value={customerIdRaw ?? ""}
+                allowClear
+              />
+            </Form.Item>
+
             <Form.Item label="Customer Name" name="customerName" rules={[{ required: true, message: "Input Customer Name" }]}>
               <Input placeholder="Input Customer Name" allowClear />
             </Form.Item>

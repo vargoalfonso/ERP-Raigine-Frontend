@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   Input,
@@ -27,6 +27,14 @@ import {
   FileTextOutlined,
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import {
+  useApproveBulkDeliveryScheduleMutation,
+  useApproveDeliveryScheduleMutation,
+  useGetDeliveryScheduleDnCreationListQuery,
+  useGetDeliverySchedulesQuery,
+  useScanDeliveryScheduleDnRobotMutation,
+} from "@/lib/api/delivery-schedule/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type TabKey = "schedule" | "dn";
 
@@ -34,6 +42,7 @@ type ScheduleStatus = "Scheduled" | "Approved";
 
 type ScheduleRow = {
   key: string;
+  scheduleId: string;
   customer: string;
   poDnName: string;
   uniq: string;
@@ -74,6 +83,35 @@ type DnRow = {
 
 const formatNumber = (n: number) => new Intl.NumberFormat("en-US").format(n);
 
+const formatDateLabel = (iso: string) => {
+  if (!iso) return "-";
+  const date = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+};
+
+const formatDateShort = (iso: string) => {
+  if (!iso) return "-";
+  const date = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-US").format(date);
+};
+
+const toScheduleStatus = (status: string): ScheduleStatus =>
+  status.toLowerCase() === "approved" ? "Approved" : "Scheduled";
+
+const toDnStatus = (status: string): DnStatus => {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === "scanned") return "Scanned";
+  if (normalized === "printed") return "Printed";
+  return "Created";
+};
+
 export default function DeliverySchedulingPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>("schedule");
@@ -81,119 +119,110 @@ export default function DeliverySchedulingPage() {
   const [customer, setCustomer] = useState<string>("");
 
   const [approveAllOpen, setApproveAllOpen] = useState(false);
-  const [approveAllTargetDay, setApproveAllTargetDay] = useState<string>("");
+  const [approveAllTargetGroupKey, setApproveAllTargetGroupKey] = useState<string>("");
 
   const [dnDetailOpen, setDnDetailOpen] = useState(false);
   const [selectedDn, setSelectedDn] = useState<DnRow | null>(null);
+  const [scanOpen, setScanOpen] = useState(false);
+  const [scanDnNumber, setScanDnNumber] = useState("");
 
-  const [groups, setGroups] = useState<DayGroup[]>([
-    {
-      key: "2025-10-15",
-      dayLabel: "Wednesday, October 15, 2025",
-      itemsLabel: "2 items",
-      rows: [
-        {
-          key: "row-1",
-          customer: "Toyota Motor Indonesia",
-          poDnName: "DN-TMC-2025-001",
-          uniq: "LV7-001",
-          model: "Avanza Model A",
-          partNo: "BRK-001-A",
-          partName: "Bracket Assembly",
-          quantity: 500,
-          cycle: "Daily",
-          dnNumber: "-",
-          status: "Scheduled",
-        },
-        {
-          key: "row-2",
-          customer: "Toyota Motor Indonesia",
-          poDnName: "DN-TMC-2025-002",
-          uniq: "LV8-002",
-          model: "Innova Model B",
-          partNo: "SA-002-B",
-          partName: "Suspension Arm",
-          quantity: 300,
-          cycle: "Daily",
-          dnNumber: "DN-OUT-2025-001",
-          status: "Approved",
-        },
-      ],
-    },
-    {
-      key: "2025-10-16",
-      dayLabel: "Thursday, October 16, 2025",
-      itemsLabel: "1 items",
-      rows: [
-        {
-          key: "row-3",
-          customer: "Honda Prospect Motor",
-          poDnName: "DN-HPM-2025-003",
-          uniq: "HV1-003",
-          model: "Brio Model C",
-          partNo: "BRK-010-C",
-          partName: "Brake Bracket",
-          quantity: 200,
-          cycle: "Daily",
-          dnNumber: "-",
-          status: "Scheduled",
-        },
-      ],
-    },
-  ]);
+  const schedulesQuery = useGetDeliverySchedulesQuery();
+  const dnCreationQuery = useGetDeliveryScheduleDnCreationListQuery();
+  const [approveDeliverySchedule, approveState] = useApproveDeliveryScheduleMutation();
+  const [approveBulkDeliverySchedule, approveBulkState] = useApproveBulkDeliveryScheduleMutation();
+  const [scanDeliveryScheduleDnRobot, scanState] = useScanDeliveryScheduleDnRobotMutation();
+
+  const adminName = "Admin ERP";
+
+  useEffect(() => {
+    if (schedulesQuery.error) {
+      message.error(getApiErrorMessage(schedulesQuery.error, "Failed to load delivery schedules"));
+    }
+  }, [schedulesQuery.error]);
+
+  useEffect(() => {
+    if (dnCreationQuery.error) {
+      message.error(getApiErrorMessage(dnCreationQuery.error, "Failed to load DN creation list"));
+    }
+  }, [dnCreationQuery.error]);
+
+  const groups: DayGroup[] = useMemo(() => {
+    const source = schedulesQuery.data?.data ?? [];
+    const grouped = new Map<string, DayGroup>();
+
+    source.forEach((schedule) => {
+      const deliveryDate = schedule.deliveryDate || "-";
+      const dayLabel = formatDateLabel(deliveryDate);
+      const baseGroup = grouped.get(deliveryDate) ?? {
+        key: deliveryDate,
+        dayLabel,
+        itemsLabel: "0 items",
+        rows: [],
+      };
+
+      const rows = schedule.items.length
+        ? schedule.items.map((item, index) => ({
+            key: `${schedule.id || schedule.poDnName || deliveryDate}-${item.uniq}-${index}`,
+            scheduleId: schedule.id,
+            customer:
+              schedule.customerName ||
+              (schedule.customerId ? `Customer #${schedule.customerId}` : "-"),
+            poDnName: schedule.poDnName || "-",
+            uniq: item.uniq,
+            model: item.model,
+            partNo: item.partNo,
+            partName: item.partName,
+            quantity: item.quantity,
+            cycle: schedule.cycle === "Weekly" ? "Weekly" : "Daily",
+            dnNumber: toScheduleStatus(schedule.status) === "Approved" ? schedule.poDnName || "-" : "-",
+            status: toScheduleStatus(schedule.status),
+          }))
+        : [
+            {
+              key: `${schedule.id || schedule.poDnName || deliveryDate}-empty`,
+              scheduleId: schedule.id,
+              customer:
+                schedule.customerName ||
+                (schedule.customerId ? `Customer #${schedule.customerId}` : "-"),
+              poDnName: schedule.poDnName || "-",
+              uniq: "-",
+              model: "-",
+              partNo: "-",
+              partName: "-",
+              quantity: 0,
+              cycle: schedule.cycle === "Weekly" ? "Weekly" : "Daily",
+              dnNumber: toScheduleStatus(schedule.status) === "Approved" ? schedule.poDnName || "-" : "-",
+              status: toScheduleStatus(schedule.status),
+            },
+          ];
+
+      baseGroup.rows.push(...rows);
+      baseGroup.itemsLabel = `${baseGroup.rows.length} items`;
+      grouped.set(deliveryDate, baseGroup);
+    });
+
+    return Array.from(grouped.values()).sort((a, b) => a.key.localeCompare(b.key));
+  }, [schedulesQuery.data]);
 
   const dnRows: DnRow[] = useMemo(
-    () => [
-      {
-        key: "dn-1",
-        dnNumber: "DN-2024-001",
-        dnDate: "1/19/2024",
-        customer: "Toyota Motor Corp",
-        customerPo: "PO-TMC-2024-001",
-        partTitle: "Engine Mount Assembly",
-        uniq: "LV7-001",
-        partNo: "EM-001-LV7",
-        quantity: 500,
-        fgLocation: "WH-FG-A01",
-        qrCode: "QR-DN-2024-001",
-        packingList: "PL-001",
-        status: "Printed",
-        statusHint: "Printed 3x",
-      },
-      {
-        key: "dn-2",
-        dnNumber: "DN-2024-002",
-        dnDate: "1/19/2024",
-        customer: "Honda Manufacturing",
-        customerPo: "PO-HMC-2024-002",
-        partTitle: "Suspension Arm",
-        uniq: "LV8-002",
-        partNo: "SA-002-LV8",
-        quantity: 300,
-        fgLocation: "WH-FG-B02",
-        qrCode: "QR-DN-2024-002",
-        packingList: "PL-002",
-        status: "Scanned",
-        statusHint: "Printed 2x",
-      },
-      {
-        key: "dn-3",
-        dnNumber: "DN-2024-003",
-        dnDate: "1/20/2024",
-        customer: "Ford Motor Company",
-        customerPo: "PO-FMC-2024-003",
-        partTitle: "Control Module",
-        uniq: "MB6-004",
-        partNo: "CM-004-MB6",
-        quantity: 200,
-        fgLocation: "WH-FG-C03",
-        qrCode: "QR-DN-2024-003",
-        packingList: "PL-003",
-        status: "Created",
-        statusHint: "Printed 1x",
-      },
-    ],
-    []
+    () =>
+      (dnCreationQuery.data?.data ?? []).map((row, index) => ({
+        key: row.id || row.dnNumber || `dn-${index}`,
+        dnNumber: row.dnNumber || "-",
+        dnDate: formatDateShort(row.dnDate),
+        customer: row.customerName || "-",
+        customerPo: row.customerPo || row.poDnName || "-",
+        partTitle: row.partTitle || row.partName || "-",
+        uniq: row.uniq || "-",
+        partNo: row.partNo || "-",
+        quantity: row.quantity,
+        fgLocation: row.fgLocation || "-",
+        qrCode: row.qrCode || "-",
+        packingList: row.packingList || "-",
+        status: toDnStatus(row.status),
+        statusHint: row.statusHint || row.updatedAt || row.createdAt || "-",
+      })),
+    [dnCreationQuery.data]
   );
 
   const filteredGroups = useMemo(() => {
@@ -214,6 +243,11 @@ export default function DeliverySchedulingPage() {
       })
       .filter((g) => g.rows.length > 0);
   }, [activeTab, groups, query, customer]);
+
+  const approveAllTargetGroup = useMemo(
+    () => filteredGroups.find((group) => group.key === approveAllTargetGroupKey) ?? null,
+    [approveAllTargetGroupKey, filteredGroups]
+  );
 
   const dnCounts = useMemo(() => {
     const total = dnRows.length;
@@ -467,14 +501,14 @@ export default function DeliverySchedulingPage() {
                 size="small"
                 className="!rounded-lg"
                 icon={<CheckCircleOutlined />}
+                loading={approveState.isLoading}
                 onClick={() => {
-                  setGroups((prev) =>
-                    prev.map((g) => ({
-                      ...g,
-                      rows: g.rows.map((r) => (r.key === record.key ? { ...r, status: "Approved" } : r)),
-                    }))
-                  );
-                  message.success("Approved");
+                  approveDeliverySchedule({ schedule_id: record.scheduleId, admin_name: adminName })
+                    .unwrap()
+                    .then(() => message.success(`Approved ${record.poDnName}`))
+                    .catch((error) =>
+                      message.error(getApiErrorMessage(error, "Failed to approve delivery schedule"))
+                    );
                 }}
               >
                 Approve
@@ -506,7 +540,7 @@ export default function DeliverySchedulingPage() {
               <p className="text-sm text-gray-500">Create delivery notes, plan daily shipments, print packing lists with QR codes, and auto-adjust FG inventory on scan</p>
             </div>
             <div className="flex items-center gap-2">
-              <Button className="!rounded-lg" icon={<QrcodeOutlined />} onClick={() => message.info("Scan Mode (mock)")}>Scan Mode</Button>
+              <Button className="!rounded-lg" icon={<QrcodeOutlined />} onClick={() => setScanOpen(true)}>Scan Mode</Button>
               <Button className="!rounded-lg" icon={<DownloadOutlined />} onClick={() => message.info("Reports (mock)")}>Reports</Button>
               <Button type="primary" className="!rounded-lg" icon={<PlusOutlined />} onClick={() => router.push("/delivery-scheduling/add")}>Schedule Delivery</Button>
             </div>
@@ -593,6 +627,7 @@ export default function DeliverySchedulingPage() {
                 dataSource={filteredDnRows}
                 rowKey="key"
                 size="middle"
+                loading={dnCreationQuery.isFetching || scanState.isLoading}
                 pagination={false}
                 scroll={{ x: "max-content" }}
               />
@@ -616,7 +651,7 @@ export default function DeliverySchedulingPage() {
                       className="!rounded-lg !bg-green-600 !text-white hover:!bg-green-700"
                       icon={<CheckCircleOutlined />}
                       onClick={() => {
-                        setApproveAllTargetDay(group.dayLabel);
+                        setApproveAllTargetGroupKey(group.key);
                         setApproveAllOpen(true);
                       }}
                     >
@@ -637,6 +672,7 @@ export default function DeliverySchedulingPage() {
                   dataSource={group.rows}
                   rowKey="key"
                   size="middle"
+                  loading={schedulesQuery.isFetching || approveState.isLoading || approveBulkState.isLoading}
                   pagination={false}
                   scroll={{ x: "max-content" }}
                 />
@@ -653,21 +689,72 @@ export default function DeliverySchedulingPage() {
         okText="Yes"
         cancelText="Cancel"
         onOk={() => {
-          setGroups((prev) =>
-            prev.map((g) =>
-              g.dayLabel === approveAllTargetDay
-                ? { ...g, rows: g.rows.map((r) => ({ ...r, status: "Approved" })) }
-                : g
-            )
+          if (!approveAllTargetGroup) return;
+
+          const scheduleIds = Array.from(
+            new Set(approveAllTargetGroup.rows.map((row) => row.scheduleId).filter(Boolean))
           );
-          setApproveAllOpen(false);
-          message.success("All schedules approved");
+
+          if (!scheduleIds.length) {
+            message.error("No schedules found to approve");
+            return;
+          }
+
+          approveBulkDeliverySchedule({ schedule_ids: scheduleIds, admin_name: adminName })
+            .unwrap()
+            .then(() => {
+              setApproveAllOpen(false);
+              message.success("All schedules approved");
+            })
+            .catch((error) =>
+              message.error(getApiErrorMessage(error, "Failed to approve all delivery schedules"))
+            );
         }}
-        okButtonProps={{ className: "!rounded-lg" }}
+        okButtonProps={{ className: "!rounded-lg", loading: approveBulkState.isLoading }}
         cancelButtonProps={{ className: "!rounded-lg" }}
       >
         <div className="text-sm text-gray-600">
-          Confirm approval of all delivery schedules for <span className="font-semibold">{approveAllTargetDay}</span>
+          Confirm approval of all delivery schedules for <span className="font-semibold">{approveAllTargetGroup?.dayLabel ?? "-"}</span>
+        </div>
+      </Modal>
+
+      <Modal
+        open={scanOpen}
+        onCancel={() => {
+          setScanOpen(false);
+          setScanDnNumber("");
+        }}
+        title={<div className="text-sm font-semibold">Scan DN Robot</div>}
+        okText="Process"
+        cancelText="Cancel"
+        onOk={() => {
+          if (!scanDnNumber.trim()) {
+            message.error("DN Number is required");
+            return;
+          }
+
+          scanDeliveryScheduleDnRobot({ dn_number: scanDnNumber.trim() })
+            .unwrap()
+            .then((response) => {
+              message.success(response.message || `Processed ${scanDnNumber.trim()}`);
+              setScanOpen(false);
+              setScanDnNumber("");
+            })
+            .catch((error) =>
+              message.error(getApiErrorMessage(error, "Failed to process DN robot scan"))
+            );
+        }}
+        okButtonProps={{ className: "!rounded-lg", loading: scanState.isLoading }}
+        cancelButtonProps={{ className: "!rounded-lg" }}
+      >
+        <div className="space-y-3">
+          <div className="text-sm text-gray-600">Enter DN number to process robot scan mode.</div>
+          <Input
+            value={scanDnNumber}
+            onChange={(event) => setScanDnNumber(event.target.value)}
+            placeholder="DN-202604-807"
+            className="!rounded-lg"
+          />
         </div>
       </Modal>
 

@@ -26,6 +26,13 @@ export const getApiErrorMessage = (error: unknown, fallback: string): string => 
     const directError = getStringField(error, "error");
     if (directError) return status ? `${directError} (status ${String(status)})` : directError;
 
+    if (status === "FETCH_ERROR") {
+      const networkError = getStringField(error, "error") || getStringField(error, "message");
+      return networkError
+        ? `${fallback}: ${networkError}. Check NEXT_PUBLIC_API_URL, API server availability, and browser CORS settings.`
+        : `${fallback}: network request failed. Check NEXT_PUBLIC_API_URL, API server availability, and browser CORS settings.`;
+    }
+
     const data = (error as UnknownRecord).data;
     const dataMessage = getStringField(data, "message");
     if (dataMessage) return status ? `${dataMessage} (status ${String(status)})` : dataMessage;
@@ -46,8 +53,20 @@ export const getApiErrorMessage = (error: unknown, fallback: string): string => 
         }
       })();
 
+      const looksLikeHtml =
+        typeof dataText === "string" &&
+        (dataText.trim().startsWith("<!DOCTYPE") || dataText.trim().startsWith("<html"));
+
+      if (looksLikeHtml) {
+        return `${fallback} (status ${String(status)}): Received HTML instead of JSON. Check NEXT_PUBLIC_API_URL and the API path (/api/...).`;
+      }
+
       const base = `${fallback} (status ${String(status)})`;
-      return dataText ? `${base}: ${dataText}` : base;
+
+      // Avoid flooding UI with huge HTML/text payloads.
+      const clipped =
+        dataText && dataText.length > 280 ? `${dataText.slice(0, 280)}…` : dataText;
+      return clipped ? `${base}: ${clipped}` : base;
     }
   }
 

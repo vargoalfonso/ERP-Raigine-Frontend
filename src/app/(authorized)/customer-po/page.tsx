@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Button, Input, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useRouter } from "next/navigation";
@@ -17,6 +17,13 @@ import {
   MdOutlineLocalShipping,
   MdPaid,
 } from "react-icons/md";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import {
+  useListCustomerPosQuery,
+  useListDeliveryNotesQuery,
+  useListSpecialOrdersQuery,
+} from "@/lib/api/customer-orders/api";
 
 type CustomerPoTabId = "dn" | "po" | "so";
 
@@ -29,7 +36,7 @@ type DnRow = {
   uom: string;
   deliveryDate: string;
   cycle: "Daily" | "Weekly" | "Monthly";
-  status: "Active" | "Draft" | "Closed";
+  status: string;
 };
 
 type PoRow = {
@@ -41,7 +48,7 @@ type PoRow = {
   uom: string;
   deliveryDate: string;
   cycle: "Daily" | "Weekly" | "Monthly";
-  status: "Active" | "Draft" | "Closed";
+  status: string;
 };
 
 type SoRow = {
@@ -53,7 +60,7 @@ type SoRow = {
   uom: string;
   deliveryDate: string;
   cycle: "Daily" | "Weekly" | "Monthly";
-  status: "Active" | "Draft" | "Closed";
+  status: string;
 };
 
 function formatNumber(value: number) {
@@ -83,6 +90,12 @@ export default function CustomerPoDnSoPage() {
   const [tab, setTab] = useState<CustomerPoTabId>("dn");
   const [search, setSearch] = useState("");
   const [customerFilter, setCustomerFilter] = useState<string>("");
+
+  const apiEnabled = Boolean(apiBaseUrl);
+
+  const dnQuery = useListDeliveryNotesQuery(undefined, { skip: !apiEnabled });
+  const poQuery = useListCustomerPosQuery(undefined, { skip: !apiEnabled });
+  const soQuery = useListSpecialOrdersQuery(undefined, { skip: !apiEnabled });
 
   const dnRows = useMemo<DnRow[]>(
     () => [
@@ -201,19 +214,82 @@ export default function CustomerPoDnSoPage() {
     []
   );
 
+  const resolvedDnRows = useMemo<DnRow[]>(() => {
+    if (!apiEnabled) return dnRows;
+    const list = dnQuery.data;
+    if (!list) return dnRows;
+
+    return list.map((dn) => {
+      const firstItem = dn.items?.[0];
+      return {
+        key: dn.id,
+        dnDate: dn.delivery_date ?? "-",
+        dnNumber: dn.dn_number ?? dn.id,
+        customer: dn.customer?.customer_name ?? (dn.customer_id ? `Customer #${dn.customer_id}` : "-"),
+        quantity: Number(firstItem?.quantity ?? 0),
+        uom: firstItem?.uom ?? "Pcs",
+        deliveryDate: dn.delivery_date ?? "-",
+        cycle: "Monthly",
+        status: dn.status ?? "-",
+      };
+    });
+  }, [apiEnabled, dnQuery.data, dnRows]);
+
+  const resolvedPoRows = useMemo<PoRow[]>(() => {
+    if (!apiEnabled) return poRows;
+    const list = poQuery.data;
+    if (!list) return poRows;
+
+    return list.map((po) => {
+      const firstItem = po.items?.[0];
+      return {
+        key: po.id,
+        poDate: firstItem?.delivery_date ?? "-",
+        poNumber: po.po_number ?? po.id,
+        customer: po.customer?.customer_name ?? (po.customer_id ? `Customer #${po.customer_id}` : "-"),
+        quantity: Number(firstItem?.quantity ?? 0),
+        uom: firstItem?.uom ?? "Pcs",
+        deliveryDate: firstItem?.delivery_date ?? "-",
+        cycle: "Monthly",
+        status: po.status ?? "-",
+      };
+    });
+  }, [apiEnabled, poQuery.data, poRows]);
+
+  const resolvedSoRows = useMemo<SoRow[]>(() => {
+    if (!apiEnabled) return soRows;
+    const list = soQuery.data;
+    if (!list) return soRows;
+
+    return list.map((so) => {
+      const firstItem = so.items?.[0];
+      return {
+        key: so.id,
+        soDate: so.order_date ?? "-",
+        soNumber: so.so_number ?? so.id,
+        customer: so.customer?.customer_name ?? (so.customer_id ? `Customer #${so.customer_id}` : "-"),
+        quantity: Number(firstItem?.quantity ?? 0),
+        uom: firstItem?.uom ?? "Pcs",
+        deliveryDate: firstItem?.target_date ?? "-",
+        cycle: "Monthly",
+        status: so.status ?? "-",
+      };
+    });
+  }, [apiEnabled, soQuery.data, soRows]);
+
   const kpis = useMemo(
     () => ({
-      activeDns: dnRows.filter((r) => r.status === "Active").length,
-      customerPos: poRows.length,
-      specialOrders: soRows.length,
+      activeDns: resolvedDnRows.filter((r) => String(r.status).toLowerCase() === "active").length,
+      customerPos: resolvedPoRows.length,
+      specialOrders: resolvedSoRows.length,
     }),
-    [dnRows, poRows, soRows]
+    [resolvedDnRows, resolvedPoRows, resolvedSoRows]
   );
 
   const filteredDnRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     const customerQ = customerFilter.trim().toLowerCase();
-    return dnRows.filter((r) => {
+    return resolvedDnRows.filter((r) => {
       const passCustomer = !customerQ || r.customer.toLowerCase().includes(customerQ);
       const passSearch =
         !q ||
@@ -222,27 +298,34 @@ export default function CustomerPoDnSoPage() {
         r.uom.toLowerCase().includes(q);
       return passCustomer && passSearch;
     });
-  }, [dnRows, search, customerFilter]);
+  }, [resolvedDnRows, search, customerFilter]);
 
   const filteredPoRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     const customerQ = customerFilter.trim().toLowerCase();
-    return poRows.filter((r) => {
+    return resolvedPoRows.filter((r) => {
       const passCustomer = !customerQ || r.customer.toLowerCase().includes(customerQ);
       const passSearch = !q || r.poNumber.toLowerCase().includes(q) || r.customer.toLowerCase().includes(q);
       return passCustomer && passSearch;
     });
-  }, [poRows, search, customerFilter]);
+  }, [resolvedPoRows, search, customerFilter]);
 
   const filteredSoRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     const customerQ = customerFilter.trim().toLowerCase();
-    return soRows.filter((r) => {
+    return resolvedSoRows.filter((r) => {
       const passCustomer = !customerQ || r.customer.toLowerCase().includes(customerQ);
       const passSearch = !q || r.soNumber.toLowerCase().includes(q) || r.customer.toLowerCase().includes(q);
       return passCustomer && passSearch;
     });
-  }, [soRows, search, customerFilter]);
+  }, [resolvedSoRows, search, customerFilter]);
+
+  useEffect(() => {
+    if (!apiEnabled) return;
+    const activeError = tab === "dn" ? dnQuery.error : tab === "po" ? poQuery.error : soQuery.error;
+    if (!activeError) return;
+    message.error(getApiErrorMessage(activeError, "Failed to load customer orders"));
+  }, [apiEnabled, tab, dnQuery.error, poQuery.error, soQuery.error]);
 
   const dnColumns = useMemo<ColumnsType<DnRow>>(
     () => [

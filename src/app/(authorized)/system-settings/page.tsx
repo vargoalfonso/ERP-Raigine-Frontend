@@ -13,7 +13,6 @@ import {
   Select,
   Table,
   Tag,
-  message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -32,47 +31,6 @@ import {
   AppstoreOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
-import { apiBaseUrl } from "@/lib/api/instance";
-import {
-  type AccessControlMatrixRecord,
-  useGetAccessControlMatrixQuery,
-  useGetApprovalWorkflowsQuery,
-  useGetGlobalWorkingDaysQuery,
-  useGetKanbanStandardsQuery,
-  useGetMachinePatternsQuery,
-  useGetPoSplitSettingsQuery,
-  useGetProcessesQuery,
-  useGetRolesQuery,
-  useGetSafetyStockQuery,
-  useGetStockdaysQuery,
-  useGetTypeParametersQuery,
-  useGetUomsQuery,
-  useUpdateAccessControlMatrixMutation,
-  useDeleteAccessControlMatrixMutation,
-  useDeleteRoleMutation,
-  useUpdateSafetyStockMutation,
-  useDeleteSafetyStockMutation,
-  useUpdateStockdaysMutation,
-  useDeleteStockdaysMutation,
-  useUpdateTypeParameterMutation,
-  useDeleteTypeParameterMutation,
-  useUpdateUomMutation,
-  useDeleteUomMutation,
-  useUpdatePoSplitMutation,
-  useDeletePoSplitMutation,
-  useUpdateApprovalWorkflowMutation,
-  useDeleteApprovalWorkflowMutation,
-  useUpdateKanbanStandardMutation,
-  useDeleteKanbanStandardMutation,
-  useUpdateGlobalWorkingDaysMutation,
-  useDeleteGlobalWorkingDaysMutation,
-  useUpdateProcessMutation,
-  useDeleteProcessMutation,
-  useUpdateMachinePatternMutation,
-  useDeleteMachinePatternMutation,
-} from "@/lib/api/system-settings/api";
-
-import { getApiErrorMessage } from "@/lib/api/error";
 
 type StatusType = "Active" | "Inactive";
 
@@ -549,13 +507,6 @@ type SafetyStockFormValues = {
   status: StatusType;
 };
 
-type StockdaysFormValues = {
-  inventoryType: string;
-  parameter: string;
-  constanta: number;
-  status: StatusType;
-};
-
 type TypeParameterFormValues = {
   typeCode: string;
   typeName: string;
@@ -618,7 +569,6 @@ type MachinePatternFormValues = {
 
 export default function SystemSettingsPage() {
   const router = useRouter();
-  const apiEnabled = Boolean(apiBaseUrl);
   const [selectedModuleId, setSelectedModuleId] = useState<string>(
     "access-control-matrix"
   );
@@ -631,128 +581,6 @@ export default function SystemSettingsPage() {
   const [typeFilter, setTypeFilter] = useState<"All Types" | StatusType>(
     "All Types"
   );
-
-  const { data: rolesApiData, isFetching: isFetchingRoles, refetch: refetchRoles } = useGetRolesQuery(undefined, {
-    skip: !apiEnabled,
-    refetchOnMountOrArgChange: true,
-  });
-  const { data: accessControlApiData, isFetching: isFetchingAccessControl, refetch: refetchAccessControl } =
-    useGetAccessControlMatrixQuery(undefined, {
-      skip: !apiEnabled,
-      refetchOnMountOrArgChange: true,
-    });
-  const { data: safetyApiData, isFetching: isFetchingSafety, refetch: refetchSafety } = useGetSafetyStockQuery(undefined, {
-    skip: !apiEnabled,
-    refetchOnMountOrArgChange: true,
-  });
-  const { data: stockdaysApiData, isFetching: isFetchingStockdays, refetch: refetchStockdays } = useGetStockdaysQuery(undefined, {
-    skip: !apiEnabled,
-    refetchOnMountOrArgChange: true,
-  });
-  const { data: typeParameterApiData, isFetching: isFetchingTypeParameters, refetch: refetchTypeParameters } =
-    useGetTypeParametersQuery(undefined, {
-      skip: !apiEnabled,
-      refetchOnMountOrArgChange: true,
-    });
-  const { data: uomApiData, isFetching: isFetchingUom, refetch: refetchUom } = useGetUomsQuery(undefined, {
-    skip: !apiEnabled,
-    refetchOnMountOrArgChange: true,
-  });
-  const { data: poSplitApiData, isFetching: isFetchingPoSplit, refetch: refetchPoSplit } =
-    useGetPoSplitSettingsQuery(undefined, {
-      skip: !apiEnabled,
-      refetchOnMountOrArgChange: true,
-    });
-  const { data: approvalApiData, isFetching: isFetchingApproval, refetch: refetchApproval } = useGetApprovalWorkflowsQuery(
-    undefined,
-    {
-      skip: !apiEnabled,
-      refetchOnMountOrArgChange: true,
-    }
-  );
-  const { data: kanbanApiData, isFetching: isFetchingKanban, refetch: refetchKanban } = useGetKanbanStandardsQuery(
-    undefined,
-    {
-      skip: !apiEnabled,
-      refetchOnMountOrArgChange: true,
-    }
-  );
-  const { data: globalApiData, isFetching: isFetchingGlobal, refetch: refetchGlobal } = useGetGlobalWorkingDaysQuery(
-    undefined,
-    {
-      skip: !apiEnabled,
-      refetchOnMountOrArgChange: true,
-    }
-  );
-  const { data: processApiData, isFetching: isFetchingProcess, refetch: refetchProcess } = useGetProcessesQuery(undefined, {
-    skip: !apiEnabled,
-    refetchOnMountOrArgChange: true,
-  });
-  const { data: machineApiData, isFetching: isFetchingMachine, refetch: refetchMachine } = useGetMachinePatternsQuery(
-    undefined,
-    {
-      skip: !apiEnabled,
-      refetchOnMountOrArgChange: true,
-    }
-  );
-
-  const [updateAccessControlMatrix] = useUpdateAccessControlMatrixMutation();
-  const [deleteAccessControlMatrix] = useDeleteAccessControlMatrixMutation();
-  const [deleteRole] = useDeleteRoleMutation();
-
-  const [updateSafetyStock] = useUpdateSafetyStockMutation();
-  const [deleteSafetyStock] = useDeleteSafetyStockMutation();
-  const [updateStockdays] = useUpdateStockdaysMutation();
-  const [deleteStockdays] = useDeleteStockdaysMutation();
-  const [updateTypeParameter] = useUpdateTypeParameterMutation();
-  const [deleteTypeParameter] = useDeleteTypeParameterMutation();
-  const [updateUom] = useUpdateUomMutation();
-  const [deleteUom] = useDeleteUomMutation();
-  const [updatePoSplit] = useUpdatePoSplitMutation();
-  const [deletePoSplit] = useDeletePoSplitMutation();
-  const [updateApprovalWorkflow] = useUpdateApprovalWorkflowMutation();
-  const [deleteApprovalWorkflow] = useDeleteApprovalWorkflowMutation();
-  const [updateKanbanStandard] = useUpdateKanbanStandardMutation();
-  const [deleteKanbanStandard] = useDeleteKanbanStandardMutation();
-  const [updateGlobalWorkingDays] = useUpdateGlobalWorkingDaysMutation();
-  const [deleteGlobalWorkingDays] = useDeleteGlobalWorkingDaysMutation();
-  const [updateProcess] = useUpdateProcessMutation();
-  const [deleteProcess] = useDeleteProcessMutation();
-  const [updateMachinePattern] = useUpdateMachinePatternMutation();
-  const [deleteMachinePattern] = useDeleteMachinePatternMutation();
-
-  const roleNameById = useMemo(() => {
-    return new Map((rolesApiData ?? []).map((r) => [r.id, r.name] as const));
-  }, [rolesApiData]);
-
-  const roleIdByName = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const r of rolesApiData ?? []) {
-      map.set(r.name, r.id);
-    }
-    return map;
-  }, [rolesApiData]);
-
-  const roleNameOptions = useMemo(() => {
-    return (rolesApiData ?? []).map((r) => ({ label: r.name, value: r.name }));
-  }, [rolesApiData]);
-
-  const accessControlById = useMemo(() => {
-    const map = new Map<string, AccessControlMatrixRecord>();
-    for (const r of accessControlApiData ?? []) {
-      map.set(r.id, r);
-    }
-    return map;
-  }, [accessControlApiData]);
-
-  const rolePeopleCountByRoleId = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const entry of accessControlApiData ?? []) {
-      const next = (counts.get(entry.role_id) ?? 0) + 1;
-      counts.set(entry.role_id, next);
-    }
-    return counts;
-  }, [accessControlApiData]);
 
   const [rows, setRows] = useState<ParameterRow[]>(initialRows);
   const [roleRows, setRoleRows] = useState<RoleRow[]>(initialRoleRows);
@@ -777,146 +605,6 @@ export default function SystemSettingsPage() {
     initialMachinePatternRows
   );
 
-  const rowsSource = useMemo<ParameterRow[]>(() => {
-    if (!apiEnabled) return rows;
-    return (accessControlApiData ?? []).map((r) => ({
-      id: r.id,
-      name: r.full_name,
-      empId: r.employee_id,
-      department: r.department,
-      role: roleNameById.get(r.role_id) ?? r.role_id,
-      team: "-",
-      permissions: [],
-      lastLogin: "-",
-      status: "Active",
-    }));
-  }, [accessControlApiData, apiEnabled, roleNameById, rows]);
-
-  const roleRowsSource = useMemo<RoleRow[]>(() => {
-    if (!apiEnabled) return roleRows;
-    return (rolesApiData ?? []).map((r) => ({
-      id: r.id,
-      roleName: r.name,
-      numberOfPeople: rolePeopleCountByRoleId.get(r.id) ?? 0,
-      lastUpdated: "-",
-    }));
-  }, [apiEnabled, rolePeopleCountByRoleId, roleRows, rolesApiData]);
-
-  const safetyRowsSource = useMemo<SafetyStockRow[]>(() => {
-    if (!apiEnabled) return safetyRows;
-    return (safetyApiData ?? []).map((r) => ({
-      id: r.id,
-      inventoryType: r.inventory_type,
-      parameter: r.calculation_type,
-      constanta: r.constanta,
-      status: "Active",
-    }));
-  }, [apiEnabled, safetyApiData, safetyRows]);
-
-  const stockdaysRowsSource = useMemo<StockdaysRow[]>(() => {
-    if (!apiEnabled) return stockdaysRows;
-    return (stockdaysApiData ?? []).map((r) => ({
-      id: r.id,
-      inventoryType: r.inventory_type,
-      parameter: r.calculation_type,
-      constanta: r.constanta,
-      status: "Active",
-    }));
-  }, [apiEnabled, stockdaysApiData, stockdaysRows]);
-
-  const typeParameterRowsSource = useMemo<TypeParameterRow[]>(() => {
-    if (!apiEnabled) return typeParameterRows;
-    return (typeParameterApiData ?? []).map((r) => ({
-      id: r.id,
-      typeCode: r.type_code,
-      typeName: r.type_name,
-      description: r.description,
-      status: r.status,
-    }));
-  }, [apiEnabled, typeParameterApiData, typeParameterRows]);
-
-  const uomRowsSource = useMemo<UomRow[]>(() => {
-    if (!apiEnabled) return uomRows;
-    return (uomApiData ?? []).map((r) => ({
-      id: r.id,
-      code: r.code,
-      name: r.name,
-      category: (r.category as UomCategory) ?? "Quantity",
-      status: r.status,
-    }));
-  }, [apiEnabled, uomApiData, uomRows]);
-
-  const purchaseOrderRowsSource = useMemo<PurchaseOrderRow[]>(() => {
-    if (!apiEnabled) return purchaseOrderRows;
-    return (poSplitApiData ?? []).map((r) => ({
-      id: r.id,
-      materialType: r.material_type,
-      minOrderQty: r.min_order_qty,
-      maxSplitLines: r.max_split_lines,
-      splitRule: r.split_rule,
-      status: r.status,
-    }));
-  }, [apiEnabled, poSplitApiData, purchaseOrderRows]);
-
-  const approvalWorkflowRowsSource = useMemo<ApprovalWorkflowRow[]>(() => {
-    if (!apiEnabled) return approvalWorkflowRows;
-    return (approvalApiData ?? []).map((r) => ({
-      id: r.id,
-      menuAction: r.action_name,
-      level1Role: r.level_1_role,
-      level2Role: r.level_2_role,
-      level3Role: r.level_3_role,
-      level4Role: r.level_4_role,
-      status: r.status,
-    }));
-  }, [apiEnabled, approvalApiData, approvalWorkflowRows]);
-
-  const kanbanRowsSource = useMemo<KanbanRow[]>(() => {
-    if (!apiEnabled) return kanbanRows;
-    return (kanbanApiData ?? []).map((r) => ({
-      id: r.id,
-      productName: r.item_name,
-      productCode: r.item_uniq_code,
-      kanbanQty: r.kanban_qty,
-      minStock: r.min_stock,
-      maxStock: r.max_stock,
-      status: r.status,
-    }));
-  }, [apiEnabled, kanbanApiData, kanbanRows]);
-
-  const globalWorkingDaysRowsSource = useMemo<GlobalWorkingDaysRow[]>(() => {
-    if (!apiEnabled) return globalWorkingDaysRows;
-    return (globalApiData ?? []).map((r) => ({
-      id: r.id,
-      period: r.period,
-      workingDays: r.working_days,
-      createdDate: "-",
-    }));
-  }, [apiEnabled, globalApiData, globalWorkingDaysRows]);
-
-  const processRowsSource = useMemo<ProcessRow[]>(() => {
-    if (!apiEnabled) return processRows;
-    return (processApiData ?? []).map((r) => ({
-      id: r.id,
-      processCode: r.process_code,
-      processName: r.process_name,
-      category: r.category,
-      sequence: r.sequence,
-      status: r.status,
-    }));
-  }, [apiEnabled, processApiData, processRows]);
-
-  const machinePatternRowsSource = useMemo<MachinePatternRow[]>(() => {
-    if (!apiEnabled) return machinePatternRows;
-    return (machineApiData ?? []).map((r) => ({
-      id: r.id,
-      patternName: r.pattern_name,
-      machineCount: r.machine_count,
-      operatingHours: r.operating_hours,
-      status: r.status,
-    }));
-  }, [apiEnabled, machineApiData, machinePatternRows]);
-
   const [machineTab, setMachineTab] = useState<"pattern" | "fast-slow">("pattern");
 
   const [detailOpen, setDetailOpen] = useState(false);
@@ -924,9 +612,6 @@ export default function SystemSettingsPage() {
 
   const [safetyDetailOpen, setSafetyDetailOpen] = useState(false);
   const [safetyDetailRow, setSafetyDetailRow] = useState<SafetyStockRow | null>(null);
-
-  const [stockdaysDetailOpen, setStockdaysDetailOpen] = useState(false);
-  const [stockdaysDetailRow, setStockdaysDetailRow] = useState<StockdaysRow | null>(null);
 
   const [typeParameterDetailOpen, setTypeParameterDetailOpen] = useState(false);
   const [typeParameterDetailRow, setTypeParameterDetailRow] = useState<TypeParameterRow | null>(
@@ -969,11 +654,6 @@ export default function SystemSettingsPage() {
   const [safetyEditingRow, setSafetyEditingRow] = useState<SafetyStockRow | null>(null);
   const [safetyEditMode, setSafetyEditMode] = useState<"create" | "edit">("edit");
   const [safetyForm] = Form.useForm<SafetyStockFormValues>();
-
-  const [stockdaysEditOpen, setStockdaysEditOpen] = useState(false);
-  const [stockdaysEditingRow, setStockdaysEditingRow] = useState<StockdaysRow | null>(null);
-  const [stockdaysEditMode, setStockdaysEditMode] = useState<"create" | "edit">("edit");
-  const [stockdaysForm] = Form.useForm<StockdaysFormValues>();
 
   const [typeParameterEditOpen, setTypeParameterEditOpen] = useState(false);
   const [typeParameterEditingRow, setTypeParameterEditingRow] = useState<TypeParameterRow | null>(
@@ -1042,9 +722,6 @@ export default function SystemSettingsPage() {
   const [safetyDeleteOpen, setSafetyDeleteOpen] = useState(false);
   const [safetyDeletingRow, setSafetyDeletingRow] = useState<SafetyStockRow | null>(null);
 
-  const [stockdaysDeleteOpen, setStockdaysDeleteOpen] = useState(false);
-  const [stockdaysDeletingRow, setStockdaysDeletingRow] = useState<StockdaysRow | null>(null);
-
   const [typeParameterDeleteOpen, setTypeParameterDeleteOpen] = useState(false);
   const [typeParameterDeletingRow, setTypeParameterDeletingRow] = useState<TypeParameterRow | null>(
     null
@@ -1079,7 +756,7 @@ export default function SystemSettingsPage() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return rowsSource
+    return rows
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -1088,17 +765,17 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, rowsSource, typeFilter]);
+  }, [query, rows, typeFilter]);
 
   const filteredRoles = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return roleRowsSource;
-    return roleRowsSource.filter((r) => r.roleName.toLowerCase().includes(q));
-  }, [query, roleRowsSource]);
+    if (!q) return roleRows;
+    return roleRows.filter((r) => r.roleName.toLowerCase().includes(q));
+  }, [query, roleRows]);
 
   const filteredSafety = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return safetyRowsSource
+    return safetyRows
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -1107,11 +784,11 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, safetyRowsSource, typeFilter]);
+  }, [query, safetyRows, typeFilter]);
 
   const filteredStockdays = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return stockdaysRowsSource
+    return stockdaysRows
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -1120,11 +797,11 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, stockdaysRowsSource, typeFilter]);
+  }, [query, stockdaysRows, typeFilter]);
 
   const filteredTypeParameters = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return typeParameterRowsSource
+    return typeParameterRows
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -1133,21 +810,21 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, typeParameterRowsSource, typeFilter]);
+  }, [query, typeParameterRows, typeFilter]);
 
   const filteredUom = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return uomRowsSource
+    return uomRows
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
         return [r.code, r.name, r.category].join(" ").toLowerCase().includes(q);
       });
-  }, [query, typeFilter, uomRowsSource]);
+  }, [query, uomRows, typeFilter]);
 
   const filteredPurchaseOrder = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return purchaseOrderRowsSource
+    return purchaseOrderRows
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -1156,11 +833,11 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [purchaseOrderRowsSource, query, typeFilter]);
+  }, [query, purchaseOrderRows, typeFilter]);
 
   const filteredApprovalWorkflow = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return approvalWorkflowRowsSource
+    return approvalWorkflowRows
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -1175,11 +852,11 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [approvalWorkflowRowsSource, query, typeFilter]);
+  }, [query, approvalWorkflowRows, typeFilter]);
 
   const filteredKanban = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return kanbanRowsSource
+    return kanbanRows
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -1188,19 +865,19 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [kanbanRowsSource, query, typeFilter]);
+  }, [query, kanbanRows, typeFilter]);
 
   const filteredGlobalWorkingDays = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return globalWorkingDaysRowsSource.filter((r) => {
+    return globalWorkingDaysRows.filter((r) => {
       if (!q) return true;
       return r.period.toLowerCase().includes(q);
     });
-  }, [globalWorkingDaysRowsSource, query]);
+  }, [query, globalWorkingDaysRows]);
 
   const filteredProcess = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return processRowsSource
+    return processRows
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -1209,27 +886,37 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [processRowsSource, query, typeFilter]);
+  }, [query, processRows, typeFilter]);
 
   const filteredMachinePattern = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return machinePatternRowsSource
+    return machinePatternRows
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
         return r.patternName.toLowerCase().includes(q);
       });
-  }, [machinePatternRowsSource, query, typeFilter]);
+  }, [query, machinePatternRows, typeFilter]);
 
   const openCreate = () => {
     setEditMode("create");
     setEditingRow(null);
     form.setFieldsValue({
       status: "Active",
-      team: "-",
-      permissions: "-",
     });
     setEditOpen(true);
+  };
+
+  const openCreateSafety = () => {
+    setSafetyEditMode("create");
+    setSafetyEditingRow(null);
+    safetyForm.resetFields();
+    safetyForm.setFieldsValue({
+      parameter: "PRL/Working days * days",
+      constanta: 7,
+      status: "Active",
+    });
+    setSafetyEditOpen(true);
   };
 
   const openCreateRole = () => {
@@ -1244,9 +931,9 @@ export default function SystemSettingsPage() {
       empId: row.empId,
       department: row.department,
       role: row.role,
-      team: apiEnabled ? "-" : row.team,
-      permissions: apiEnabled ? "-" : row.permissions.join(", "),
-      status: apiEnabled ? "Active" : row.status,
+      team: row.team,
+      permissions: row.permissions.join(", "),
+      status: row.status,
     });
     setEditOpen(true);
   };
@@ -1271,18 +958,6 @@ export default function SystemSettingsPage() {
     setSafetyEditOpen(true);
   };
 
-  const openEditStockdays = (row: StockdaysRow) => {
-    setStockdaysEditMode("edit");
-    setStockdaysEditingRow(row);
-    stockdaysForm.setFieldsValue({
-      inventoryType: row.inventoryType,
-      parameter: row.parameter,
-      constanta: row.constanta,
-      status: row.status,
-    });
-    setStockdaysEditOpen(true);
-  };
-
   const openEditTypeParameter = (row: TypeParameterRow) => {
     setTypeParameterEditMode("edit");
     setTypeParameterEditingRow(row);
@@ -1295,6 +970,16 @@ export default function SystemSettingsPage() {
     setTypeParameterEditOpen(true);
   };
 
+  const openCreateUom = () => {
+    setUomEditMode("create");
+    setUomEditingRow(null);
+    uomForm.resetFields();
+    uomForm.setFieldsValue({
+      status: "Active",
+    });
+    setUomEditOpen(true);
+  };
+
   const openEditUom = (row: UomRow) => {
     setUomEditMode("edit");
     setUomEditingRow(row);
@@ -1305,6 +990,20 @@ export default function SystemSettingsPage() {
       status: row.status,
     });
     setUomEditOpen(true);
+  };
+
+  const openCreatePurchaseOrder = () => {
+    setPurchaseOrderEditMode("create");
+    setPurchaseOrderEditingRow(null);
+    purchaseOrderForm.resetFields();
+    purchaseOrderForm.setFieldsValue({
+      materialType: "Raw Material",
+      minOrderQty: 1000,
+      maxSplitLines: 3,
+      splitRule: "By Supplier Capacity",
+      status: "Active",
+    });
+    setPurchaseOrderEditOpen(true);
   };
 
   const openEditPurchaseOrder = (row: PurchaseOrderRow) => {
@@ -1320,6 +1019,17 @@ export default function SystemSettingsPage() {
     setPurchaseOrderEditOpen(true);
   };
 
+  const openCreateApprovalWorkflow = () => {
+    setApprovalWorkflowEditMode("create");
+    setApprovalWorkflowEditingRow(null);
+    approvalWorkflowForm.resetFields();
+    approvalWorkflowForm.setFieldsValue({
+      status: "Active",
+      level4Role: "-",
+    });
+    setApprovalWorkflowEditOpen(true);
+  };
+
   const openEditApprovalWorkflow = (row: ApprovalWorkflowRow) => {
     setApprovalWorkflowEditMode("edit");
     setApprovalWorkflowEditingRow(row);
@@ -1332,6 +1042,49 @@ export default function SystemSettingsPage() {
       status: row.status,
     });
     setApprovalWorkflowEditOpen(true);
+  };
+
+  const openCreateKanban = () => {
+    setKanbanEditMode("create");
+    setKanbanEditingRow(null);
+    kanbanForm.resetFields();
+    kanbanForm.setFieldsValue({
+      status: "Active",
+      kanbanQty: 50,
+      minStock: 100,
+      maxStock: 500,
+    });
+    setKanbanEditOpen(true);
+  };
+
+  const openCreateGlobalWorkingDays = () => {
+    setGlobalWorkingDaysEditMode("create");
+    setGlobalWorkingDaysEditingRow(null);
+    globalWorkingDaysForm.resetFields();
+    globalWorkingDaysForm.setFieldsValue({
+      workingDays: 22,
+    });
+    setGlobalWorkingDaysEditOpen(true);
+  };
+
+  const openCreateProcess = () => {
+    setProcessEditMode("create");
+    setProcessEditingRow(null);
+    processForm.resetFields();
+    processForm.setFieldsValue({ status: "Active" });
+    setProcessEditOpen(true);
+  };
+
+  const openCreateMachinePattern = () => {
+    setMachinePatternEditMode("create");
+    setMachinePatternEditingRow(null);
+    machinePatternForm.resetFields();
+    machinePatternForm.setFieldsValue({
+      status: "Active",
+      machineCount: 10,
+      operatingHours: 8,
+    });
+    setMachinePatternEditOpen(true);
   };
 
   const openEditKanban = (row: KanbanRow) => {
@@ -1395,12 +1148,6 @@ export default function SystemSettingsPage() {
     safetyForm.resetFields();
   };
 
-  const closeStockdaysEdit = () => {
-    setStockdaysEditOpen(false);
-    setStockdaysEditingRow(null);
-    stockdaysForm.resetFields();
-  };
-
   const closeTypeParameterEdit = () => {
     setTypeParameterEditOpen(false);
     setTypeParameterEditingRow(null);
@@ -1452,36 +1199,6 @@ export default function SystemSettingsPage() {
   const saveEdit = async () => {
     const values = await form.validateFields();
 
-    if (apiEnabled) {
-      if (editMode !== "edit" || !editingRow) {
-        message.error("Edit via Create page when API is enabled");
-        return;
-      }
-
-      const record = accessControlById.get(editingRow.id);
-      const resolvedRoleId =
-        roleIdByName.get(values.role) ?? record?.role_id ?? String(values.role || "");
-
-      try {
-        await updateAccessControlMatrix({
-          id: editingRow.id,
-          body: {
-            full_name: values.name,
-            employee_id: values.empId,
-            department: values.department,
-            role_id: resolvedRoleId,
-          },
-        }).unwrap();
-        message.success("Updated");
-        closeEdit();
-        refetchAccessControl();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to update"));
-      }
-
-      return;
-    }
-
     const next: ParameterRow = {
       id: values.empId,
       name: values.name,
@@ -1509,29 +1226,6 @@ export default function SystemSettingsPage() {
   const saveSafetyEdit = async () => {
     const values = await safetyForm.validateFields();
 
-    if (apiEnabled) {
-      if (safetyEditMode !== "edit" || !safetyEditingRow) {
-        message.error("Create via Safety Stock create page when API is enabled");
-        return;
-      }
-      try {
-        await updateSafetyStock({
-          id: safetyEditingRow.id,
-          body: {
-            inventory_type: values.inventoryType,
-            calculation_type: values.parameter,
-            constanta: Number(values.constanta ?? 0),
-          },
-        }).unwrap();
-        message.success("Updated");
-        closeSafetyEdit();
-        refetchSafety();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to update"));
-      }
-      return;
-    }
-
     const next: SafetyStockRow = {
       id:
         safetyEditMode === "create"
@@ -1552,78 +1246,8 @@ export default function SystemSettingsPage() {
     closeSafetyEdit();
   };
 
-  const saveStockdaysEdit = async () => {
-    const values = await stockdaysForm.validateFields();
-
-    if (apiEnabled) {
-      if (stockdaysEditMode !== "edit" || !stockdaysEditingRow) {
-        message.error("Create via Stockdays create page when API is enabled");
-        return;
-      }
-      try {
-        await updateStockdays({
-          id: stockdaysEditingRow.id,
-          body: {
-            inventory_type: values.inventoryType,
-            calculation_type: values.parameter,
-            constanta: Number(values.constanta ?? 0),
-          },
-        }).unwrap();
-        message.success("Updated");
-        closeStockdaysEdit();
-        refetchStockdays();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to update"));
-      }
-      return;
-    }
-
-    const next: StockdaysRow = {
-      id:
-        stockdaysEditMode === "create"
-          ? `SDP-${String(stockdaysRows.length + 1).padStart(3, "0")}`
-          : (stockdaysEditingRow?.id ?? `SDP-${String(stockdaysRows.length + 1).padStart(3, "0")}`),
-      inventoryType: values.inventoryType,
-      parameter: values.parameter,
-      constanta: Number(values.constanta ?? 0),
-      status: values.status,
-    };
-
-    if (stockdaysEditMode === "create") {
-      setStockdaysRows((prev) => [next, ...prev]);
-    } else {
-      setStockdaysRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
-    }
-
-    closeStockdaysEdit();
-  };
-
   const saveTypeParameterEdit = async () => {
     const values = await typeParameterForm.validateFields();
-
-    if (apiEnabled) {
-      if (typeParameterEditMode !== "edit" || !typeParameterEditingRow) {
-        message.error("Create via Type Parameters create page when API is enabled");
-        return;
-      }
-      try {
-        await updateTypeParameter({
-          id: typeParameterEditingRow.id,
-          body: {
-            type_code: values.typeCode,
-            type_name: values.typeName,
-            description: values.description,
-            status: values.status,
-          },
-        }).unwrap();
-        message.success("Updated");
-        closeTypeParameterEdit();
-        refetchTypeParameters();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to update"));
-      }
-      return;
-    }
 
     const next: TypeParameterRow = {
       id:
@@ -1649,29 +1273,6 @@ export default function SystemSettingsPage() {
   const saveUomEdit = async () => {
     const values = await uomForm.validateFields();
 
-    if (apiEnabled) {
-      if (uomEditMode !== "edit" || !uomEditingRow) {
-        message.error("Create via UoM create page when API is enabled");
-        return;
-      }
-      try {
-        await updateUom({
-          id: uomEditingRow.id,
-          body: {
-            code: String(values.code || "").toUpperCase(),
-            name: values.name,
-            category: values.category,
-          },
-        }).unwrap();
-        message.success("Updated");
-        closeUomEdit();
-        refetchUom();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to update"));
-      }
-      return;
-    }
-
     const next: UomRow = {
       id:
         uomEditMode === "create"
@@ -1694,30 +1295,6 @@ export default function SystemSettingsPage() {
 
   const savePurchaseOrderEdit = async () => {
     const values = await purchaseOrderForm.validateFields();
-
-    if (apiEnabled) {
-      if (purchaseOrderEditMode !== "edit" || !purchaseOrderEditingRow) {
-        message.error("Create via PO Split create page when API is enabled");
-        return;
-      }
-      try {
-        await updatePoSplit({
-          id: purchaseOrderEditingRow.id,
-          body: {
-            material_type: values.materialType,
-            min_order_qty: Number(values.minOrderQty ?? 0),
-            max_split_lines: Number(values.maxSplitLines ?? 0),
-            split_rule: values.splitRule,
-          },
-        }).unwrap();
-        message.success("Updated");
-        closePurchaseOrderEdit();
-        refetchPoSplit();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to update"));
-      }
-      return;
-    }
 
     const next: PurchaseOrderRow = {
       id:
@@ -1743,31 +1320,6 @@ export default function SystemSettingsPage() {
 
   const saveApprovalWorkflowEdit = async () => {
     const values = await approvalWorkflowForm.validateFields();
-
-    if (apiEnabled) {
-      if (approvalWorkflowEditMode !== "edit" || !approvalWorkflowEditingRow) {
-        message.error("Create via Approval Workflow create page when API is enabled");
-        return;
-      }
-      try {
-        await updateApprovalWorkflow({
-          id: approvalWorkflowEditingRow.id,
-          body: {
-            action_name: values.menuAction,
-            level_1_role: values.level1Role,
-            level_2_role: values.level2Role,
-            level_3_role: values.level3Role,
-            level_4_role: values.level4Role,
-          },
-        }).unwrap();
-        message.success("Updated");
-        closeApprovalWorkflowEdit();
-        refetchApproval();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to update"));
-      }
-      return;
-    }
 
     const next: ApprovalWorkflowRow = {
       id:
@@ -1795,31 +1347,6 @@ export default function SystemSettingsPage() {
   const saveKanbanEdit = async () => {
     const values = await kanbanForm.validateFields();
 
-    if (apiEnabled) {
-      if (kanbanEditMode !== "edit" || !kanbanEditingRow) {
-        message.error("Create via Kanban create page when API is enabled");
-        return;
-      }
-      try {
-        await updateKanbanStandard({
-          id: kanbanEditingRow.id,
-          body: {
-            item_name: values.productName,
-            item_uniq_code: values.productCode,
-            kanban_qty: Number(values.kanbanQty ?? 0),
-            min_stock: Number(values.minStock ?? 0),
-            max_stock: Number(values.maxStock ?? 0),
-          },
-        }).unwrap();
-        message.success("Updated");
-        closeKanbanEdit();
-        refetchKanban();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to update"));
-      }
-      return;
-    }
-
     const next: KanbanRow = {
       id:
         kanbanEditMode === "create"
@@ -1844,28 +1371,6 @@ export default function SystemSettingsPage() {
 
   const saveGlobalWorkingDaysEdit = async () => {
     const values = await globalWorkingDaysForm.validateFields();
-
-    if (apiEnabled) {
-      if (globalWorkingDaysEditMode !== "edit" || !globalWorkingDaysEditingRow) {
-        message.error("Create via Global create page when API is enabled");
-        return;
-      }
-      try {
-        await updateGlobalWorkingDays({
-          id: globalWorkingDaysEditingRow.id,
-          body: {
-            period: values.period,
-            working_days: Number(values.workingDays ?? 0),
-          },
-        }).unwrap();
-        message.success("Updated");
-        closeGlobalWorkingDaysEdit();
-        refetchGlobal();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to update"));
-      }
-      return;
-    }
 
     const createdDate = new Date().toLocaleDateString("en-US");
 
@@ -1895,30 +1400,6 @@ export default function SystemSettingsPage() {
   const saveProcessEdit = async () => {
     const values = await processForm.validateFields();
 
-    if (apiEnabled) {
-      if (processEditMode !== "edit" || !processEditingRow) {
-        message.error("Create via Process create page when API is enabled");
-        return;
-      }
-      try {
-        await updateProcess({
-          id: processEditingRow.id,
-          body: {
-            process_code: values.processCode,
-            process_name: values.processName,
-            category: values.category,
-            sequence: Number(values.sequence ?? 0),
-          },
-        }).unwrap();
-        message.success("Updated");
-        closeProcessEdit();
-        refetchProcess();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to update"));
-      }
-      return;
-    }
-
     const next: ProcessRow = {
       id:
         processEditMode === "create"
@@ -1942,29 +1423,6 @@ export default function SystemSettingsPage() {
 
   const saveMachinePatternEdit = async () => {
     const values = await machinePatternForm.validateFields();
-
-    if (apiEnabled) {
-      if (machinePatternEditMode !== "edit" || !machinePatternEditingRow) {
-        message.error("Create via Machine create page when API is enabled");
-        return;
-      }
-      try {
-        await updateMachinePattern({
-          id: machinePatternEditingRow.id,
-          body: {
-            pattern_name: values.patternName,
-            machine_count: Number(values.machineCount ?? 0),
-            operating_hours: Number(values.operatingHours ?? 0),
-          },
-        }).unwrap();
-        message.success("Updated");
-        closeMachinePatternEdit();
-        refetchMachine();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to update"));
-      }
-      return;
-    }
 
     const next: MachinePatternRow = {
       id:
@@ -1995,11 +1453,6 @@ export default function SystemSettingsPage() {
   const openSafetyDetail = (row: SafetyStockRow) => {
     setSafetyDetailRow(row);
     setSafetyDetailOpen(true);
-  };
-
-  const openStockdaysDetail = (row: StockdaysRow) => {
-    setStockdaysDetailRow(row);
-    setStockdaysDetailOpen(true);
   };
 
   const openTypeParameterDetail = (row: TypeParameterRow) => {
@@ -2060,11 +1513,6 @@ export default function SystemSettingsPage() {
     setSafetyDetailRow(null);
   };
 
-  const closeStockdaysDetail = () => {
-    setStockdaysDetailOpen(false);
-    setStockdaysDetailRow(null);
-  };
-
   const closeTypeParameterDetail = () => {
     setTypeParameterDetailOpen(false);
     setTypeParameterDetailRow(null);
@@ -2114,11 +1562,6 @@ export default function SystemSettingsPage() {
   const openSafetyDelete = (row: SafetyStockRow) => {
     setSafetyDeletingRow(row);
     setSafetyDeleteOpen(true);
-  };
-
-  const openStockdaysDelete = (row: StockdaysRow) => {
-    setStockdaysDeletingRow(row);
-    setStockdaysDeleteOpen(true);
   };
 
   const openTypeParameterDelete = (row: TypeParameterRow) => {
@@ -2181,11 +1624,6 @@ export default function SystemSettingsPage() {
     setSafetyDeletingRow(null);
   };
 
-  const closeStockdaysDelete = () => {
-    setStockdaysDeleteOpen(false);
-    setStockdaysDeletingRow(null);
-  };
-
   const closeTypeParameterDelete = () => {
     setTypeParameterDeleteOpen(false);
     setTypeParameterDeletingRow(null);
@@ -2226,230 +1664,70 @@ export default function SystemSettingsPage() {
     setMachinePatternDeletingRow(null);
   };
 
-  const confirmDelete = async () => {
+  const confirmDelete = () => {
     if (!deletingRow) return;
-
-    if (apiEnabled) {
-      try {
-        await deleteAccessControlMatrix(deletingRow.id).unwrap();
-        message.success("Deleted");
-        closeDelete();
-        refetchAccessControl();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to delete"));
-      }
-      return;
-    }
-
     setRows((prev) => prev.filter((r) => r.id !== deletingRow.id));
     closeDelete();
   };
 
-  const confirmRoleDelete = async () => {
+  const confirmRoleDelete = () => {
     if (!roleDeletingRow) return;
-
-    if (apiEnabled) {
-      try {
-        await deleteRole(roleDeletingRow.id).unwrap();
-        message.success("Deleted");
-        closeRoleDelete();
-        refetchRoles();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to delete"));
-      }
-      return;
-    }
-
     setRoleRows((prev) => prev.filter((r) => r.id !== roleDeletingRow.id));
     closeRoleDelete();
   };
 
-  const confirmSafetyDelete = async () => {
+  const confirmSafetyDelete = () => {
     if (!safetyDeletingRow) return;
-
-    if (apiEnabled) {
-      try {
-        await deleteSafetyStock(safetyDeletingRow.id).unwrap();
-        message.success("Deleted");
-        closeSafetyDelete();
-        refetchSafety();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to delete"));
-      }
-      return;
-    }
-
     setSafetyRows((prev) => prev.filter((r) => r.id !== safetyDeletingRow.id));
     closeSafetyDelete();
   };
 
-  const confirmStockdaysDelete = async () => {
-    if (!stockdaysDeletingRow) return;
-
-    if (apiEnabled) {
-      try {
-        await deleteStockdays(stockdaysDeletingRow.id).unwrap();
-        message.success("Deleted");
-        closeStockdaysDelete();
-        refetchStockdays();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to delete"));
-      }
-      return;
-    }
-
-    setStockdaysRows((prev) => prev.filter((r) => r.id !== stockdaysDeletingRow.id));
-    closeStockdaysDelete();
-  };
-
-  const confirmTypeParameterDelete = async () => {
+  const confirmTypeParameterDelete = () => {
     if (!typeParameterDeletingRow) return;
-
-    if (apiEnabled) {
-      try {
-        await deleteTypeParameter(typeParameterDeletingRow.id).unwrap();
-        message.success("Deleted");
-        closeTypeParameterDelete();
-        refetchTypeParameters();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to delete"));
-      }
-      return;
-    }
-
-    setTypeParameterRows((prev) => prev.filter((r) => r.id !== typeParameterDeletingRow.id));
+    setTypeParameterRows((prev) =>
+      prev.filter((r) => r.id !== typeParameterDeletingRow.id)
+    );
     closeTypeParameterDelete();
   };
 
-  const confirmUomDelete = async () => {
+  const confirmUomDelete = () => {
     if (!uomDeletingRow) return;
-
-    if (apiEnabled) {
-      try {
-        await deleteUom(uomDeletingRow.id).unwrap();
-        message.success("Deleted");
-        closeUomDelete();
-        refetchUom();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to delete"));
-      }
-      return;
-    }
-
     setUomRows((prev) => prev.filter((r) => r.id !== uomDeletingRow.id));
     closeUomDelete();
   };
 
-  const confirmPurchaseOrderDelete = async () => {
+  const confirmPurchaseOrderDelete = () => {
     if (!purchaseOrderDeletingRow) return;
-
-    if (apiEnabled) {
-      try {
-        await deletePoSplit(purchaseOrderDeletingRow.id).unwrap();
-        message.success("Deleted");
-        closePurchaseOrderDelete();
-        refetchPoSplit();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to delete"));
-      }
-      return;
-    }
-
     setPurchaseOrderRows((prev) => prev.filter((r) => r.id !== purchaseOrderDeletingRow.id));
     closePurchaseOrderDelete();
   };
 
-  const confirmApprovalWorkflowDelete = async () => {
+  const confirmApprovalWorkflowDelete = () => {
     if (!approvalWorkflowDeletingRow) return;
-
-    if (apiEnabled) {
-      try {
-        await deleteApprovalWorkflow(approvalWorkflowDeletingRow.id).unwrap();
-        message.success("Deleted");
-        closeApprovalWorkflowDelete();
-        refetchApproval();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to delete"));
-      }
-      return;
-    }
-
     setApprovalWorkflowRows((prev) => prev.filter((r) => r.id !== approvalWorkflowDeletingRow.id));
     closeApprovalWorkflowDelete();
   };
 
-  const confirmKanbanDelete = async () => {
+  const confirmKanbanDelete = () => {
     if (!kanbanDeletingRow) return;
-
-    if (apiEnabled) {
-      try {
-        await deleteKanbanStandard(kanbanDeletingRow.id).unwrap();
-        message.success("Deleted");
-        closeKanbanDelete();
-        refetchKanban();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to delete"));
-      }
-      return;
-    }
-
     setKanbanRows((prev) => prev.filter((r) => r.id !== kanbanDeletingRow.id));
     closeKanbanDelete();
   };
 
-  const confirmGlobalWorkingDaysDelete = async () => {
+  const confirmGlobalWorkingDaysDelete = () => {
     if (!globalWorkingDaysDeletingRow) return;
-
-    if (apiEnabled) {
-      try {
-        await deleteGlobalWorkingDays(globalWorkingDaysDeletingRow.id).unwrap();
-        message.success("Deleted");
-        closeGlobalWorkingDaysDelete();
-        refetchGlobal();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to delete"));
-      }
-      return;
-    }
-
     setGlobalWorkingDaysRows((prev) => prev.filter((r) => r.id !== globalWorkingDaysDeletingRow.id));
     closeGlobalWorkingDaysDelete();
   };
 
-  const confirmProcessDelete = async () => {
+  const confirmProcessDelete = () => {
     if (!processDeletingRow) return;
-
-    if (apiEnabled) {
-      try {
-        await deleteProcess(processDeletingRow.id).unwrap();
-        message.success("Deleted");
-        closeProcessDelete();
-        refetchProcess();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to delete"));
-      }
-      return;
-    }
-
     setProcessRows((prev) => prev.filter((r) => r.id !== processDeletingRow.id));
     closeProcessDelete();
   };
 
-  const confirmMachinePatternDelete = async () => {
+  const confirmMachinePatternDelete = () => {
     if (!machinePatternDeletingRow) return;
-
-    if (apiEnabled) {
-      try {
-        await deleteMachinePattern(machinePatternDeletingRow.id).unwrap();
-        message.success("Deleted");
-        closeMachinePatternDelete();
-        refetchMachine();
-      } catch (err: unknown) {
-        message.error(getApiErrorMessage(err, "Failed to delete"));
-      }
-      return;
-    }
-
     setMachinePatternRows((prev) => prev.filter((r) => r.id !== machinePatternDeletingRow.id));
     closeMachinePatternDelete();
   };
@@ -2672,11 +1950,11 @@ export default function SystemSettingsPage() {
       key: "actions",
       width: 120,
       fixed: "right",
-      render: (_: unknown, r: StockdaysRow) => (
+      render: () => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openStockdaysDetail(r)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditStockdays(r)} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openStockdaysDelete(r)} />
+          <Button type="text" icon={<EyeOutlined />} />
+          <Button type="text" icon={<EditOutlined />} />
+          <Button type="text" danger icon={<DeleteOutlined />} />
         </div>
       ),
     },
@@ -3180,20 +2458,6 @@ export default function SystemSettingsPage() {
       </Modal>
 
       <Modal
-        title="Delete stockdays parameter?"
-        open={stockdaysDeleteOpen}
-        okText="Delete"
-        okButtonProps={{ danger: true }}
-        cancelText="Cancel"
-        onOk={confirmStockdaysDelete}
-        onCancel={closeStockdaysDelete}
-      >
-        <div className="text-gray-700">
-          This will remove <span className="font-semibold">{stockdaysDeletingRow?.inventoryType}</span>.
-        </div>
-      </Modal>
-
-      <Modal
         title="Delete type parameter?"
         open={typeParameterDeleteOpen}
         okText="Delete"
@@ -3370,38 +2634,6 @@ export default function SystemSettingsPage() {
               <div>
                 <div className="text-xs text-gray-500">Status</div>
                 <div className="font-medium text-gray-900">{safetyDetailRow.status}</div>
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      <Modal
-        title="Stockdays Parameter Details"
-        open={stockdaysDetailOpen}
-        footer={null}
-        onCancel={closeStockdaysDetail}
-        width={520}
-        destroyOnClose
-      >
-        {stockdaysDetailRow && (
-          <div className="space-y-3">
-            <div>
-              <div className="text-xs text-gray-500">Inventory Type</div>
-              <div className="font-medium text-gray-900">{stockdaysDetailRow.inventoryType}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-500">Parameter</div>
-              <div className="font-medium text-gray-900">{stockdaysDetailRow.parameter}</div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <div className="text-xs text-gray-500">Constanta</div>
-                <div className="font-medium text-gray-900">{stockdaysDetailRow.constanta}</div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-500">Status</div>
-                <div className="font-medium text-gray-900">{stockdaysDetailRow.status}</div>
               </div>
             </div>
           </div>
@@ -3702,7 +2934,7 @@ export default function SystemSettingsPage() {
           </Form.Item>
 
           <Form.Item label="EMP ID" name="empId" rules={[{ required: true }]}>
-            <Input placeholder="EMP-001" disabled={apiEnabled} />
+            <Input placeholder="EMP-001" />
           </Form.Item>
 
           <Form.Item label="Department" name="department" rules={[{ required: true }]}>
@@ -3710,15 +2942,7 @@ export default function SystemSettingsPage() {
           </Form.Item>
 
           <Form.Item label="Role" name="role" rules={[{ required: true }]}>
-            {apiEnabled ? (
-              <Select
-                showSearch
-                placeholder="Select role"
-                options={roleNameOptions}
-              />
-            ) : (
-              <Input placeholder="Role" />
-            )}
+            <Input placeholder="Role" />
           </Form.Item>
 
           <Form.Item label="Team" name="team" rules={[{ required: true }]}>
@@ -3786,54 +3010,6 @@ export default function SystemSettingsPage() {
             name="constanta"
             rules={[{ required: true }]}
           >
-            <InputNumber className="w-full" min={0} placeholder="7" />
-          </Form.Item>
-
-          <Form.Item label="Status" name="status" rules={[{ required: true }]}>
-            <Select
-              options={[
-                { label: "Active", value: "Active" },
-                { label: "Inactive", value: "Inactive" },
-              ]}
-            />
-          </Form.Item>
-        </Form>
-      </Drawer>
-
-      <Drawer
-        title={stockdaysEditMode === "create" ? "Add Parameter" : "Edit"}
-        placement="right"
-        open={stockdaysEditOpen}
-        onClose={closeStockdaysEdit}
-        width={420}
-        destroyOnClose
-        footer={
-          <div className="flex items-center justify-end gap-2">
-            <Button onClick={closeStockdaysEdit}>Cancel</Button>
-            <Button type="primary" onClick={saveStockdaysEdit}>
-              Save
-            </Button>
-          </div>
-        }
-      >
-        <Form form={stockdaysForm} layout="vertical">
-          <Form.Item label="Inventory Type" name="inventoryType" rules={[{ required: true }]}>
-            <Select
-              placeholder="Select inventory type"
-              options={[
-                { label: "Raw Material", value: "Raw Material" },
-                { label: "Indirect Raw Material", value: "Indirect Raw Material" },
-                { label: "SubCon", value: "SubCon" },
-                { label: "Finished Goods", value: "Finished Goods" },
-              ]}
-            />
-          </Form.Item>
-
-          <Form.Item label="Parameter" name="parameter" rules={[{ required: true }]}>
-            <Input placeholder="Stockdays - DailyUsage = Stock / Daily Usage (Data history)" />
-          </Form.Item>
-
-          <Form.Item label="Constanta" name="constanta" rules={[{ required: true }]}>
             <InputNumber className="w-full" min={0} placeholder="7" />
           </Form.Item>
 
@@ -4425,7 +3601,6 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
-                    loading={apiEnabled && isFetchingRoles}
                   />
                 ) : selectedModuleId === "safety-stock" ? (
                   <Table<SafetyStockRow>
@@ -4434,7 +3609,6 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
-                    loading={apiEnabled && isFetchingSafety}
                   />
                 ) : selectedModuleId === "stockdays" ? (
                   <Table<StockdaysRow>
@@ -4443,7 +3617,6 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
-                    loading={apiEnabled && isFetchingStockdays}
                   />
                 ) : selectedModuleId === "type-parameters" ? (
                   <Table<TypeParameterRow>
@@ -4452,7 +3625,6 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
-                    loading={apiEnabled && isFetchingTypeParameters}
                   />
                 ) : selectedModuleId === "uom-global" ? (
                   <Table<UomRow>
@@ -4461,7 +3633,6 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
-                    loading={apiEnabled && isFetchingUom}
                   />
                 ) : selectedModuleId === "purchase-order" ? (
                   <Table<PurchaseOrderRow>
@@ -4470,7 +3641,6 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
-                    loading={apiEnabled && isFetchingPoSplit}
                   />
                 ) : selectedModuleId === "approval-workflow" ? (
                   <Table<ApprovalWorkflowRow>
@@ -4479,7 +3649,6 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
-                    loading={apiEnabled && isFetchingApproval}
                   />
                 ) : selectedModuleId === "kanban" ? (
                   <Table<KanbanRow>
@@ -4488,7 +3657,6 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
-                    loading={apiEnabled && isFetchingKanban}
                   />
                 ) : selectedModuleId === "global" ? (
                   <Table<GlobalWorkingDaysRow>
@@ -4497,7 +3665,6 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
-                    loading={apiEnabled && isFetchingGlobal}
                   />
                 ) : selectedModuleId === "process" ? (
                   <Table<ProcessRow>
@@ -4506,7 +3673,6 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
-                    loading={apiEnabled && isFetchingProcess}
                   />
                 ) : selectedModuleId === "machine" ? (
                   <Table<MachinePatternRow>
@@ -4515,7 +3681,6 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
-                    loading={apiEnabled && isFetchingMachine}
                   />
                 ) : (
                   <Table<ParameterRow>
@@ -4524,7 +3689,6 @@ export default function SystemSettingsPage() {
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}
-                    loading={apiEnabled && isFetchingAccessControl}
                   />
                 )}
               </div>

@@ -22,6 +22,15 @@ import {
   SearchOutlined,
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex, type BomUniqIndex } from "@/lib/utils/bomUniq";
+import {
+  type RmProcessingWorkOrderRecord,
+  type WorkOrderRecord,
+  useGetRmProcessingWorkOrdersQuery,
+  useGetWorkOrdersQuery,
+} from "@/lib/api/work-orders/api";
 
 const { TextArea } = Input;
 
@@ -46,8 +55,9 @@ type UniqRow = {
 
 type WorkOrderRow = {
   key: string;
+  id?: string;
   woNumber: string;
-  type: "New" | "Assembly" | "Rework";
+  type: "New" | "Assembly" | "Rework" | "Additional";
   status: WorkOrderStatus;
   approvalStatus: ApprovalStatus;
   createDate: string;
@@ -57,6 +67,19 @@ type WorkOrderRow = {
   uniqClosed: number;
   agingDays: number;
   uniqDetails: UniqRow[];
+};
+
+type RmProcessingRow = {
+  key: string;
+  sourceMaterialUniq: string;
+  targetMaterialUniq: string;
+  partName: string;
+  modelGrade: string;
+  inputQty: number;
+  outputQty: number;
+  dateIssued: string;
+  remarks: string;
+  status: string;
 };
 
 type RobotTaskRow = {
@@ -85,6 +108,7 @@ const approvalTag = (s: ApprovalStatus) => {
 
 const typeTag = (t: WorkOrderRow["type"]) => {
   if (t === "New") return <Tag color="default" className="!rounded-md">New</Tag>;
+  if (t === "Additional") return <Tag color="purple" className="!rounded-md">Additional</Tag>;
   if (t === "Assembly") return <Tag color="blue" className="!rounded-md">Assembly</Tag>;
   return <Tag color="red" className="!rounded-md">Rework</Tag>;
 };
@@ -251,12 +275,96 @@ const INITIAL_WORK_ORDERS: WorkOrderRow[] = [
   },
 ];
 
+const INITIAL_RM_PROCESSING_ROWS: RmProcessingRow[] = [];
+
+const formatDisplayDate = (value?: string) => {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString("en-US");
+};
+
+const normalizeType = (value?: string): WorkOrderRow["type"] => {
+  const lower = String(value ?? "").trim().toLowerCase();
+  if (lower === "assembly") return "Assembly";
+  if (lower === "rework") return "Rework";
+  if (lower === "additional") return "Additional";
+  return "New";
+};
+
+const normalizeStatus = (value?: string): WorkOrderStatus => {
+  const lower = String(value ?? "").trim().toLowerCase();
+  if (lower.includes("complete")) return "Completed";
+  if (lower.includes("progress") || lower.includes("process")) return "In Progress";
+  return "Pending";
+};
+
+const normalizeApproval = (value?: string): ApprovalStatus => {
+  const lower = String(value ?? "").trim().toLowerCase();
+  if (lower.includes("reject")) return "Rejected";
+  if (lower.includes("approve")) return "Approved";
+  return "Pending Approval";
+};
+
+const normalizeUniqItemStatus = (value?: string): UniqStatus => {
+  const lower = String(value ?? "").trim().toLowerCase();
+  if (lower.includes("close") || lower.includes("complete")) return "Closed";
+  return "In Progress";
+};
+
+const toWorkOrderRow = (record: WorkOrderRecord, bomIndex: BomUniqIndex): WorkOrderRow => {
+  const uniqDetails = record.items.map((item, index) => ({
+    key: item.id || `${record.id}-item-${index}`,
+    uniq: item.item_uniq_code,
+    productName:
+      item.part_name ?? bomIndex.partNameByUniq[item.item_uniq_code] ?? "-",
+    quantity: `${item.quantity} ${item.uom || "pcs"}`,
+    status: normalizeUniqItemStatus(item.status),
+  }));
+
+  const uniqClosed =
+    typeof record.uniq_closed === "number"
+      ? record.uniq_closed
+      : uniqDetails.filter((item) => item.status === "Closed").length;
+
+  return {
+    key: record.id || record.wo_number,
+    id: record.id,
+    woNumber: record.wo_number || "-",
+    type: normalizeType(record.wo_type),
+    status: normalizeStatus(record.status),
+    approvalStatus: normalizeApproval(record.approval_status),
+    createDate: formatDisplayDate(record.created_at),
+    targetDate: formatDisplayDate(record.target_date),
+    operator: record.operator_name || "Not Assigned",
+    uniqTotal:
+      typeof record.uniq_total === "number" ? record.uniq_total : uniqDetails.length,
+    uniqClosed,
+    agingDays: Number(record.aging_days ?? 0),
+    uniqDetails,
+  };
+};
+
+const toRmProcessingRow = (record: RmProcessingWorkOrderRecord): RmProcessingRow => ({
+  key: record.id,
+  sourceMaterialUniq: record.source_material_uniq ?? "-",
+  targetMaterialUniq: record.target_material_uniq ?? "-",
+  partName: record.part_name ?? "-",
+  modelGrade: record.model_grade ?? "-",
+  inputQty: Number(record.input_qty ?? 0),
+  outputQty: Number(record.output_qty ?? 0),
+  dateIssued: formatDisplayDate(record.date_issued),
+  remarks: record.remarks ?? "-",
+  status: record.status ?? "Pending",
+});
+
 export default function WorkOrdersPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>("workOrder");
   const [search, setSearch] = useState("");
+  const apiEnabled = Boolean(apiBaseUrl);
 
-  const [workOrders, setWorkOrders] = useState<WorkOrderRow[]>(INITIAL_WORK_ORDERS);
+  const [mockWorkOrders, setMockWorkOrders] = useState<WorkOrderRow[]>(INITIAL_WORK_ORDERS);
   const [selectedRowKeys, setSelectedRowKeys] = useState<Array<string>>([]);
   const [selectedRows, setSelectedRows] = useState<WorkOrderRow[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -264,6 +372,40 @@ export default function WorkOrdersPage() {
 
   const [bulkWorkOrders] = useState<Array<{ key: string }>>([]);
   const [robotTasks, setRobotTasks] = useState<RobotTaskRow[]>(INITIAL_ROBOT_TASKS);
+  const [mockRmProcessingRows] = useState<RmProcessingRow[]>(INITIAL_RM_PROCESSING_ROWS);
+
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomTreeRes?.data ?? []),
+    [bomTreeRes?.data]
+  );
+  const workOrdersQuery = useGetWorkOrdersQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const rmProcessingQuery = useGetRmProcessingWorkOrdersQuery(undefined, {
+    skip: !apiEnabled,
+  });
+
+  const liveWorkOrders = useMemo(
+    () => workOrdersQuery.data?.map((item) => toWorkOrderRow(item, bomIndex)) ?? [],
+    [bomIndex, workOrdersQuery.data]
+  );
+
+  const workOrders = useMemo(() => {
+    if (apiEnabled && !workOrdersQuery.isError) {
+      return liveWorkOrders;
+    }
+    return mockWorkOrders;
+  }, [apiEnabled, liveWorkOrders, mockWorkOrders, workOrdersQuery.isError]);
+
+  const rmProcessingRows = useMemo(() => {
+    if (apiEnabled && !rmProcessingQuery.isError) {
+      return (rmProcessingQuery.data ?? []).map(toRmProcessingRow);
+    }
+    return mockRmProcessingRows;
+  }, [apiEnabled, mockRmProcessingRows, rmProcessingQuery.data, rmProcessingQuery.isError]);
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -293,8 +435,12 @@ export default function WorkOrdersPage() {
   );
 
   const applyBulk = (nextStatus: ApprovalStatus) => {
+    if (apiEnabled) {
+      message.info("Bulk approval backend belum tersedia untuk Work Order");
+      return;
+    }
     if (!selectedRowKeys.length) return;
-    setWorkOrders((prev) =>
+    setMockWorkOrders((prev) =>
       prev.map((w) =>
         selectedRowKeys.includes(w.key)
           ? {
@@ -379,7 +525,7 @@ export default function WorkOrdersPage() {
       return;
     }
 
-    setWorkOrders((prev) => [
+    setMockWorkOrders((prev) => [
       {
         key: `wo-robot-${Date.now()}`,
         woNumber: row.woNumber,
@@ -667,6 +813,29 @@ export default function WorkOrdersPage() {
     },
   ];
 
+  const rmProcessingColumns: ColumnsType<RmProcessingRow> = [
+    { title: "Source UNIQ", dataIndex: "sourceMaterialUniq", key: "sourceMaterialUniq", width: 140 },
+    { title: "Target UNIQ", dataIndex: "targetMaterialUniq", key: "targetMaterialUniq", width: 140 },
+    { title: "Part Name", dataIndex: "partName", key: "partName", width: 180 },
+    { title: "Model / Grade", dataIndex: "modelGrade", key: "modelGrade", width: 200 },
+    { title: "Input Qty", dataIndex: "inputQty", key: "inputQty", width: 100 },
+    { title: "Output Qty", dataIndex: "outputQty", key: "outputQty", width: 100 },
+    { title: "Date Issued", dataIndex: "dateIssued", key: "dateIssued", width: 120 },
+    {
+      title: "Status",
+      dataIndex: "status",
+      key: "status",
+      width: 120,
+      render: (value: string) => <Tag color="blue" className="!rounded-md">{value}</Tag>,
+    },
+    {
+      title: "Remarks",
+      dataIndex: "remarks",
+      key: "remarks",
+      render: (value: string) => <span className="text-sm text-gray-700">{value}</span>,
+    },
+  ];
+
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
@@ -674,6 +843,11 @@ export default function WorkOrdersPage() {
           <div>
             <div className="text-2xl font-bold text-gray-900">Work Order Management</div>
             <div className="text-sm text-gray-500 mt-1">Create, print, and track work orders with inventory effects and Kanban integration</div>
+            {activeTab === "workOrder" && apiEnabled ? (
+              <div className="text-xs text-gray-400 mt-2">
+                {workOrdersQuery.isFetching ? "Loading data from /api/work-order/list..." : "Live data connected to /api/work-order/list"}
+              </div>
+            ) : null}
           </div>
           <Button className="!rounded-lg" icon={<PrinterOutlined />} onClick={() => message.info("Print Kanban (mock)")}> 
             Print Kanban
@@ -777,13 +951,33 @@ export default function WorkOrdersPage() {
               <span className="font-semibold">Process:</span> Select source RM → Define output semi-RM → Set quantities → Complete processing → Update inventory
             </div>
 
-            <div className="mt-10 flex flex-col items-center justify-center text-center text-gray-500">
-              <div className="h-10 w-10 rounded-xl border border-gray-200 bg-white flex items-center justify-center text-gray-500">
-                <AppstoreOutlined />
+            {apiEnabled ? (
+              <div className="mt-4 text-xs text-gray-400">
+                {rmProcessingQuery.isFetching
+                  ? "Loading data from /api/work-order/rm-processing/..."
+                  : "Live data connected to /api/work-order/rm-processing/"}
               </div>
-              <div className="text-sm font-semibold text-gray-700 mt-3">No RM processing work orders created yet.</div>
-              <div className="text-xs text-gray-400 mt-1">Click “Create RM Processing WO” to start material transformation.</div>
-            </div>
+            ) : null}
+
+            {rmProcessingRows.length ? (
+              <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
+                <Table<RmProcessingRow>
+                  columns={rmProcessingColumns}
+                  dataSource={rmProcessingRows}
+                  rowKey="key"
+                  pagination={false}
+                  scroll={{ x: "max-content" }}
+                />
+              </div>
+            ) : (
+              <div className="mt-10 flex flex-col items-center justify-center text-center text-gray-500">
+                <div className="h-10 w-10 rounded-xl border border-gray-200 bg-white flex items-center justify-center text-gray-500">
+                  <AppstoreOutlined />
+                </div>
+                <div className="text-sm font-semibold text-gray-700 mt-3">No RM processing work orders created yet.</div>
+                <div className="text-xs text-gray-400 mt-1">Click “Create RM Processing WO” to start material transformation.</div>
+              </div>
+            )}
           </div>
         ) : isRobotTaskTab ? (
           <div className="mt-6 rounded-xl border border-gray-100 bg-white p-6">
@@ -845,7 +1039,7 @@ export default function WorkOrdersPage() {
                 {isWorkOrderTab ? (
                   <Button
                     className="!rounded-lg"
-                    disabled={!selectedRowKeys.length}
+                    disabled={apiEnabled || !selectedRowKeys.length}
                     onClick={() => setBulkOpen(true)}
                   >
                     Bulk Approval {selectedRowKeys.length ? `(${selectedRowKeys.length})` : ""}
@@ -853,7 +1047,13 @@ export default function WorkOrdersPage() {
                 ) : null}
                 <Button
                   type="primary"
-                  className="!rounded-lg"
+                    onClick={() => {
+                      if (apiEnabled && r.id) {
+                        router.push(`/work-orders/detail/${encodeURIComponent(r.id)}`);
+                        return;
+                      }
+                      message.info(`View ${r.woNumber} (mock)`);
+                    }}
                   icon={<PlusOutlined />}
                   onClick={() => router.push("/work-orders/create")}
                 >

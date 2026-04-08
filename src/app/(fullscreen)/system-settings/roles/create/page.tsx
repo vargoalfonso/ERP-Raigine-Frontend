@@ -1,12 +1,9 @@
 "use client";
 
-import React, { Suspense, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Button, Card, Checkbox, Input, Switch, message } from "antd";
 import { LeftOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
-import { apiBaseUrl } from "@/lib/api/instance";
-import { useCreateRoleMutation } from "@/lib/api/system-settings/api";
-import { getApiErrorMessage } from "@/lib/api/error";
 
 type FeatureGroup = {
   title: string;
@@ -223,19 +220,8 @@ function buildDefaultChecked(): Record<string, boolean> {
 }
 
 export default function CreateRolePage() {
-  return (
-    <Suspense fallback={null}>
-      <CreateRolePageContent />
-    </Suspense>
-  );
-}
-
-function CreateRolePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-
-  const apiEnabled = Boolean(apiBaseUrl);
-  const [createRole, { isLoading: isSaving }] = useCreateRoleMutation();
 
   const mode = searchParams.get("mode") ?? "create";
   const isDetail = mode === "detail";
@@ -286,19 +272,8 @@ function CreateRolePageContent() {
       return;
     }
 
-    if (!apiEnabled) {
-      message.success(isEdit ? "Role updated" : "Role created");
-      router.push("/system-settings");
-      return;
-    }
-
-    try {
-      await createRole({ name: roleName.trim(), permissions: checked }).unwrap();
-      message.success(isEdit ? "Role updated" : "Role created");
-      router.push("/system-settings");
-    } catch (err: unknown) {
-      message.error(getApiErrorMessage(err, "Failed to save role"));
-    }
+    message.success(isEdit ? "Role updated" : "Role created");
+    router.push("/system-settings");
   };
 
   return (
@@ -317,7 +292,7 @@ function CreateRolePageContent() {
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
               {!isDetail && (
-                <Button type="primary" onClick={onSubmit} loading={isSaving}>
+                <Button type="primary" onClick={onSubmit}>
                   {isEdit ? "Save Role" : "Create Role"}
                 </Button>
               )}

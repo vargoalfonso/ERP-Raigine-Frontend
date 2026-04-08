@@ -27,11 +27,17 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 
 import {
+  useCreateAccessControlMatrixMutation,
+  useCreateEmployeeMutation,
   useDeleteAccessControlMatrixMutation,
+  useDeleteDepartmentMutation,
   useDeleteEmployeeMutation,
   useGetAccessControlMatrixQuery,
+  useGetDepartmentsQuery,
+  useGetEmployeeByIdQuery,
   useGetEmployeesQuery,
   useGetRolesQuery,
+  useUpdateDepartmentMutation,
   useUpdateAccessControlMatrixMutation,
   useUpdateEmployeeMutation,
 } from "@/lib/api/system-settings/api";
@@ -43,6 +49,7 @@ type EmployeeRow = {
   key: string;
   apiId?: string;
   accessControlId?: string;
+  departmentId?: string;
   empId: string;
   name: string;
   isManager: boolean;
@@ -61,6 +68,8 @@ type EmployeeRow = {
 
 type DepartmentRow = {
   key: string;
+  apiId?: string;
+  parentDepartmentId?: string;
   code?: string;
   name: string;
   head: string;
@@ -91,6 +100,9 @@ function EmployeeDeptPageContent() {
   const { data: employeesApiData, refetch: refetchEmployees } = useGetEmployeesQuery(undefined, {
     skip: !apiEnabled,
   });
+  const { data: departmentsApiData, refetch: refetchDepartments } = useGetDepartmentsQuery(undefined, {
+    skip: !apiEnabled,
+  });
   const { data: accessControlApiData, refetch: refetchAccessControl } = useGetAccessControlMatrixQuery(undefined, {
     skip: !apiEnabled,
   });
@@ -98,8 +110,12 @@ function EmployeeDeptPageContent() {
     skip: !apiEnabled,
   });
 
+  const [createEmployee] = useCreateEmployeeMutation();
   const [updateEmployee] = useUpdateEmployeeMutation();
   const [deleteEmployee] = useDeleteEmployeeMutation();
+  const [updateDepartment] = useUpdateDepartmentMutation();
+  const [deleteDepartment] = useDeleteDepartmentMutation();
+  const [createAccessControl] = useCreateAccessControlMatrixMutation();
   const [updateAccessControl] = useUpdateAccessControlMatrixMutation();
   const [deleteAccessControl] = useDeleteAccessControlMatrixMutation();
 
@@ -112,6 +128,10 @@ function EmployeeDeptPageContent() {
   const [editEmployeeOpen, setEditEmployeeOpen] = useState(false);
   const [deleteEmployeeOpen, setDeleteEmployeeOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeRow | null>(null);
+
+  const { data: employeeDetailApiData } = useGetEmployeeByIdQuery(selectedEmployee?.apiId ?? "", {
+    skip: !apiEnabled || !viewEmployeeOpen || !selectedEmployee?.apiId,
+  });
 
   const [deptSearch, setDeptSearch] = useState("");
   const [deptStatus, setDeptStatus] = useState<"All" | DepartmentRow["status"]>("All");
@@ -310,15 +330,34 @@ function EmployeeDeptPageContent() {
     return map;
   }, [accessControlApiData]);
 
+  const departmentById = useMemo(() => {
+    const map: Record<string, (typeof departmentsApiData)[number]> = {};
+    for (const dept of departmentsApiData ?? []) {
+      map[dept.id] = dept;
+    }
+    return map;
+  }, [departmentsApiData]);
+
+  const departmentNameToId = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const dept of departmentsApiData ?? []) {
+      map[dept.department_name] = dept.id;
+    }
+    return map;
+  }, [departmentsApiData]);
+
   const apiEmployeesRows: EmployeeRow[] = useMemo(() => {
     if (!apiEnabled) return [];
     const list = employeesApiData ?? [];
 
     return list.map((e) => {
       const ac = accessControlByEmployeeId[e.employee_id];
-      const department = ac?.department ?? "-";
-      const roleId = ac?.role_id;
+      const departmentName = e.department_id ? departmentById[e.department_id]?.department_name : undefined;
+      const department = departmentName ?? ac?.department ?? "-";
+      const roleId = e.role_id ?? ac?.role_id;
       const roleName = roleId ? rolesById[roleId] ?? roleId : "-";
+      const lowerJobTitle = String(e.job_title ?? "").toLowerCase();
+      const isManager = ["manager", "head", "director", "supervisor"].some((token) => lowerJobTitle.includes(token));
 
       const normalizedStatus = String(e.status ?? "Active").toLowerCase();
       const status: EmployeeRow["status"] = normalizedStatus === "inactive" ? "Inactive" : "Active";
@@ -327,13 +366,14 @@ function EmployeeDeptPageContent() {
         key: e.id,
         apiId: e.id,
         accessControlId: ac?.id,
+        departmentId: e.department_id ?? undefined,
         empId: e.employee_id,
         name: ac?.full_name || e.full_name,
-        isManager: false,
-        jobTitle: "-",
-        jobLevel: "-",
+        isManager,
+        jobTitle: e.job_title ?? "-",
+        jobLevel: roleName !== "-" ? roleName : e.job_title ?? "-",
         email: e.email ?? "-",
-        phone: "-",
+        phone: e.phone_number ?? "-",
         department,
         manager: "Top Level",
         role: roleName,
@@ -346,14 +386,12 @@ function EmployeeDeptPageContent() {
   }, [apiEnabled, employeesApiData, accessControlByEmployeeId, rolesById]);
 
   const departmentOptionsApi = useMemo(() => {
-    const depts = new Set<string>();
-    for (const ac of accessControlApiData ?? []) {
-      if (ac.department) depts.add(ac.department);
-    }
-    return Array.from(depts)
-      .sort((a, b) => a.localeCompare(b))
-      .map((d) => ({ label: d, value: d }));
-  }, [accessControlApiData]);
+    return (departmentsApiData ?? []).map((d) => ({
+      label: d.department_name,
+      value: d.department_name,
+      id: d.id,
+    }));
+  }, [departmentsApiData]);
 
   const roleOptionsApi = useMemo(() => {
     return (rolesApiData ?? []).map((r) => ({ label: r.name, value: r.id }));
@@ -372,7 +410,8 @@ function EmployeeDeptPageContent() {
 
   const filteredDepartments = useMemo(() => {
     const q = deptSearch.trim().toLowerCase();
-    return departments.filter((d) => {
+    const source = apiEnabled ? [] : departments;
+    return source.filter((d) => {
       const matchesSearch =
         !q ||
         (d.code || "").toLowerCase().includes(q) ||
@@ -513,6 +552,8 @@ function EmployeeDeptPageContent() {
                 email: record.email === "-" ? "" : record.email,
                 department: record.department === "-" ? undefined : record.department,
                 roleId: record.roleId,
+                phone: record.phone === "-" ? "" : record.phone,
+                jobTitle: record.jobTitle === "-" ? "" : record.jobTitle,
                 status: record.status,
               });
               setEditEmployeeOpen(true);
@@ -586,7 +627,22 @@ function EmployeeDeptPageContent() {
             type="text"
             danger
             icon={<DeleteOutlined />}
-            onClick={() => setDepartments((prev) => prev.filter((d) => d.key !== record.key))}
+            onClick={async () => {
+              if (!apiEnabled) {
+                setDepartments((prev) => prev.filter((d) => d.key !== record.key));
+                message.success("Department deleted");
+                return;
+              }
+
+              try {
+                if (!record.apiId) throw new Error("Missing department id");
+                await deleteDepartment(record.apiId).unwrap();
+                message.success("Department deleted");
+                refetchDepartments();
+              } catch (error) {
+                message.error(getApiErrorMessage(error, "Failed to delete department"));
+              }
+            }}
           />
         </div>
       ),
@@ -596,49 +652,34 @@ function EmployeeDeptPageContent() {
   const selectedDeptEmployees = useMemo(() => {
     if (!selectedDept) return [];
     const source = apiEnabled ? apiEmployeesRows : employees;
-    return source.filter((e) => e.department === selectedDept.name);
+    return source.filter((e) =>
+      apiEnabled
+        ? e.departmentId === selectedDept.apiId || e.department === selectedDept.name
+        : e.department === selectedDept.name
+    );
   }, [employees, selectedDept, apiEnabled, apiEmployeesRows]);
 
   const employeeRows = apiEnabled ? apiEmployeesRows : employees;
 
   const departmentsReadOnlyApi: DepartmentRow[] = useMemo(() => {
     if (!apiEnabled) return [];
-    const byName = new Map<string, number>();
-    for (const ac of accessControlApiData ?? []) {
-      const dept = ac.department || "-";
-      byName.set(dept, (byName.get(dept) ?? 0) + 1);
-    }
-    return Array.from(byName.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([name, employeeCount]) => ({
-        key: name,
+    return (departmentsApiData ?? []).map((dept) => {
+      const employeeCount = apiEmployeesRows.filter((employee) => employee.departmentId === dept.id).length;
+      const status: DepartmentRow["status"] = String(dept.status ?? "Active").toLowerCase() === "inactive" ? "Inactive" : "Active";
+      return {
+        key: dept.id,
+        apiId: dept.id,
+        parentDepartmentId: dept.parent_department_id ?? undefined,
         code: undefined,
-        name,
+        name: dept.department_name,
         head: "-",
-        parentDepartment: undefined,
-        description: undefined,
+        parentDepartment: dept.parent_department?.department_name,
+        description: dept.description ?? undefined,
         employeeCount,
-        status: "Active",
-      }));
-  }, [apiEnabled, accessControlApiData]);
-
-  const departmentColumnsReadOnlyApi: ColumnsType<DepartmentRow> = useMemo(
-    () => [
-      { title: "Department", dataIndex: "name", key: "name", render: (v: string) => <span className="text-sm font-semibold text-gray-900">{v}</span> },
-      { title: "Employees", dataIndex: "employeeCount", key: "employeeCount", render: (v: number) => <span className="text-sm text-gray-800">{v}</span> },
-      {
-        title: "Status",
-        dataIndex: "status",
-        key: "status",
-        render: (v: DepartmentRow["status"]) => (
-          <Tag color={v === "Active" ? "blue" : "default"} className="!rounded-full !px-3 !py-0.5 !text-xs">
-            {v}
-          </Tag>
-        ),
-      },
-    ],
-    []
-  );
+        status,
+      };
+    });
+  }, [apiEnabled, apiEmployeesRows, departmentsApiData]);
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
@@ -665,8 +706,8 @@ function EmployeeDeptPageContent() {
           </div>
 
           {apiEnabled ? (
-            <div className="mt-3 text-xs text-amber-700">
-              API mode: only Employee edit/delete is connected. Department create/edit uses mock data.
+            <div className="mt-3 text-xs text-emerald-700">
+              API mode: employee and department data are connected to backend endpoints.
             </div>
           ) : null}
         </div>
@@ -782,7 +823,7 @@ function EmployeeDeptPageContent() {
 
             <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
               <Table<DepartmentRow>
-                columns={apiEnabled ? departmentColumnsReadOnlyApi : departmentColumns}
+                columns={departmentColumns}
                 dataSource={apiEnabled ? departmentsReadOnlyApi : filteredDepartments}
                 rowKey="key"
                 size="middle"
@@ -825,7 +866,11 @@ function EmployeeDeptPageContent() {
             </div>
             <div className="rounded-lg border border-gray-100 p-3">
               <div className="text-xs text-gray-500">Email</div>
-              <div className="text-sm text-gray-900 mt-1">{selectedEmployee.email}</div>
+              <div className="text-sm text-gray-900 mt-1">{employeeDetailApiData?.email ?? selectedEmployee.email}</div>
+            </div>
+            <div className="rounded-lg border border-gray-100 p-3">
+              <div className="text-xs text-gray-500">Phone</div>
+              <div className="text-sm text-gray-900 mt-1">{employeeDetailApiData?.phone_number ?? selectedEmployee.phone}</div>
             </div>
             <div className="rounded-lg border border-gray-100 p-3">
               <div className="text-xs text-gray-500">Department</div>
@@ -834,6 +879,10 @@ function EmployeeDeptPageContent() {
             <div className="rounded-lg border border-gray-100 p-3">
               <div className="text-xs text-gray-500">Role</div>
               <div className="text-sm text-gray-900 mt-1">{selectedEmployee.role}</div>
+            </div>
+            <div className="rounded-lg border border-gray-100 p-3">
+              <div className="text-xs text-gray-500">Job Title</div>
+              <div className="text-sm text-gray-900 mt-1">{employeeDetailApiData?.job_title ?? selectedEmployee.jobTitle}</div>
             </div>
             <div className="rounded-lg border border-gray-100 p-3">
               <div className="text-xs text-gray-500">Status</div>
@@ -886,7 +935,11 @@ function EmployeeDeptPageContent() {
                 body: {
                   full_name: values.name,
                   email: values.email || null,
+                  phone_number: values.phone || null,
+                  job_title: values.jobTitle || null,
                   status: values.status,
+                  role_id: values.roleId || null,
+                  department_id: departmentNameToId[values.department] ?? selectedEmployee.departmentId ?? null,
                 },
               }).unwrap();
 
@@ -899,6 +952,13 @@ function EmployeeDeptPageContent() {
                     department: values.department,
                     role_id: values.roleId,
                   },
+                }).unwrap();
+              } else if (values.department && values.roleId) {
+                await createAccessControl({
+                  employee_id: selectedEmployee.empId,
+                  full_name: values.name,
+                  department: values.department,
+                  role_id: values.roleId,
                 }).unwrap();
               }
 
@@ -925,6 +985,12 @@ function EmployeeDeptPageContent() {
           </Form.Item>
           <Form.Item name="email" label="Email">
             <Input className="!rounded-lg" placeholder="name@company.com" />
+          </Form.Item>
+          <Form.Item name="phone" label="Phone Number">
+            <Input className="!rounded-lg" placeholder="08xxxxxxxxxx" />
+          </Form.Item>
+          <Form.Item name="jobTitle" label="Job Title">
+            <Input className="!rounded-lg" placeholder="Job title" />
           </Form.Item>
           <Form.Item name="department" label="Department" rules={[{ required: true }]}>
             {apiEnabled ? (
@@ -1112,29 +1178,46 @@ function EmployeeDeptPageContent() {
             const values = await editDeptForm.validateFields();
             if (!selectedDept) return;
 
-            setDepartments((prev) =>
-              prev.map((d) =>
-                d.key === selectedDept.key
-                  ? {
-                      ...d,
-                      code: values.code,
-                      name: values.name,
-                      head: values.head,
-                      parentDepartment: values.parentDepartment || undefined,
-                      description: values.description || undefined,
-                      employeeCount: Number(values.employeeCount || 0),
-                      status: values.status,
-                    }
-                  : d
-              )
-            );
+            if (apiEnabled) {
+              if (!selectedDept.apiId) throw new Error("Missing department id");
+              await updateDepartment({
+                id: selectedDept.apiId,
+                body: {
+                  department_name: values.name,
+                  description: values.description || null,
+                  parent_department_id:
+                    (departmentsApiData ?? []).find((dept) => dept.department_name === values.parentDepartment)?.id ??
+                    selectedDept.parentDepartmentId ??
+                    null,
+                },
+              }).unwrap();
+              refetchDepartments();
+            } else {
+              setDepartments((prev) =>
+                prev.map((d) =>
+                  d.key === selectedDept.key
+                    ? {
+                        ...d,
+                        code: values.code,
+                        name: values.name,
+                        head: values.head,
+                        parentDepartment: values.parentDepartment || undefined,
+                        description: values.description || undefined,
+                        employeeCount: Number(values.employeeCount || 0),
+                        status: values.status,
+                      }
+                    : d
+                )
+              );
+            }
 
             setEditDeptOpen(false);
             setSelectedDept(null);
             editDeptForm.resetFields();
             message.success("Department updated");
-          } catch {
-            // validation handled by form
+          } catch (error) {
+            if (error && typeof error === "object" && "errorFields" in error) return;
+            message.error(getApiErrorMessage(error, "Failed to update department"));
           }
         }}
       >
@@ -1146,14 +1229,17 @@ function EmployeeDeptPageContent() {
             <Input className="!rounded-lg" placeholder="Department" />
           </Form.Item>
           <Form.Item name="head" label="Department Head" rules={[{ required: true }]}>
-            <Select className="!rounded-lg" options={employees.map((e) => ({ label: e.name, value: e.name }))} />
+            <Select
+              className="!rounded-lg"
+              options={(apiEnabled ? apiEmployeesRows : employees).map((e) => ({ label: e.name, value: e.name }))}
+            />
           </Form.Item>
           <Form.Item name="parentDepartment" label="Parent Department">
             <Select
               className="!rounded-lg"
               allowClear
               placeholder="Select parent"
-              options={departments.map((d) => ({ label: d.name, value: d.name }))}
+              options={(apiEnabled ? departmentsReadOnlyApi : departments).map((d) => ({ label: d.name, value: d.name }))}
             />
           </Form.Item>
           <Form.Item name="description" label="Description">

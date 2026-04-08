@@ -4,6 +4,14 @@ import type { ApiResponse } from "@/types";
 export type BomStatus = "Active" | "Inactive";
 
 export type BackendBomNode = {
+  description: any;
+  quantity: any;
+  material_code: any;
+  unit_measurement: any;
+  process_routes: any;
+  material_specifications: any;
+  created_at: any;
+  updated_at: any;
   // Some backends use `uuid` instead of `id`.
   id?: string;
   uuid?: string;
@@ -49,6 +57,17 @@ export type BomCreateRequest = {
   imageFile?: File | null;
 };
 
+export type BomUniqDetail = {
+  id: string;
+  uniq: string;
+  part_name?: string;
+  part_number?: string;
+  material_code?: string;
+  unit_measurement?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
 const ok = <T,>(data: T, message = "OK"): ApiResponse<T> => ({
   message,
   status: "success",
@@ -62,6 +81,35 @@ const parseTreeResponse = (response: unknown): BackendBomNode[] => {
     if (Array.isArray(maybe)) return maybe as BackendBomNode[];
   }
   return [];
+};
+
+const parseArrayResponse = (response: unknown): unknown[] => {
+  if (Array.isArray(response)) return response as unknown[];
+  if (response && typeof response === "object") {
+    const maybe = (response as Partial<{ data: unknown }>).data;
+    if (Array.isArray(maybe)) return maybe as unknown[];
+    if (maybe && typeof maybe === "object") {
+      const nested = (maybe as Partial<{ data: unknown }>).data;
+      if (Array.isArray(nested)) return nested as unknown[];
+    }
+  }
+  return [];
+};
+
+const toBomUniqDetail = (raw: unknown): BomUniqDetail => {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const id = String(r.id ?? r.uuid ?? "").trim();
+  const uniq = String(r.uniq ?? "").trim();
+  return {
+    id,
+    uniq,
+    part_name: typeof r.part_name === "string" ? r.part_name : undefined,
+    part_number: typeof r.part_number === "string" ? r.part_number : undefined,
+    material_code: typeof r.material_code === "string" ? r.material_code : undefined,
+    unit_measurement: typeof r.unit_measurement === "string" ? r.unit_measurement : undefined,
+    created_at: typeof r.created_at === "string" ? r.created_at : undefined,
+    updated_at: typeof r.updated_at === "string" ? r.updated_at : undefined,
+  };
 };
 
 const pickNodeId = (n: BackendBomNode): string => {
@@ -182,6 +230,20 @@ export const bomSlice = apiSlice.injectEndpoints({
       },
     }),
 
+    getBomUniqsDetails: builder.query<ApiResponse<BomUniqDetail[]>, void>({
+      query: () => ({
+        url: "/api/bom/uniqs-details",
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => {
+        const arr = parseArrayResponse(response);
+        const mapped = arr.map(toBomUniqDetail).filter((x) => x.uniq.trim().length > 0);
+        mapped.sort((a, b) => a.uniq.localeCompare(b.uniq));
+        return ok(mapped);
+      },
+    }),
+
     createBom: builder.mutation<ApiResponse<{ id: string }>, BomCreateRequest>({
       query: (body) => {
         const formData = new FormData();
@@ -274,6 +336,7 @@ export const {
   useGetBomByIdQuery,
   useGetBomAssemblyCodesQuery,
   useGetBomUniqsQuery,
+  useGetBomUniqsDetailsQuery,
   useCreateBomMutation,
   useUpdateBomMutation,
   useDeleteBomMutation,

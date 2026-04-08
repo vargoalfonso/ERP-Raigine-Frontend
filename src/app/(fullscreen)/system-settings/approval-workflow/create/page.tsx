@@ -4,9 +4,8 @@ import React, { useMemo, useState } from "react";
 import { Button, Card, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
-import { apiBaseUrl } from "@/lib/api/instance";
-import { useCreateApprovalWorkflowMutation } from "@/lib/api/system-settings/api";
-import { getApiErrorMessage } from "@/lib/api/error";
+
+type StatusType = "Active" | "Inactive";
 
 type Entry = {
   id: string;
@@ -15,6 +14,7 @@ type Entry = {
   level2Role?: string;
   level3Role?: string;
   level4Role?: string;
+  status?: StatusType;
   created: boolean;
 };
 
@@ -34,6 +34,11 @@ const ROLE_OPTIONS = [
   { label: "N/A", value: "N/A" },
 ] as const;
 
+const STATUS_OPTIONS = [
+  { label: "Active", value: "Active" },
+  { label: "Inactive", value: "Inactive" },
+] as const;
+
 function makeEntry(idx: number): Entry {
   return {
     id: `entry-${idx}`,
@@ -42,16 +47,13 @@ function makeEntry(idx: number): Entry {
     level2Role: idx === 1 ? "Finance Manager" : undefined,
     level3Role: idx === 1 ? "Director" : undefined,
     level4Role: idx === 1 ? "CEO" : undefined,
+    status: idx === 1 ? "Active" : undefined,
     created: false,
   };
 }
 
 export default function ApprovalWorkflowCreatePage() {
   const router = useRouter();
-
-  const apiEnabled = Boolean(apiBaseUrl);
-  const [createApprovalWorkflow, { isLoading: isSaving }] =
-    useCreateApprovalWorkflowMutation();
 
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
 
@@ -70,6 +72,7 @@ export default function ApprovalWorkflowCreatePage() {
     if (!e.level2Role) return "Level 2 Role is required";
     if (!e.level3Role) return "Level 3 Role is required";
     if (!e.level4Role) return "Level 4 Role is required";
+    if (!e.status) return "Status is required";
     return null;
   };
 
@@ -77,7 +80,7 @@ export default function ApprovalWorkflowCreatePage() {
     setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
   };
 
-  const onSave = async () => {
+  const onSave = () => {
     for (const e of entries) {
       const err = validateEntry(e);
       if (err) {
@@ -86,29 +89,8 @@ export default function ApprovalWorkflowCreatePage() {
       }
     }
 
-    if (!apiEnabled) {
-      message.success("Approval workflow saved");
-      router.push("/system-settings");
-      return;
-    }
-
-    try {
-      for (const e of entries) {
-        await createApprovalWorkflow({
-          action_name: e.menuAction!,
-          level_1_role: e.level1Role!,
-          level_2_role: e.level2Role!,
-          level_3_role: e.level3Role!,
-          level_4_role: e.level4Role!,
-        }).unwrap();
-        updateEntry(e.id, { created: true });
-      }
-
-      message.success("Approval workflow saved");
-      router.push("/system-settings");
-    } catch (err: unknown) {
-      message.error(getApiErrorMessage(err, "Failed to save approval workflow"));
-    }
+    message.success("Approval workflow saved");
+    router.push("/system-settings");
   };
 
   return (
@@ -126,7 +108,7 @@ export default function ApprovalWorkflowCreatePage() {
 
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={isSaving}>
+              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
                 Save Parameter
               </Button>
             </div>
@@ -212,6 +194,15 @@ export default function ApprovalWorkflowCreatePage() {
                   </div>
                 </div>
 
+                <div>
+                  <div className="text-sm text-gray-700 mb-2">Status</div>
+                  <Select
+                    value={e.status}
+                    onChange={(v) => updateEntry(e.id, { status: v as StatusType, created: false })}
+                    placeholder="Select Status"
+                    options={STATUS_OPTIONS as unknown as { label: string; value: string }[]}
+                  />
+                </div>
               </div>
             </Card>
           ))}

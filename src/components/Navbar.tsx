@@ -28,7 +28,6 @@ const getPageTitle = (pathname: string): string => {
     "/customer-po": "Customer PO & DN",
     "/master-supplier": "Master Supplier",
     "/master-supplier/create": "Add Master Supplier Item",
-    "/master-supplier/only/create": "Add Supplier (Only)",
     "/bill-of-material": "Bill Of Material",
     "/work-orders": "Work Orders",
     "/finished-goods": "Finished Goods",
@@ -44,7 +43,6 @@ const getPageTitle = (pathname: string): string => {
     "/sub-con-materials/detail": "SubCon Stock In Vendor Details",
     "/dn-management": "DN Management",
     "/dn-management/detail": "DN Raw Material Details",
-    "/dn-procurement": "DN - Procurement",
     "/stock-opname": "Stock Opname",
   };
 
