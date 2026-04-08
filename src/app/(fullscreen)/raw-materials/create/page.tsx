@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Input,
@@ -267,7 +267,7 @@ const RawMaterialForm = ({
   );
 };
 
-export default function CreateRawMaterialPage() {
+function CreateRawMaterialPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
@@ -772,5 +772,13 @@ export default function CreateRawMaterialPage() {
         </div>
       </Card>
     </div>
+  );
+}
+
+export default function CreateRawMaterialPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <CreateRawMaterialPageContent />
+    </Suspense>
   );
 }

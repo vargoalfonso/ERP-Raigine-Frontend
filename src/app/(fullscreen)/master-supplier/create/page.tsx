@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { Suspense, useMemo, useState } from "react";
 import { Button, Card, Input, InputNumber, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -79,7 +79,7 @@ function nextUniq(used: Set<string>) {
   return `LV-${String(used.size + 1).padStart(3, "0")}`;
 }
 
-export default function MasterSupplierCreatePage() {
+function MasterSupplierCreatePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -829,5 +829,13 @@ export default function MasterSupplierCreatePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function MasterSupplierCreatePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <MasterSupplierCreatePageContent />
+    </Suspense>
   );
 }

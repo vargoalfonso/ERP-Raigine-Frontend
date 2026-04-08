@@ -86,7 +86,7 @@ export default function CreateRmProcessingWoPage() {
       partName: item.part_name ?? item.name,
       partNumber: item.part_no ?? item.code,
       model: item.model ?? undefined,
-      gradeSize: item.notes ?? null ?? undefined,
+      gradeSize: item.notes ?? undefined,
       unit: item.unit ?? "pcs",
       label: `${item.uniq} - ${item.name}`,
       value: item.uniq,

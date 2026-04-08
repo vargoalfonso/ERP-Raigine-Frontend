@@ -27,6 +27,7 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 
 import {
+  type DepartmentRecord,
   useCreateAccessControlMatrixMutation,
   useCreateEmployeeMutation,
   useDeleteAccessControlMatrixMutation,
@@ -84,7 +85,7 @@ const STORAGE_DEPARTMENTS = "ai-erp-departments";
 
 export default function EmployeeDeptPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
       <EmployeeDeptPageContent />
     </Suspense>
   );
@@ -331,7 +332,7 @@ function EmployeeDeptPageContent() {
   }, [accessControlApiData]);
 
   const departmentById = useMemo(() => {
-    const map: Record<string, (typeof departmentsApiData)[number]> = {};
+    const map: Record<string, DepartmentRecord> = {};
     for (const dept of departmentsApiData ?? []) {
       map[dept.id] = dept;
     }

@@ -118,7 +118,9 @@ export type ProductReturnDecisionRequest = {
   remark?: string;
 };
 
-export const productReturnSlice = apiSlice.injectEndpoints({
+const PRODUCT_RETURN_TAG = "ProductReturns" as const;
+
+export const productReturnSlice = apiSlice.enhanceEndpoints({ addTagTypes: [PRODUCT_RETURN_TAG] }).injectEndpoints({
   endpoints: (builder) => ({
     createProductReturn: builder.mutation<ApiResponse<BackendProductReturn>, CreateProductReturnRequest>({
       query: (body) => {
@@ -159,7 +161,7 @@ export const productReturnSlice = apiSlice.injectEndpoints({
         };
       },
       transformResponse: (response: unknown) => ok((parseObjectResponse<BackendProductReturn>(response) ?? {}) as BackendProductReturn, "Created"),
-      invalidatesTags: [{ type: "ProductReturns", id: "PENDING" }, { type: "ProductReturns", id: "HISTORY" }],
+      invalidatesTags: [{ type: PRODUCT_RETURN_TAG, id: "PENDING" }, { type: PRODUCT_RETURN_TAG, id: "HISTORY" }],
     }),
 
     getProductReturnPending: builder.query<ApiResponse<BackendProductReturn[]>, void>({
@@ -169,7 +171,7 @@ export const productReturnSlice = apiSlice.injectEndpoints({
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) => ok(parseArrayResponse<BackendProductReturn>(response)),
-      providesTags: [{ type: "ProductReturns", id: "PENDING" }],
+      providesTags: [{ type: PRODUCT_RETURN_TAG, id: "PENDING" }],
     }),
 
     getProductReturnPendingById: builder.query<ApiResponse<BackendProductReturn>, string>({
@@ -179,7 +181,7 @@ export const productReturnSlice = apiSlice.injectEndpoints({
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) => ok((parseObjectResponse<BackendProductReturn>(response) ?? {}) as BackendProductReturn),
-      providesTags: (_result, _error, id) => [{ type: "ProductReturns", id }],
+      providesTags: (_result, _error, id) => [{ type: PRODUCT_RETURN_TAG, id }],
     }),
 
     getProductReturnHistory: builder.query<ApiResponse<BackendProductReturn[]>, void>({
@@ -189,7 +191,7 @@ export const productReturnSlice = apiSlice.injectEndpoints({
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) => ok(parseArrayResponse<BackendProductReturn>(response)),
-      providesTags: [{ type: "ProductReturns", id: "HISTORY" }],
+      providesTags: [{ type: PRODUCT_RETURN_TAG, id: "HISTORY" }],
     }),
 
     getProductReturnById: builder.query<ApiResponse<BackendProductReturn>, string>({
@@ -199,7 +201,7 @@ export const productReturnSlice = apiSlice.injectEndpoints({
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) => ok((parseObjectResponse<BackendProductReturn>(response) ?? {}) as BackendProductReturn),
-      providesTags: (_result, _error, id) => [{ type: "ProductReturns", id }],
+      providesTags: (_result, _error, id) => [{ type: PRODUCT_RETURN_TAG, id }],
     }),
 
     decideProductReturn: builder.mutation<ApiResponse<{ id: string }>, ProductReturnDecisionRequest>({
@@ -214,9 +216,9 @@ export const productReturnSlice = apiSlice.injectEndpoints({
         return ok({ id: typeof r?.id === "string" ? r.id : "" }, r?.message ?? "Updated");
       },
       invalidatesTags: (_result, _error, { id }) => [
-        { type: "ProductReturns", id: "PENDING" },
-        { type: "ProductReturns", id: "HISTORY" },
-        { type: "ProductReturns", id },
+        { type: PRODUCT_RETURN_TAG, id: "PENDING" },
+        { type: PRODUCT_RETURN_TAG, id: "HISTORY" },
+        { type: PRODUCT_RETURN_TAG, id },
       ],
     }),
   }),

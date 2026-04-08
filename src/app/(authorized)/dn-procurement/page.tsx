@@ -98,7 +98,7 @@ const computeStatus = (dnCreated: number, dnIncoming: number): DnRow["status"] =
 
 export default function DnProcurementPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
       <DnProcurementPageContent />
     </Suspense>
   );

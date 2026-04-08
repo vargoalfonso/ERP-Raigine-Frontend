@@ -77,7 +77,7 @@ function toId(prefix: string) {
 
 export default function StockOpnameStartCountPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
       <StockOpnameStartCountPageContent />
     </Suspense>
   );

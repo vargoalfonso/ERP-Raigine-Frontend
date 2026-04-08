@@ -160,7 +160,7 @@ export default function DeliverySchedulingPage() {
         rows: [],
       };
 
-      const rows = schedule.items.length
+      const rows: ScheduleRow[] = schedule.items.length
         ? schedule.items.map((item, index) => ({
             key: `${schedule.id || schedule.poDnName || deliveryDate}-${item.uniq}-${index}`,
             scheduleId: schedule.id,

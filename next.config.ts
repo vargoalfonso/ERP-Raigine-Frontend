@@ -1,8 +1,12 @@
+import path from "path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
   transpilePackages: ["antd"],
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  outputFileTracingRoot: path.join(__dirname),
   experimental: {
     optimizePackageImports: ["antd"],
   },

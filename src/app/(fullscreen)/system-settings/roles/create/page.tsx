@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { Suspense, useMemo, useState } from "react";
 import { Button, Card, Checkbox, Input, Switch, message } from "antd";
 import { LeftOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -219,7 +219,7 @@ function buildDefaultChecked(): Record<string, boolean> {
   };
 }
 
-export default function CreateRolePage() {
+function CreateRolePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -380,5 +380,13 @@ export default function CreateRolePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function CreateRolePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
+      <CreateRolePageContent />
+    </Suspense>
   );
 }

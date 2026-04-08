@@ -195,7 +195,7 @@ const makeRows = (prefix: string): PoRow[] => {
 
 export default function PoProcurementPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
       <PoProcurementPageContent />
     </Suspense>
   );
