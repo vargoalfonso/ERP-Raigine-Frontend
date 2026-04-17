@@ -59,7 +59,6 @@ type PoRow = {
 type PoRowBase = Omit<PoRow, "dnIncoming" | "openPo" | "expectedArrival" | "poAlert">;
 
 const formatNumber = (n: number) => new Intl.NumberFormat("en-US").format(n);
-const formatIdr = (n: number) => `${formatNumber(n)} IDR`;
 
 const extractUniqSummary = (items: Array<Record<string, unknown>> | undefined): string | undefined => {
   if (!Array.isArray(items) || items.length === 0) return undefined;
@@ -299,7 +298,7 @@ function PoProcurementPageContent() {
         poStage: r.po_stage,
         budgetIdr: totalPo,
         qtyDelivered: totalIncoming,
-        uniq: uniqSummary ?? r.data_order ?? "-",
+        uniq: uniqSummary ?? r.uniq_code ?? r.data_order ?? "-",
         supplier: resolvedSupplierName,
         supplierId: supplierIdText || undefined,
         dnCreated: Number(r.dn_created ?? 0),
