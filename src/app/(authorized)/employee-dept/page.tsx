@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import {
   Button,
+  DatePicker,
   Form,
   Input,
   InputNumber,
@@ -12,6 +13,7 @@ import {
   Tag,
   message,
 } from "antd";
+import dayjs from "dayjs";
 import type { ColumnsType } from "antd/es/table";
 import {
   CrownOutlined,
@@ -27,6 +29,7 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 
 import {
+  type DepartmentRecord,
   useCreateAccessControlMatrixMutation,
   useCreateEmployeeMutation,
   useDeleteAccessControlMatrixMutation,
@@ -131,6 +134,10 @@ function EmployeeDeptPageContent() {
 
   const { data: employeeDetailApiData } = useGetEmployeeByIdQuery(selectedEmployee?.apiId ?? "", {
     skip: !apiEnabled || !viewEmployeeOpen || !selectedEmployee?.apiId,
+  });
+
+  const { data: employeeEditApiData } = useGetEmployeeByIdQuery(selectedEmployee?.apiId ?? "", {
+    skip: !apiEnabled || !editEmployeeOpen || !selectedEmployee?.apiId,
   });
 
   const [deptSearch, setDeptSearch] = useState("");
@@ -314,11 +321,43 @@ function EmployeeDeptPageContent() {
     }
   }, [departments, hasLoaded, apiEnabled]);
 
+  useEffect(() => {
+    if (!apiEnabled) return;
+    if (!editEmployeeOpen) return;
+    if (!selectedEmployee?.apiId) return;
+    if (!employeeEditApiData) return;
+
+    editEmployeeForm.setFieldsValue({
+      departmentId: employeeEditApiData.department_id ?? selectedEmployee.departmentId,
+      roleId: employeeEditApiData.role_id ?? selectedEmployee.roleId,
+      reportsToId: employeeEditApiData.reports_to_id ?? null,
+      joinDate: employeeEditApiData.join_date ? dayjs(employeeEditApiData.join_date) : undefined,
+      notes: employeeEditApiData.notes ?? "",
+    });
+  }, [
+    apiEnabled,
+    editEmployeeForm,
+    editEmployeeOpen,
+    employeeEditApiData,
+    selectedEmployee?.apiId,
+    selectedEmployee?.departmentId,
+    selectedEmployee?.roleId,
+  ]);
+
   const rolesById = useMemo(() => {
     const list = rolesApiData ?? [];
     const map: Record<string, string> = {};
     for (const r of list) map[r.id] = r.name;
     return map;
+  }, [rolesApiData]);
+
+  const managerRoleIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of rolesApiData ?? []) {
+      const roleName = String(r?.name ?? "").toLowerCase();
+      if (roleName.includes("manager")) ids.add(String(r.id));
+    }
+    return ids;
   }, [rolesApiData]);
 
   const accessControlByEmployeeId = useMemo(() => {
@@ -331,20 +370,20 @@ function EmployeeDeptPageContent() {
   }, [accessControlApiData]);
 
   const departmentById = useMemo(() => {
-    const map: Record<string, (typeof departmentsApiData)[number]> = {};
+    const map: Record<string, DepartmentRecord> = {};
     for (const dept of departmentsApiData ?? []) {
       map[dept.id] = dept;
     }
     return map;
   }, [departmentsApiData]);
 
-  const departmentNameToId = useMemo(() => {
+  const employeeById = useMemo(() => {
     const map: Record<string, string> = {};
-    for (const dept of departmentsApiData ?? []) {
-      map[dept.department_name] = dept.id;
+    for (const e of employeesApiData ?? []) {
+      map[e.id] = e.full_name;
     }
     return map;
-  }, [departmentsApiData]);
+  }, [employeesApiData]);
 
   const apiEmployeesRows: EmployeeRow[] = useMemo(() => {
     if (!apiEnabled) return [];
@@ -356,8 +395,9 @@ function EmployeeDeptPageContent() {
       const department = departmentName ?? ac?.department ?? "-";
       const roleId = e.role_id ?? ac?.role_id;
       const roleName = roleId ? rolesById[roleId] ?? roleId : "-";
-      const lowerJobTitle = String(e.job_title ?? "").toLowerCase();
-      const isManager = ["manager", "head", "director", "supervisor"].some((token) => lowerJobTitle.includes(token));
+      const isManager = roleId ? managerRoleIds.has(String(roleId)) : false;
+
+      const managerName = e.reports_to_id ? employeeById[String(e.reports_to_id)] : undefined;
 
       const normalizedStatus = String(e.status ?? "Active").toLowerCase();
       const status: EmployeeRow["status"] = normalizedStatus === "inactive" ? "Inactive" : "Active";
@@ -375,7 +415,7 @@ function EmployeeDeptPageContent() {
         email: e.email ?? "-",
         phone: e.phone_number ?? "-",
         department,
-        manager: "Top Level",
+        manager: managerName ?? "Top Level",
         role: roleName,
         roleId,
         roleHint: "",
@@ -383,19 +423,24 @@ function EmployeeDeptPageContent() {
         status,
       };
     });
-  }, [apiEnabled, employeesApiData, accessControlByEmployeeId, rolesById]);
+  }, [apiEnabled, employeesApiData, accessControlByEmployeeId, departmentById, employeeById, managerRoleIds, rolesById]);
 
   const departmentOptionsApi = useMemo(() => {
     return (departmentsApiData ?? []).map((d) => ({
       label: d.department_name,
-      value: d.department_name,
-      id: d.id,
+      value: d.id,
     }));
   }, [departmentsApiData]);
 
   const roleOptionsApi = useMemo(() => {
     return (rolesApiData ?? []).map((r) => ({ label: r.name, value: r.id }));
   }, [rolesApiData]);
+
+  const reportsToOptionsApi = useMemo(() => {
+    if (!apiEnabled) return [];
+    const managers = apiEmployeesRows.filter((e) => e.isManager);
+    return [{ label: "Top Level", value: null }, ...managers.map((e) => ({ label: e.name, value: e.apiId ?? e.key }))];
+  }, [apiEnabled, apiEmployeesRows]);
 
   const metrics = useMemo(() => {
     const activeEmployees = apiEnabled ? apiEmployeesRows : employees;
@@ -551,6 +596,7 @@ function EmployeeDeptPageContent() {
                 name: record.name,
                 email: record.email === "-" ? "" : record.email,
                 department: record.department === "-" ? undefined : record.department,
+                departmentId: record.departmentId,
                 roleId: record.roleId,
                 phone: record.phone === "-" ? "" : record.phone,
                 jobTitle: record.jobTitle === "-" ? "" : record.jobTitle,
@@ -930,6 +976,11 @@ function EmployeeDeptPageContent() {
               const apiId = selectedEmployee.apiId;
               if (!apiId) throw new Error("Missing employee id");
 
+              const apiStatus = String(values.status ?? "active").toLowerCase() === "inactive" ? "inactive" : "active";
+              const departmentNameForAccessControl = values.departmentId
+                ? departmentById[String(values.departmentId)]?.department_name
+                : values.department;
+
               await updateEmployee({
                 id: apiId,
                 body: {
@@ -937,9 +988,13 @@ function EmployeeDeptPageContent() {
                   email: values.email || null,
                   phone_number: values.phone || null,
                   job_title: values.jobTitle || null,
-                  status: values.status,
+                  status: apiStatus,
                   role_id: values.roleId || null,
-                  department_id: departmentNameToId[values.department] ?? selectedEmployee.departmentId ?? null,
+                  department_id: values.departmentId ?? selectedEmployee.departmentId ?? null,
+                  reports_to_id: values.reportsToId ?? null,
+                  join_date:
+                    values.joinDate && typeof values.joinDate.toISOString === "function" ? values.joinDate.toISOString() : null,
+                  notes: values.notes ? String(values.notes) : null,
                 },
               }).unwrap();
 
@@ -949,15 +1004,15 @@ function EmployeeDeptPageContent() {
                   body: {
                     employee_id: selectedEmployee.empId,
                     full_name: values.name,
-                    department: values.department,
+                    department: departmentNameForAccessControl,
                     role_id: values.roleId,
                   },
                 }).unwrap();
-              } else if (values.department && values.roleId) {
+              } else if (departmentNameForAccessControl && values.roleId) {
                 await createAccessControl({
                   employee_id: selectedEmployee.empId,
                   full_name: values.name,
-                  department: values.department,
+                  department: departmentNameForAccessControl,
                   role_id: values.roleId,
                 }).unwrap();
               }
@@ -992,7 +1047,7 @@ function EmployeeDeptPageContent() {
           <Form.Item name="jobTitle" label="Job Title">
             <Input className="!rounded-lg" placeholder="Job title" />
           </Form.Item>
-          <Form.Item name="department" label="Department" rules={[{ required: true }]}>
+          <Form.Item name={apiEnabled ? "departmentId" : "department"} label="Department" rules={[{ required: true }]}>
             {apiEnabled ? (
               <Select
                 className="!rounded-lg"
@@ -1027,6 +1082,29 @@ function EmployeeDeptPageContent() {
               <Input className="!rounded-lg" placeholder="Role" />
             )}
           </Form.Item>
+
+          {apiEnabled ? (
+            <Form.Item name="reportsToId" label="Reports To">
+              <Select
+                className="!rounded-lg"
+                placeholder="Select manager"
+                allowClear
+                options={reportsToOptionsApi}
+              />
+            </Form.Item>
+          ) : null}
+
+          {apiEnabled ? (
+            <Form.Item name="joinDate" label="Join Date">
+              <DatePicker className="!rounded-lg w-full" />
+            </Form.Item>
+          ) : null}
+
+          {apiEnabled ? (
+            <Form.Item name="notes" label="Notes">
+              <Input.TextArea className="!rounded-lg" rows={3} placeholder="Notes" />
+            </Form.Item>
+          ) : null}
 
           <Form.Item name="status" label="Status" rules={[{ required: true }]}>
             <Select
@@ -1231,7 +1309,9 @@ function EmployeeDeptPageContent() {
           <Form.Item name="head" label="Department Head" rules={[{ required: true }]}>
             <Select
               className="!rounded-lg"
-              options={(apiEnabled ? apiEmployeesRows : employees).map((e) => ({ label: e.name, value: e.name }))}
+              options={(apiEnabled ? apiEmployeesRows : employees)
+                .filter((e) => e.isManager)
+                .map((e) => ({ label: e.name, value: e.name }))}
             />
           </Form.Item>
           <Form.Item name="parentDepartment" label="Parent Department">

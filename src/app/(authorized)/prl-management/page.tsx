@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import {
   Badge,
   Button,
+  Form,
   Input,
+  InputNumber,
   Modal,
   Select,
   Table,
@@ -33,6 +35,7 @@ import {
   BarChartOutlined,
   CalendarOutlined,
   DeleteOutlined,
+  EditOutlined,
   FilterOutlined,
   EyeOutlined,
   FileExcelOutlined,
@@ -40,18 +43,19 @@ import {
   PlusOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
-import { apiBaseUrl } from "@/lib/api/instance";
+import { apiBaseUrl, generateHeaders } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
-  useClearAllPrlForecastsMutation,
-  useClearPrlForecastsByPeriodMutation,
-  useClearPrlForecastsByUniqMutation,
+  useDeletePrlMutation,
   useGetPrlGapAnalysisQuery,
-  useListPrlForecastsQuery,
-  useUploadPrlExcelMutation,
+  useGetPrlByIdQuery,
+  useImportPrlsMutation,
+  useListPrlsQuery,
+  useUpdatePrlMutation,
 } from "@/lib/api/prl/api";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { useGetGlobalWorkingDaysQuery } from "@/lib/api/system-settings/api";
 
 type PrlTabId = "forecast-table" | "demand-gap" | "bulk-ops";
 
@@ -86,7 +90,7 @@ type RiskAssessmentRow = {
   status: "Monitoring" | "Action Needed";
 };
 
-type PrlStatus = "Active" | "Draft" | "Closed";
+type PrlStatus = "Active" | "Inactive";
 
 type ForecastRow = {
   key: string;
@@ -158,7 +162,7 @@ const initialRows: ForecastRow[] = [
     partNumber: "BC-003-LV9",
     quantity: 3200,
     period: "2024-Q2",
-    status: "Draft",
+    status: "Active",
   },
 ];
 
@@ -214,34 +218,77 @@ export default function PrlManagementPage() {
     open: false,
     record: null,
   });
+  const [editPrlOpen, setEditPrlOpen] = useState(false);
+  const [editingPrl, setEditingPrl] = useState<ForecastRow | null>(null);
+  const [editForm] = Form.useForm();
 
   const apiEnabled = Boolean(apiBaseUrl);
   const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const { data: globalParameters = [] } = useGetGlobalWorkingDaysQuery(undefined, {
+    skip: !apiEnabled,
+  });
 
-  const prlListQuery = useListPrlForecastsQuery(undefined, { skip: !apiEnabled });
+  const prlListQuery = useListPrlsQuery(undefined, { skip: !apiEnabled });
+  const prlDetailQuery = useGetPrlByIdQuery(forecastDetail.record?.key ?? "", {
+    skip: !apiEnabled || !forecastDetail.open || !forecastDetail.record?.key,
+  });
   const gapQuery = useGetPrlGapAnalysisQuery(undefined, {
     skip: !apiEnabled || activeTab !== "demand-gap",
   });
 
-  const [uploadExcel, uploadExcelState] = useUploadPrlExcelMutation();
-  const [clearAll, clearAllState] = useClearAllPrlForecastsMutation();
-  const [clearByUniq, clearByUniqState] = useClearPrlForecastsByUniqMutation();
-  const [clearByPeriod, clearByPeriodState] = useClearPrlForecastsByPeriodMutation();
+  const [importPrls, importPrlsState] = useImportPrlsMutation();
+  const [updatePrl, updatePrlState] = useUpdatePrlMutation();
+  const [deletePrl, deletePrlState] = useDeletePrlMutation();
 
   const bomIndex = useMemo(
     () => buildBomUniqIndex(bomTreeRes?.data ?? []),
     [bomTreeRes?.data]
   );
 
-  const anyBulkLoading =
-    uploadExcelState.isLoading ||
-    clearAllState.isLoading ||
-    clearByUniqState.isLoading ||
-    clearByPeriodState.isLoading;
+  const anyBulkLoading = importPrlsState.isLoading || updatePrlState.isLoading || deletePrlState.isLoading;
 
   const refetchDemandGapIfActive = () => {
     if (activeTab !== "demand-gap") return;
     gapQuery.refetch();
+  };
+
+  const openEditModal = (record: ForecastRow) => {
+    setEditingPrl(record);
+    editForm.setFieldsValue({
+      forecastPeriod: record.period,
+      quantity: record.quantity,
+    });
+    setEditPrlOpen(true);
+  };
+
+  const handleExport = async () => {
+    if (!apiEnabled || !apiBaseUrl) {
+      message.info("Export is only available in API mode");
+      return;
+    }
+
+    try {
+      const headers = await generateHeaders({ useAuthorization: true, contentType: "application/json" });
+      const response = await fetch(`${apiBaseUrl}/prls/export`, {
+        method: "GET",
+        headers,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Export failed with status ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "prls-export.xlsx";
+      anchor.click();
+      URL.revokeObjectURL(url);
+      message.success("PRL export downloaded");
+    } catch (error) {
+      message.error(getApiErrorMessage(error, "Failed to export PRL data"));
+    }
   };
 
   const resolvedForecastRows = useMemo<ForecastRow[]>(() => {
@@ -250,28 +297,29 @@ export default function PrlManagementPage() {
     if (!list) return initialRows;
 
     return list.map((r) => {
-      const customerName = r.customer?.customer_name ?? (r.customer_id != null ? `Customer #${r.customer_id}` : "-");
-      const uniq = r.item_uniq_code ?? "-";
+      const customerName = r.customer?.customer_name ?? r.customer_name ?? (r.customer_uuid ? `Customer #${r.customer_uuid}` : "-");
+      const uniq = r.uniq_code ?? r.item_uniq_code ?? "-";
+      const normalizedStatus = String(r.status ?? "active").toLowerCase() === "inactive" ? "Inactive" : "Active";
 
       return {
         key: r.id,
         prlId: r.prl_id ?? r.id,
         customer: customerName,
-        customerId: r.customer_id != null ? String(r.customer_id) : undefined,
+        customerId: r.customer_uuid != null ? String(r.customer_uuid) : r.customer_id != null ? String(r.customer_id) : undefined,
         uniq,
-        productModel: r.product_details?.description ?? bomIndex.assemblyCodeByUniq[uniq] ?? "-",
-        partName: r.product_details?.part_name ?? bomIndex.partNameByUniq[uniq] ?? "-",
-        partNumber: r.product_details?.part_number ?? bomIndex.partNumberByUniq[uniq] ?? "-",
+        productModel: r.product_model ?? r.product_details?.model ?? r.product_details?.description ?? bomIndex.modelByUniq[uniq] ?? bomIndex.assemblyCodeByUniq[uniq] ?? "-",
+        partName: r.part_name ?? r.product_details?.part_name ?? bomIndex.partNameByUniq[uniq] ?? "-",
+        partNumber: r.part_number ?? r.product_details?.part_number ?? bomIndex.partNumberByUniq[uniq] ?? "-",
         quantity: Number(r.quantity ?? 0),
-        period: r.period ?? "-",
-        status: (r.status ?? "Draft") as PrlStatus,
+        period: r.forecast_period ?? r.period ?? "-",
+        status: normalizedStatus as PrlStatus,
         createdBy: r.created_by,
-        createdAt: r.createdAt ?? r.created_at,
-        updatedAt: r.updatedAt ?? r.updated_at,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
         deliveryQuantity: Number(r.delivery_quantity ?? 0),
       };
     });
-  }, [apiEnabled, bomIndex.assemblyCodeByUniq, bomIndex.partNameByUniq, bomIndex.partNumberByUniq, prlListQuery.data]);
+  }, [apiEnabled, bomIndex.assemblyCodeByUniq, bomIndex.modelByUniq, bomIndex.partNameByUniq, bomIndex.partNumberByUniq, prlListQuery.data]);
 
   const selectedUniqRows = useMemo(() => {
     if (!forecastDetail.record) return [] as ForecastRow[];
@@ -530,12 +578,36 @@ export default function PrlManagementPage() {
   }, [resolvedForecastRows, search, customerFilter, periodFilter, typeFilter]);
 
   const periodOptions = useMemo(
-    () => [
-      { label: "Current Period", value: "current" },
-      { label: "2024-Q1", value: "2024-Q1" },
-      { label: "2024-Q2", value: "2024-Q2" },
-    ],
-    []
+    () => {
+      const activePlanningPeriods = globalParameters
+        .filter((item) => String(item.status ?? "active").trim().toLowerCase() === "active")
+        .filter((item) => {
+          const group = String(item.parameter_group ?? "").trim().toLowerCase();
+          return group === "planning";
+        })
+        .map((item) => String(item.period ?? "").trim())
+        .filter(Boolean);
+
+      const fallbackPeriodsFromRows = resolvedForecastRows
+        .map((item) => String(item.period ?? "").trim())
+        .filter(Boolean);
+
+      const periods = (activePlanningPeriods.length ? activePlanningPeriods : globalParameters
+        .filter((item) => String(item.status ?? "active").trim().toLowerCase() === "active")
+        .map((item) => String(item.period ?? "").trim())
+        .filter(Boolean).length
+          ? globalParameters
+              .filter((item) => String(item.status ?? "active").trim().toLowerCase() === "active")
+              .map((item) => String(item.period ?? "").trim())
+              .filter(Boolean)
+          : fallbackPeriodsFromRows)
+        .filter((value, index, array) => array.indexOf(value) === index);
+
+      return [{ label: "Current Period", value: "current" }].concat(
+        periods.map((value) => ({ label: value, value }))
+      );
+    },
+    [globalParameters, resolvedForecastRows]
   );
 
   const typeOptions = useMemo(
@@ -546,6 +618,14 @@ export default function PrlManagementPage() {
     ],
     []
   );
+
+  const editablePeriodOptions = useMemo(() => {
+    const options = periodOptions.filter((option) => option.value !== "current");
+    if (editingPrl?.period && !options.some((option) => option.value === editingPrl.period)) {
+      return [{ label: editingPrl.period, value: editingPrl.period }, ...options];
+    }
+    return options;
+  }, [editingPrl?.period, periodOptions]);
 
   const columns: ColumnsType<ForecastRow> = [
     {
@@ -627,7 +707,7 @@ export default function PrlManagementPage() {
     {
       title: "Actions",
       key: "actions",
-      width: 110,
+      width: 150,
       render: (_: unknown, record: ForecastRow) => (
         <div className="flex items-center gap-2">
           <Button
@@ -640,6 +720,42 @@ export default function PrlManagementPage() {
                 record,
               })
             }
+          />
+          <Button
+            size="small"
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => openEditModal(record)}
+          />
+          <Button
+            size="small"
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => {
+              Modal.confirm({
+                title: "Delete PRL entry?",
+                content: `This will delete ${record.prlId}.`,
+                okText: "Delete",
+                okButtonProps: { danger: true },
+                cancelText: "Cancel",
+                onOk: async () => {
+                  if (!apiEnabled) {
+                    message.info("Delete is only available in API mode");
+                    return;
+                  }
+
+                  try {
+                    await deletePrl(record.key).unwrap();
+                    message.success("PRL entry deleted");
+                    prlListQuery.refetch();
+                    refetchDemandGapIfActive();
+                  } catch (error) {
+                    message.error(getApiErrorMessage(error, "Failed to delete PRL entry"));
+                  }
+                },
+              });
+            }}
           />
           <Button
             size="small"
@@ -774,7 +890,7 @@ export default function PrlManagementPage() {
             <Button className="!rounded-lg" icon={<UploadOutlined />} onClick={() => setExcelModalOpen(true)}>
               Excel Upload
             </Button>
-            <Button className="!rounded-lg" icon={<FileExcelOutlined />} onClick={() => message.info("Export data")}> 
+            <Button className="!rounded-lg" icon={<FileExcelOutlined />} onClick={handleExport}> 
               Export Data
             </Button>
             <Button
@@ -910,9 +1026,9 @@ export default function PrlManagementPage() {
 
             {/* Excel Upload */}
             <div className="bg-white rounded-xl border border-gray-100 p-4 mb-4">
-              <div className="text-sm font-semibold text-gray-900">Excel Upload</div>
+              <div className="text-sm font-semibold text-gray-900">PRL Import</div>
               <div className="text-xs text-gray-500 mt-1">
-                Upload forecast data directly from Excel sheet with columns: Customer, Uniq, Product Model, Part Name, Part Number, Quantity
+                Upload PRL data directly from Excel using `POST /prls/import`.
               </div>
 
               <div className="mt-3">
@@ -927,26 +1043,26 @@ export default function PrlManagementPage() {
                       return Upload.LIST_IGNORE;
                     }
                     if (!apiEnabled) {
-                      message.success(`Uploaded ${file.name}`);
+                      message.success(`Imported ${file.name}`);
                       return false;
                     }
 
-                    uploadExcel(file as File)
+                    importPrls(file as File)
                       .unwrap()
                       .then(() => {
-                        message.success(`Uploaded ${file.name}`);
+                        message.success(`Imported ${file.name}`);
                         prlListQuery.refetch();
                         refetchDemandGapIfActive();
                       })
                       .catch((err) => {
-                        message.error(getApiErrorMessage(err, "Excel upload failed"));
+                        message.error(getApiErrorMessage(err, "PRL import failed"));
                       });
                     return false;
                   }}
                 >
                   <div className="py-6">
                     <div className="text-3xl text-gray-400 mb-2">⬆</div>
-                    <div className="text-sm font-semibold text-gray-900">Upload Excel File</div>
+                    <div className="text-sm font-semibold text-gray-900">Upload PRL Excel File</div>
                     <div className="text-xs text-gray-500 mt-1">Drag and drop your Excel file here, or click to browse</div>
                     <Button className="!rounded-lg mt-3" type="primary">
                       Choose File
@@ -956,123 +1072,23 @@ export default function PrlManagementPage() {
               </div>
             </div>
 
-            {/* Aggregation Logic */}
             <div className="bg-white rounded-xl border border-gray-100 p-4 mb-4">
-              <div className="text-sm font-semibold text-gray-900">Data Aggregation Logic</div>
+              <div className="text-sm font-semibold text-gray-900">PRL Export</div>
               <div className="text-xs text-gray-500 mt-1">
-                When multiple PRL rows exist for same Uniq in a period, the system will sum them automatically
+                Download current PRL data using `GET /prls/export`.
               </div>
 
-              <div className="mt-3 bg-blue-50/60 rounded-xl border border-blue-100 p-4">
-                <div className="text-xs font-semibold text-blue-800 mb-2">Current Aggregation Rules:</div>
-                <ul className="text-xs text-blue-700 space-y-1 list-disc pl-5">
-                  <li>Same Uniq + Same Period → Quantities summed</li>
-                  <li>Customer data preserved from latest entry</li>
-                  <li>Part specifications updated to most recent</li>
-                  <li>Audit trail maintained for all aggregations</li>
-                </ul>
+              <div className="mt-4">
+                <Button className="!rounded-lg" icon={<FileExcelOutlined />} onClick={handleExport}>
+                  Export PRL Data
+                </Button>
               </div>
             </div>
 
-            {/* Clear Operations */}
             <div className="bg-white rounded-xl border border-gray-100 p-4">
-              <div className="text-sm font-semibold text-gray-900">Clear Operations</div>
-              <div className="text-xs text-gray-500 mt-1">Clear forecast data by various criteria</div>
-
-              <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-                <Button
-                  className="!rounded-xl !h-auto !py-4"
-                  disabled={anyBulkLoading}
-                  onClick={() => {
-                    if (!apiEnabled) {
-                      message.info("Clear All Table (mock)");
-                      return;
-                    }
-
-                    Modal.confirm({
-                      title: "Clear all PRL forecasts?",
-                      content: "This will delete all forecast rows.",
-                      okText: "Clear All",
-                      okButtonProps: { danger: true },
-                      cancelText: "Cancel",
-                      onOk: async () => {
-                        try {
-                          await clearAll().unwrap();
-                          message.success("Cleared all forecasts");
-                          prlListQuery.refetch();
-                          refetchDemandGapIfActive();
-                        } catch (err) {
-                          message.error(getApiErrorMessage(err, "Clear all failed"));
-                        }
-                      },
-                    });
-                  }}
-                >
-                  <div className="flex flex-col items-center gap-2">
-                    <DeleteOutlined className="text-red-500" />
-                    <div className="text-sm font-semibold">Clear All Table</div>
-                  </div>
-                </Button>
-
-                <Button
-                  className="!rounded-xl !h-auto !py-4"
-                  disabled={anyBulkLoading}
-                  onClick={() => {
-                    if (!apiEnabled) {
-                      message.info("Clear by Uniq (mock)");
-                      return;
-                    }
-
-                    const uniq = window.prompt("Input UNIQ to clear (e.g., FG-ABC-001)");
-                    if (!uniq) return;
-
-                    clearByUniq(uniq)
-                      .unwrap()
-                      .then(() => {
-                        message.success(`Cleared forecasts for UNIQ ${uniq}`);
-                        prlListQuery.refetch();
-                        refetchDemandGapIfActive();
-                      })
-                      .catch((err) => {
-                        message.error(getApiErrorMessage(err, "Clear by uniq failed"));
-                      });
-                  }}
-                >
-                  <div className="flex flex-col items-center gap-2">
-                    <FilterOutlined className="text-amber-500" />
-                    <div className="text-sm font-semibold">Clear by Uniq</div>
-                  </div>
-                </Button>
-
-                <Button
-                  className="!rounded-xl !h-auto !py-4"
-                  disabled={anyBulkLoading}
-                  onClick={() => {
-                    if (!apiEnabled) {
-                      message.info("Clear by Period (mock)");
-                      return;
-                    }
-
-                    const period = window.prompt("Input period to clear (e.g., 2025-Q1)");
-                    if (!period) return;
-
-                    clearByPeriod(period)
-                      .unwrap()
-                      .then(() => {
-                        message.success(`Cleared forecasts for period ${period}`);
-                        prlListQuery.refetch();
-                        refetchDemandGapIfActive();
-                      })
-                      .catch((err) => {
-                        message.error(getApiErrorMessage(err, "Clear by period failed"));
-                      });
-                  }}
-                >
-                  <div className="flex flex-col items-center gap-2">
-                    <CalendarOutlined className="text-blue-600" />
-                    <div className="text-sm font-semibold">Clear by Period</div>
-                  </div>
-                </Button>
+              <div className="text-sm font-semibold text-gray-900">Notes</div>
+              <div className="text-xs text-gray-500 mt-1">
+                Create uses `POST /prls`, detail uses `GET /prls/:id`, update uses `PUT /prls/:id`, and delete uses `DELETE /prls/:id` from the table actions.
               </div>
             </div>
           </div>
@@ -1083,30 +1099,34 @@ export default function PrlManagementPage() {
         open={forecastDetail.open}
         onCancel={() => setForecastDetail({ open: false, record: null })}
         footer={null}
-        width={860}
+        width={720}
         title={
           <div>
-            <div className="text-sm font-semibold text-gray-900">Forecast Detail by Uniq</div>
+            <div className="text-sm font-semibold text-gray-900">PRL Detail</div>
             <div className="text-xs text-gray-500 font-normal">
-              View detail and all forecast entries for the selected uniq.
+              View detail for the selected PRL entry.
             </div>
           </div>
         }
       >
-        {selectedUniqSummary ? (
+        {forecastDetail.record ? (
           <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="rounded-xl border border-gray-100 bg-white p-4">
+                <div className="text-xs text-gray-500">PRL ID</div>
+                <div className="mt-1 text-sm font-semibold text-gray-900">{forecastDetail.record.prlId}</div>
+              </div>
+              <div className="rounded-xl border border-gray-100 bg-white p-4">
+                <div className="text-xs text-gray-500">Customer</div>
+                <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.customer?.customer_name ?? prlDetailQuery.data?.customer_name ?? forecastDetail.record.customer}</div>
+              </div>
               <div className="rounded-xl border border-gray-100 bg-white p-4">
                 <div className="text-xs text-gray-500">UNIQ</div>
-                <div className="mt-1 text-sm font-semibold text-gray-900">{selectedUniqSummary.uniq}</div>
+                <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.uniq_code ?? forecastDetail.record.uniq}</div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-white p-4">
-                <div className="text-xs text-gray-500">Total Forecast Qty</div>
-                <div className="mt-1 text-sm font-semibold text-gray-900">{formatNumber(selectedUniqSummary.totalForecastQty)}</div>
-              </div>
-              <div className="rounded-xl border border-gray-100 bg-white p-4">
-                <div className="text-xs text-gray-500">Total Entries</div>
-                <div className="mt-1 text-sm font-semibold text-gray-900">{selectedUniqSummary.totalEntries}</div>
+                <div className="text-xs text-gray-500">Forecast Period</div>
+                <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.forecast_period ?? forecastDetail.record.period}</div>
               </div>
             </div>
 
@@ -1114,83 +1134,92 @@ export default function PrlManagementPage() {
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <div className="text-xs text-gray-500">Product Model</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900">{selectedUniqSummary.productModel}</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.product_model ?? prlDetailQuery.data?.product_details?.model ?? prlDetailQuery.data?.product_details?.description ?? forecastDetail.record.productModel}</div>
                 </div>
                 <div>
                   <div className="text-xs text-gray-500">Part Name</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900">{selectedUniqSummary.partName}</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.part_name ?? prlDetailQuery.data?.product_details?.part_name ?? forecastDetail.record.partName}</div>
                 </div>
                 <div>
                   <div className="text-xs text-gray-500">Part Number</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900">{selectedUniqSummary.partNumber}</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.part_number ?? prlDetailQuery.data?.product_details?.part_number ?? forecastDetail.record.partNumber}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500">Total Delivery Qty</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900">{formatNumber(selectedUniqSummary.totalDeliveryQty)}</div>
+                  <div className="text-xs text-gray-500">Quantity</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">{formatNumber(Number(prlDetailQuery.data?.quantity ?? forecastDetail.record.quantity ?? 0))}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500">Status</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">{forecastDetail.record.status}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500">Created At</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.created_at ?? forecastDetail.record.createdAt ?? "-"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500">Updated At</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.updated_at ?? forecastDetail.record.updatedAt ?? "-"}</div>
                 </div>
               </div>
             </div>
-
-            <div className="overflow-hidden rounded-xl border border-gray-100">
-              <Table<ForecastRow>
-                dataSource={selectedUniqRows}
-                rowKey="key"
-                size="small"
-                pagination={false}
-                columns={([
-                  {
-                    title: "PRL ID",
-                    dataIndex: "prlId",
-                    key: "prlId",
-                    render: (value: string) => <span className="text-sm text-gray-800">{value}</span>,
-                  },
-                  {
-                    title: "Customer",
-                    dataIndex: "customer",
-                    key: "customer",
-                    render: (value: string) => <span className="text-sm text-gray-700">{value}</span>,
-                  },
-                  {
-                    title: "Quantity",
-                    dataIndex: "quantity",
-                    key: "quantity",
-                    align: "right",
-                    render: (value: number) => <span className="text-sm text-gray-700">{formatNumber(value)}</span>,
-                  },
-                  {
-                    title: "Delivery Qty",
-                    dataIndex: "deliveryQuantity",
-                    key: "deliveryQuantity",
-                    align: "right",
-                    render: (value: number | undefined) => <span className="text-sm text-gray-700">{formatNumber(Number(value ?? 0))}</span>,
-                  },
-                  {
-                    title: "Period",
-                    dataIndex: "period",
-                    key: "period",
-                    render: (value: string) => <span className="text-sm text-gray-700">{value}</span>,
-                  },
-                  {
-                    title: "Status",
-                    dataIndex: "status",
-                    key: "status",
-                    render: (value: PrlStatus) => (
-                      <Tag color={value === "Active" ? "blue" : "default"} className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
-                        {value}
-                      </Tag>
-                    ),
-                  },
-                  {
-                    title: "Created By",
-                    dataIndex: "createdBy",
-                    key: "createdBy",
-                    render: (value?: string) => <span className="text-sm text-gray-700">{value ?? "-"}</span>,
-                  },
-                ]) as ColumnsType<ForecastRow>}
-              />
-            </div>
           </div>
         ) : null}
+      </Modal>
+
+      <Modal
+        open={editPrlOpen}
+        onCancel={() => {
+          setEditPrlOpen(false);
+          setEditingPrl(null);
+          editForm.resetFields();
+        }}
+        title="Edit PRL"
+        okText="Save"
+        okButtonProps={{ className: "!rounded-lg", loading: updatePrlState.isLoading }}
+        cancelButtonProps={{ className: "!rounded-lg" }}
+        onOk={async () => {
+          if (!editingPrl) return;
+
+          try {
+            const values = await editForm.validateFields();
+            if (!apiEnabled) {
+              message.info("Edit is only available in API mode");
+              return;
+            }
+
+            await updatePrl({
+              id: editingPrl.key,
+              body: {
+                forecast_period: String(values.forecastPeriod),
+                quantity: Number(values.quantity),
+              },
+            }).unwrap();
+
+            message.success("PRL updated");
+            setEditPrlOpen(false);
+            setEditingPrl(null);
+            editForm.resetFields();
+            prlListQuery.refetch();
+            refetchDemandGapIfActive();
+          } catch (error) {
+            message.error(getApiErrorMessage(error, "Failed to update PRL"));
+          }
+        }}
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item label="Forecast Period" name="forecastPeriod" rules={[{ required: true }]}> 
+            <Select
+              className="!rounded-lg"
+              options={editablePeriodOptions}
+              placeholder="Select forecast period"
+              showSearch
+              optionFilterProp="label"
+            />
+          </Form.Item>
+          <Form.Item label="Quantity" name="quantity" rules={[{ required: true }]}> 
+            <InputNumber className="!rounded-lg w-full" min={1} placeholder="e.g. 4200" />
+          </Form.Item>
+        </Form>
       </Modal>
 
       <Modal
@@ -1208,19 +1237,19 @@ export default function PrlManagementPage() {
               return Upload.LIST_IGNORE;
             }
             if (!apiEnabled) {
-              message.success(`Uploaded ${file.name}`);
+              message.success(`Imported ${file.name}`);
               return false;
             }
 
-            uploadExcel(file as File)
+            importPrls(file as File)
               .unwrap()
               .then(() => {
-                message.success(`Uploaded ${file.name}`);
+                message.success(`Imported ${file.name}`);
                 prlListQuery.refetch();
                 refetchDemandGapIfActive();
               })
               .catch((err) => {
-                message.error(getApiErrorMessage(err, "Excel upload failed"));
+                message.error(getApiErrorMessage(err, "PRL import failed"));
               });
             return false;
           }}
@@ -1228,7 +1257,7 @@ export default function PrlManagementPage() {
           <Button icon={<UploadOutlined />}>Select Excel File</Button>
         </Upload>
         <div className="text-xs text-gray-500 mt-3">
-          {apiEnabled ? "Uses /api/prl/upload-excel." : "API disabled: UI-only mock."}
+          {apiEnabled ? "Uses POST /prls/import." : "API disabled: UI-only mock."}
         </div>
       </Modal>
 

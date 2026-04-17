@@ -1,280 +1,367 @@
 import { apiSlice } from "@/lib/api/instance";
 import { unwrapBackendData } from "@/lib/api/utils/unwrap";
-import type { ApiResponse, DataArray, DataObject } from "@/types";
+import type { ApiResponse } from "@/types";
 
-export type ProcurementDnItem = {
-  uniq: string;
-  qty: number;
-  uom?: string;
-  spec_material?: string;
-  weigh_kg?: number;
-  packing?: string;
-  pcs_kanban?: number;
+const TAG = "ProcurementDns" as const;
+
+type UnknownRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
+
+const toText = (value: unknown): string | undefined => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
 };
 
-export type ProcurementDnRecord = {
-  id: string;
-  dn_id?: string;
-  po_id?: string;
-  dn_number?: string;
-  delivery_date?: string;
-  notes?: string;
-  items?: ProcurementDnItem[];
-  created_at?: string;
-  updated_at?: string;
+const toNumber = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 };
 
-export type ProcurementDnBoardRow = {
-  id: string;
-  po_id?: string;
-  po_number?: string;
-  month?: string;
-  supplier_name?: string;
-  subcon_name?: string;
-  expected_arrival?: string;
-  dn_created?: number;
-  dn_incoming?: number;
-  total_po?: number;
-  total_incoming?: number;
-  open_dn?: number;
-  dn_alert?: number;
-};
-
-export type ProcurementDnIncomingScanItem = { uniq: string; qty: number };
-
-export type ProcurementDnIncomingLog = {
-  id: string;
-  dn_id?: string;
-  scanned_at?: string;
-  notes?: string;
-  uniq?: string;
-  qty?: number;
-  created_at?: string;
-  full_name?: string;
-};
-
-export type CreateProcurementDnRequest = {
-  po_id: string;
-  dn_number: string;
-  delivery_date: string;
-  notes?: string;
-  items: ProcurementDnItem[];
-};
-
-export type UpdateProcurementDnRequest = Partial<Pick<CreateProcurementDnRequest, "dn_number" | "delivery_date" | "notes">>;
-
-export type IncomingScanRequest = {
-  scanned_at: string;
-  notes?: string;
-  items: ProcurementDnIncomingScanItem[];
-};
-
-export type ProcurementDnBoardFilters = {
-  category?: string;
-  month?: string;
-  supplier?: string;
-  subcon?: string;
-};
-
-const ok = <T>(data: T, message = "OK"): ApiResponse<T> => ({
+const ok = <T,>(data: T, message = "OK"): ApiResponse<T> => ({
   message,
   status: "success",
   data,
 });
 
-const toNumber = (value: unknown): number | undefined => {
-  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-  return Number.isFinite(n) ? n : undefined;
+const parseArrayResponse = <T,>(response: unknown): T[] => {
+  const unwrapped = unwrapBackendData<unknown>(response);
+  if (Array.isArray(unwrapped)) return unwrapped as T[];
+  if (isRecord(unwrapped) && Array.isArray(unwrapped.data)) return unwrapped.data as T[];
+  if (isRecord(unwrapped) && Array.isArray(unwrapped.items)) return unwrapped.items as T[];
+  if (!isRecord(response)) return [];
+  if (Array.isArray(response.data)) return response.data as T[];
+  if (isRecord(response.data) && Array.isArray(response.data.items)) return response.data.items as T[];
+  return [];
 };
 
-const toItem = (raw: unknown): ProcurementDnItem => {
-  const r = (raw ?? {}) as Record<string, unknown>;
-  return {
-    uniq: String(r.uniq ?? r.item_uniq_code ?? r.itemUniqCode ?? ""),
-    qty: Number(r.qty ?? r.quantity ?? 0),
-    uom: (r.uom ?? r.unit) as string | undefined,
-    spec_material: (r.spec_material ?? r.specMaterial ?? r.material_spec) as string | undefined,
-    weigh_kg: toNumber(r.weigh_kg ?? r.weighKg ?? r.weight_kg ?? r.weightKg),
-    packing: (r.packing ?? r.packing_type ?? r.packingNumber) as string | undefined,
-    pcs_kanban: toNumber(r.pcs_kanban ?? r.pcsKanban ?? r.pcs_per_kanban ?? r.pcsPerKanban),
+const parseObjectResponse = <T,>(response: unknown): T | null => {
+  const unwrapped = unwrapBackendData<unknown>(response);
+  if (isRecord(unwrapped)) return unwrapped as T;
+  if (!isRecord(response)) return null;
+  if (isRecord(response.data) && isRecord(response.data.data)) return response.data.data as T;
+  if (isRecord(response.data)) return response.data as T;
+  return response as T;
+};
+
+export type ProcurementDnType = "RM" | "IRM" | "SC";
+
+export type CreateProcurementDnItemRequest = {
+  item_uniq_code: string;
+  qty: number;
+  incoming_date: string;
+};
+
+export type CreateProcurementDnRequest = {
+  po_number: string;
+  period: string;
+  type: ProcurementDnType | string;
+  items: CreateProcurementDnItemRequest[];
+  customer_id?: number;
+  contact_person?: string;
+};
+
+export type ProcurementDnItem = {
+  id?: number | string;
+  dn_id?: number | string;
+  item_uniq_code?: string;
+  quantity?: number;
+  uom?: string;
+  weight?: number;
+  qr?: string;
+  order_qty?: number;
+  date_incoming?: string;
+  qty_stated?: number;
+  qty_received?: number;
+  weight_received?: number;
+  quality_status?: string;
+  pcs_per_kanban?: number;
+  received_at?: string | null;
+  packing_number?: string;
+  check?: string;
+  kanban_id?: number | string;
+  kanban?: {
+    id?: number | string;
+    kanban_number?: string;
+    item_uniq_code?: string;
+    kanban_qty?: number;
+    min_stock?: number;
+    max_stock?: number;
+    status?: string;
   };
 };
 
-const toDn = (raw: unknown): ProcurementDnRecord => {
-  const r = (raw ?? {}) as Record<string, unknown>;
-  const items = Array.isArray(r.items) ? (r.items as unknown[]).map(toItem) : undefined;
-  const id = String(r.dn_id ?? r.id ?? r.uuid ?? r.key ?? "");
+export type ProcurementDnRecord = {
+  id: string;
+  dn_number?: string;
+  customer_id?: number | string;
+  contact_person?: string;
+  period?: string;
+  po_number?: string;
+  type?: ProcurementDnType;
+  status?: string;
+  incoming_date?: string;
+  supplier_id?: number | string;
+  supplier_name?: string;
+  total_po_qty?: number;
+  total_po_incoming?: number;
+  total_dn_created?: number;
+  total_dn_incoming?: number;
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+  items: ProcurementDnItem[];
+};
+
+export type ProcurementDnPreview = {
+  period?: string;
+  po_number?: string;
+  type?: ProcurementDnType;
+  supplier?: string;
+  total_po?: number;
+  total_incoming?: number;
+  total_dn_created?: number;
+  total_dn_incoming?: number;
+  items: ProcurementDnPreviewItem[];
+};
+
+export type ProcurementDnPreviewItem = {
+  item_uniq_code?: string;
+  material_info?: string;
+  total_qty?: number;
+  remaining_qty?: number;
+  uom?: string;
+  order_qty?: number;
+  pcs_per_kanban?: number;
+  packing_number?: string;
+  date_incoming?: string;
+};
+
+export type ProcurementDnPreviewRequest = {
+  po_number: string;
+  period?: string;
+  type?: ProcurementDnType | string;
+  item?: unknown[];
+};
+
+export type ProcurementDnScanResult = {
+  packing_number?: string;
+  dn_number?: string;
+  item_uniq_code?: string;
+  quantity?: number;
+  qty_stated?: number;
+  qty_received?: number;
+  weight_received?: number;
+  quality_status?: string;
+  check?: string;
+  uom?: string;
+  po_number?: string;
+  period?: string;
+  qr?: string;
+};
+
+const toDnItem = (raw: unknown): ProcurementDnItem => {
+  const record = isRecord(raw) ? raw : {};
+  const kanbanRecord = isRecord(record.kanban) ? record.kanban : undefined;
   return {
-    id,
-    dn_id: (r.dn_id ?? r.id) as string | undefined,
-    po_id: (r.po_id ?? r.poId) as string | undefined,
-    dn_number: (r.dn_number ?? r.dnNumber) as string | undefined,
-    delivery_date: (r.delivery_date ?? r.deliveryDate) as string | undefined,
-    notes: (r.notes ?? r.note) as string | undefined,
-    items,
-    created_at: (r.created_at ?? r.createdAt) as string | undefined,
-    updated_at: (r.updated_at ?? r.updatedAt) as string | undefined,
+    id: toText(record.id),
+    dn_id: toText(record.dn_id),
+    item_uniq_code: toText(record.item_uniq_code) ?? toText(record.uniq),
+    quantity: toNumber(record.quantity),
+    uom: toText(record.uom),
+    weight: toNumber(record.weight),
+    qr: toText(record.qr),
+    order_qty: toNumber(record.order_qty),
+    date_incoming: toText(record.date_incoming),
+    qty_stated: toNumber(record.qty_stated),
+    qty_received: toNumber(record.qty_received),
+    weight_received: toNumber(record.weight_received),
+    quality_status: toText(record.quality_status),
+    pcs_per_kanban: toNumber(record.pcs_per_kanban),
+    received_at: toText(record.received_at) ?? null,
+    packing_number: toText(record.packing_number),
+    check: toText(record.check),
+    kanban_id: toText(record.kanban_id),
+    kanban: kanbanRecord
+      ? {
+          id: toText(kanbanRecord.id),
+          kanban_number: toText(kanbanRecord.kanban_number),
+          item_uniq_code: toText(kanbanRecord.item_uniq_code),
+          kanban_qty: toNumber(kanbanRecord.kanban_qty),
+          min_stock: toNumber(kanbanRecord.min_stock),
+          max_stock: toNumber(kanbanRecord.max_stock),
+          status: toText(kanbanRecord.status),
+        }
+      : undefined,
   };
 };
 
-const toBoardRow = (raw: unknown): ProcurementDnBoardRow => {
-  const r = (raw ?? {}) as Record<string, unknown>;
+const toDnRecord = (raw: unknown): ProcurementDnRecord => {
+  const record = isRecord(raw) ? raw : {};
+  const supplier = isRecord(record.supplier) ? record.supplier : undefined;
   return {
-    id: String(r.id ?? r.po_id ?? r.poId ?? r.key ?? ""),
-    po_id: (r.po_id ?? r.poId) as string | undefined,
-    po_number: (r.po_number ?? r.poNumber) as string | undefined,
-    month: (r.month ?? r.period) as string | undefined,
-    supplier_name: (r.supplier_name ?? r.supplierName) as string | undefined,
-    subcon_name: (r.subcon_name ?? r.subconName) as string | undefined,
-    expected_arrival: (r.expected_arrival ?? r.expectedArrival) as string | undefined,
-    dn_created: toNumber(r.dn_created ?? r.dnCreated),
-    dn_incoming: toNumber(r.dn_incoming ?? r.dnIncoming),
-    total_po: toNumber(r.total_po ?? r.totalPo),
-    total_incoming: toNumber(r.total_incoming ?? r.totalIncoming),
-    open_dn: toNumber(r.open_dn ?? r.openDn),
-    dn_alert: toNumber(r.dn_alert ?? r.dnAlert),
+    id: toText(record.id) ?? toText(record.dn_number) ?? "",
+    dn_number: toText(record.dn_number),
+    customer_id: toText(record.customer_id),
+    contact_person: toText(record.contact_person),
+    period: toText(record.period),
+    po_number: toText(record.po_number),
+    type: toText(record.type) as ProcurementDnType | undefined,
+    status: toText(record.status),
+    incoming_date: toText(record.incoming_date),
+    supplier_id: toText(record.supplier_id),
+    supplier_name: toText(record.supplier_name) ?? toText(supplier?.supplier_name),
+    total_po_qty: toNumber(record.total_po_qty),
+    total_po_incoming: toNumber(record.total_po_incoming),
+    total_dn_created: toNumber(record.total_dn_created),
+    total_dn_incoming: toNumber(record.total_dn_incoming),
+    created_by: toText(record.created_by),
+    created_at: toText(record.created_at),
+    updated_at: toText(record.updated_at),
+    items: Array.isArray(record.items) ? record.items.map(toDnItem) : [],
   };
 };
 
-const toIncomingLog = (raw: unknown): ProcurementDnIncomingLog => {
-  const r = (raw ?? {}) as Record<string, unknown>;
+const toPreviewItem = (raw: unknown): ProcurementDnPreviewItem => {
+  const record = isRecord(raw) ? raw : {};
   return {
-    id: String(r.id ?? r.log_id ?? r.logId ?? r.key ?? ""),
-    dn_id: (r.dn_id ?? r.dnId) as string | undefined,
-    scanned_at: (r.scanned_at ?? r.scannedAt ?? r.timestamp ?? r.created_at) as string | undefined,
-    notes: (r.notes ?? r.note) as string | undefined,
-    uniq: (r.uniq ?? r.item_uniq_code ?? r.itemUniqCode) as string | undefined,
-    qty: toNumber(r.qty ?? r.quantity),
-    created_at: (r.created_at ?? r.createdAt) as string | undefined,
-    full_name: (r.full_name ?? r.fullName ?? r.actor) as string | undefined,
+    item_uniq_code: toText(record.item_uniq_code) ?? toText(record.uniq_code) ?? toText(record.uniq),
+    material_info: toText(record.material_info) ?? toText(record.material) ?? toText(record.material_name),
+    total_qty: toNumber(record.total_qty) ?? toNumber(record.total_quantity) ?? toNumber(record.quantity),
+    remaining_qty: toNumber(record.remaining_qty) ?? toNumber(record.remaining_quantity),
+    uom: toText(record.uom) ?? toText(record.unit),
+    order_qty: toNumber(record.order_qty) ?? toNumber(record.qty_stated) ?? toNumber(record.orderQty),
+    pcs_per_kanban: toNumber(record.pcs_per_kanban) ?? toNumber(record.pcsPerKanban),
+    packing_number: toText(record.packing_number) ?? toText(record.packing),
+    date_incoming: toText(record.date_incoming) ?? toText(record.incoming_date),
   };
 };
 
-const toQueryString = (filters?: ProcurementDnBoardFilters): string => {
-  if (!filters) return "";
-  const params = new URLSearchParams();
-  if (filters.category) params.set("category", filters.category);
-  if (filters.month) params.set("month", filters.month);
-  if (filters.supplier) params.set("supplier", filters.supplier);
-  if (filters.subcon) params.set("subcon", filters.subcon);
-  const qs = params.toString();
-  return qs ? `?${qs}` : "";
+const toPreview = (raw: unknown): ProcurementDnPreview => {
+  const parsed = parseObjectResponse<unknown>(raw);
+  const record = isRecord(parsed)
+    ? (parsed as UnknownRecord)
+    : isRecord(raw)
+      ? raw
+      : {};
+  const itemsRaw = record.items;
+  return {
+    period: toText(record.period),
+    po_number: toText(record.po_number),
+    type: toText(record.type) as ProcurementDnType | undefined,
+    supplier: toText(record.supplier),
+    total_po: toNumber(record.total_po) ?? toNumber(record.total_po_qty),
+    total_incoming: toNumber(record.total_incoming) ?? toNumber(record.total_po_incoming),
+    total_dn_created: toNumber(record.total_dn_created),
+    total_dn_incoming: toNumber(record.total_dn_incoming),
+    items: Array.isArray(itemsRaw) ? itemsRaw.map(toPreviewItem) : [],
+  };
 };
 
-export const procurementDnApiSlice = apiSlice.injectEndpoints({
+const toScanResult = (raw: unknown): ProcurementDnScanResult => {
+  const record = isRecord(parseObjectResponse<unknown>(raw))
+    ? (parseObjectResponse<unknown>(raw) as UnknownRecord)
+    : isRecord(raw)
+      ? raw
+      : {};
+  return {
+    packing_number: toText(record.packing_number) ?? toText(record.packing),
+    dn_number: toText(record.dn_number),
+    item_uniq_code: toText(record.item_uniq_code) ?? toText(record.uniq),
+    quantity: toNumber(record.quantity),
+    qty_stated: toNumber(record.qty_stated),
+    qty_received: toNumber(record.qty_received),
+    weight_received: toNumber(record.weight_received),
+    quality_status: toText(record.quality_status),
+    check: toText(record.check),
+    uom: toText(record.uom),
+    po_number: toText(record.po_number),
+    period: toText(record.period),
+    qr:
+      toText(record.qr) ??
+      toText(record.qr_code) ??
+      toText(record.qrcode) ??
+      toText(record.qr_image) ??
+      toText(record.qrImage) ??
+      toText(record.qr_url) ??
+      toText(record.qrUrl),
+  };
+};
+
+export const procurementDnApiSlice = apiSlice
+  .enhanceEndpoints({ addTagTypes: [TAG] })
+  .injectEndpoints({
   endpoints: (builder) => ({
-    getProcurementDnBoard: builder.query<ApiResponse<DataArray<ProcurementDnBoardRow>>, ProcurementDnBoardFilters | void>({
-      query: (filters) => ({
-        url: `/api/procurement/dn/board${toQueryString(filters || undefined)}`,
+    listProcurementDns: builder.query<ApiResponse<ProcurementDnRecord[]>, void>({
+      query: () => ({
+        url: "/delivery-notes",
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => {
-        const unwrapped = unwrapBackendData<unknown>(response);
-        const list = Array.isArray(unwrapped) ? unwrapped : [];
-        return ok((list as unknown[]).map(toBoardRow));
-      },
+      transformResponse: (response: unknown) => ok(parseArrayResponse<unknown>(response).map(toDnRecord)),
+      providesTags: [{ type: TAG, id: "LIST" }],
     }),
 
-    createProcurementDn: builder.mutation<ApiResponse<DataObject<ProcurementDnRecord>>, CreateProcurementDnRequest>({
+    createProcurementDn: builder.mutation<ApiResponse<ProcurementDnRecord>, CreateProcurementDnRequest>({
       query: (body) => ({
-        url: "/api/procurement/dn/create",
+        url: "/delivery-notes",
         method: "POST",
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(toDn(unwrapBackendData(response)), "Created"),
+      transformResponse: (response: unknown) => ok(toDnRecord(parseObjectResponse<unknown>(response)), "Created"),
+      invalidatesTags: [{ type: TAG, id: "LIST" }],
     }),
 
-    listProcurementDnsByPo: builder.query<ApiResponse<DataArray<ProcurementDnRecord>>, string>({
-      query: (poId) => ({
-        url: `/api/procurement/dn/po/${encodeURIComponent(poId)}`,
-        method: "GET",
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => {
-        const unwrapped = unwrapBackendData<unknown>(response);
-        const list = Array.isArray(unwrapped) ? unwrapped : [];
-        return ok((list as unknown[]).map(toDn));
-      },
-    }),
-
-    getProcurementDnById: builder.query<ApiResponse<DataObject<ProcurementDnRecord>>, string>({
-      query: (dnId) => ({
-        url: `/api/procurement/dn/${encodeURIComponent(dnId)}`,
-        method: "GET",
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => ok(toDn(unwrapBackendData(response))),
-    }),
-
-    updateProcurementDn: builder.mutation<ApiResponse<DataObject<ProcurementDnRecord>>, { dnId: string; body: UpdateProcurementDnRequest }>({
-      query: ({ dnId, body }) => ({
-        url: `/api/procurement/dn/${encodeURIComponent(dnId)}`,
-        method: "PATCH",
-        body,
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => ok(toDn(unwrapBackendData(response)), "Updated"),
-    }),
-
-    scanProcurementDnIncoming: builder.mutation<ApiResponse<DataObject<{ ok: boolean }>>, { dnId: string; body: IncomingScanRequest }>({
-      query: ({ dnId, body }) => ({
-        url: `/api/procurement/dn/${encodeURIComponent(dnId)}/scan-incoming`,
+    previewProcurementDn: builder.mutation<ApiResponse<ProcurementDnPreview>, ProcurementDnPreviewRequest>({
+      query: ({ po_number, period, type, item }) => ({
+        url: `/delivery-notes/preview?po_number=${encodeURIComponent(po_number)}`,
         method: "POST",
-        body,
+        body: {
+          period,
+          po_number,
+          type,
+          item: Array.isArray(item) ? item : [],
+        },
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => {
-        const unwrapped = unwrapBackendData<unknown>(response);
-        if (typeof unwrapped === "object" && unwrapped !== null) return ok({ ok: true }, "Scanned");
-        return ok({ ok: true }, "Scanned");
-      },
+      transformResponse: (response: unknown) => ok(toPreview(response), "success"),
     }),
 
-    getProcurementDnIncomingLogs: builder.query<ApiResponse<DataArray<ProcurementDnIncomingLog>>, string>({
-      query: (dnId) => ({
-        url: `/api/procurement/dn/${encodeURIComponent(dnId)}/incoming-logs`,
+    scanProcurementDnPacking: builder.query<ApiResponse<ProcurementDnScanResult>, { packing: string }>({
+      query: ({ packing }) => ({
+        url: `/delivery-notes/scan?packing=${encodeURIComponent(packing)}`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => {
-        const unwrapped = unwrapBackendData<unknown>(response);
-        const list = Array.isArray(unwrapped) ? unwrapped : [];
-        return ok((list as unknown[]).map(toIncomingLog));
-      },
+      transformResponse: (response: unknown) => ok(toScanResult(response)),
     }),
 
-    getProcurementDnPackingListHtml: builder.query<ApiResponse<DataObject<string>>, string>({
-      query: (dnId) => ({
-        url: `/api/procurement/dn/${encodeURIComponent(dnId)}/packing-list`,
+    getProcurementDnById: builder.query<ApiResponse<ProcurementDnRecord>, string | number>({
+      query: (id) => ({
+        url: `/delivery-notes/${encodeURIComponent(String(id))}`,
         method: "GET",
-        responseHandler: (response) => response.text(),
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(String(response ?? "")),
-    }),
-
-    deleteProcurementDn: builder.mutation<ApiResponse<DataObject<{ id: string }>>, string>({
-      query: (dnId) => ({
-        url: `/api/procurement/dn/${encodeURIComponent(dnId)}`,
-        method: "DELETE",
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (_response: unknown, _meta, arg) => ok({ id: arg }, "Deleted"),
+      transformResponse: (response: unknown) => ok(toDnRecord(parseObjectResponse<unknown>(response))),
     }),
   }),
 });
 
 export const {
-  useGetProcurementDnBoardQuery,
-  useCreateProcurementDnMutation,
-  useListProcurementDnsByPoQuery,
+  useListProcurementDnsQuery,
+  usePreviewProcurementDnMutation,
+  useScanProcurementDnPackingQuery,
+  useLazyScanProcurementDnPackingQuery,
   useGetProcurementDnByIdQuery,
-  useUpdateProcurementDnMutation,
-  useScanProcurementDnIncomingMutation,
-  useGetProcurementDnIncomingLogsQuery,
-  useGetProcurementDnPackingListHtmlQuery,
-  useLazyGetProcurementDnPackingListHtmlQuery,
-  useDeleteProcurementDnMutation,
+  useCreateProcurementDnMutation,
 } = procurementDnApiSlice;

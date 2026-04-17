@@ -1,15 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Button, DatePicker, InputNumber, Select, Table, Tag, message } from "antd";
+import { Button, DatePicker, Input, InputNumber, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { LeftOutlined, PlusOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import dayjs, { Dayjs } from "dayjs";
 import { apiBaseUrl } from "@/lib/api/instance";
-import { useCreateProcurementPoMutation, useLazyListProcurementPosQuery } from "@/lib/api/procurement-po/api";
+import {
+  useGenerateProcurementPoMutation,
+  type ProcurementPoType,
+} from "@/lib/api/procurement-po/api";
 import { getApiErrorMessage } from "@/lib/api/error";
-import { useListMasterSuppliersQuery } from "@/lib/api/master-supplier/api";
+import { useGetPoBudgetListQuery, type PoBudgetType } from "@/lib/api/po-budget/api";
 
 type PoItemRow = {
   key: string;
@@ -29,31 +32,16 @@ const formatIdr = (n: number) => `${formatNumber(n)} IDR`;
 
 const pad3 = (n: number) => String(n).padStart(3, "0");
 
-const categoryToPrefix = (category: "RAW_MATERIAL" | "INDIRECT_RAW_MATERIAL" | "SUBCON") => {
-  if (category === "RAW_MATERIAL") return "PO-RM-";
-  if (category === "INDIRECT_RAW_MATERIAL") return "PO-IRM-";
-  return "PO-SC-";
+const tabToPoType = (tab: string | null): ProcurementPoType => {
+  if (tab === "indirect") return "indirect";
+  if (tab === "subcon") return "subcon";
+  return "raw_material";
 };
 
-const tabToCategory = (tab: string | null): "RAW_MATERIAL" | "INDIRECT_RAW_MATERIAL" | "SUBCON" => {
-  if (tab === "indirect") return "INDIRECT_RAW_MATERIAL";
-  if (tab === "subcon") return "SUBCON";
-  return "RAW_MATERIAL";
-};
-
-const categoryToUniqPrefix = (category: "RAW_MATERIAL" | "INDIRECT_RAW_MATERIAL" | "SUBCON") => {
-  if (category === "RAW_MATERIAL") return "RM";
-  if (category === "INDIRECT_RAW_MATERIAL") return "IRM";
-  return "SC";
-};
-
-const extractTrailingNumber = (value: string, prefix: string): number | null => {
-  if (!value.startsWith(prefix)) return null;
-  const rest = value.slice(prefix.length);
-  const m = rest.match(/(\d+)$/);
-  if (!m) return null;
-  const n = Number(m[1]);
-  return Number.isFinite(n) ? n : null;
+const procurementTypeToBudgetType = (type: ProcurementPoType): PoBudgetType => {
+  if (type === "raw_material") return "raw-material";
+  if (type === "subcon") return "subcon";
+  return "indirect";
 };
 
 export default function CreatePoProcurementPage() {
@@ -61,10 +49,10 @@ export default function CreatePoProcurementPage() {
   const searchParams = useSearchParams();
 
   const apiEnabled = Boolean(apiBaseUrl);
-  const [createPo, createPoState] = useCreateProcurementPoMutation();
-  const [triggerListPos] = useLazyListProcurementPosQuery();
+  const [generatePo, generatePoState] = useGenerateProcurementPoMutation();
 
-  const poCategory = useMemo(() => tabToCategory(searchParams.get("tab")), [searchParams]);
+  const poType = useMemo(() => tabToPoType(searchParams.get("tab")), [searchParams]);
+  const poBudgetType = useMemo(() => procurementTypeToBudgetType(poType), [poType]);
   const returnUrl = useMemo(() => {
     const tab = searchParams.get("tab");
     if (!tab) return "/po-procurement";
@@ -76,127 +64,71 @@ export default function CreatePoProcurementPage() {
   const [dnCreated, setDnCreated] = useState<number>(0);
   const [dnIncoming, setDnIncoming] = useState<number>(0);
 
-  const [poBudget, setPoBudget] = useState<string | undefined>(undefined);
-  const [poSequence, setPoSequence] = useState<string | undefined>(undefined);
-  const [supplier, setSupplier] = useState<string | undefined>(undefined);
-  const masterSuppliersQuery = useListMasterSuppliersQuery(undefined, { skip: !apiEnabled });
+  const [selectedBudgetIds, setSelectedBudgetIds] = useState<number[]>([]);
+  const [externalSystem, setExternalSystem] = useState<string>("zahir");
+  const [externalPoNumber, setExternalPoNumber] = useState<string>("");
+  const [generateMode, setGenerateMode] = useState<string>("both_stages");
 
-  const supplierOptions = useMemo(() => {
+  const poBudgetQuery = useGetPoBudgetListQuery(
+    { type: poBudgetType, page: 1, limit: 100 },
+    { skip: !apiEnabled },
+  );
+
+  const poBudgetOptions = useMemo<{ label: string; value: number }[]>(() => {
     if (!apiEnabled) {
       return [
-        { label: "Supplier A", value: "Supplier A" },
-        { label: "Supplier B", value: "Supplier B" },
+        { label: "PO Budget Mock 1", value: 1 },
+        { label: "PO Budget Mock 2", value: 2 },
       ];
     }
-    const list = masterSuppliersQuery.data ?? [];
-    return list
-      .map((r) => (r.supplier_name ? String(r.supplier_name) : ""))
-      .filter((v) => v.trim().length > 0)
-      .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({ label: name, value: name }));
-  }, [apiEnabled, masterSuppliersQuery.data]);
 
-  useEffect(() => {
-    // Default supplier selection from API list
-    if (supplier) return;
-    if (!supplierOptions.length) return;
-    setSupplier(String(supplierOptions[0].value));
-  }, [supplier, supplierOptions]);
-
-  const poBudgetOptions = useMemo(
-    () => [
-      { label: "(Open PO Budget menu)", value: "" },
-      { label: "Budget 2024", value: "Budget 2024" },
-      { label: "Budget 2025", value: "Budget 2025" },
-    ],
-    []
-  );
+    return (poBudgetQuery.data?.data ?? []).map((row) => ({
+      label: `${row.poBudgetRef ?? row.id ?? row.key} - ${row.uniq} - ${row.supplier}`,
+      value: Number(row.id ?? row.key),
+    }));
+  }, [apiEnabled, poBudgetQuery.data?.data]);
 
   const poSequenceOptions = useMemo(
     () => [
-      { label: "Sequence 1", value: "Sequence 1" },
-      { label: "Sequence 2", value: "Sequence 2" },
+      { label: "Both Stages", value: "both_stages" },
+      { label: "Stage 1", value: "stage_1" },
+      { label: "Stage 2", value: "stage_2" },
     ],
     []
   );
 
   const baseItems: PoItemRow[] = useMemo(() => {
-    const uniqPrefix = categoryToUniqPrefix(poCategory);
-    const items: Omit<PoItemRow, "uniq">[] = [
-      {
-        key: "1",
-        partNumber: "SP-001-A",
-        partName: "Steel Plate",
-        model: "Camry 2024",
-        qty: 100,
-        uom: "pcs",
-        packingNumber: "KBN-084-2024",
-        pcsPerKanban: 20,
-        budgetPoIdr: 100_000_000,
-      },
-      {
-        key: "2",
-        partNumber: "SP-001-A",
-        partName: "Steel Plate",
-        model: "Camry 2024",
-        qty: 100,
-        uom: "pcs",
-        packingNumber: "KBN-084-2024",
-        pcsPerKanban: 20,
-        budgetPoIdr: 10_000_000,
-      },
-      {
-        key: "3",
-        partNumber: "SP-001-A",
-        partName: "Steel Plate",
-        model: "Camry 2024",
-        qty: 100,
-        uom: "pcs",
-        packingNumber: "KBN-084-2024",
-        pcsPerKanban: 20,
-        budgetPoIdr: 5_000_000,
-      },
-      {
-        key: "4",
-        partNumber: "SP-001-A",
-        partName: "Steel Plate",
-        model: "Camry 2024",
-        qty: 100,
-        uom: "pcs",
-        packingNumber: "KBN-084-2024",
-        pcsPerKanban: 20,
-        budgetPoIdr: 20_000_000,
-      },
-      {
-        key: "5",
-        partNumber: "SP-001-A",
-        partName: "Steel Plate",
-        model: "Camry 2024",
-        qty: 100,
-        uom: "pcs",
-        packingNumber: "KBN-084-2024",
-        pcsPerKanban: 20,
-        budgetPoIdr: 90_000_000,
-      },
-    ];
+    const selectedRows = (poBudgetQuery.data?.data ?? []).filter((row) =>
+      selectedBudgetIds.includes(Number(row.id ?? row.key)),
+    );
 
-    return items.map((it, idx) => ({
-      ...it,
-      uniq: `${uniqPrefix}-${pad3(idx + 1)}`,
+    if (!selectedRows.length) return [];
+
+    return selectedRows.map((row, index) => ({
+      key: String(row.id ?? row.key ?? index + 1),
+      uniq: row.uniq,
+      partNumber: row.partNumber ?? "-",
+      partName: row.partName,
+      model: row.productModel,
+      qty: row.totalPo || row.pr || row.salesPlan || 0,
+      uom: row.uom ?? "-",
+      packingNumber: row.poBudgetRef ?? "-",
+      pcsPerKanban: 0,
+      budgetPoIdr: row.totalPo || 0,
     }));
-  }, [poCategory]);
+  }, [poBudgetQuery.data?.data, selectedBudgetIds]);
 
   const poGroups = useMemo(
     () => [
       {
         id: "(auto)",
-        supplierName: supplier || "-",
+        supplierName: baseItems[0]?.partName ? "Auto from PO Budget" : "-",
         totalQty: baseItems.reduce((sum, r) => sum + (r.qty || 0), 0),
         totalUniq: baseItems.length,
         items: baseItems.map((r) => ({ ...r, key: `xxx-${r.key}` })),
       },
     ],
-    [baseItems, supplier]
+    [baseItems]
   );
 
   const columns: ColumnsType<PoItemRow> = [
@@ -225,9 +157,8 @@ export default function CreatePoProcurementPage() {
   ];
 
   const handleGeneratePo = () => {
-    if (!poBudget) return message.error("Select PO Budget");
-    if (!poSequence) return message.error("Select Sequence");
-    if (!supplier) return message.error("Select Supplier");
+    if (!selectedBudgetIds.length) return message.error("Select PO Budget entries");
+    if (!generateMode) return message.error("Select generate mode");
     message.success("PO data prepared");
   };
 
@@ -237,13 +168,8 @@ export default function CreatePoProcurementPage() {
       return;
     }
 
-    if (!supplier?.trim()) {
-      message.error("Supplier is required");
-      return;
-    }
-
-    if (apiEnabled && poCategory !== "RAW_MATERIAL") {
-      message.info("POST procurement backend saat ini hanya tersedia untuk Raw Material");
+    if (!selectedBudgetIds.length) {
+      message.error("PO Budget entries are required");
       return;
     }
 
@@ -255,46 +181,20 @@ export default function CreatePoProcurementPage() {
     }
 
     try {
-      const prefix = categoryToPrefix(poCategory);
-      const listRes = await triggerListPos({ category: poCategory }).unwrap();
-      const list = listRes.data ?? [];
-      let max = 0;
-      for (const p of list) {
-        const candidate = typeof p.po_number === "string" ? p.po_number : "";
-        const n = extractTrailingNumber(candidate, prefix);
-        if (n !== null && n > max) max = n;
-      }
-
-      const month = period.format("YYYY-MM");
-      const nextPoNumber = (n: number) => `${prefix}${pad3(n)}`;
-      const headerBase = {
-        po_category: poCategory,
-        month,
-        supplier_name: poCategory === "SUBCON" ? undefined : supplier.trim() || undefined,
-        subcon_name: poCategory === "SUBCON" ? (supplier.trim() || undefined) : undefined,
-
-        total_incoming: Number.isFinite(totalIncoming) ? totalIncoming : undefined,
-        dn_created: Number.isFinite(dnCreated) ? dnCreated : undefined,
-        dn_incoming: Number.isFinite(dnIncoming) ? dnIncoming : undefined,
-      };
-
-      const items = poGroups.flatMap((g) => g.items);
-      const totalPoQty = items.reduce((sum, it) => sum + (Number.isFinite(it.qty) ? Number(it.qty) : 0), 0);
-      const totalBudgetPo = items.reduce((sum, it) => sum + (Number.isFinite(it.budgetPoIdr) ? Number(it.budgetPoIdr) : 0), 0);
-
-      const po_number = nextPoNumber(max + 1);
-      await createPo({
-        ...headerBase,
-        po_number,
-        total_po: totalPoQty || undefined,
-        total_budget_po: totalBudgetPo || undefined,
+      await generatePo({
+        po_type: poType,
+        period: period.format("YYYY-MM"),
+        po_budget_entry_ids: selectedBudgetIds,
+        external_system: externalSystem,
+        external_po_number: externalPoNumber || undefined,
+        generate_mode: generateMode,
       }).unwrap();
 
-      message.success(`PO created (${po_number})`);
+      message.success("PO generated successfully");
       router.replace(returnUrl);
       router.refresh();
     } catch (e) {
-      message.error(getApiErrorMessage(e, "Failed to create PO"));
+      message.error(getApiErrorMessage(e, "Failed to generate PO"));
     }
   };
 
@@ -318,7 +218,7 @@ export default function CreatePoProcurementPage() {
             type="primary"
             className="!rounded-lg"
             onClick={handleSave}
-            loading={createPoState.isLoading}
+            loading={generatePoState.isLoading}
           >
             Save PO
           </Button>
@@ -328,7 +228,7 @@ export default function CreatePoProcurementPage() {
       <div className="mb-5">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <div className="text-xl font-bold text-gray-900">PO Procurement Management</div>
-          <div className="text-sm text-gray-500">Initialize new PO Raw Material &nbsp;•&nbsp; 1 entry</div>
+          <div className="text-sm text-gray-500">Generate purchase order from PO Budget entries</div>
         </div>
       </div>
 
@@ -403,36 +303,44 @@ export default function CreatePoProcurementPage() {
             <div>
               <div className="text-xs font-semibold text-gray-700 mb-1">PO Budget</div>
               <Select
-                value={poBudget}
-                onChange={setPoBudget}
+                mode="multiple"
+                value={selectedBudgetIds}
+                onChange={(values) => setSelectedBudgetIds(values.map((value) => Number(value)).filter(Number.isFinite))}
                 options={poBudgetOptions}
-                placeholder="Select PO Budget"
+                placeholder="Select PO Budget entries"
                 className="w-full"
               />
             </div>
             <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">PO Sequence</div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">Generate Mode</div>
               <Select
-                value={poSequence}
-                onChange={setPoSequence}
+                value={generateMode}
+                onChange={setGenerateMode}
                 options={poSequenceOptions}
-                placeholder="Select Sequence"
+                placeholder="Select generate mode"
                 className="w-full"
               />
             </div>
             <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">{poCategory === "SUBCON" ? "Subcon" : "Supplier"}</div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">External System</div>
               <Select
-                value={supplier}
-                onChange={setSupplier}
-                options={supplierOptions}
-                placeholder={poCategory === "SUBCON" ? "Subcon" : "Supplier"}
+                value={externalSystem}
+                onChange={setExternalSystem}
+                options={[{ label: "Zahir", value: "zahir" }]}
+                placeholder="External system"
                 className="w-full"
-                showSearch
-                filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
               />
             </div>
-            <div className="flex items-end">
+            <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">External PO Number</div>
+              <Input
+                value={externalPoNumber}
+                onChange={(event) => setExternalPoNumber(event.target.value)}
+                placeholder="e.g. ZH-PO-000123"
+                className="!rounded-lg"
+              />
+            </div>
+            <div className="md:col-span-2 flex items-end">
               <Button type="primary" className="!rounded-lg w-full" icon={<PlusOutlined />} onClick={handleGeneratePo}>
                 Generate PO
               </Button>

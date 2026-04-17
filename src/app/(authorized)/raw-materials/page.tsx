@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -34,11 +34,10 @@ import { FiAlertTriangle } from "react-icons/fi";
 import { HiOutlineArchiveBox } from "react-icons/hi2";
 import { LuChartColumn } from "react-icons/lu";
 import { FaRegEdit, FaRegTrashAlt } from "react-icons/fa";
-import {
-  useGetAllRawMaterialsQuery,
-  useDeleteRawMaterialMutation,
-} from "@/lib/api/raw-materials/api";
 import { RawMaterialRecord } from "@/lib/api/raw-materials/interface";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { type InventoryRecord, useGetInventoryListQuery } from "@/lib/api/inventory/api";
 import {
   formatNumber,
   getStatusStockColor,
@@ -107,6 +106,61 @@ interface DetailModalState {
   record: RawMaterialRecord | null;
   isEditing: boolean;
 }
+
+type UnknownRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+
+const isMissingRouteError = (error: unknown): boolean => isRecord(error) && error.status === 404;
+
+const deriveStatus = (stockQty: number): RawMaterialRecord["status"] => {
+  if (stockQty <= 0) return "OutOfStock";
+  if (stockQty <= 20) return "LowStock";
+  return "Available";
+};
+
+const mapInventoryToRawMaterial = (record: InventoryRecord): RawMaterialRecord => {
+  const stockQty = Number(record.stock_qty ?? 0);
+  const status = deriveStatus(stockQty);
+  return {
+    current_stock: undefined,
+    master_list: undefined,
+    id: record.id,
+    uniq: record.uniq_code ?? "-",
+    code: record.rm_source ?? "-",
+    name: record.part_name ?? record.item_name ?? record.uniq_code ?? "-",
+    category: record.raw_material_type,
+    stock: stockQty,
+    unit: record.uom,
+    kanban_quantity: 0,
+    safety_stock: 20,
+    stock_days: 0,
+    status,
+    is_buyed: status !== "Available",
+    warehouse: { id: record.warehouse_location ?? "", name: record.warehouse_location ?? "-" },
+    master_list_supplier_id: record.rm_source,
+    price: record.stock_weight_kg,
+    po_reference: "",
+    batch_number: "",
+    quality_status: "",
+    notes: "",
+    order_flag: false,
+    created_by: "",
+    created_at: record.created_at ?? "",
+    updated_at: record.updated_at ?? "",
+    part_name: record.part_name,
+    part_no: record.part_number,
+    model: undefined,
+    total_kanban: undefined,
+    description: undefined,
+    save_as: undefined,
+    received_quantity: undefined,
+    received_date: undefined,
+    expiry_date: undefined,
+    updated_by: undefined,
+    master_list_supplier: undefined,
+  };
+};
 
 const RawMaterialDetailModal = ({
   state,
@@ -331,7 +385,6 @@ export default function RawMaterialsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [searchValue, setSearchValue] = useState("");
-  const [deleteRawMaterial] = useDeleteRawMaterialMutation();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletingRecord, setDeletingRecord] =
     useState<RawMaterialRecord | null>(null);
@@ -340,20 +393,50 @@ export default function RawMaterialsPage() {
     record: null,
     isEditing: false,
   });
-  const [rawMaterials, setRawMaterials] =
-    useState<RawMaterialRecord[]>(MOCK_RAW_MATERIALS);
+  const [rawMaterials, setRawMaterials] = useState<RawMaterialRecord[]>(MOCK_RAW_MATERIALS);
+  const apiEnabled = Boolean(apiBaseUrl);
+  const listQuery = useGetInventoryListQuery(
+    { type: "raw-materials", page: currentPage, limit: pageSize },
+    { skip: !apiEnabled }
+  );
 
-  // Gunakan mock data untuk demo, ganti dengan API data jika tersedia
+  useEffect(() => {
+    if (!apiEnabled || !listQuery.error) return;
+    if (isMissingRouteError(listQuery.error)) {
+      message.warning("Inventory raw-materials API route is not available yet; showing mock data.");
+      return;
+    }
+    message.error(getApiErrorMessage(listQuery.error, "Failed to load raw materials inventory"));
+  }, [apiEnabled, listQuery.error]);
 
-  const pagination = { total: MOCK_RAW_MATERIALS.length };
+  const inventoryRows = useMemo<RawMaterialRecord[]>(() => {
+    if (!apiEnabled || isMissingRouteError(listQuery.error)) return rawMaterials;
+    const items = listQuery.data?.data ?? [];
+    if (!items.length) return [];
+    return items.map(mapInventoryToRawMaterial);
+  }, [apiEnabled, listQuery.data, listQuery.error, rawMaterials]);
+
+  const filteredRows = useMemo(() => {
+    const q = searchValue.trim().toLowerCase();
+    if (!q) return inventoryRows;
+    return inventoryRows.filter((item) => {
+      return [item.uniq, item.name, item.code, item.category, item.warehouse?.name]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(q));
+    });
+  }, [inventoryRows, searchValue]);
+
+  const paginationTotal = searchValue.trim()
+    ? filteredRows.length
+    : listQuery.data?.pagination?.total ?? inventoryRows.length;
 
   const stats = {
-    totalItems: pagination.total || 0,
-    availableItems: rawMaterials.filter((item) => item.status === "Available")
+    totalItems: paginationTotal || 0,
+    availableItems: inventoryRows.filter((item) => item.status === "Available")
       .length,
-    lowStockItems: rawMaterials.filter((item) => item.status === "LowStock")
+    lowStockItems: inventoryRows.filter((item) => item.status === "LowStock")
       .length,
-    outOfStockItems: rawMaterials.filter((item) => item.status === "OutOfStock")
+    outOfStockItems: inventoryRows.filter((item) => item.status === "OutOfStock")
       .length,
   };
 
@@ -378,10 +461,12 @@ export default function RawMaterialsPage() {
   const handleConfirmDelete = async () => {
     if (!deletingRecord) return;
     try {
-      // jika pakai API:
-      // await deleteRawMaterial(deletingRecord.id).unwrap();
+      if (apiEnabled && !isMissingRouteError(listQuery.error)) {
+        message.info("Delete inventory is not integrated for this page yet.");
+        closeDeleteModal();
+        return;
+      }
 
-      // MOCK delete
       setRawMaterials((prev) => prev.filter((item) => item.id !== deletingRecord.id));
 
       message.success("Raw material deleted successfully!");
@@ -405,6 +490,11 @@ export default function RawMaterialsPage() {
   };
 
   const handleDetailSave = (data: any) => {
+    if (apiEnabled && !isMissingRouteError(listQuery.error)) {
+      message.info("Update inventory is not integrated for this page yet.");
+      setDetailModal({ visible: false, record: null, isEditing: false });
+      return;
+    }
     message.success("Raw material updated successfully!");
     setDetailModal({ visible: false, record: null, isEditing: false });
   };
@@ -556,7 +646,11 @@ export default function RawMaterialsPage() {
             icon={<EyeOutlined />}
             size="small"
             className="text-blue-600 hover:text-blue-800"
-            onClick={() => router.push(`/raw-materials/detail`)}
+            onClick={() =>
+              router.push(
+                `/raw-materials/detail?id=${encodeURIComponent(record.id)}&uniq=${encodeURIComponent(record.uniq)}`
+              )
+            }
           />
           <Button
             type="text"
@@ -671,17 +765,17 @@ export default function RawMaterialsPage() {
         <div className="p-6">
           <TableTemplate
             columns={columns}
-            data={rawMaterials}
+            data={filteredRows}
             rowKey="id"
             searchValue={searchValue}
             onSearchChange={setSearchValue}
             searchPlaceholder="Search raw materials..."
             pageSize={pageSize}
             currentPage={currentPage}
-            total={pagination?.total || 0}
+            total={paginationTotal}
             onPageChange={setCurrentPage}
             onPageSizeChange={setPageSize}
-            loading={false}
+            loading={apiEnabled ? listQuery.isFetching : false}
           />
         </div>
       </div>

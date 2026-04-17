@@ -4,10 +4,6 @@ import { useMemo, useState } from "react";
 import { Button, DatePicker, Form, Input, InputNumber, Select, message } from "antd";
 import { useRouter } from "next/navigation";
 import dayjs, { type Dayjs } from "dayjs";
-import { apiBaseUrl } from "@/lib/api/instance";
-import { getApiErrorMessage } from "@/lib/api/error";
-import { useGetAllRawMaterialsQuery } from "@/lib/api/raw-materials/api";
-import { useCreateRmProcessingWorkOrderMutation } from "@/lib/api/work-orders/api";
 
 type RmOption = {
   uniq: string;
@@ -29,14 +25,8 @@ const buildPackingNumber = () => {
 export default function CreateRmProcessingWoPage() {
   const router = useRouter();
   const [form] = Form.useForm();
-  const apiEnabled = Boolean(apiBaseUrl);
   const [packingNumber] = useState(buildPackingNumber);
   const { TextArea } = Input;
-  const [createRmProcessingWorkOrder, createRmProcessingState] = useCreateRmProcessingWorkOrderMutation();
-  const { data: rawMaterialsRes } = useGetAllRawMaterialsQuery(
-    { currentPage: 1, pageSize: 200 },
-    { skip: !apiEnabled, refetchOnMountOrArgChange: true }
-  );
 
   const fallbackOptions: RmOption[] = useMemo(
     () => [
@@ -78,20 +68,8 @@ export default function CreateRmProcessingWoPage() {
   );
 
   const rmOptions: RmOption[] = useMemo(() => {
-    const list = rawMaterialsRes?.data ?? [];
-    if (!list.length) return fallbackOptions;
-    return list.map((item) => ({
-      uniq: item.uniq,
-      name: item.name,
-      partName: item.part_name ?? item.name,
-      partNumber: item.part_no ?? item.code,
-      model: item.model ?? undefined,
-      gradeSize: item.notes ?? null ?? undefined,
-      unit: item.unit ?? "pcs",
-      label: `${item.uniq} - ${item.name}`,
-      value: item.uniq,
-    }));
-  }, [fallbackOptions, rawMaterialsRes?.data]);
+    return fallbackOptions;
+  }, [fallbackOptions]);
 
   const modelOptions = [
     { label: "SPHC", value: "SPHC" },
@@ -120,29 +98,12 @@ export default function CreateRmProcessingWoPage() {
   const onCreate = async () => {
     try {
       const values = await form.validateFields();
-      if (!apiEnabled) {
-        message.success("RM Processing WO created (mock)");
-        void values;
-        router.push("/work-orders");
-        return;
-      }
-
-      await createRmProcessingWorkOrder({
-        source_material_uniq: values.sourceMaterial ?? null,
-        target_material_uniq: values.targetMaterialUniq ?? null,
-        part_name: values.partName ?? null,
-        model_grade: values.gradeSize ?? values.model ?? null,
-        input_qty: values.qtyInput != null ? Number(values.qtyInput) : null,
-        output_qty: values.qtyOutput != null ? Number(values.qtyOutput) : null,
-        date_issued: values.dateIssued ? dayjs(values.dateIssued as Dayjs).format("YYYY-MM-DD") : null,
-        remarks: values.remarks ?? null,
-      }).unwrap();
-
-      message.success("RM Processing WO created successfully");
+      void values;
+      message.success("RM Processing WO created locally");
       router.push("/work-orders");
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error(getApiErrorMessage(err, "Failed to create RM processing work order"));
+      message.error("Failed to create RM processing work order");
     }
   };
 
@@ -167,7 +128,7 @@ export default function CreateRmProcessingWoPage() {
               type="primary"
               className="!rounded-lg"
               onClick={onCreate}
-              loading={createRmProcessingState.isLoading}
+              loading={false}
             >
               Create RM Processing WO
             </Button>

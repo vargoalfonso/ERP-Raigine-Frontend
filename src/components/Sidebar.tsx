@@ -22,6 +22,8 @@ import {
   MdWarning,
   MdScience,
   MdContentCopy,
+  MdWarehouse,
+  MdCheckCircle,
 } from "react-icons/md";
 import { HiOutlineArchiveBox } from "react-icons/hi2";
 
@@ -57,6 +59,12 @@ const menuItems: MenuItem[] = [
     label: "Demand Forecasting",
     icon: MdTrendingUp,
     href: "/demand-forecasting",
+  },
+  {
+    id: "approval-manager",
+    label: "Approval Manager",
+    icon: MdCheckCircle,
+    href: "/approval-manager",
   },
   {
     id: "sales",
@@ -107,6 +115,18 @@ const menuItems: MenuItem[] = [
     icon: MdArchive,
     children: [
       {
+        id: "master-customer",
+        label: "Master Customer",
+        icon: MdGroup,
+        href: "/master-customer",
+      },
+      {
+        id: "master-warehouse",
+        label: "Master Warehouse",
+        icon: MdWarehouse,
+        href: "/master-warehouse",
+      },
+      {
         id: "master-supplier",
         label: "Master Supplier",
         icon: MdGroup,
@@ -118,24 +138,7 @@ const menuItems: MenuItem[] = [
         icon: MdGroup,
         href: "/master-supplier-only",
       },
-      {
-        id: "master-supplier-raw",
-        label: "Supplier - Raw Material",
-        icon: MdScience,
-        href: "/master-supplier?tab=raw",
-      },
-      {
-        id: "master-supplier-indirect",
-        label: "Supplier - Indirect",
-        icon: MdScience,
-        href: "/master-supplier?tab=indirect",
-      },
-      {
-        id: "master-supplier-subcon",
-        label: "Supplier - Sub Con",
-        icon: MdScience,
-        href: "/master-supplier?tab=subcon",
-      },
+      
     ],
   },
   {
@@ -266,24 +269,24 @@ const menuItems: MenuItem[] = [
         icon: MdReceiptLong,
         href: "/po-procurement?tab=subcon",
       },
-      {
-        id: "dn-raw-material",
-        label: "DN - Raw Material",
-        icon: MdContentCopy,
-        href: "/dn-procurement?tab=raw",
-      },
-      {
-        id: "dn-indirect",
-        label: "DN - Indirect",
-        icon: MdContentCopy,
-        href: "/dn-procurement?tab=indirect",
-      },
-      {
-        id: "dn-subcon",
-        label: "DN - Sub Con",
-        icon: MdContentCopy,
-        href: "/dn-procurement?tab=subcon",
-      },
+      // {
+      //   id: "dn-raw-material",
+      //   label: "DN - Raw Material",
+      //   icon: MdContentCopy,
+      //   href: "/dn-procurement?tab=raw",
+      // },
+      // {
+      //   id: "dn-indirect",
+      //   label: "DN - Indirect",
+      //   icon: MdContentCopy,
+      //   href: "/dn-procurement?tab=indirect",
+      // },
+      // {
+      //   id: "dn-subcon",
+      //   label: "DN - Sub Con",
+      //   icon: MdContentCopy,
+      //   href: "/dn-procurement?tab=subcon",
+      // },
     ],
   },
   {

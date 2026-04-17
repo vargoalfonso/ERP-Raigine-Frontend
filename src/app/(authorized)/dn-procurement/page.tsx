@@ -6,8 +6,8 @@ import type { ColumnsType } from "antd/es/table";
 import { DownloadOutlined, FileTextOutlined, ShoppingCartOutlined, WarningOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
-import { type DnManagementType, useGetDnManagementByTypeQuery } from "@/lib/api/dn-management/api";
 import { getApiErrorMessage } from "@/lib/api/error";
+import { type ProcurementDnType, useListProcurementDnsQuery } from "@/lib/api/procurement-dn/api";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -15,13 +15,14 @@ const isRecord = (value: unknown): value is UnknownRecord => typeof value === "o
 
 const isMissingRouteError = (error: unknown): boolean => {
   if (!isRecord(error)) return false;
-  return (error as UnknownRecord).status === 404;
+  return error.status === 404;
 };
 
 type ProcurementTab = "raw" | "indirect" | "subcon";
 
 type DnRow = {
   key: string;
+  id: string;
   period: string;
   poNumber: string;
   partner: string;
@@ -39,6 +40,7 @@ const makeRows = (tab: ProcurementTab): DnRow[] => {
   return [
     {
       key: `${tab}-1`,
+      id: `${tab}-1`,
       period: "2024-01",
       poNumber: `PO-${tab.toUpperCase()}-2024-001`,
       partner,
@@ -50,6 +52,7 @@ const makeRows = (tab: ProcurementTab): DnRow[] => {
     },
     {
       key: `${tab}-2`,
+      id: `${tab}-2`,
       period: "2024-01",
       poNumber: `PO-${tab.toUpperCase()}-2024-002`,
       partner,
@@ -61,6 +64,7 @@ const makeRows = (tab: ProcurementTab): DnRow[] => {
     },
     {
       key: `${tab}-3`,
+      id: `${tab}-3`,
       period: "2024-01",
       poNumber: `PO-${tab.toUpperCase()}-2024-003`,
       partner,
@@ -72,6 +76,7 @@ const makeRows = (tab: ProcurementTab): DnRow[] => {
     },
     {
       key: `${tab}-4`,
+      id: `${tab}-4`,
       period: "2024-01",
       poNumber: `PO-${tab.toUpperCase()}-2024-004`,
       partner,
@@ -84,10 +89,10 @@ const makeRows = (tab: ProcurementTab): DnRow[] => {
   ];
 };
 
-const tabToType = (tab: ProcurementTab): DnManagementType => {
-  if (tab === "raw") return "rm";
-  if (tab === "indirect") return "indirect";
-  return "subcon";
+const tabToType = (tab: ProcurementTab): ProcurementDnType => {
+  if (tab === "raw") return "RM";
+  if (tab === "indirect") return "IRM";
+  return "SC";
 };
 
 const computeStatus = (dnCreated: number, dnIncoming: number): DnRow["status"] => {
@@ -135,18 +140,14 @@ function DnProcurementPageContent() {
   }, [activeTab]);
 
   const apiEnabled = Boolean(apiBaseUrl);
-  const boardQuery = useGetDnManagementByTypeQuery(
-    apiEnabled ? tabToType(activeTab) : ("rm" as DnManagementType),
-    { skip: !apiEnabled }
-  );
-
+  const boardQuery = useListProcurementDnsQuery(undefined, { skip: !apiEnabled });
   const procurementApiAvailable = apiEnabled && !isMissingRouteError(boardQuery.error);
 
   useEffect(() => {
     if (!apiEnabled) return;
     if (!boardQuery.error) return;
     if (isMissingRouteError(boardQuery.error)) {
-      message.warning("Procurement DN API route is not available on this backend yet; showing mock data.");
+      message.warning("Delivery note API route is not available on this backend yet; showing mock data.");
       return;
     }
     message.error(getApiErrorMessage(boardQuery.error, "Failed to load DN board"));
@@ -154,24 +155,24 @@ function DnProcurementPageContent() {
 
   const rows = useMemo<DnRow[]>(() => {
     if (!procurementApiAvailable) return makeRows(activeTab);
-    const list = boardQuery.data ?? [];
-    return list.map((r) => {
-      const dnNumber = r.dn_number ?? r.id;
-      const dnCreated = Number(r.total_dn_created ?? 0);
-      const dnIncoming = r.items.reduce((total, item) => total + Number(item.qty_stated ?? 0), 0);
-      const totalPo = Number(r.total_po_qty ?? 0);
-      const openDn = Math.max(totalPo - dnCreated, 0);
-      const partner = r.supplier_name ?? (r.supplier_id ? `Supplier #${r.supplier_id}` : "-");
+    const list = (boardQuery.data?.data ?? []).filter((record) => record.type === tabToType(activeTab));
+    return list.map((record, index) => {
+      const totalPoQty = Number(record.total_po_qty ?? 0);
+      const totalPoIncoming = Number(record.total_po_incoming ?? 0);
+      const totalDnCreated = Number(record.total_dn_created ?? 0);
+      const totalDnIncoming = Number(record.total_dn_incoming ?? 0);
+      const id = String(record.id ?? "").trim() || String(record.dn_number ?? record.po_number ?? `${activeTab}-${index}`);
       return {
-        key: dnNumber,
-        period: r.period ?? "-",
-        poNumber: r.po_number ?? dnNumber,
-        partner,
-        dnCreated,
-        dnIncoming,
-        openDn,
-        dnAlert: openDn > 0 ? 1 : 0,
-        status: computeStatus(dnCreated, dnIncoming),
+        key: id,
+        id,
+        period: record.period ?? "-",
+        poNumber: record.po_number ?? "-",
+        partner: record.supplier_name ?? (record.supplier_id ? `Supplier #${record.supplier_id}` : "-"),
+        dnCreated: totalDnCreated,
+        dnIncoming: totalDnIncoming,
+        openDn: Math.max(totalPoQty - totalPoIncoming, 0),
+        dnAlert: Math.max(totalPoQty - totalPoIncoming, 0) > 0 ? 1 : 0,
+        status: computeStatus(totalDnCreated, totalDnIncoming),
       };
     });
   }, [activeTab, procurementApiAvailable, boardQuery.data]);
@@ -270,7 +271,7 @@ function DnProcurementPageContent() {
             size="small"
             className="!rounded-lg"
             icon={<FileTextOutlined />}
-            onClick={() => router.push(`/dn-management/detail/${encodeURIComponent(record.key)}?tab=${encodeURIComponent(activeTab)}`)}
+            onClick={() => router.push(`/dn-management/detail/${encodeURIComponent(record.id)}?tab=${encodeURIComponent(activeTab)}`)}
           >
             View
           </Button>
@@ -323,10 +324,10 @@ function DnProcurementPageContent() {
             Raw Material
           </button>
           <button type="button" className={tabButtonClass(activeTab === "indirect")} onClick={() => setTab("indirect")}>
-            Indirect Raw Material
+            Indirect
           </button>
           <button type="button" className={tabButtonClass(activeTab === "subcon")} onClick={() => setTab("subcon")}>
-            SubCon
+            Subcon
           </button>
         </div>
 
@@ -348,6 +349,7 @@ function DnProcurementPageContent() {
               dataSource={pagedRows}
               rowKey="key"
               size="middle"
+              loading={boardQuery.isFetching}
               pagination={false}
               scroll={{ x: "max-content" }}
             />
@@ -404,7 +406,7 @@ function DnProcurementPageContent() {
         <div className="mt-6 rounded-xl border border-gray-100 bg-gray-50 p-3 text-xs text-gray-500 flex items-center gap-2">
           <FileTextOutlined />
           <span>
-            Note: {apiEnabled ? "Using backend API (/api/dn-management/type/{rm|indirect|subcon})." : "Using mock data (NEXT_PUBLIC_API_URL is not set)."}
+            Note: {apiEnabled ? "Using backend API (/delivery-notes) with DN types RM, IRM, and SC." : "Using mock data (NEXT_PUBLIC_API_URL is not set)."}
           </span>
         </div>
       </div>

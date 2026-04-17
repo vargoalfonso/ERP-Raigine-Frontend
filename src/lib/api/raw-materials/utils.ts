@@ -97,7 +97,7 @@ export const getStatusStockColor = (status: string | undefined): string => {
 export const transformRawMaterialForDisplay = (data: RawMaterialRecord) => {
   return {
     id: data.id,
-    code: formatValue(data.code),
+    //code: formatValue(data.code),
     name: formatValue(data.name),
     category: formatValue(data.category),
     partName: formatValue(data.part_name),
@@ -111,7 +111,7 @@ export const transformRawMaterialForDisplay = (data: RawMaterialRecord) => {
     price: formatPrice(data.price),
     orderFlag: formatBoolean(data.order_flag),
     description: formatValue(data.description),
-    status: formatValue(data.status),
+    //status: formatValue(data.status),
     isBuyed: formatBoolean(data.is_buyed),
     saveAs: formatValue(data.save_as),
     supplierName: formatValue(data.master_list_supplier?.name),
@@ -127,16 +127,22 @@ export const transformRawMaterialForDisplay = (data: RawMaterialRecord) => {
 export const validateRawMaterialData = (data: Partial<RawMaterialRecord>) => {
   const errors: string[] = [];
 
-  if (!data.code?.trim()) {
-    errors.push("Code is required");
-  }
+  // NOTE: For create/update raw material via `/inventory/:type`, backend does NOT require
+  // `code` nor `quality_status`. Validate only the fields needed by that contract.
+  const uniq = (data as any)?.uniq ?? (data as any)?.uniq_code;
+  const rawMaterialType = (data as any)?.raw_material_type ?? (data as any)?.category;
+  const rmSource = (data as any)?.rm_source ?? (data as any)?.master_list_supplier_id;
+  const warehouseLocation = (data as any)?.warehouse_location ?? (data as any)?.warehouse_id;
+  const uom = (data as any)?.uom ?? (data as any)?.unit;
+  const stockQty = (data as any)?.stock_qty ?? (data as any)?.stock;
 
-  if (!data.name?.trim()) {
-    errors.push("Name is required");
-  }
-
-  if (!data.quality_status) {
-    errors.push("Quality Status is required");
+  if (!String(uniq ?? "").trim()) errors.push("Uniq is required");
+  if (!String(rawMaterialType ?? "").trim()) errors.push("Raw Material Type is required");
+  if (!String(rmSource ?? "").trim()) errors.push("Raw Material Source is required");
+  if (!String(warehouseLocation ?? "").trim()) errors.push("Warehouse Location is required");
+  if (!String(uom ?? "").trim()) errors.push("UOM is required");
+  if (!(typeof stockQty === "number" ? Number.isFinite(stockQty) : String(stockQty ?? "").trim())) {
+    errors.push("Stock Qty is required");
   }
 
   return {

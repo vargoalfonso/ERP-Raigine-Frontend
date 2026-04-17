@@ -1,14 +1,22 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Button, Card, DatePicker, Input, InputNumber, Select, Tag, message } from "antd";
 import { LeftOutlined, SaveOutlined, PlusOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { apiBaseUrl } from "@/lib/api/instance";
-import { type DnManagementType, useCreateDnManagementMutation } from "@/lib/api/dn-management/api";
 import { getApiErrorMessage } from "@/lib/api/error";
+import {
+  type ProcurementDnPreview,
+  useCreateProcurementDnMutation,
+  usePreviewProcurementDnMutation,
+  type ProcurementDnType,
+} from "@/lib/api/procurement-dn/api";
+import { type ProcurementPoType, useGetProcurementPoByIdQuery, useListProcurementPosQuery } from "@/lib/api/procurement-po/api";
+
+type DnManagementType = "rm" | "indirect" | "subcon";
 
 type Step1Data = {
   period?: string;
@@ -19,6 +27,8 @@ type Step1Data = {
   totalIncoming?: number;
   dnCreated?: number;
   dnIncoming?: number;
+  // customerId?: number;
+  // contactPerson?: string;
 };
 
 type DnItemRow = {
@@ -47,60 +57,32 @@ type Step2Draft = {
   dateIncoming?: Dayjs;
 };
 
-const PO_OPTIONS = [
-  { label: "PO-RM-2024-01", value: "PO-RM-2024-01", supplier: "Autofilled" },
-  { label: "PO-RM-2024-02", value: "PO-RM-2024-02", supplier: "Autofilled" },
-];
+type UnknownRecord = Record<string, unknown>;
 
-const UNIQ_OPTIONS = [
-  {
-    label: "LV-001",
-    value: "LV-001",
-    material: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
-    totalQty: 120,
-    remainingQty: 40,
-    uom: "pcs",
-    packingNumber: "KBN-004-2024",
-  },
-  {
-    label: "LV-002",
-    value: "LV-002",
-    material: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
-    totalQty: 100,
-    remainingQty: 50,
-    uom: "pcs",
-    packingNumber: "KBN-004-2024",
-  },
-  {
-    label: "LV-003",
-    value: "LV-003",
-    material: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
-    totalQty: 200,
-    remainingQty: 100,
-    uom: "pcs",
-    packingNumber: "KBN-004-2024",
-  },
-  {
-    label: "LV-004",
-    value: "LV-004",
-    material: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
-    totalQty: 200,
-    remainingQty: 100,
-    uom: "pcs",
-    packingNumber: "KBN-004-2024",
-  },
-];
+const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+
+const toText = (value: unknown): string | undefined => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+};
+
+const toNumber = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+};
 
 const UOM_OPTIONS = [
   { label: "pcs", value: "pcs" },
   { label: "kg", value: "kg" },
   { label: "m", value: "m" },
-];
-
-const PACKING_OPTIONS = [
-  { label: "Select Packing", value: "" },
-  { label: "KBN-004-2024", value: "KBN-004-2024" },
-  { label: "KBN-005-2024", value: "KBN-005-2024" },
 ];
 
 function nextDnCode() {
@@ -112,6 +94,19 @@ const tabToType = (tab: string): DnManagementType => {
   if (tab === "indirect") return "indirect";
   return "rm";
 };
+
+const managementTypeToProcurementType = (type: DnManagementType): ProcurementDnType => {
+  if (type === "subcon") return "SC";
+  if (type === "indirect") return "IRM";
+  return "RM";
+};
+
+const managementTypeToPoType = (type: DnManagementType): ProcurementPoType => {
+  if (type === "subcon") return "subcon";
+  if (type === "indirect") return "indirect";
+  return "raw_material";
+};
+
 
 const typeCopy = (type: DnManagementType) => {
   if (type === "subcon") return { label: "SubCon", title: "DN SubCon", back: "SubCon", codePrefix: "DN-SUB" };
@@ -125,94 +120,217 @@ export default function DnRawMaterialCreatePage() {
   const apiEnabled = Boolean(apiBaseUrl);
   const dnType = tabToType((searchParams.get("tab") ?? "raw").toLowerCase());
   const copy = typeCopy(dnType);
-  const [createDnManagement, { isLoading: saving }] = useCreateDnManagementMutation();
+  const [createProcurementDn, { isLoading: saving }] = useCreateProcurementDnMutation();
+  const [previewProcurementDn, { isLoading: previewing }] = usePreviewProcurementDnMutation();
 
-  const [step1, setStep1] = useState<Step1Data>({
-    period: "01/2024",
-    poNumber: "PO-RM-2024-01",
-    supplierId: 1,
-    supplier: "Autofilled",
-    totalPo: 1000,
-    totalIncoming: 950,
-    dnCreated: 10,
-    dnIncoming: 8,
-  });
+  const [step1, setStep1] = useState<Step1Data>({});
+
+  const [preview, setPreview] = useState<ProcurementDnPreview | null>(null);
 
   const [draft, setDraft] = useState<Step2Draft>({});
 
-  const [items, setItems] = useState<DnItemRow[]>(() => {
-    const baseDate = undefined;
-    return [
-      {
-        key: "LV-001",
-        uniq: "LV-001",
-        materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
-        totalQty: 120,
-        remainingQty: 40,
-        uom: "pcs",
-        orderQty: 40,
-        packingNumber: "KBN-004-2024",
-        pcsPerKanban: 40,
-        dateIncoming: baseDate,
-      },
-      {
-        key: "LV-002",
-        uniq: "LV-002",
-        materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
-        totalQty: 100,
-        remainingQty: 50,
-        uom: "pcs",
-        orderQty: 100,
-        packingNumber: "KBN-004-2024",
-        pcsPerKanban: 50,
-        dateIncoming: baseDate,
-      },
-      {
-        key: "LV-003",
-        uniq: "LV-003",
-        materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
-        totalQty: 200,
-        remainingQty: 100,
-        uom: "pcs",
-        orderQty: 100,
-        packingNumber: "KBN-004-2024",
-        pcsPerKanban: 100,
-        dateIncoming: baseDate,
-      },
-      {
-        key: "LV-004",
-        uniq: "LV-004",
-        materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
-        totalQty: 200,
-        remainingQty: 100,
-        uom: "pcs",
-        orderQty: 100,
-        packingNumber: "KBN-004-2024",
-        pcsPerKanban: 100,
-        dateIncoming: baseDate,
-      },
-    ];
+  const [items, setItems] = useState<DnItemRow[]>([]);
+
+  const poType = managementTypeToPoType(dnType);
+  const poListQuery = useListProcurementPosQuery({ po_type: poType }, { skip: !apiEnabled });
+
+
+  const selectedPo = useMemo(() => {
+    const poNumber = String(step1.poNumber ?? "").trim();
+    if (!poNumber) return undefined;
+    return (poListQuery.data?.data ?? []).find((po) => String(po.po_number ?? "").trim() === poNumber);
+  }, [poListQuery.data, step1.poNumber]);
+
+  const poDetailQuery = useGetProcurementPoByIdQuery(selectedPo?.id ?? "", {
+    skip: !apiEnabled || !selectedPo?.id,
   });
+
+
+  const poOptions = useMemo(() => {
+    const list = poListQuery.data?.data ?? [];
+    return list
+      .map((po) => ({
+        label: String(po.po_number ?? "-")
+          .trim(),
+        value: String(po.po_number ?? "").trim(),
+        supplier: String(po.supplier_name ?? "-").trim(),
+      }))
+      .filter((opt) => Boolean(opt.value));
+  }, [poListQuery.data]);
+
+  const uniqOptions = useMemo(() => {
+    if (preview?.items?.length) {
+      const mapped = preview.items
+        .map((item) => {
+          const uniq = toText(item.item_uniq_code);
+          if (!uniq) return null;
+          const totalQty = Number(item.total_qty ?? 0);
+          const remainingQty = Number(item.remaining_qty ?? 0);
+          return {
+            label: uniq,
+            value: uniq,
+            material: {
+              code: toText(item.material_info) ?? uniq,
+              name: toText(item.material_info) ?? uniq,
+              model: String(preview.type ?? "-") || "-",
+            },
+            totalQty,
+            remainingQty,
+            uom: toText(item.uom) ?? "-",
+            packingNumber: toText(item.packing_number) ?? "-",
+            pcsPerKanban: Number(item.pcs_per_kanban ?? 0),
+            dateIncoming: toText(item.date_incoming),
+          };
+        })
+        .filter((v): v is NonNullable<typeof v> => v !== null);
+
+      const deduped = new Map<string, (typeof mapped)[number]>();
+      mapped.forEach((m) => {
+        if (!deduped.has(m.value)) deduped.set(m.value, m);
+      });
+      return Array.from(deduped.values());
+    }
+
+    const rawItems = (poDetailQuery.data?.data?.items ?? []).filter((it): it is UnknownRecord => isRecord(it));
+
+    const mapped = rawItems
+      .map((item) => {
+        const uniq = toText(item.uniq_code) ?? toText(item.item_uniq_code) ?? toText(item.uniq);
+        if (!uniq) return null;
+
+        const received = toNumber(item.qty_received) ?? toNumber(item.received_qty) ?? 0;
+        const totalQty =
+          toNumber(item.quantity) ??
+          toNumber(item.order_qty) ??
+          toNumber(item.qty_stated) ??
+          toNumber(item.total_qty) ??
+          0;
+
+        return {
+          label: uniq,
+          value: uniq,
+          material: {
+            code:
+              toText(item.material_code) ??
+              toText(item.item_code) ??
+              toText(item.part_number) ??
+              toText(item.kanban_number) ??
+              "-",
+            name:
+              toText(item.part_name) ??
+              toText(item.material_name) ??
+              toText(item.item_name) ??
+              uniq,
+            model: toText(item.product_model) ?? toText(item.model) ?? "-",
+          },
+          totalQty,
+          remainingQty: Math.max(totalQty - Number(received || 0), 0),
+          uom: toText(item.uom) ?? toText(item.unit) ?? "-",
+          packingNumber:
+            toText(item.packing_number) ??
+            toText(item.packing) ??
+            toText(item.kanban_number) ??
+            "-",
+          pcsPerKanban: toNumber(item.pcs_per_kanban) ?? toNumber(item.pcs) ?? 0,
+          dateIncoming: undefined,
+        };
+      })
+      .filter((v): v is NonNullable<typeof v> => v !== null);
+
+    const deduped = new Map<string, (typeof mapped)[number]>();
+    mapped.forEach((m) => {
+      if (!deduped.has(m.value)) deduped.set(m.value, m);
+    });
+    return Array.from(deduped.values());
+  }, [poDetailQuery.data, preview]);
 
   const dnCode = useMemo(() => `${copy.codePrefix}-${step1.period?.replace(/[^0-9A-Za-z]/g, "") ?? "202401"}-001`, [copy.codePrefix, step1.period]);
   const totalUniqChosen = useMemo(() => items.length, [items]);
 
-  const onPickPo = (poValue: string) => {
-    const po = PO_OPTIONS.find((p) => p.value === poValue);
+  const onPickPo = async (poValue: string) => {
+    const po = (poListQuery.data?.data ?? []).find((p) => String(p.po_number ?? "").trim() === poValue);
+
+    const procurementType = managementTypeToProcurementType(dnType);
+
     setStep1((prev) => ({
       ...prev,
       poNumber: poValue,
-      supplier: po?.supplier ?? "Autofilled",
+      period: String(po?.period ?? prev.period ?? "").trim() || prev.period,
+      supplierId: po?.supplier_id == null ? prev.supplierId : Number(po.supplier_id),
+      supplier: String(po?.supplier_name ?? prev.supplier ?? "").trim() || prev.supplier,
+      totalPo: po?.total_po == null ? prev.totalPo : Number(po.total_po),
+      totalIncoming: po?.total_incoming == null ? prev.totalIncoming : Number(po.total_incoming),
+      dnCreated: po?.dn_created == null ? prev.dnCreated : Number(po.dn_created),
+      dnIncoming: po?.dn_incoming == null ? prev.dnIncoming : Number(po.dn_incoming),
     }));
+
+    if (!apiEnabled) return;
+
+    try {
+      const res = await previewProcurementDn({
+        po_number: poValue,
+        period: dayjs().format("YYYY-MM"),
+        type: procurementType,
+        item: [],
+      }).unwrap();
+
+      setPreview(res.data);
+
+      setStep1((prev) => ({
+        ...prev,
+        period: res.data.period ?? prev.period,
+        supplier: res.data.supplier ?? prev.supplier,
+        totalPo: res.data.total_po ?? prev.totalPo,
+        totalIncoming: res.data.total_incoming ?? prev.totalIncoming,
+        dnCreated: res.data.total_dn_created ?? prev.dnCreated,
+        dnIncoming: res.data.total_dn_incoming ?? prev.dnIncoming,
+      }));
+
+      const nextItems: DnItemRow[] = (res.data.items ?? [])
+        .map((item, index) => {
+          const uniq = String(item.item_uniq_code ?? "").trim();
+          if (!uniq) return null;
+          const packingNumber = String(item.packing_number ?? "").trim() || "-";
+          const dateIncomingText = String(item.date_incoming ?? "").trim();
+          const dateIncoming = dateIncomingText ? dayjs(dateIncomingText, "DD/MM/YYYY") : undefined;
+
+          return {
+            key: `${uniq}-${packingNumber}-${index}`,
+            uniq,
+            materialInfo: {
+              code: String(item.material_info ?? uniq),
+              name: String(item.material_info ?? uniq),
+              model: String(res.data.type ?? "-") || "-",
+            },
+            totalQty: Number(item.total_qty ?? 0),
+            remainingQty: Number(item.remaining_qty ?? 0),
+            uom: String(item.uom ?? "-") || "-",
+            orderQty: Number(item.order_qty ?? 0),
+            packingNumber,
+            pcsPerKanban: Number(item.pcs_per_kanban ?? 0),
+            dateIncoming,
+          };
+        })
+        .filter((v): v is NonNullable<typeof v> => v !== null);
+
+      if (nextItems.length > 0) {
+        setItems(nextItems);
+      }
+    } catch (error) {
+      message.error(getApiErrorMessage(error, "Failed to load DN preview"));
+      setPreview(null);
+    }
   };
 
   const onPickUniq = (uniq: string) => {
-    const found = UNIQ_OPTIONS.find((u) => u.value === uniq);
+    const found = uniqOptions.find((u) => u.value === uniq);
     setDraft((prev) => ({
       ...prev,
       uniq,
       uom: found?.uom ?? prev.uom,
       packing: found?.packingNumber ?? prev.packing,
+      pcsPerKanban: found?.pcsPerKanban ?? prev.pcsPerKanban,
+      dateIncoming: found?.dateIncoming ? dayjs(found.dateIncoming, "DD/MM/YYYY") : prev.dateIncoming,
     }));
   };
 
@@ -234,14 +352,14 @@ export default function DnRawMaterialCreatePage() {
     const uom = draft.uom;
     const orderQty = draft.orderQty;
 
-    const found = UNIQ_OPTIONS.find((u) => u.value === uniq);
+    const found = uniqOptions.find((u) => u.value === uniq);
     const material = found?.material ?? { code: "-", name: "-", model: "-" };
     const totalQty = found?.totalQty ?? 0;
     const remainingQty = found?.remainingQty ?? 0;
     const packingNumber = draft.packing && draft.packing.length > 0 ? draft.packing : found?.packingNumber ?? "-";
 
     setItems((prev) => {
-      const exists = prev.some((p) => p.uniq === uniq);
+      const exists = prev.some((p) => p.uniq === uniq && p.packingNumber === packingNumber);
       if (exists) {
         message.warning("This UNIQ already exists in the table");
         return prev;
@@ -249,7 +367,7 @@ export default function DnRawMaterialCreatePage() {
       return [
         ...prev,
         {
-          key: uniq,
+          key: `${uniq}-${packingNumber}-${prev.length}`,
           uniq,
           materialInfo: material,
           totalQty,
@@ -257,7 +375,7 @@ export default function DnRawMaterialCreatePage() {
           uom,
           orderQty,
           packingNumber,
-          pcsPerKanban: draft.pcsPerKanban ?? 0,
+          pcsPerKanban: draft.pcsPerKanban ?? found?.pcsPerKanban ?? 0,
           dateIncoming: draft.dateIncoming,
         },
       ];
@@ -279,32 +397,26 @@ export default function DnRawMaterialCreatePage() {
 
     if (!apiEnabled) {
       message.success(`${copy.title} saved`);
-      router.push(`/dn-procurement?tab=${dnType === "rm" ? "raw" : dnType}`);
+      router.push("/dn-management");
       return;
     }
 
+    const procurementType = managementTypeToProcurementType(dnType);
+
     try {
-      await createDnManagement({
-        type: dnType,
-        period: step1.period,
+      await createProcurementDn({
         po_number: step1.poNumber,
-        supplier_id: step1.supplierId ?? 1,
-        dn_type: copy.label,
-        total_po_qty: step1.totalPo ?? 0,
-        total_dn_created: step1.dnCreated ?? items.reduce((total, item) => total + item.orderQty, 0),
-        created_by: "System",
+        period: step1.period,
+        type: procurementType,
         items: items.map((item) => ({
-          uniq: item.uniq,
-          order_qty: item.orderQty,
-          packing: item.packingNumber,
-          pcs_per_kanban: item.pcsPerKanban,
-          date_incoming: item.dateIncoming ? item.dateIncoming.format("YYYY-MM-DD") : dayjs().format("YYYY-MM-DD"),
-          qty_stated: item.orderQty,
+          item_uniq_code: item.uniq,
+          qty: Number(item.orderQty || 0),
+          incoming_date: item.dateIncoming ? item.dateIncoming.format("DD/MM/YYYY") : dayjs().format("DD/MM/YYYY"),
         })),
       }).unwrap();
 
       message.success(`${copy.title} saved successfully`);
-      router.push(`/dn-procurement?tab=${dnType === "rm" ? "raw" : dnType}`);
+      router.push("/dn-management");
     } catch (error) {
       message.error(getApiErrorMessage(error, `Failed to save ${copy.title}`));
     }
@@ -317,14 +429,14 @@ export default function DnRawMaterialCreatePage() {
           <div className="flex items-center justify-between gap-4">
             <button
               className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
-              onClick={() => router.push(`/dn-procurement?tab=${dnType === "rm" ? "raw" : dnType}`)}
+              onClick={() => router.push("/dn-management")}
             >
               <LeftOutlined />
               <span>Back to {copy.back}</span>
             </button>
 
             <div className="flex items-center gap-2">
-              <Button onClick={() => router.push(`/dn-procurement?tab=${dnType === "rm" ? "raw" : dnType}`)}>Cancel</Button>
+              <Button onClick={() => router.push("/dn-management")}>Cancel</Button>
               <Button type="primary" icon={<SaveOutlined />} onClick={() => void onSave()} loading={saving}>
                 Save {copy.title}
               </Button>
@@ -363,9 +475,10 @@ export default function DnRawMaterialCreatePage() {
                   <Select
                     value={step1.poNumber}
                     onChange={onPickPo}
-                    options={PO_OPTIONS.map((p) => ({ label: p.label, value: p.value }))}
+                    options={poOptions.map((p) => ({ label: p.label, value: p.value }))}
                     placeholder="Select PO Number"
                     className="w-full"
+                    disabled={previewing}
                   />
                 </div>
 
@@ -438,7 +551,7 @@ export default function DnRawMaterialCreatePage() {
                     value={draft.uniq}
                     onChange={onPickUniq}
                     placeholder="Select Uniq"
-                    options={UNIQ_OPTIONS.map((u) => ({ label: u.label, value: u.value }))}
+                    options={uniqOptions.map((u) => ({ label: u.label, value: u.value }))}
                     className="w-full"
                   />
                 </div>
@@ -467,11 +580,10 @@ export default function DnRawMaterialCreatePage() {
 
                 <div>
                   <div className="text-sm text-gray-700 mb-2">Packing</div>
-                  <Select
+                  <Input
                     value={draft.packing}
-                    onChange={(v) => setDraft((p) => ({ ...p, packing: v }))}
-                    placeholder="Select Packing"
-                    options={PACKING_OPTIONS.filter((p) => p.value !== "").map((p) => ({ label: p.label, value: p.value }))}
+                    onChange={(e) => setDraft((p) => ({ ...p, packing: e.target.value }))}
+                    placeholder="Input Packing Number"
                     className="w-full"
                   />
                 </div>

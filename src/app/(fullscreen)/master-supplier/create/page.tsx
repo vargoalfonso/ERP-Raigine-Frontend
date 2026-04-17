@@ -1,832 +1,557 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { Button, Card, Input, InputNumber, Select, Tag, message } from "antd";
-import { LeftOutlined, PlusOutlined } from "@ant-design/icons";
+import { useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import {
+  Alert,
+  Button,
+  Card,
+  Descriptions,
+  Form,
+  Input,
+  InputNumber,
+  Select,
+  Skeleton,
+  Space,
+  Tag,
+  Typography,
+  message,
+} from "antd";
+import { ArrowLeftOutlined, SaveOutlined } from "@ant-design/icons";
+import {
+  type BackendBomNode,
+  useGetBomTreeQuery,
+} from "@/lib/api/bom/api";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { apiBaseUrl } from "@/lib/api/instance";
+import {
+  type SupplierItemMutationRequest,
+  useCreateSupplierItemMutation,
+  useGetSupplierItemByIdQuery,
+  useUpdateSupplierItemMutation,
+} from "@/lib/api/supplier-items/api";
+import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
+import { useGetUomsQuery } from "@/lib/api/system-settings/api";
+import { useListWarehousesQuery } from "@/lib/api/warehouse/api";
 
-type SupplierOption = { label: string; value: string; supplierId: string };
+type SupplierSection = "raw-material" | "indirect-raw-material" | "subcon";
+type PageMode = "create" | "edit" | "view";
 
-type CycleType = "Daily" | "Weekly";
-
-type SupplierItemRow = {
-  key: string;
-  sebanggo: string;
-  uniq: string;
-  materialInfo: {
-    code: string;
-    name: string;
-    model: string;
-  };
-  type: string;
-  gradeSize: string;
-  quantity: number;
-  uom: string;
-  weight: number;
-  cycle: CycleType;
-  pcsPerKanban: string;
-};
-
-type Draft = {
-  sebanggo?: string;
-  uniq?: string;
-  customerCycle?: string;
-  quantity?: number;
+type FormValues = {
+  supplier_uuid?: string;
+  warehouse_uuid?: string;
+  uniq_code?: string;
+  sebango_code?: string;
   type?: string;
+  product_model?: string;
+  part_name?: string;
+  part_number?: string;
+  grade?: string;
+  size?: string;
+  uom?: string;
+  quantity?: number;
+  weight?: number;
+  pcs_per_kanban?: number;
+  customer_cycle?: string;
   description?: string;
 };
 
-type IndirectRow = {
-  key: string;
-  productModel: string;
-  partName: string;
-  partNumber: string;
-  gradeSize: string;
-  qtyPerKanban: number;
-  uom: string;
-  weightKg: number;
-  location: string;
-  type: string;
-  cycleDays: number;
-  status: "Active" | "Inactive";
-};
-
-type IndirectDraft = {
+type BomOption = {
+  value: string;
+  label: string;
   productModel?: string;
   partName?: string;
   partNumber?: string;
-  gradeSize?: string;
-  qtyPerKanban?: number;
-  uom?: string;
-  weightKg?: number;
-  location?: string;
   type?: string;
-  cycleDays?: number;
+  grade?: string;
+  size?: string;
+  uom?: string;
 };
 
-const SUPPLIERS: SupplierOption[] = [
-  { label: "PT Steel", value: "PT Steel", supplierId: "SUP-PT-STEEL" },
-  { label: "PT Metal Works", value: "PT Metal Works", supplierId: "SUP-PT-METAL" },
-  { label: "PT Chemical Solutions", value: "PT Chemical Solutions", supplierId: "SUP-PT-CHEM" },
+const SECTION_OPTIONS: Array<{ label: string; value: SupplierSection }> = [
+  { label: "Raw Material", value: "raw-material" },
+  { label: "Indirect Raw Material", value: "indirect-raw-material" },
+  { label: "SubCon", value: "subcon" },
 ];
 
-const UNIQ_POOL = ["LV-001", "LV-002", "LV-003", "LV-004", "LV-005"]; // auto-generated mock
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
 
-function nextUniq(used: Set<string>) {
-  for (const u of UNIQ_POOL) {
-    if (!used.has(u)) return u;
+const pickText = (...values: unknown[]) => {
+  for (const value of values) {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed;
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
   }
-  return `LV-${String(used.size + 1).padStart(3, "0")}`;
-}
+  return "";
+};
+
+const normalizeSection = (value: string | null): SupplierSection => {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "indirect" || raw === "indirect-raw-material") return "indirect-raw-material";
+  if (raw === "subcon" || raw === "sub-con") return "subcon";
+  return "raw-material";
+};
+
+const sectionLabel = (section: SupplierSection) =>
+  SECTION_OPTIONS.find((option) => option.value === section)?.label ?? "Raw Material";
+
+const sectionApiValue = (section: SupplierSection) => {
+  if (section === "indirect-raw-material") return "indirect_raw_material";
+  if (section === "subcon") return "subcon";
+  return "raw_material";
+};
+
+const flattenBomTree = (nodes: BackendBomNode[]): BackendBomNode[] => {
+  const flattened: BackendBomNode[] = [];
+
+  const walk = (items: BackendBomNode[]) => {
+    items.forEach((item) => {
+      flattened.push(item);
+      if (Array.isArray(item.children) && item.children.length > 0) walk(item.children);
+    });
+  };
+
+  walk(nodes);
+  return flattened;
+};
+
+const toBomOption = (node: BackendBomNode): BomOption | null => {
+  const uniqCode = pickText(node.uniq_code, node.uniq);
+  if (!uniqCode) return null;
+
+  const materialSpec = isRecord(node.material_specifications)
+    ? node.material_specifications
+    : undefined;
+
+  return {
+    value: uniqCode,
+    label: uniqCode,
+    productModel: pickText((node as any).model, node.assembly_code),
+    partName: pickText(node.part_name, node.description),
+    partNumber: pickText(node.part_number),
+    type: pickText(
+      materialSpec?.material_type,
+      materialSpec?.type,
+      materialSpec?.item_type,
+      materialSpec?.form,
+      node.material_code,
+    ),
+    grade: pickText(materialSpec?.material_grade, materialSpec?.grade),
+    size: pickText(materialSpec?.size, materialSpec?.material_size, materialSpec?.thickness),
+    uom: pickText(node.unit_measurement),
+  };
+};
 
 export default function MasterSupplierCreatePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const [messageApi, contextHolder] = message.useMessage();
+  const [form] = Form.useForm<FormValues>();
 
-  const section = useMemo(() => {
-    const s = (searchParams.get("section") ?? "").toLowerCase();
-    return s === "indirect" ? "indirect" : "raw";
-  }, [searchParams]);
+  const apiEnabled = Boolean(apiBaseUrl);
+  const section = normalizeSection(searchParams.get("section"));
+  const rawMode = String(searchParams.get("mode") ?? "create").toLowerCase();
+  const mode: PageMode = rawMode === "edit" || rawMode === "view" ? (rawMode as PageMode) : "create";
+  const readOnly = mode === "view";
+  const itemId = String(searchParams.get("id") ?? "").trim();
+  const isEditing = mode === "edit";
 
-  const [selectedSupplier, setSelectedSupplier] = useState<string | undefined>(undefined);
-  const supplierId = useMemo(() => SUPPLIERS.find((s) => s.value === selectedSupplier)?.supplierId, [selectedSupplier]);
+  const { data: suppliers = [], isLoading: suppliersLoading } = useListSuppliersQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const { data: warehouses = [], isLoading: warehousesLoading } = useListWarehousesQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const { data: uoms = [], isLoading: uomsLoading } = useGetUomsQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const { data: bomTree } = useGetBomTreeQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const detailQuery = useGetSupplierItemByIdQuery(itemId, {
+    skip: !apiEnabled || mode === "create" || !itemId,
+  });
 
-  const [rows, setRows] = useState<SupplierItemRow[]>([
-    {
-      key: "ASM-LV-001",
-      sebanggo: "ASM-LV-001",
-      uniq: "LV-001",
-      materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
-      type: "Pipe",
-      gradeSize: "STKM 550 - 5mm",
-      quantity: 40,
-      uom: "pcs",
-      weight: 2.5,
-      cycle: "Daily",
-      pcsPerKanban: "WH-A1",
-    },
-    {
-      key: "ASM-LV-002",
-      sebanggo: "ASM-LV-002",
-      uniq: "LV-002",
-      materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
-      type: "Steel Plate",
-      gradeSize: "STKM 550 - 5mm",
-      quantity: 100,
-      uom: "pcs",
-      weight: 18,
-      cycle: "Weekly",
-      pcsPerKanban: "WH-A1",
-    },
-    {
-      key: "ASM-LV-003",
-      sebanggo: "ASM-LV-003",
-      uniq: "LV-003",
-      materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
-      type: "Coil",
-      gradeSize: "STKM 550 - 5mm",
-      quantity: 100,
-      uom: "pcs",
-      weight: 1,
-      cycle: "Daily",
-      pcsPerKanban: "WH-A1",
-    },
-    {
-      key: "ASM-LV-004",
-      sebanggo: "ASM-LV-004",
-      uniq: "LV-004",
-      materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
-      type: "Wire",
-      gradeSize: "STKM 550 - 5mm",
-      quantity: 100,
-      uom: "m",
-      weight: 2.5,
-      cycle: "Daily",
-      pcsPerKanban: "WH-A1",
-    },
-  ]);
+  const [createSupplierItem, createState] = useCreateSupplierItemMutation();
+  const [updateSupplierItem, updateState] = useUpdateSupplierItemMutation();
 
-  const usedUniq = useMemo(() => new Set(rows.map((r) => r.uniq)), [rows]);
+  const supplierOptions = useMemo(
+    () =>
+      suppliers
+        .filter((supplier) => {
+          const status = String(supplier.status ?? "active").trim().toLowerCase();
+          return !status || status === "active";
+        })
+        .map((supplier) => {
+          const value = pickText(supplier.id);
+          const supplierName = pickText(supplier.supplier_name);
+          const supplierCode = pickText(supplier.supplier_code);
+          const label =
+            supplierCode && supplierName
+              ? `${supplierCode} — ${supplierName}`
+              : pickText(supplierName, supplierCode);
+          if (!value || !label) return null;
+          return {
+            value,
+            label,
+            supplierCode,
+          };
+        })
+        .filter((option): option is { value: string; label: string; supplierCode: string } => Boolean(option))
+        .sort((left, right) => left.label.localeCompare(right.label)),
+    [suppliers]
+  );
 
-  const [draft, setDraft] = useState<Draft>(() => ({ uniq: nextUniq(new Set(["LV-001", "LV-002", "LV-003", "LV-004"])) }));
-  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const uomOptions = useMemo(
+    () =>
+      uoms
+        .map((uom) => {
+          const value = pickText(uom.name, uom.unit_name, uom.code, uom.unit_code);
+          if (!value) return null;
+          return { label: value, value };
+        })
+        .filter((option): option is { label: string; value: string } => Boolean(option))
+        .sort((left, right) => left.label.localeCompare(right.label)),
+    [uoms],
+  );
 
-  const totalUniqAdded = useMemo(() => rows.length, [rows]);
-  const totalQuantity = useMemo(() => rows.reduce((sum, r) => sum + r.quantity, 0), [rows]);
+  const warehouseOptions = useMemo(
+    () =>
+      warehouses
+        .map((warehouse) => {
+          const value = pickText(warehouse.id, warehouse.warehouse_uuid);
+          const label = pickText(warehouse.warehouse_name);
+          if (!value || !label) return null;
+          return {
+            value,
+            label,
+            type: pickText(warehouse.type_warehouse),
+          };
+        })
+        .filter((option): option is { value: string; label: string; type: string } => Boolean(option))
+        .sort((left, right) => left.label.localeCompare(right.label)),
+    [warehouses]
+  );
 
-  const ensureUniqInDraft = () => {
-    setDraft((prev) => ({
-      ...prev,
-      uniq: prev.uniq ?? nextUniq(usedUniq),
-    }));
-  };
+  const bomOptions = useMemo(() => {
+    const items = flattenBomTree(bomTree?.data ?? []);
+    const mapped = items.map(toBomOption).filter((option): option is BomOption => Boolean(option));
+    const deduped = new Map<string, BomOption>();
 
-  const startEdit = (row: SupplierItemRow) => {
-    setEditingKey(row.key);
-    setDraft({
-      sebanggo: row.sebanggo,
-      uniq: row.uniq,
-      customerCycle: row.cycle,
-      quantity: row.quantity,
-      type: row.type,
-      description: row.materialInfo.name,
+    mapped.forEach((option) => {
+      if (!deduped.has(option.value)) deduped.set(option.value, option);
+    });
+
+    return Array.from(deduped.values()).sort((left, right) => left.label.localeCompare(right.label));
+  }, [bomTree]);
+
+  const selectedSupplierId = Form.useWatch("supplier_uuid", form);
+  const selectedWarehouseId = Form.useWatch("warehouse_uuid", form);
+
+  const selectedSupplier = useMemo(
+    () => supplierOptions.find((option) => option.value === selectedSupplierId),
+    [selectedSupplierId, supplierOptions]
+  );
+  const selectedWarehouse = useMemo(
+    () => warehouseOptions.find((option) => option.value === selectedWarehouseId),
+    [selectedWarehouseId, warehouseOptions]
+  );
+
+  useEffect(() => {
+    if (!detailQuery.data) return;
+
+    form.setFieldsValue({
+      supplier_uuid: pickText(detailQuery.data.supplier_uuid),
+      warehouse_uuid: pickText(detailQuery.data.warehouse_uuid, detailQuery.data.warehouse_id),
+      uniq_code: pickText(detailQuery.data.uniq_code),
+      sebango_code: pickText(detailQuery.data.sebango_code),
+      type: pickText(detailQuery.data.type),
+      product_model: pickText(detailQuery.data.product_model),
+      part_name: pickText(detailQuery.data.part_name),
+      part_number: pickText(detailQuery.data.part_number),
+      grade: pickText(detailQuery.data.grade),
+      size: pickText(detailQuery.data.size),
+      uom: pickText(detailQuery.data.uom),
+      quantity: Number(detailQuery.data.quantity ?? 0),
+      weight: Number(detailQuery.data.weight ?? 0),
+      pcs_per_kanban: Number(detailQuery.data.pcs_per_kanban ?? 0),
+      customer_cycle: pickText(detailQuery.data.customer_cycle),
+      description: pickText(detailQuery.data.description),
+    });
+  }, [detailQuery.data, form]);
+
+  const handleUniqChange = (value: string) => {
+    const matched = bomOptions.find((option) => option.value === value);
+    if (!matched) return;
+
+    const matchedUom = matched.uom
+      ? uomOptions.find((option) => option.value.toLowerCase() === matched.uom?.toLowerCase())
+      : undefined;
+
+    form.setFieldsValue({
+      uniq_code: matched.value,
+      product_model: matched.productModel,
+      part_name: matched.partName,
+      part_number: matched.partNumber,
+      type: matched.type,
+      grade: matched.grade,
+      size: matched.size,
+      uom: matchedUom?.value,
+      description: form.getFieldValue("description") || matched.partName,
     });
   };
 
-  const removeRow = (key: string) => {
-    const ok = window.confirm("Delete this item?");
-    if (!ok) return;
-    setRows((prev) => prev.filter((r) => r.key !== key));
-  };
-
-  const upsertRow = () => {
-    if (!selectedSupplier) {
-      message.error("Supplier Name is required");
-      return;
-    }
-    if (!draft.sebanggo || draft.sebanggo.trim().length === 0) {
-      message.error("Sebanggo (Assembly Code) is required");
-      return;
-    }
-    if (!draft.uniq) {
-      message.error("Uniq is required");
-      return;
-    }
-    if (!draft.customerCycle || draft.customerCycle.trim().length === 0) {
-      message.error("Customer Cycle is required");
-      return;
-    }
-    if (draft.quantity === undefined || draft.quantity === null) {
-      message.error("Quantity is required");
+  const handleSave = async () => {
+    if (!apiEnabled) {
+      messageApi.warning("Set NEXT_PUBLIC_API_URL before saving supplier items.");
       return;
     }
 
-    const cycle = (draft.customerCycle === "Weekly" ? "Weekly" : "Daily") as CycleType;
+    try {
+      const values = await form.validateFields();
+      const payload: SupplierItemMutationRequest = {
+        supplier_uuid: pickText(values.supplier_uuid),
+        sebango_code: pickText(values.sebango_code),
+        uniq_code: pickText(values.uniq_code),
+        type: pickText(values.type) || sectionApiValue(section),
+        description: pickText(values.description, values.part_name, values.uniq_code),
+        quantity: Number(values.quantity ?? 0),
+        uom: pickText(values.uom),
+        weight: Number(values.weight ?? 0),
+        pcs_per_kanban: Number(values.pcs_per_kanban ?? 0),
+        customer_cycle: pickText(values.customer_cycle),
+        status: "active",
+        warehouse_uuid: pickText(values.warehouse_uuid) || undefined,
+        warehouse_name: selectedWarehouse?.label,
+        product_model: pickText(values.product_model) || undefined,
+        part_name: pickText(values.part_name) || undefined,
+        part_number: pickText(values.part_number) || undefined,
+        material_type: sectionApiValue(section),
+        grade: pickText(values.grade) || undefined,
+        size: pickText(values.size) || undefined,
+      };
 
-    const newRow: SupplierItemRow = {
-      key: editingKey ?? draft.sebanggo,
-      sebanggo: draft.sebanggo,
-      uniq: draft.uniq,
-      materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
-      type: draft.type ?? "-",
-      gradeSize: "STKM 550 - 5mm",
-      quantity: draft.quantity,
-      uom: "pcs",
-      weight: 2.5,
-      cycle,
-      pcsPerKanban: "WH-A1",
-    };
-
-    setRows((prev) => {
-      const exists = prev.some((r) => r.key === (editingKey ?? draft.sebanggo));
-      if (exists) {
-        return prev.map((r) => (r.key === (editingKey ?? draft.sebanggo) ? newRow : r));
+      if (isEditing) {
+        await updateSupplierItem({ id: itemId, body: payload }).unwrap();
+        messageApi.success("Supplier item updated");
+      } else {
+        await createSupplierItem(payload).unwrap();
+        messageApi.success("Supplier item created");
       }
-      const uniqUsed = prev.some((r) => r.uniq === draft.uniq);
-      if (uniqUsed) {
-        message.warning("Uniq already exists in the table");
-        return prev;
+
+      router.push("/master-supplier");
+    } catch (saveError) {
+      if (isRecord(saveError) && Array.isArray(saveError.errorFields)) {
+        messageApi.error("Please complete all required fields");
+        return;
       }
-      return [newRow, ...prev];
-    });
-
-    setEditingKey(null);
-    setDraft({ uniq: nextUniq(new Set(rows.map((r) => r.uniq))) });
-    message.success(editingKey ? "Item updated" : "Item added");
-  };
-
-  const onCreate = () => {
-    if (!selectedSupplier) {
-      message.error("Please select Supplier Name");
-      return;
+      messageApi.error(getApiErrorMessage(saveError, "Failed to save supplier item"));
     }
-    message.success("Master supplier item created");
-    router.push("/master-supplier");
   };
 
-  // Indirect Raw Material flow
-  const [indirectRows, setIndirectRows] = useState<IndirectRow[]>([
-    {
-      key: "IND-001",
-      productModel: "Universal",
-      partName: "Cutting Oil",
-      partNumber: "OIL-CUT-001",
-      gradeSize: "Grade A - 20L",
-      qtyPerKanban: 100,
-      uom: "liter",
-      weightKg: 18,
-      location: "Chemical Storage",
-      type: "Consumable",
-      cycleDays: 14,
-      status: "Active",
-    },
-    {
-      key: "IND-002",
-      productModel: "Universal",
-      partName: "Welding Wire",
-      partNumber: "WLD-WR-002",
-      gradeSize: "ER70S-6 - 1.2mm",
-      qtyPerKanban: 50,
-      uom: "kg",
-      weightKg: 15,
-      location: "Welding Area",
-      type: "Consumable",
-      cycleDays: 7,
-      status: "Active",
-    },
-  ]);
-
-  const [indirectDraft, setIndirectDraft] = useState<IndirectDraft>({});
-  const [indirectEditingKey, setIndirectEditingKey] = useState<string | null>(null);
-
-  const indirectTotals = useMemo(() => {
-    const totalQty = indirectRows.reduce((sum, r) => sum + r.qtyPerKanban, 0);
-    return { totalItems: indirectRows.length, totalQty };
-  }, [indirectRows]);
-
-  const startIndirectEdit = (row: IndirectRow) => {
-    setIndirectEditingKey(row.key);
-    setIndirectDraft({
-      productModel: row.productModel,
-      partName: row.partName,
-      partNumber: row.partNumber,
-      gradeSize: row.gradeSize,
-      qtyPerKanban: row.qtyPerKanban,
-      uom: row.uom,
-      weightKg: row.weightKg,
-      location: row.location,
-      type: row.type,
-      cycleDays: row.cycleDays,
-    });
-  };
-
-  const removeIndirectRow = (key: string) => {
-    const ok = window.confirm("Delete this item?");
-    if (!ok) return;
-    setIndirectRows((prev) => prev.filter((r) => r.key !== key));
-  };
-
-  const upsertIndirectRow = () => {
-    if (!selectedSupplier) {
-      message.error("Supplier Name is required");
-      return;
-    }
-    if (!indirectDraft.productModel?.trim()) return void message.error("Product Model is required");
-    if (!indirectDraft.partName?.trim()) return void message.error("Part Name is required");
-    if (!indirectDraft.partNumber?.trim()) return void message.error("Part Number is required");
-    if (!indirectDraft.gradeSize?.trim()) return void message.error("Grade/Size is required");
-    if (indirectDraft.qtyPerKanban === undefined || indirectDraft.qtyPerKanban === null) return void message.error("Qty/Kanban is required");
-    if (!indirectDraft.uom?.trim()) return void message.error("UOM is required");
-    if (indirectDraft.weightKg === undefined || indirectDraft.weightKg === null) return void message.error("Weight (kg) is required");
-    if (!indirectDraft.location?.trim()) return void message.error("Lokasi is required");
-    if (!indirectDraft.type?.trim()) return void message.error("Type is required");
-    if (indirectDraft.cycleDays === undefined || indirectDraft.cycleDays === null) return void message.error("Cycle (days) is required");
-
-    const newRow: IndirectRow = {
-      key: indirectEditingKey ?? indirectDraft.partNumber,
-      productModel: indirectDraft.productModel,
-      partName: indirectDraft.partName,
-      partNumber: indirectDraft.partNumber,
-      gradeSize: indirectDraft.gradeSize,
-      qtyPerKanban: indirectDraft.qtyPerKanban,
-      uom: indirectDraft.uom,
-      weightKg: indirectDraft.weightKg,
-      location: indirectDraft.location,
-      type: indirectDraft.type,
-      cycleDays: indirectDraft.cycleDays,
-      status: "Active",
-    };
-
-    setIndirectRows((prev) => {
-      const keyToUse = indirectEditingKey ?? indirectDraft.partNumber;
-      const exists = prev.some((r) => r.key === keyToUse);
-      if (exists) return prev.map((r) => (r.key === keyToUse ? newRow : r));
-      const partExists = prev.some((r) => r.partNumber === indirectDraft.partNumber);
-      if (partExists) {
-        message.warning("Part Number already exists in the table");
-        return prev;
-      }
-      return [newRow, ...prev];
-    });
-
-    setIndirectEditingKey(null);
-    setIndirectDraft({});
-    message.success(indirectEditingKey ? "Item updated" : "Item added");
-  };
-
-  const onCreateIndirect = () => {
-    if (!selectedSupplier) {
-      message.error("Please select Supplier Name");
-      return;
-    }
-    message.success("Master supplier item created");
-    router.push("/master-supplier");
-  };
-
-  if (section === "indirect") {
-    return (
-      <div className="min-h-screen bg-[#EEF5FF]">
-        <div className="bg-white border-b border-gray-200">
-          <div className="px-6 py-4">
-            <div className="flex items-center justify-between gap-4">
-              <button
-                className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
-                onClick={() => router.push("/master-supplier")}
-              >
-                <LeftOutlined />
-                <span>Back to Master Supplier List</span>
-              </button>
-
-              <div className="flex items-center gap-2">
-                <Button onClick={() => router.push("/master-supplier")}>Cancel</Button>
-                <Button type="primary" icon={<PlusOutlined />} onClick={onCreateIndirect}>
-                  Create Master Item
-                </Button>
-              </div>
-            </div>
-
-            <div className="mt-2">
-              <div className="text-xl font-semibold text-gray-900">Add Master Supplier Item</div>
-              <div className="text-sm text-gray-500">Indirect Raw Material</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="px-6 py-6">
-          <div className="max-w-6xl mx-auto space-y-5">
-            <Card className="rounded-2xl" bodyStyle={{ padding: 24 }}>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="text-base font-semibold text-gray-900">Step 1: Select Supplier</div>
-                  <div className="text-sm text-gray-500">Configure supplier details</div>
-                </div>
-                <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">Required</Tag>
-              </div>
-
-              <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Supplier Name</div>
-                  <Select
-                    value={selectedSupplier}
-                    onChange={(v) => setSelectedSupplier(v)}
-                    placeholder="Select supplier"
-                    options={SUPPLIERS.map((s) => ({ label: s.label, value: s.value }))}
-                    className="w-full"
-                  />
-                </div>
-
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Supplier ID</div>
-                  <Input value={supplierId} placeholder="Auto-filled from supplier selection" disabled />
-                </div>
-              </div>
-            </Card>
-
-            <Card className="rounded-2xl" bodyStyle={{ padding: 24 }}>
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="text-base font-semibold text-gray-900">Step 2: Input Data</div>
-                  <div className="text-sm text-gray-500">Indirect raw material specification</div>
-                </div>
-                <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">Required</Tag>
-              </div>
-
-              <div className="mt-5 space-y-4">
-                <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-                  <div>
-                    <div className="text-sm text-gray-700 mb-2">Product Model</div>
-                    <Input
-                      value={indirectDraft.productModel}
-                      onChange={(e) => setIndirectDraft((p) => ({ ...p, productModel: e.target.value }))}
-                      placeholder="Enter product model"
-                    />
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-700 mb-2">Part Name</div>
-                    <Input
-                      value={indirectDraft.partName}
-                      onChange={(e) => setIndirectDraft((p) => ({ ...p, partName: e.target.value }))}
-                      placeholder="Enter part name"
-                    />
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-700 mb-2">Part Number</div>
-                    <Input
-                      value={indirectDraft.partNumber}
-                      onChange={(e) => setIndirectDraft((p) => ({ ...p, partNumber: e.target.value }))}
-                      placeholder="Enter part number"
-                    />
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-700 mb-2">Grade/Size</div>
-                    <Input
-                      value={indirectDraft.gradeSize}
-                      onChange={(e) => setIndirectDraft((p) => ({ ...p, gradeSize: e.target.value }))}
-                      placeholder="Enter grade/size"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-                  <div>
-                    <div className="text-sm text-gray-700 mb-2">Qty/Kanban</div>
-                    <InputNumber
-                      value={indirectDraft.qtyPerKanban}
-                      onChange={(v) => setIndirectDraft((p) => ({ ...p, qtyPerKanban: v ?? undefined }))}
-                      className="w-full"
-                      min={0}
-                      placeholder="Enter qty"
-                    />
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-700 mb-2">UOM</div>
-                    <Input
-                      value={indirectDraft.uom}
-                      onChange={(e) => setIndirectDraft((p) => ({ ...p, uom: e.target.value }))}
-                      placeholder="e.g. kg, liter"
-                    />
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-700 mb-2">Weight (kg)</div>
-                    <InputNumber
-                      value={indirectDraft.weightKg}
-                      onChange={(v) => setIndirectDraft((p) => ({ ...p, weightKg: v ?? undefined }))}
-                      className="w-full"
-                      min={0}
-                      placeholder="Enter weight"
-                    />
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-700 mb-2">Lokasi</div>
-                    <Input
-                      value={indirectDraft.location}
-                      onChange={(e) => setIndirectDraft((p) => ({ ...p, location: e.target.value }))}
-                      placeholder="Enter location"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-end">
-                  <div>
-                    <div className="text-sm text-gray-700 mb-2">Type</div>
-                    <Input
-                      value={indirectDraft.type}
-                      onChange={(e) => setIndirectDraft((p) => ({ ...p, type: e.target.value }))}
-                      placeholder="e.g. Consumable"
-                    />
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-700 mb-2">Cycle (days)</div>
-                    <InputNumber
-                      value={indirectDraft.cycleDays}
-                      onChange={(v) => setIndirectDraft((p) => ({ ...p, cycleDays: v ?? undefined }))}
-                      className="w-full"
-                      min={0}
-                      placeholder="Enter cycle"
-                    />
-                  </div>
-                  <div className="lg:col-span-2">
-                    <Button type="primary" icon={<PlusOutlined />} onClick={upsertIndirectRow} className="w-full">
-                      {indirectEditingKey ? "Update Data" : "Add Data"}
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
-                  <div>
-                    <div className="text-xs text-gray-500">Supplier Name</div>
-                    <div className="text-sm font-medium text-gray-900">{selectedSupplier ?? "-"}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500">Total Items</div>
-                    <div className="text-sm font-medium text-gray-900">{indirectTotals.totalItems}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500">Total Quantity</div>
-                    <div className="text-sm font-medium text-gray-900">{indirectTotals.totalQty.toLocaleString()}</div>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-gray-50 text-gray-600">
-                        <tr>
-                          <th className="text-left font-medium px-4 py-3">Product Model</th>
-                          <th className="text-left font-medium px-4 py-3">Part Name</th>
-                          <th className="text-left font-medium px-4 py-3">Part Number</th>
-                          <th className="text-left font-medium px-4 py-3">Grade/Size</th>
-                          <th className="text-left font-medium px-4 py-3">Qty/Kanban</th>
-                          <th className="text-left font-medium px-4 py-3">UOM</th>
-                          <th className="text-left font-medium px-4 py-3">Weight (kg)</th>
-                          <th className="text-left font-medium px-4 py-3">Lokasi</th>
-                          <th className="text-left font-medium px-4 py-3">Type</th>
-                          <th className="text-left font-medium px-4 py-3">Cycle (days)</th>
-                          <th className="text-left font-medium px-4 py-3">Status</th>
-                          <th className="text-right font-medium px-4 py-3">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {indirectRows.map((r) => (
-                          <tr key={r.key} className="text-gray-800">
-                            <td className="px-4 py-4 whitespace-nowrap">{r.productModel}</td>
-                            <td className="px-4 py-4 whitespace-nowrap">{r.partName}</td>
-                            <td className="px-4 py-4 whitespace-nowrap">{r.partNumber}</td>
-                            <td className="px-4 py-4 whitespace-nowrap">{r.gradeSize}</td>
-                            <td className="px-4 py-4 whitespace-nowrap text-blue-600 font-semibold">{r.qtyPerKanban}</td>
-                            <td className="px-4 py-4 whitespace-nowrap">{r.uom}</td>
-                            <td className="px-4 py-4 whitespace-nowrap">{r.weightKg}</td>
-                            <td className="px-4 py-4 whitespace-nowrap">{r.location}</td>
-                            <td className="px-4 py-4 whitespace-nowrap">
-                              <span className="inline-flex items-center rounded-md bg-purple-50 px-2 py-0.5 text-xs font-semibold text-purple-700 border border-purple-100">
-                                {r.type}
-                              </span>
-                            </td>
-                            <td className="px-4 py-4 whitespace-nowrap">
-                              <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
-                                {r.cycleDays}d
-                              </span>
-                            </td>
-                            <td className="px-4 py-4 whitespace-nowrap">
-                              <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-0.5 text-xs font-semibold text-green-700 border border-green-100">
-                                {r.status}
-                              </span>
-                            </td>
-                            <td className="px-4 py-4 whitespace-nowrap text-right">
-                              <div className="inline-flex items-center gap-3 text-gray-500">
-                                <button type="button" onClick={() => startIndirectEdit(r)} className="hover:text-gray-700" aria-label="Edit">
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5" />
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                  </svg>
-                                </button>
-                                <button type="button" onClick={() => removeIndirectRow(r.key)} className="hover:text-red-600" aria-label="Trash">
-                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7" />
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 11v6M14 11v6" />
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" />
-                                  </svg>
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const pageTitle =
+    mode === "view" ? "View Supplier Item" : mode === "edit" ? "Edit Supplier Item" : "Create Supplier Item";
+  const pageSubtitle = `${sectionLabel(section)} • ${mode === "create" ? "new entry" : `mode: ${mode}`}`;
 
   return (
-    <div className="min-h-screen bg-[#EEF5FF]">
-      <div className="bg-white border-b border-gray-200">
-        <div className="px-6 py-4">
-          <div className="flex items-center justify-between gap-4">
-            <button
-              className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
-              onClick={() => router.push("/master-supplier")}
-            >
-              <LeftOutlined />
-              <span>Back to Master Supplier List</span>
-            </button>
+    <div className="min-h-screen bg-gray-50 pb-10">
+      {contextHolder}
 
-            <div className="flex items-center gap-2">
-              <Button onClick={() => router.push("/master-supplier")}>Cancel</Button>
-              <Button type="primary" icon={<PlusOutlined />} onClick={onCreate}>
-                Create Master Item
+      <div className="border-b border-gray-200 bg-white px-6 py-4">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => router.push("/master-supplier")}>
+              Back to Master Supplier
+            </Button>
+            <Typography.Title level={3} className="!mb-1 !mt-2">
+              {pageTitle}
+            </Typography.Title>
+            <Space wrap>
+              <Typography.Text type="secondary">{pageSubtitle}</Typography.Text>
+              <Tag color={section === "subcon" ? "orange" : section === "indirect-raw-material" ? "purple" : "blue"}>
+                {sectionLabel(section)}
+              </Tag>
+              {readOnly ? <Tag>Read only</Tag> : null}
+            </Space>
+          </div>
+
+          <Space>
+            <Button onClick={() => router.push("/master-supplier")}>Cancel</Button>
+            {!readOnly ? (
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                loading={createState.isLoading || updateState.isLoading}
+                onClick={handleSave}
+              >
+                {isEditing ? "Update" : "Save"}
               </Button>
-            </div>
-          </div>
-
-          <div className="mt-2">
-            <div className="text-xl font-semibold text-gray-900">Add Master Supplier Item</div>
-            <div className="text-sm text-gray-500">Create supplier master data with delivery cycles and specifications</div>
-          </div>
+            ) : null}
+          </Space>
         </div>
       </div>
 
-      <div className="px-6 py-6">
-        <div className="max-w-6xl mx-auto space-y-5">
-          <Card className="rounded-2xl" bodyStyle={{ padding: 24 }}>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-base font-semibold text-gray-900">Step 1: Select Supplier</div>
-                <div className="text-sm text-gray-500">Configure supplier details</div>
-              </div>
-              <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">Required</Tag>
-            </div>
+      <div className="mx-auto max-w-6xl p-6 space-y-6">
+        {!apiEnabled ? (
+          <Alert
+            type="warning"
+            showIcon
+            message="Backend is not configured"
+            description="Set NEXT_PUBLIC_API_URL to enable supplier item create, edit, and view operations."
+          />
+        ) : null}
 
-            <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div>
-                <div className="text-sm text-gray-700 mb-2">Supplier Name</div>
-                <Select
-                  value={selectedSupplier}
-                  onChange={(v) => {
-                    setSelectedSupplier(v);
-                    ensureUniqInDraft();
-                  }}
-                  placeholder="Select supplier"
-                  options={SUPPLIERS.map((s) => ({ label: s.label, value: s.value }))}
-                  className="w-full"
-                />
-              </div>
+        {apiEnabled && detailQuery.error ? (
+          <Alert
+            type="error"
+            showIcon
+            message="Failed to load supplier item"
+            description={getApiErrorMessage(detailQuery.error, "Unable to fetch supplier item detail")}
+          />
+        ) : null}
 
-              <div>
-                <div className="text-sm text-gray-700 mb-2">Supplier ID</div>
-                <Input value={supplierId} placeholder="Auto-filled from supplier selection" disabled />
-              </div>
-            </div>
+        {apiEnabled && (detailQuery.isLoading || (suppliersLoading && mode !== "view") || warehousesLoading || uomsLoading) ? (
+          <Card className="rounded-2xl border border-gray-100 shadow-sm">
+            <Skeleton active paragraph={{ rows: 8 }} />
           </Card>
+        ) : null}
 
-          <Card className="rounded-2xl" bodyStyle={{ padding: 24 }}>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-base font-semibold text-gray-900">Step 2: Input Data</div>
-                <div className="text-sm text-gray-500">Configure product codes and identification information</div>
-              </div>
-              <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">Required</Tag>
-            </div>
+        {(!apiEnabled || !detailQuery.isLoading) && (!apiEnabled || !detailQuery.error) ? (
+          <>
+            <Card className="rounded-2xl border border-gray-100 shadow-sm">
+              <Descriptions title="Selection Summary" column={{ xs: 1, md: 3 }}>
+                <Descriptions.Item label="Supplier">{selectedSupplier?.label ?? "-"}</Descriptions.Item>
+                <Descriptions.Item label="Warehouse">{selectedWarehouse?.label ?? "-"}</Descriptions.Item>
+                <Descriptions.Item label="Material Section">{sectionLabel(section)}</Descriptions.Item>
+              </Descriptions>
+            </Card>
 
-            <div className="mt-5 space-y-4">
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Sebanggo (Assembly Code)</div>
-                  <Input
-                    value={draft.sebanggo}
-                    onChange={(e) => setDraft((p) => ({ ...p, sebanggo: e.target.value }))}
-                    placeholder="Enter assembly code (e.g., ASM-LV7-01)"
-                  />
-                </div>
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Uniq</div>
-                  <Input value={draft.uniq} placeholder="Auto-generated" disabled />
-                </div>
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Customer Cycle</div>
-                  <Input
-                    value={draft.customerCycle}
-                    onChange={(e) => setDraft((p) => ({ ...p, customerCycle: e.target.value }))}
-                    placeholder="Enter Cycle"
-                  />
-                </div>
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Quantity</div>
-                  <InputNumber
-                    value={draft.quantity}
-                    onChange={(v) => setDraft((p) => ({ ...p, quantity: v ?? undefined }))}
-                    placeholder="Enter Quantity"
-                    className="w-full"
-                    min={0}
-                  />
-                </div>
-              </div>
+            <Card className="rounded-2xl border border-gray-100 shadow-sm">
+              <Form form={form} layout="vertical" disabled={readOnly}>
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <Form.Item
+                    label="Supplier"
+                    name="supplier_uuid"
+                    rules={[{ required: true, message: "Please select a supplier" }]}
+                  >
+                    <Select
+                      showSearch
+                      placeholder="Select supplier"
+                      options={supplierOptions}
+                      optionFilterProp="label"
+                    />
+                  </Form.Item>
 
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-end">
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Type</div>
-                  <Input value={draft.type} onChange={(e) => setDraft((p) => ({ ...p, type: e.target.value }))} placeholder="Enter Type" />
-                </div>
-                <div className="lg:col-span-2">
-                  <div className="text-sm text-gray-700 mb-2">Description</div>
-                  <Input
-                    value={draft.description}
-                    onChange={(e) => setDraft((p) => ({ ...p, description: e.target.value }))}
-                    placeholder="Enter Description"
-                  />
-                </div>
-                <div>
-                  <Button type="primary" icon={<PlusOutlined />} onClick={upsertRow} className="w-full">
-                    {editingKey ? "Update Data" : "Add Data"}
-                  </Button>
-                </div>
-              </div>
+                  <Form.Item
+                    label="Warehouse"
+                    name="warehouse_uuid"
+                    rules={[{ required: true, message: "Please select a warehouse" }]}
+                  >
+                    <Select
+                      showSearch
+                      placeholder="Select warehouse"
+                      options={warehouseOptions}
+                      optionFilterProp="label"
+                    />
+                  </Form.Item>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
-                <div>
-                  <div className="text-xs text-gray-500">Supplier Name</div>
-                  <div className="text-sm font-medium text-gray-900">{selectedSupplier ?? "-"}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Total Uniq Added</div>
-                  <div className="text-sm font-medium text-gray-900">{totalUniqAdded}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Total Quantity</div>
-                  <div className="text-sm font-medium text-gray-900">{totalQuantity.toLocaleString()}</div>
-                </div>
-              </div>
+                  <Form.Item
+                    label="UNIQ Code"
+                    name="uniq_code"
+                    rules={[{ required: true, message: "Please select a uniq code" }]}
+                  >
+                    <Select
+                      showSearch
+                      placeholder="Select UNIQ code from BOM"
+                      options={bomOptions}
+                      optionFilterProp="label"
+                      onChange={handleUniqChange}
+                    />
+                  </Form.Item>
 
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left font-medium px-4 py-3">Sebango</th>
-                        <th className="text-left font-medium px-4 py-3">Uniq</th>
-                        <th className="text-left font-medium px-4 py-3">Material Info</th>
-                        <th className="text-left font-medium px-4 py-3">Type</th>
-                        <th className="text-left font-medium px-4 py-3">Grade/Size</th>
-                        <th className="text-left font-medium px-4 py-3">Quantity</th>
-                        <th className="text-left font-medium px-4 py-3">UoM</th>
-                        <th className="text-left font-medium px-4 py-3">Weight</th>
-                        <th className="text-left font-medium px-4 py-3">Cycle</th>
-                        <th className="text-left font-medium px-4 py-3">Pcs/Kanban</th>
-                        <th className="text-right font-medium px-4 py-3">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {rows.map((r) => (
-                        <tr key={r.key} className="text-gray-800">
-                          <td className="px-4 py-4 whitespace-nowrap">{r.sebanggo}</td>
-                          <td className="px-4 py-4 whitespace-nowrap">{r.uniq}</td>
-                          <td className="px-4 py-4 min-w-[200px]">
-                            <div className="text-[11px] text-gray-500">{r.materialInfo.code}</div>
-                            <div className="text-sm font-medium text-gray-900">{r.materialInfo.name}</div>
-                            <div className="text-[11px] text-gray-500">{r.materialInfo.model}</div>
-                          </td>
-                          <td className="px-4 py-4 whitespace-nowrap">{r.type}</td>
-                          <td className="px-4 py-4 whitespace-nowrap">{r.gradeSize}</td>
-                          <td className="px-4 py-4 whitespace-nowrap">{r.quantity}</td>
-                          <td className="px-4 py-4 whitespace-nowrap">{r.uom}</td>
-                          <td className="px-4 py-4 whitespace-nowrap">{r.weight}</td>
-                          <td className="px-4 py-4 whitespace-nowrap">
-                            <span className={`inline-flex px-2 py-0.5 rounded-md text-xs font-medium border ${r.cycle === "Daily" ? "bg-blue-50 text-blue-700 border-blue-100" : "bg-gray-50 text-gray-700 border-gray-200"}`}>
-                              {r.cycle}
-                            </span>
-                          </td>
-                          <td className="px-4 py-4 whitespace-nowrap">{r.pcsPerKanban}</td>
-                          <td className="px-4 py-4 whitespace-nowrap text-right">
-                            <div className="inline-flex items-center gap-3 text-gray-500">
-                              <button type="button" onClick={() => startEdit(r)} className="hover:text-gray-700" aria-label="Edit">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5" />
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-                                </svg>
-                              </button>
-                              <button type="button" onClick={() => removeRow(r.key)} className="hover:text-red-600" aria-label="Trash">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7" />
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 11v6M14 11v6" />
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <Form.Item
+                    label="Sebango Code"
+                    name="sebango_code"
+                    rules={[{ required: true, message: "Please input sebango code" }]}
+                  >
+                    <Input placeholder="Enter sebango code" />
+                  </Form.Item>
                 </div>
-              </div>
-            </div>
-          </Card>
-        </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <Form.Item label="Type of Material" name="type">
+                    <Input placeholder="Auto-filled from BOM material spec" />
+                  </Form.Item>
+                  <Form.Item label="Product Model" name="product_model">
+                    <Input placeholder="Auto-filled from BOM" />
+                  </Form.Item>
+                  <Form.Item label="Part Name" name="part_name">
+                    <Input placeholder="Auto-filled from BOM" />
+                  </Form.Item>
+                  <Form.Item label="Part Number" name="part_number">
+                    <Input placeholder="Auto-filled from BOM" />
+                  </Form.Item>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <Form.Item label="Grade" name="grade">
+                    <Input placeholder="Auto-filled from BOM" />
+                  </Form.Item>
+                  <Form.Item label="Size" name="size">
+                    <Input placeholder="Auto-filled from BOM" />
+                  </Form.Item>
+                  <Form.Item label="UOM" name="uom">
+                    <Select
+                      showSearch
+                      placeholder="Select UOM from system setting"
+                      options={uomOptions}
+                      optionFilterProp="label"
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    label="Quantity"
+                    name="quantity"
+                    rules={[{ required: true, message: "Please input quantity" }]}
+                  >
+                    <InputNumber min={0} className="w-full" placeholder="Enter quantity" />
+                  </Form.Item>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <Form.Item
+                    label="Weight"
+                    name="weight"
+                    rules={[{ required: true, message: "Please input weight" }]}
+                  >
+                    <InputNumber min={0} className="w-full" placeholder="Enter weight" />
+                  </Form.Item>
+                  <Form.Item
+                    label="Pcs per Kanban"
+                    name="pcs_per_kanban"
+                    rules={[{ required: true, message: "Please input pcs per kanban" }]}
+                  >
+                    <InputNumber min={0} className="w-full" placeholder="Enter pcs per kanban" />
+                  </Form.Item>
+                  <Form.Item
+                    label="Customer Cycle"
+                    name="customer_cycle"
+                    rules={[{ required: true, message: "Please input customer cycle" }]}
+                  >
+                    <Input placeholder="e.g. Daily / Weekly / Monthly" />
+                  </Form.Item>
+                  <Form.Item label="Description" name="description">
+                    <Input placeholder="Optional description" />
+                  </Form.Item>
+                </div>
+              </Form>
+            </Card>
+          </>
+        ) : null}
       </div>
     </div>
   );

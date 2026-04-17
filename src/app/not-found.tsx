@@ -8,7 +8,7 @@ export default function NotFound() {
 
   useEffect(() => {
     // Redirect to dashboard when page is not found
-    router.push("/dashboard");
+    router.push("/login");
   }, [router]);
 
   // Optional: Show a brief loading message before redirect

@@ -43,7 +43,7 @@ export const generateHeaders = async ({
   contentType = "application/json",
 }: {
   useAuthorization?: boolean;
-  contentType?: "application/json" | "multipart/form-data";
+  contentType?: string;
 }) => {
   const location = await getUserLocation().catch(() => ({
     latitude: null,
@@ -52,7 +52,8 @@ export const generateHeaders = async ({
   const deviceInfo = getDeviceInfo();
 
   const headers: Record<string, string> = {
-    "User-Agent": deviceInfo.userAgent,
+    // Browsers disallow setting the User-Agent header. Use a custom header instead.
+    "X-User-Agent": deviceInfo.userAgent,
     "X-Device-Info": deviceInfo.deviceInfo,
     "X-Longitude": location.latitude?.toString() ?? "",
     "X-Latitude": location.longitude?.toString() ?? "",
@@ -66,7 +67,7 @@ export const generateHeaders = async ({
     }
   }
 
-  if (contentType !== "multipart/form-data") {
+  if (contentType && contentType !== "multipart/form-data") {
     headers["Content-Type"] = contentType;
   }
 
@@ -79,6 +80,18 @@ export const apiBaseUrl = rawApiBaseUrl.replace(/\/$/, "");
 
 export const apiSlice = createApi({
   reducerPath: "api",
+  tagTypes: [
+    "BOM",
+    "PoBudget",
+    "ProductReturns",
+    "SystemSettingsRoles",
+    "SystemSettingsDepartments",
+    "SystemSettingsKanban",
+    "SystemSettingsUom",
+    "SystemSettingsTypeParameter",
+    "SystemSettingsProcess",
+    "SystemSettingsGlobalParameters",
+  ],
   refetchOnFocus: true,
   baseQuery: async (args, api, extraOptions) => {
     if (!apiBaseUrl) {

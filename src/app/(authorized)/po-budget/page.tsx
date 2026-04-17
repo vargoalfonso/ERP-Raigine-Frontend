@@ -1,23 +1,31 @@
 "use client";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import {
   useGetPoBudgetListQuery,
   useAddPoBudgetEntryMutation,
+  useAddPoBudgetBulkMutation,
+  useGetPoBudgetDetailQuery,
+  useUpdatePoBudgetEntryMutation,
   type PoBudgetType,
-  PoBudgetEntryRequest,
+  type PoBudgetEntryRequest,
+  type PoBudgetGroupedDetail,
+  type PoBudgetUpdateRequest,
 } from "@/lib/api/po-budget/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
-import {
-  useListMasterSuppliersQuery,
-  type MasterSupplierRecord,
-} from "@/lib/api/master-supplier/api";
 import {
   useListSuppliersQuery,
   type SupplierRecord,
 } from "@/lib/api/suppliers/api";
+import {
+  useListSupplierItemsQuery,
+  type SupplierItemRecord,
+} from "@/lib/api/supplier-items/api";
+import { useListCustomersQuery, type CustomerRecord } from "@/lib/api/customers/api";
+import { useListPrlsQuery } from "@/lib/api/prl/api";
+import { useGetGlobalWorkingDaysQuery, useGetUomsQuery } from "@/lib/api/system-settings/api";
 const useApi = Boolean(apiBaseUrl);
 import {
   Button,
@@ -60,21 +68,26 @@ type BulkSupplierLine = {
 type BulkItemRow = {
   key: string;
   prlId: string;
+  prlItemId: number | null;
   uniq: string;
+  productModel: string;
   partName: string;
   partNumber: string;
   weightKg: number;
+  uom: string;
   quantity: number;
   existingRawMaterial: string;
   suppliers: BulkSupplierLine[];
 };
 
 type PoBudgetRow = {
+  id?: string;
   key: string;
   uniq: string;
   customer: string;
   productModel: string;
   partName: string;
+  partNumber?: string;
   supplier: string;
   type: string;
   salesPlan: number;
@@ -93,11 +106,52 @@ type SupplierOption = {
   value: string;
   label: string;
   supplierName: string;
-  supplierId?: string;
+  supplierId?: number;
+  uniqCode?: string;
+  uom?: string;
+  weight?: number;
+  description?: string;
+};
+
+type DetailState = {
+  open: boolean;
+  row: PoBudgetRow | null;
+};
+
+type AddFormState = {
+  customer: string;
+  customerId: number | null;
+  uniq: string;
+  productModel: string;
+  partName: string;
+  partNumber: string;
+  uom: string;
+  weightKg: string;
+  description: string;
+  supplier: string;
+  supplierId: number | null;
+  salesPlan: number;
+  purchaseRequest: number;
+  po1Pct: number;
+  po2Pct: number;
+  prl: number;
+  period: string;
 };
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+function getApiType(tab: BudgetTabId): PoBudgetType {
+  if (tab === "raw") return "raw-material";
+  if (tab === "subcon") return "subcon";
+  return "indirect";
+}
+
+function getBudgetTypeLabel(tab: BudgetTabId) {
+  if (tab === "raw") return "Raw Material";
+  if (tab === "subcon") return "Subcon";
+  return "Indirect";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -134,28 +188,38 @@ function resolveSupplierName(
   return "-";
 }
 
-function resolveSupplierBudgetTab(supplier: MasterSupplierRecord): BudgetTabId {
-  const rawValue = String(
-    supplier.type ?? supplier.rawMaterialType ?? supplier.material_category ?? "",
-  ).toLowerCase();
-
-  if (rawValue.includes("subcon") || rawValue.includes("sub-con")) {
-    return "subcon";
-  }
-
-  if (rawValue.includes("consum") || rawValue.includes("indirect")) {
-    return "indirect";
-  }
-
-  return "raw";
+function normalizeSupplierItemType(value: unknown): BudgetTabId | null {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return null;
+  if (raw.includes("sub")) return "subcon";
+  if (raw.includes("indirect")) return "indirect";
+  if (raw.includes("raw")) return "raw";
+  return null;
 }
 
-function resolveSupplierOnlyBudgetTab(supplier: SupplierRecord): BudgetTabId {
-  const rawValue = String(supplier.material_category ?? "").toLowerCase();
+function normalizeCustomerName(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
+}
 
-  if (rawValue.includes("sub") && rawValue.includes("con")) return "subcon";
-  if (rawValue.includes("indirect")) return "indirect";
-  return "raw";
+function isIntegerId(value: string) {
+  return /^\d+$/.test(value.trim());
+}
+
+function toIntegerId(value: unknown): number | null {
+  const text = String(value ?? "").trim();
+  if (!isIntegerId(text)) return null;
+  const parsed = Number(text);
+  return Number.isInteger(parsed) ? parsed : null;
+}
+
+function getPrlPeriodValue(prl: unknown): string {
+  if (!isRecord(prl)) return "";
+  return String(prl.forecast_period ?? prl.period ?? "").trim();
+}
+
+function getPrlRowId(prl: unknown): number | null {
+  if (!isRecord(prl)) return null;
+  return toIntegerId(prl.row_id);
 }
 
 function StatCard(props: {
@@ -307,21 +371,28 @@ export default function PoBudgetPage() {
 
   const {
     data: rawListRes = { data: [] as PoBudgetRow[] },
-  } = useGetPoBudgetListQuery("raw-material" as PoBudgetType, {
+  } = useGetPoBudgetListQuery({ type: "raw-material" as PoBudgetType, limit: 20, page: 1 }, {
     skip: !useApi,
   });
   const {
     data: subconListRes = { data: [] as PoBudgetRow[] },
-  } = useGetPoBudgetListQuery("subcon" as PoBudgetType, {
+  } = useGetPoBudgetListQuery({ type: "subcon" as PoBudgetType, limit: 20, page: 1 }, {
     skip: !useApi,
   });
   const {
     data: indirectListRes = { data: [] as PoBudgetRow[] },
-  } = useGetPoBudgetListQuery("indirect" as PoBudgetType, {
+  } = useGetPoBudgetListQuery({ type: "indirect" as PoBudgetType, limit: 20, page: 1 }, {
     skip: !useApi,
   });
 
   const [addEntry] = useAddPoBudgetEntryMutation();
+  const [addBulk] = useAddPoBudgetBulkMutation();
+  const [updateEntry] = useUpdatePoBudgetEntryMutation();
+  const { data: customers = [] } = useListCustomersQuery(undefined, { skip: !useApi });
+  const { data: prls = [] } = useListPrlsQuery(undefined, { skip: !useApi });
+  const { data: supplierItems = [] } = useListSupplierItemsQuery(undefined, { skip: !useApi });
+  const { data: globalParameters = [] } = useGetGlobalWorkingDaysQuery(undefined, { skip: !useApi });
+  const { data: uoms = [] } = useGetUomsQuery(undefined, { skip: !useApi });
 
   const rowsByTab = useMemo(() => ({
     raw: rawListRes.data,
@@ -330,20 +401,27 @@ export default function PoBudgetPage() {
   }), [rawListRes.data, subconListRes.data, indirectListRes.data]);
 
   const [addOpen, setAddOpen] = useState(false);
-  const [addForm, setAddForm] = useState({
+  const [detailState, setDetailState] = useState<DetailState>({ open: false, row: null });
+  const [editOpen, setEditOpen] = useState(false);
+  const [editRow, setEditRow] = useState<PoBudgetRow | null>(null);
+  const [addForm, setAddForm] = useState<AddFormState>({
     customer: "",
+    customerId: null,
     uniq: "",
     productModel: "",
     partName: "",
     partNumber: "",
+    uom: "",
+    weightKg: "",
+    description: "",
     supplier: "",
-    supplierId: "",
+    supplierId: null,
     salesPlan: 0,
     purchaseRequest: 0,
     po1Pct: 60,
     po2Pct: 40,
-    prl: "Auto-retrieved",
-    period: "October 2025",
+    prl: 0,
+    period: "",
   });
 
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -354,14 +432,12 @@ export default function PoBudgetPage() {
   const [bulkPeriod, setBulkPeriod] = useState<string | undefined>(undefined);
   const [bulkPo1Pct, setBulkPo1Pct] = useState<number>(60);
   const [bulkPo2Pct, setBulkPo2Pct] = useState<number>(40);
+  const [editForm, setEditForm] = useState({ purchaseRequest: 0, prl: 0, po1Pct: 50, po2Pct: 50, period: "" });
 
   const [addSupplierOpen, setAddSupplierOpen] = useState(false);
   const [addSupplierItemKey, setAddSupplierItemKey] = useState<string | null>(
     null,
   );
-  const { data: masterSupplierList = [] } = useListMasterSuppliersQuery(undefined, {
-    skip: !useApi,
-  });
   const { data: supplierOnlyList = [] } = useListSuppliersQuery(undefined, {
     skip: !useApi,
   });
@@ -370,10 +446,15 @@ export default function PoBudgetPage() {
     qty?: number;
   }>({});
 
+  const detailQuery = useGetPoBudgetDetailQuery(
+    detailState.row?.id ? { type: getApiType(activeTab), id: detailState.row.id } : ({ type: "raw-material", id: "" } as any),
+    { skip: !useApi || !detailState.open || !detailState.row?.id },
+  );
+
   const supplierNameByCode = useMemo(
     () =>
       new Map(
-        masterSupplierList
+        supplierOnlyList
           .flatMap((supplier) => {
             const supplierName =
               typeof supplier.supplier_name === "string" ? supplier.supplier_name : "";
@@ -391,26 +472,172 @@ export default function PoBudgetPage() {
               Boolean(entry[0]) && Boolean(entry[1]),
           ),
       ),
-    [masterSupplierList],
+    [supplierOnlyList],
   );
+
+  const supplierRowIdByUuid = useMemo(() => {
+    const map = new Map<string, number>();
+
+    supplierOnlyList.forEach((supplier) => {
+      const rowId = toIntegerId(supplier.row_id);
+      const uuid = String(supplier.id ?? "").trim();
+      if (rowId == null || !uuid) return;
+      map.set(uuid, rowId);
+    });
+
+    return map;
+  }, [supplierOnlyList]);
+
+  const supplierRowIdByCode = useMemo(() => {
+    const map = new Map<string, number>();
+
+    supplierOnlyList.forEach((supplier) => {
+      const rowId = toIntegerId(supplier.row_id);
+      const code = String(supplier.supplier_code ?? "").trim().toLowerCase();
+      if (rowId == null || !code) return;
+      map.set(code, rowId);
+    });
+
+    return map;
+  }, [supplierOnlyList]);
+
+  const supplierRowIdByName = useMemo(() => {
+    const map = new Map<string, number>();
+
+    supplierOnlyList.forEach((supplier) => {
+      const rowId = toIntegerId(supplier.row_id);
+      const name = String(supplier.supplier_name ?? "").trim().toLowerCase();
+      if (rowId == null || !name) return;
+      map.set(name, rowId);
+    });
+
+    return map;
+  }, [supplierOnlyList]);
+
+  const resolveSupplierRowId = (input: {
+    supplierUuid?: unknown;
+    supplierCode?: unknown;
+    supplierName?: unknown;
+    fallbackValue?: unknown;
+  }): number | undefined => {
+    const supplierUuid = String(input.supplierUuid ?? "").trim();
+    if (supplierUuid) {
+      const byUuid = supplierRowIdByUuid.get(supplierUuid);
+      if (byUuid != null) return byUuid;
+    }
+
+    const supplierCode = String(input.supplierCode ?? "").trim().toLowerCase();
+    if (supplierCode) {
+      const byCode = supplierRowIdByCode.get(supplierCode);
+      if (byCode != null) return byCode;
+    }
+
+    const supplierName = String(input.supplierName ?? "").trim().toLowerCase();
+    if (supplierName) {
+      const byName = supplierRowIdByName.get(supplierName);
+      if (byName != null) return byName;
+    }
+
+    const fallbackId = toIntegerId(input.fallbackValue);
+    return fallbackId == null ? undefined : fallbackId;
+  };
+
+  const customerIdByName = useMemo(() => {
+    const map = new Map<string, number>();
+
+    customers.forEach((customer: CustomerRecord) => {
+      const customerName = normalizeCustomerName(customer.customer_name);
+      const customerId = toIntegerId(customer.row_id ?? customer.id ?? customer.customer_id);
+      if (!customerName || customerId == null) return;
+      map.set(customerName, customerId);
+    });
+
+    return map;
+  }, [customers]);
+
+  const resolvePrlCustomerId = (item: Record<string, unknown>) => {
+    const nestedCustomer = isRecord(item.customer) ? item.customer : undefined;
+    const explicitRowId = toIntegerId(nestedCustomer?.row_id);
+    if (explicitRowId != null) return explicitRowId;
+
+    const customerName = normalizeCustomerName(
+      item.customer_name ?? nestedCustomer?.customer_name,
+    );
+    const mappedCustomerId = customerIdByName.get(customerName);
+    if (mappedCustomerId != null) return mappedCustomerId;
+
+    const nestedId = toIntegerId(nestedCustomer?.id ?? nestedCustomer?.customer_id);
+    if (nestedId != null) return nestedId;
+
+    const directId = toIntegerId(item.customer_id);
+    if (directId != null) return directId;
+
+    return null;
+  };
 
   const supplierOptions = useMemo<SupplierOption[]>(() => {
     const deduped = new Map<string, SupplierOption>();
+
+    const activeSupplierItems = supplierItems.filter((item: SupplierItemRecord) => {
+      const status = String(item.status ?? "active").toLowerCase();
+      const itemTab = normalizeSupplierItemType(item.type ?? item.material_type);
+      return (!status || status === "active") && (!itemTab || itemTab === activeTab);
+    });
+
+    activeSupplierItems.forEach((item) => {
+      const supplierName =
+        typeof item.supplier_name === "string" ? item.supplier_name.trim() : "";
+      const supplierId = resolveSupplierRowId({
+        supplierUuid: item.supplier_uuid,
+        supplierCode: item.supplier_code,
+        supplierName,
+      });
+      const supplierValue = item.supplier_uuid == null ? supplierName : String(item.supplier_uuid);
+      const uniqCode = typeof item.uniq_code === "string" ? item.uniq_code.trim() : "";
+      if (!supplierName) return;
+
+      const key = [supplierValue || supplierName.toLowerCase(), uniqCode || "-"].join("::");
+      deduped.set(key, {
+        value: supplierValue || supplierName,
+        label: supplierName,
+        supplierName,
+        supplierId,
+        uniqCode: uniqCode || undefined,
+        uom: typeof item.uom === "string" ? item.uom.trim() : undefined,
+        weight:
+          typeof item.weight === "number"
+            ? item.weight
+            : Number(item.weight ?? 0) || undefined,
+        description:
+          typeof item.description === "string" ? item.description.trim() : undefined,
+      });
+    });
+
+    if (deduped.size > 0) {
+      return Array.from(deduped.values()).sort((a, b) =>
+        a.label.localeCompare(b.label),
+      );
+    }
 
     supplierOnlyList
       .filter((supplier) => {
         const status = String(supplier.status ?? "active").toLowerCase();
         return status === "active" || !status;
       })
-      .filter((supplier) => resolveSupplierOnlyBudgetTab(supplier) === activeTab)
       .forEach((supplier) => {
         const supplierName =
           typeof supplier.supplier_name === "string" ? supplier.supplier_name.trim() : "";
         if (!supplierName) return;
-        const supplierId = supplier.id == null ? undefined : String(supplier.id);
-        const key = supplierId || supplierName.toLowerCase();
+        const supplierId = resolveSupplierRowId({
+          supplierUuid: supplier.id,
+          supplierCode: supplier.supplier_code,
+          supplierName,
+          fallbackValue: supplier.row_id,
+        });
+        const supplierValue = supplier.id == null ? supplierName : String(supplier.id);
+        const key = supplierValue || supplierName.toLowerCase();
         deduped.set(key, {
-          value: supplierName,
+          value: supplierValue,
           label: supplierName,
           supplierName,
           supplierId,
@@ -420,7 +647,116 @@ export default function PoBudgetPage() {
     return Array.from(deduped.values()).sort((a, b) =>
       a.label.localeCompare(b.label),
     );
-  }, [activeTab, supplierOnlyList]);
+  }, [activeTab, supplierItems, supplierOnlyList, supplierRowIdByCode, supplierRowIdByName, supplierRowIdByUuid]);
+
+  const addSupplierOptions = useMemo<SupplierOption[]>(() => {
+    const selectedUniq = String(addForm.uniq ?? "").trim();
+    if (!selectedUniq) return supplierOptions;
+
+    const filtered = supplierOptions.filter((option) => option.uniqCode === selectedUniq);
+    return filtered.length > 0 ? filtered : supplierOptions;
+  }, [addForm.uniq, supplierOptions]);
+
+  const approvedPrls = useMemo(
+    () =>
+      prls.filter((item) => {
+        const status = String(item.approval_status ?? item.status ?? "")
+          .trim()
+          .toLowerCase();
+        return status === "approved";
+      }),
+    [prls],
+  );
+
+  const supplierItemsByUniq = useMemo(() => {
+    const grouped = new Map<string, SupplierItemRecord[]>();
+
+    supplierItems.forEach((item) => {
+      const uniqCode = String(item.uniq_code ?? "").trim();
+      const status = String(item.status ?? "active").toLowerCase();
+      const itemTab = normalizeSupplierItemType(item.type ?? item.material_type);
+      if (!uniqCode || (status && status !== "active") || (itemTab && itemTab !== activeTab)) {
+        return;
+      }
+
+      const current = grouped.get(uniqCode) ?? [];
+      current.push(item);
+      grouped.set(uniqCode, current);
+    });
+
+    return grouped;
+  }, [activeTab, supplierItems]);
+
+  const findApprovedPrlMatch = (
+    customerId: number | null | undefined,
+    customerName: string | undefined,
+    uniqCode: string | undefined,
+  ) => {
+    const normalizedUniq = String(uniqCode ?? "").trim();
+    if (!normalizedUniq) return undefined;
+
+    return approvedPrls.find((item) => {
+      const resolvedCustomerId = resolvePrlCustomerId(item as Record<string, unknown>);
+      const itemUniq = String(item.uniq_code ?? item.item_uniq_code ?? "").trim();
+      if (itemUniq !== normalizedUniq) return false;
+
+      const matchesCustomerId =
+        customerId != null &&
+        resolvedCustomerId === customerId;
+      const matchesCustomerName =
+        customerName &&
+        String(item.customer_name ?? item.customer?.customer_name ?? "").trim().toLowerCase() ===
+          String(customerName).trim().toLowerCase();
+
+      return Boolean(matchesCustomerId || matchesCustomerName || (!customerId && !customerName));
+    });
+  };
+
+  const customerOptions = useMemo(() => {
+    const deduped = new Map<string, { value: number; label: string }>();
+
+    approvedPrls.forEach((item) => {
+      const value = resolvePrlCustomerId(item as Record<string, unknown>);
+      const label = String(item.customer_name ?? item.customer?.customer_name ?? "").trim();
+      if (!label || value == null) return;
+      deduped.set(String(value), {
+        value,
+        label,
+      });
+    });
+
+    return Array.from(deduped.values()).sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
+  }, [approvedPrls, customerIdByName]);
+
+  const uniqOptions = useMemo(() => {
+    const deduped = new Map<string, { value: string; label: string }>();
+
+    approvedPrls
+      .filter((item) => {
+        if (addForm.customerId == null && !addForm.customer) return true;
+
+        const itemCustomerId = resolvePrlCustomerId(item as Record<string, unknown>);
+        const itemCustomerName = String(item.customer_name ?? item.customer?.customer_name ?? "")
+          .trim()
+          .toLowerCase();
+
+        return (
+          (addForm.customerId != null && itemCustomerId === addForm.customerId) ||
+          (addForm.customer && itemCustomerName === String(addForm.customer).trim().toLowerCase())
+        );
+      })
+      .forEach((item) => {
+        const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "").trim();
+        if (!uniqCode) return;
+        deduped.set(uniqCode, { value: uniqCode, label: uniqCode });
+      });
+
+    return Array.from(deduped.values()).sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
+  }, [addForm.customer, addForm.customerId, approvedPrls, customerIdByName]);
 
   const filteredRows = useMemo(() => {
     const sourceRows = rowsByTab[activeTab].length
@@ -459,89 +795,187 @@ export default function PoBudgetPage() {
   ]);
 
   const periodOptions = useMemo(
-    () => [
-      { label: "October 2025", value: "October 2025" },
-      { label: "November 2025", value: "November 2025" },
-      { label: "December 2025", value: "December 2025" },
-      { label: "January 2026", value: "January 2026" },
-    ],
-    [],
+    () =>
+      globalParameters
+        .map((item) => String(item.period ?? "").trim())
+        .filter(Boolean)
+        .filter((value, index, arr) => arr.indexOf(value) === index)
+        .map((value) => ({ label: value, value })),
+    [globalParameters],
   );
+
+  const uomOptions = useMemo(
+    () =>
+      uoms
+        .map((uom) => {
+          const value = String(uom.name ?? uom.unit_name ?? uom.code ?? uom.unit_code ?? "").trim();
+          if (!value) return null;
+          return { label: value, value };
+        })
+        .filter((item): item is { label: string; value: string } => Boolean(item)),
+    [uoms],
+  );
+
+  const defaultUom = uomOptions[0]?.value ?? "";
 
   const prlOptions = useMemo(
-    () => [
-      {
-        label: "PRL-2024-001 - Toyota Motor Indonesia",
-        value: "PRL-2024-001 - Toyota Motor Indonesia",
-      },
-      {
-        label: "PRL-2024-002 - Honda Manufacturing",
-        value: "PRL-2024-002 - Honda Manufacturing",
-      },
-      {
-        label: "PRL-2024-003 - Nissan Global",
-        value: "PRL-2024-003 - Nissan Global",
-      },
-    ],
-    [],
+    () =>
+      approvedPrls.map((item) => {
+        const prlId = String(item.prl_id ?? item.id ?? "");
+        const customerName = String(item.customer?.customer_name ?? item.customer_name ?? "-");
+        return {
+          label: `${prlId} - ${customerName}`,
+          value: prlId,
+        };
+      }),
+    [approvedPrls],
   );
 
-  const initialBulkItems = useMemo<BulkItemRow[]>(
-    () => [
-      {
-        key: "RM-001",
-        prlId: "PRL-2024-001",
-        uniq: "RM-001",
-        partName: "Steel Plate",
-        partNumber: "SP-001-A",
-        weightKg: 25.5,
-        quantity: 1000,
-        existingRawMaterial: "SPCC 1.2mm",
-        suppliers: [{ id: "s1", supplier: "PT Steel Indonesia", qty: 1000 }],
-      },
-      {
-        key: "RM-002",
-        prlId: "PRL-2024-001",
-        uniq: "RM-002",
-        partName: "Aluminum Sheet",
-        partNumber: "AS-002-B",
-        weightKg: 15.3,
-        quantity: 800,
-        existingRawMaterial: "AL6061 2.0mm",
-        suppliers: [{ id: "s1", supplier: "PT Auto Parts", qty: 800 }],
-      },
-      {
-        key: "RM-003",
-        prlId: "PRL-2024-001",
-        uniq: "RM-003",
-        partName: "Rubber Gasket",
-        partNumber: "RG-003-C",
-        weightKg: 2.1,
-        quantity: 1500,
-        existingRawMaterial: "NBR-70",
-        suppliers: [{ id: "s1", supplier: "PT Steel Indonesia", qty: 1500 }],
-      },
-      {
-        key: "RM-004",
-        prlId: "PRL-2024-001",
-        uniq: "RM-004",
-        partName: "Bolt M8×20",
-        partNumber: "BLT-004-D",
-        weightKg: 0.05,
-        quantity: 5000,
-        existingRawMaterial: "S45C",
-        suppliers: [{ id: "s1", supplier: "PT Steel Indonesia", qty: 5000 }],
-      },
-    ],
-    [],
+  const matchedAddPrl = useMemo(
+    () => {
+      const effectiveCustomerId =
+        addForm.customerId ??
+        customerIdByName.get(normalizeCustomerName(addForm.customer)) ??
+        null;
+
+      return findApprovedPrlMatch(effectiveCustomerId, addForm.customer, addForm.uniq);
+    },
+    [addForm.customer, addForm.customerId, addForm.uniq, approvedPrls, customerIdByName],
   );
+
+  const resolvedAddSupplierOption = useMemo(() => {
+    const currentSupplier = String(addForm.supplier ?? "").trim().toLowerCase();
+    if (!currentSupplier) return undefined;
+
+    const options = addForm.uniq ? addSupplierOptions : supplierOptions;
+    return options.find((option) => {
+      const value = String(option.value ?? "").trim().toLowerCase();
+      const label = String(option.label ?? "").trim().toLowerCase();
+      const supplierName = String(option.supplierName ?? "").trim().toLowerCase();
+      return value === currentSupplier || label === currentSupplier || supplierName === currentSupplier;
+    });
+  }, [addForm.supplier, addForm.uniq, addSupplierOptions, supplierOptions]);
+
+  const selectedBulkPrl = useMemo(
+    () =>
+      approvedPrls.find(
+        (item) =>
+          String(item.prl_id ?? item.id ?? "") === String(bulkPrlId ?? "") ||
+          String(item.id ?? item.prl_id ?? "") === String(bulkPrlId ?? ""),
+      ),
+    [approvedPrls, bulkPrlId],
+  );
+
+  const buildBulkItemsFromPrl = (prlId?: string): BulkItemRow[] => {
+    const rows = approvedPrls.filter((item) => String(item.prl_id ?? item.id ?? "") === String(prlId ?? ""));
+    return rows.map((item, index) => {
+      const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "");
+      const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ?? [])[0];
+      const prlRowId = getPrlRowId(item as Record<string, unknown>);
+
+      return {
+        key: String(prlRowId ?? item.id ?? `${prlId}-${index}`),
+        prlId: String(item.prl_id ?? item.id ?? ""),
+        prlItemId: prlRowId,
+        uniq: uniqCode,
+        productModel: String(item.product_model ?? bomIndex.assemblyCodeByUniq[uniqCode] ?? "-"),
+        partName: String(item.part_name ?? bomIndex.partNameByUniq[uniqCode] ?? "-"),
+        partNumber: String(item.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "-"),
+        weightKg: Number(supplierItemMatch?.weight ?? 0),
+        uom: String(supplierItemMatch?.uom ?? defaultUom),
+        quantity: Number(item.quantity ?? 0),
+        existingRawMaterial: String(supplierItemMatch?.description ?? "-"),
+        suppliers: [],
+      };
+    });
+  };
+
+  const initialBulkItems = useMemo<BulkItemRow[]>(() => buildBulkItemsFromPrl(prlOptions[0]?.value), [prlOptions, approvedPrls, bomIndex.assemblyCodeByUniq, bomIndex.partNameByUniq, bomIndex.partNumberByUniq, defaultUom, supplierItemsByUniq]);
 
   const [bulkItems, setBulkItems] = useState<BulkItemRow[]>(initialBulkItems);
+
+  useEffect(() => {
+    if (!addForm.period && periodOptions[0]?.value) {
+      setAddForm((prev) => ({ ...prev, period: periodOptions[0].value }));
+    }
+    if (!bulkPeriod && periodOptions[0]?.value) {
+      setBulkPeriod(periodOptions[0].value);
+    }
+  }, [addForm.period, bulkPeriod, periodOptions]);
+
+  useEffect(() => {
+    const matchedPeriod = getPrlPeriodValue(matchedAddPrl);
+    if (!matchedPeriod) return;
+
+    setAddForm((prev) =>
+      prev.period === matchedPeriod ? prev : { ...prev, period: matchedPeriod },
+    );
+  }, [matchedAddPrl]);
+
+  useEffect(() => {
+    const effectiveCustomerId =
+      customerIdByName.get(normalizeCustomerName(addForm.customer)) ?? null;
+    if (!addForm.customer || effectiveCustomerId == null || addForm.customerId === effectiveCustomerId) {
+      return;
+    }
+
+    setAddForm((prev) => ({
+      ...prev,
+      customerId: effectiveCustomerId,
+    }));
+  }, [addForm.customer, addForm.customerId, customerIdByName]);
+
+  useEffect(() => {
+    if (!addForm.supplier || resolvedAddSupplierOption?.supplierId == null || addForm.supplierId === resolvedAddSupplierOption.supplierId) {
+      return;
+    }
+
+    setAddForm((prev) => ({
+      ...prev,
+      supplierId: resolvedAddSupplierOption.supplierId ?? null,
+      supplier: resolvedAddSupplierOption.supplierName ?? prev.supplier,
+      uom: resolvedAddSupplierOption.uom ?? prev.uom,
+      weightKg:
+        resolvedAddSupplierOption.weight == null ? prev.weightKg : String(resolvedAddSupplierOption.weight),
+      description: resolvedAddSupplierOption.description ?? prev.description,
+    }));
+  }, [addForm.supplier, addForm.supplierId, resolvedAddSupplierOption]);
+
+  useEffect(() => {
+    if (!bulkPrlId) return;
+    setBulkItems(buildBulkItemsFromPrl(bulkPrlId));
+  }, [bulkPrlId, approvedPrls.length, defaultUom]);
+
+  useEffect(() => {
+    const selectedPeriod = getPrlPeriodValue(selectedBulkPrl);
+    if (selectedPeriod) {
+      setBulkPeriod((prev) => (prev === selectedPeriod ? prev : selectedPeriod));
+      return;
+    }
+
+    if (periodOptions[0]?.value) {
+      setBulkPeriod((prev) => (prev === periodOptions[0].value ? prev : periodOptions[0].value));
+    }
+  }, [selectedBulkPrl, periodOptions]);
 
   const activeAddSupplierItem = useMemo(
     () => bulkItems.find((it) => it.key === addSupplierItemKey),
     [bulkItems, addSupplierItemKey],
   );
+
+  const addSupplierModalOptions = useMemo(() => {
+    if (!activeAddSupplierItem) return supplierOptions;
+
+    const filteredByUniq = supplierOptions.filter(
+      (option) => option.uniqCode === activeAddSupplierItem.uniq,
+    );
+    const baseOptions = filteredByUniq.length > 0 ? filteredByUniq : supplierOptions;
+    const existingSuppliers = new Set(
+      activeAddSupplierItem.suppliers.map((supplier) => supplier.supplier),
+    );
+
+    return baseOptions.filter((option) => !existingSuppliers.has(option.value));
+  }, [activeAddSupplierItem, supplierOptions]);
 
   const addSupplierBudget = activeAddSupplierItem?.quantity ?? 0;
   const addSupplierAllocated = useMemo(() => {
@@ -558,9 +992,13 @@ export default function PoBudgetPage() {
   );
 
   const openBulkPoBudget = () => {
-    setBulkItems(initialBulkItems);
-    setBulkPeriod(undefined);
-    setBulkPrlId("PRL-2024-001 - Toyota Motor Indonesia");
+    const firstPrlId = prlOptions[0]?.value ?? "";
+    const firstPrl = approvedPrls.find(
+      (item) => String(item.prl_id ?? item.id ?? "") === String(firstPrlId),
+    );
+    setBulkItems(buildBulkItemsFromPrl(firstPrlId));
+    setBulkPeriod(getPrlPeriodValue(firstPrl) || periodOptions[0]?.value);
+    setBulkPrlId(firstPrlId);
     setBulkBudgetType("adhoc");
     setBulkPo1Pct(60);
     setBulkPo2Pct(40);
@@ -634,6 +1072,11 @@ export default function PoBudgetPage() {
 
     const target = bulkItems.find((it) => it.key === addSupplierItemKey);
     if (!target) return;
+    const duplicateSupplier = target.suppliers.some((item) => item.supplier === supplier);
+    if (duplicateSupplier) {
+      message.warning("Supplier already added for this item");
+      return;
+    }
     const allocated = target.suppliers.reduce(
       (sum, s) => sum + Number(s.qty || 0),
       0,
@@ -676,79 +1119,237 @@ export default function PoBudgetPage() {
     );
   };
 
-  const bulkSave = () => {
-    if (!bulkPeriod) {
-      message.warning("Please select period");
-      return;
-    }
-    message.success("Bulk PO Budget created");
-    setBulkOpen(false);
+  const bulkUpdateItem = (itemKey: string, patch: Partial<BulkItemRow>) => {
+    setBulkItems((prev) => prev.map((item) => (item.key === itemKey ? { ...item, ...patch } : item)));
   };
-
-  const addSubtitle = useMemo(() => {
-    if (activeTab === "raw")
-      return "Enter the PO budget details for raw material";
-    if (activeTab === "subcon") return "Enter the PO budget details for subcon";
-    return "Enter the PO budget details for indirect";
-  }, [activeTab]);
 
   const computedPo1Units = useMemo(() => {
     const pr = Number(addForm.purchaseRequest || 0);
     const pct = Number(addForm.po1Pct || 0);
     return Math.round((pr * pct) / 100);
-  }, [addForm.purchaseRequest, addForm.po1Pct]);
+  }, [addForm.po1Pct, addForm.purchaseRequest]);
 
   const computedPo2Units = useMemo(() => {
     const pr = Number(addForm.purchaseRequest || 0);
     const pct = Number(addForm.po2Pct || 0);
     return Math.round((pr * pct) / 100);
-  }, [addForm.purchaseRequest, addForm.po2Pct]);
+  }, [addForm.po2Pct, addForm.purchaseRequest]);
 
-  const getApiType = (tab: BudgetTabId): PoBudgetType => {
-    if (tab === "raw") return "raw-material";
-    if (tab === "subcon") return "subcon";
-    return "indirect";
-  };
+  const derivedPrlAmount = useMemo(() => {
+    return approvedPrls
+      .filter(
+        (item) => {
+          const resolvedCustomerId = resolvePrlCustomerId(item as Record<string, unknown>);
+          return (
+            (addForm.customerId != null && resolvedCustomerId === addForm.customerId) ||
+            String(item.customer_name ?? "").toLowerCase() ===
+              String(addForm.customer || "").toLowerCase()
+          );
+        },
+      )
+      .filter(
+        (item) =>
+          String(item.uniq_code ?? item.item_uniq_code ?? "") ===
+          String(addForm.uniq || ""),
+      )
+      .filter(
+        (item) =>
+          String(item.forecast_period ?? item.period ?? "") ===
+          String(addForm.period || ""),
+      )
+      .reduce((sum, item) => sum + Number(item.quantity ?? 0), 0);
+  }, [addForm.customer, addForm.customerId, addForm.period, addForm.uniq, approvedPrls, customerIdByName]);
 
   const saveAddBudget = async () => {
-    if (!addForm.customer || !addForm.uniq || !addForm.supplier) {
-      message.warning("Please fill Customer Name, Uniq, and Supplier Name");
+    const effectiveCustomerId =
+      addForm.customerId ??
+      customerIdByName.get(normalizeCustomerName(addForm.customer)) ??
+      null;
+    const effectiveSupplierId =
+      addForm.supplierId ??
+      resolvedAddSupplierOption?.supplierId ??
+      null;
+
+    if (
+      effectiveCustomerId == null ||
+      !addForm.customer ||
+      !addForm.uniq ||
+      effectiveSupplierId == null ||
+      !addForm.uom ||
+      !addForm.period
+    ) {
+      message.warning("Please complete customer, uniq, supplier, UOM, and period");
       return;
     }
 
-    const prlGuess = Math.max(
-      0,
-      Math.round(
-        (Number(addForm.salesPlan || 0) +
-          Number(addForm.purchaseRequest || 0)) /
-          2,
-      ),
-    );
-    const totalPo = computedPo1Units + computedPo2Units;
-    const apoPrl = Math.max(0, Math.abs(totalPo - prlGuess));
-
     const payload: PoBudgetEntryRequest = {
+      customer_id: effectiveCustomerId,
       customer_name: addForm.customer,
-      item_uniq_code: addForm.uniq,
+      uniq_code: addForm.uniq,
+      product_model: addForm.productModel,
+      part_name: addForm.partName,
+      part_number: addForm.partNumber,
+      uom: addForm.uom,
+      weight_kg: Number(addForm.weightKg || 0),
+      description: addForm.description,
+      supplier_id: Number(effectiveSupplierId),
       supplier_name: addForm.supplier,
-      supplier_id: 1,
       period: addForm.period,
-      sales_plan_qty: Number(addForm.salesPlan || 0),
-      pr_qty: Number(addForm.purchaseRequest || 0),
-      prl_qty: prlGuess,
-      po1_percent: Number(addForm.po1Pct || 0),
-      po2_percent: Number(addForm.po2Pct || 0),
+      sales_plan: Number(addForm.salesPlan || 0),
+      purchase_request: Number(addForm.purchaseRequest || 0),
+      po1_pct: Number(addForm.po1Pct || 0),
+      po2_pct: Number(addForm.po2Pct || 0),
+      prl: Number(derivedPrlAmount || addForm.prl || 0),
     };
 
     try {
-      await addEntry({
-        type: getApiType(activeTab),
-        body: payload,
-      }).unwrap();
+      if (useApi) {
+        await addEntry({ type: getApiType(activeTab), body: payload }).unwrap();
+      }
       message.success("Budget entry saved");
       setAddOpen(false);
+      setAddForm({
+        customer: "",
+        customerId: null,
+        uniq: "",
+        productModel: "",
+        partName: "",
+        partNumber: "",
+        uom: "",
+        weightKg: "",
+        description: "",
+        supplier: "",
+        supplierId: null,
+        salesPlan: 0,
+        purchaseRequest: 0,
+        po1Pct: 60,
+        po2Pct: 40,
+        prl: 0,
+        period: "",
+      });
     } catch (error) {
       message.error(getApiErrorMessage(error, "Failed to save budget entry"));
+      console.error(error);
+    }
+  };
+
+  const bulkSave = async () => {
+    if (!bulkPrlId || !bulkPeriod) {
+      message.warning("Please select PRL and period");
+      return;
+    }
+
+    const selectedPrl = approvedPrls.find(
+      (item) => String(item.id ?? item.prl_id ?? "") === String(bulkPrlId),
+    );
+
+    const unresolvedSupplier = bulkItems.find((item) =>
+      item.suppliers.some((supplier) => {
+        const selectedOption = supplierOptions.find(
+          (option) => option.value === supplier.supplier,
+        );
+        return selectedOption?.supplierId == null;
+      }),
+    );
+
+    const unresolvedPrlItem = bulkItems.find((item) => item.prlItemId == null);
+
+    if (unresolvedSupplier) {
+      message.warning(`Supplier row_id for UNIQ ${unresolvedSupplier.uniq} is not resolved yet`);
+      return;
+    }
+
+    if (unresolvedPrlItem) {
+      message.warning(`PRL row_id for UNIQ ${unresolvedPrlItem.uniq} is not resolved yet`);
+      return;
+    }
+
+    const body = {
+      prl_id: String(bulkPrlId),
+      budget_subtype: bulkBudgetType === "adhoc" ? "adhoc" : "regular",
+      period: bulkPeriod,
+      po1_pct: Number(bulkPo1Pct || 0),
+      po2_pct: Number(bulkPo2Pct || 0),
+      items: bulkItems.map((item) => ({
+        prl_item_id: Number(item.prlItemId),
+        uniq_code: item.uniq,
+        sales_plan: Number(item.quantity || 0),
+        po1_pct: Number(bulkPo1Pct || 0),
+        po2_pct: Number(bulkPo2Pct || 0),
+        weight_kg: Number(item.weightKg || 0),
+        uom: item.uom,
+        suppliers: item.suppliers.map((supplier) => ({
+          supplier_id: Number(
+            supplierOptions.find((option) => option.value === supplier.supplier)
+              ?.supplierId,
+          ),
+          supplier_name:
+            supplierOptions.find((option) => option.value === supplier.supplier)
+              ?.supplierName ?? supplier.supplier,
+          quantity: Number(supplier.qty || 0),
+        })),
+      })),
+    };
+
+    try {
+      if (useApi) {
+        await addBulk({ type: getApiType(activeTab), body }).unwrap();
+      }
+      message.success(
+        `Bulk ${getBudgetTypeLabel(activeTab)} PO Budget${selectedPrl ? ` for ${selectedPrl.uniq_code ?? selectedPrl.item_uniq_code ?? bulkPrlId}` : ""} saved successfully`,
+      );
+      setBulkOpen(false);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, "Failed to save bulk PO Budget"));
+      console.error(error);
+    }
+  };
+
+  const addSubtitle = `Enter the PO budget details for ${getBudgetTypeLabel(activeTab).toLowerCase()}`;
+  const groupedDetail = detailQuery.data?.data as PoBudgetGroupedDetail | undefined;
+
+  const openDetail = (row: PoBudgetRow) => {
+    if (!row.id && useApi) {
+      message.warning("This row does not have a detail reference yet.");
+      return;
+    }
+    setDetailState({ open: true, row });
+  };
+
+  const openEdit = (row: PoBudgetRow) => {
+    if (!row.id) {
+      message.warning("Only API rows can be updated.");
+      return;
+    }
+    setEditRow(row);
+    setEditForm({
+      purchaseRequest: Number(row.pr || 0),
+      prl: Number(row.prl || 0),
+      po1Pct: Number(row.po1 && row.pr ? Math.round((row.po1 / row.pr) * 100) : 50),
+      po2Pct: Number(row.po2 && row.pr ? Math.round((row.po2 / row.pr) * 100) : 50),
+      period: row.period || "",
+    });
+    setEditOpen(true);
+  };
+
+  const saveEditBudget = async () => {
+    if (!editRow?.id) return;
+
+    const body: PoBudgetUpdateRequest = {
+      purchase_request: Number(editForm.purchaseRequest || 0),
+      prl: Number(editForm.prl || 0),
+      po1_pct: Number(editForm.po1Pct || 0),
+      po2_pct: Number(editForm.po2Pct || 0),
+      period: editForm.period,
+    };
+
+    try {
+      await updateEntry({ type: getApiType(activeTab), id: editRow.id, body }).unwrap();
+      message.success("PO Budget updated successfully");
+      setEditOpen(false);
+      setEditRow(null);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, "Failed to update PO Budget"));
       console.error(error);
     }
   };
@@ -760,7 +1361,7 @@ export default function PoBudgetPage() {
         dataIndex: "uniq",
         key: "uniq",
         render: (v: string) => (
-          <span className="text-sm font-semibold text-gray-800">{v}</span>
+          <span className="text-sm text-gray-700">{v}</span>
         ),
       },
       {
@@ -931,18 +1532,28 @@ export default function PoBudgetPage() {
         key: "actions",
         fixed: "right",
         render: (_, r) => (
-          <Button
-            size="small"
-            icon={<EyeOutlined />}
-            className="!rounded-lg"
-            onClick={() => message.info(`Open detail for ${r.uniq}`)}
-          >
-            Detail
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="small"
+              icon={<EyeOutlined />}
+              className="!rounded-lg"
+              onClick={() => openDetail(r)}
+            >
+              Detail
+            </Button>
+            <Button
+              size="small"
+              className="!rounded-lg"
+              disabled={!r.id}
+              onClick={() => openEdit(r)}
+            >
+              Edit
+            </Button>
+          </div>
         ),
       },
     ],
-    [],
+    [openDetail, openEdit],
   );
 
   const tabOptions = useMemo(
@@ -976,8 +1587,29 @@ export default function PoBudgetPage() {
         key: "weightKg",
         width: 110,
         align: "right",
-        render: (v: number) => (
-          <span className="text-sm text-gray-700">{v}</span>
+        render: (v: number, r) => (
+          <InputNumber
+            min={0}
+            value={v}
+            onChange={(next) => bulkUpdateItem(r.key, { weightKg: Number(next || 0) })}
+            className="w-[90px]"
+            size="small"
+          />
+        ),
+      },
+      {
+        title: "UOM",
+        dataIndex: "uom",
+        key: "uom",
+        width: 120,
+        render: (value: string, r) => (
+          <Select
+            value={value || undefined}
+            onChange={(next) => bulkUpdateItem(r.key, { uom: String(next ?? "") })}
+            options={uomOptions}
+            className="w-[100px]"
+            size="small"
+          />
         ),
       },
       {
@@ -1063,7 +1695,7 @@ export default function PoBudgetPage() {
         ),
       },
     ],
-    [supplierOptions],
+    [supplierOptions, uomOptions],
   );
 
   return (
@@ -1193,15 +1825,52 @@ export default function PoBudgetPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <div className="text-xs text-gray-600 mb-1">Customer Name</div>
-            <Input
+            <Select
+              showSearch
               allowClear
-              value={addForm.customer}
-              onChange={(e) =>
-                setAddForm((p) => ({ ...p, customer: e.target.value }))
+              value={addForm.customerId ?? undefined}
+              options={customerOptions}
+              placeholder="Select customer from approved PRL"
+              className="w-full"
+              filterOption={(input, option) =>
+                String(option?.label ?? "")
+                  .toLowerCase()
+                  .includes(input.toLowerCase())
               }
-              placeholder="Input customer"
-              className="!rounded-lg"
+              onChange={(value, option) => {
+                const selected = Array.isArray(option)
+                  ? undefined
+                  : (option as { value?: number; label?: string } | undefined);
+                const selectedCustomerId = toIntegerId(value);
+                const matchedPrl = findApprovedPrlMatch(
+                  selectedCustomerId,
+                  String(selected?.label ?? ""),
+                  addForm.uniq,
+                );
+                setAddForm((prev) => ({
+                  ...prev,
+                  customerId: selectedCustomerId,
+                  customer: String(selected?.label ?? ""),
+                  supplier: "",
+                  supplierId: null,
+                  uniq: matchedPrl ? prev.uniq : "",
+                  productModel:
+                    matchedPrl?.product_model ??
+                    "",
+                  partName:
+                    matchedPrl?.part_name ??
+                    "",
+                  partNumber:
+                    matchedPrl?.part_number ??
+                    "",
+                  period: getPrlPeriodValue(matchedPrl) || prev.period,
+                }));
+              }}
             />
+          </div>
+          <div>
+            <div className="text-xs text-gray-600 mb-1">Customer ID (row_id)</div>
+            <Input value={addForm.customerId == null ? "" : String(addForm.customerId)} disabled className="!rounded-lg" />
           </div>
           <div>
             <div className="text-xs text-gray-600 mb-1">
@@ -1211,7 +1880,7 @@ export default function PoBudgetPage() {
               showSearch
               placeholder="Select UNIQ"
               className="rounded-lg w-full font-black"
-              options={bomIndex.options}
+              options={uniqOptions}
               value={addForm.uniq}
               filterOption={(input, option) =>
                 String(option?.label ?? "")
@@ -1219,17 +1888,47 @@ export default function PoBudgetPage() {
                   .includes(input.toLowerCase())
               }
               onChange={(value) => {
-                const partName = bomIndex.partNameByUniq[String(value)] ?? "";
-                const partNumber = bomIndex.partNumberByUniq[String(value)] ?? "";
+                const uniqCode = String(value ?? "");
+                const matchedPrl = findApprovedPrlMatch(
+                  addForm.customerId,
+                  addForm.customer,
+                  uniqCode,
+                );
+                const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ?? [])[0];
+                const partName =
+                  matchedPrl?.part_name ??
+                  bomIndex.partNameByUniq[uniqCode] ??
+                  "";
+                const partNumber =
+                  matchedPrl?.part_number ??
+                  bomIndex.partNumberByUniq[uniqCode] ??
+                  "";
                 const productModel =
-                  bomIndex.assemblyCodeByUniq[String(value)] ?? "";
+                  matchedPrl?.product_model ??
+                  bomIndex.assemblyCodeByUniq[uniqCode] ??
+                  "";
 
                 setAddForm((prev) => ({
                   ...prev,
-                  uniq: String(value),
+                  uniq: uniqCode,
                   productModel,
                   partName,
                   partNumber,
+                  uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
+                  weightKg:
+                    supplierItemMatch?.weight == null
+                      ? prev.weightKg
+                      : String(supplierItemMatch.weight),
+                  description: supplierItemMatch?.description ?? prev.description,
+                  supplier:
+                    String(supplierItemMatch?.supplier_name ?? "") || prev.supplier,
+                  supplierId:
+                    resolveSupplierRowId({
+                      supplierUuid: supplierItemMatch?.supplier_uuid,
+                      supplierCode: supplierItemMatch?.supplier_code,
+                      supplierName: supplierItemMatch?.supplier_name,
+                    }) ?? prev.supplierId,
+                  period: getPrlPeriodValue(matchedPrl) || prev.period,
                 }));
               }}
             />
@@ -1239,10 +1938,8 @@ export default function PoBudgetPage() {
             <div className="text-xs text-gray-600 mb-1">Product Model</div>
             <Input
               value={addForm.productModel}
-              onChange={(e) =>
-                setAddForm((p) => ({ ...p, productModel: e.target.value }))
-              }
-              placeholder="Enter product model"
+              placeholder="Auto-filled from approved PRL"
+              disabled
               className="!rounded-lg"
             />
           </div>
@@ -1250,10 +1947,8 @@ export default function PoBudgetPage() {
             <div className="text-xs text-gray-600 mb-1">Part Name</div>
             <Input
               value={addForm.partName}
-              onChange={(e) =>
-                setAddForm((p) => ({ ...p, partName: e.target.value }))
-              }
-              placeholder="Enter part name"
+              placeholder="Auto-filled from approved PRL/BOM"
+              disabled
               className="!rounded-lg"
             />
           </div>
@@ -1262,10 +1957,32 @@ export default function PoBudgetPage() {
             <div className="text-xs text-gray-600 mb-1">Part Number</div>
             <Input
               value={addForm.partNumber}
-              onChange={(e) =>
-                setAddForm((p) => ({ ...p, partNumber: e.target.value }))
+              placeholder="Auto-filled from approved PRL/BOM"
+              disabled
+              className="!rounded-lg"
+            />
+          </div>
+          <div>
+            <div className="text-xs text-gray-600 mb-1">UOM</div>
+            <Select
+              value={addForm.uom || undefined}
+              options={uomOptions}
+              placeholder="Select UOM"
+              className="w-full"
+              onChange={(value) =>
+                setAddForm((prev) => ({ ...prev, uom: String(value ?? "") }))
               }
-              placeholder="Enter part number"
+            />
+          </div>
+
+          <div>
+            <div className="text-xs text-gray-600 mb-1">Weight (kg)</div>
+            <Input
+              value={addForm.weightKg}
+              onChange={(e) =>
+                setAddForm((prev) => ({ ...prev, weightKg: e.target.value }))
+              }
+              placeholder="Enter weight"
               className="!rounded-lg"
             />
           </div>
@@ -1280,12 +1997,27 @@ export default function PoBudgetPage() {
                 setAddForm((p) => ({
                   ...p,
                   supplier: selected?.supplierName ?? selected?.label ?? String(v ?? ""),
-                  supplierId: selected?.supplierId ?? "",
+                  supplierId: selected?.supplierId ?? null,
+                  uom: selected?.uom ?? p.uom,
+                  weightKg:
+                    selected?.weight == null ? p.weightKg : String(selected.weight),
+                  description: selected?.description ?? p.description,
                 }));
               }}
-              options={supplierOptions}
-              placeholder="Select supplier"
+              options={addSupplierOptions}
+              placeholder="Select supplier from supplier item"
               className="w-full"
+            />
+          </div>
+          <div>
+            <div className="text-xs text-gray-600 mb-1">Description</div>
+            <Input
+              value={addForm.description}
+              onChange={(e) =>
+                setAddForm((prev) => ({ ...prev, description: e.target.value }))
+              }
+              placeholder="Optional description"
+              className="!rounded-lg"
             />
           </div>
 
@@ -1382,7 +2114,7 @@ export default function PoBudgetPage() {
             <div className="text-xs text-gray-600 mb-1">
               PRL (from PRL & Master Data)
             </div>
-            <Input value={addForm.prl} disabled className="!rounded-lg" />
+            <Input value={derivedPrlAmount} disabled className="!rounded-lg" />
           </div>
           <div>
             <div className="text-xs text-gray-600 mb-1">Period</div>
@@ -1592,6 +2324,291 @@ export default function PoBudgetPage() {
       </Modal>
 
       <Modal
+        open={detailState.open}
+        onCancel={() => setDetailState({ open: false, row: null })}
+        width={760}
+        destroyOnHidden
+        footer={null}
+        title={
+          <div>
+            <div className="text-sm font-semibold text-gray-900">
+              PO Budget Detail
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              Grouped detail for {detailState.row?.uniq ?? "selected budget"}
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-4 text-sm text-gray-700">
+          <div className="rounded-2xl border border-gray-200 bg-white p-5">
+            <div className="text-sm font-semibold text-gray-900 mb-4">Basic Information</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">Customer Name</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.customer_name ?? detailState.row?.customer ?? "-"}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">UNIQ</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.uniq ?? detailState.row?.uniq ?? "-"}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-amber-600 uppercase">Product Model</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.product_model ?? detailState.row?.productModel ?? "-"}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">Part Name</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.part_name ?? detailState.row?.partName ?? "-"}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">Part Number</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.part_number ?? detailState.row?.partNumber ?? "-"}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">Supplier Name</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.supplier_name ?? detailState.row?.supplier ?? "-"}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">Type</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.budget_type ?? detailState.row?.type ?? "-"}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">Type Label</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.type_label ?? detailState.row?.type ?? "-"}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">Period</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.period ?? detailState.row?.period ?? "-"}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-5">
+            <div className="text-sm font-semibold text-gray-900 mb-4">Budget Calculations</div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">Sales Plan</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{formatNumber(Number(groupedDetail?.budget_calculations?.sales_plan ?? detailState.row?.salesPlan ?? 0))}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">Purchase Request (PR)</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{formatNumber(Number(groupedDetail?.budget_calculations?.purchase_request ?? detailState.row?.pr ?? 0))}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">PRL Amount</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{formatNumber(Number(groupedDetail?.budget_calculations?.prl_amount ?? detailState.row?.prl ?? 0))}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">PO1 Percentage</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{Number(groupedDetail?.budget_calculations?.po1_pct ?? 0)}%</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">PO2 Percentage</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{Number(groupedDetail?.budget_calculations?.po2_pct ?? 0)}%</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-5">
+            <div className="text-sm font-semibold text-gray-900 mb-4">Calculation Results</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="rounded-xl border border-gray-200 bg-white p-4">
+                <div className="text-xs text-gray-500">PO1 Amount</div>
+                <div className="mt-1 text-2xl font-semibold text-gray-900">{formatNumber(Number(groupedDetail?.calculation_results?.po1_amount ?? detailState.row?.po1 ?? 0))}</div>
+                <div className="text-[11px] text-gray-400">PO1 of PR</div>
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-white p-4">
+                <div className="text-xs text-gray-500">PO2 Amount</div>
+                <div className="mt-1 text-2xl font-semibold text-gray-900">{formatNumber(Number(groupedDetail?.calculation_results?.po2_amount ?? detailState.row?.po2 ?? 0))}</div>
+                <div className="text-[11px] text-gray-400">PO2 of PR</div>
+              </div>
+              <div className="rounded-xl border border-green-200 bg-white p-4">
+                <div className="text-xs text-gray-500">Total PO</div>
+                <div className="mt-1 text-2xl font-semibold text-gray-900">{formatNumber(Number(groupedDetail?.calculation_results?.total_po ?? detailState.row?.totalPo ?? 0))}</div>
+                <div className="text-[11px] text-gray-400">PO1 + PO2</div>
+              </div>
+              <div className="rounded-xl border border-amber-200 bg-white p-4">
+                <div className="text-xs text-gray-500">APO - PRL</div>
+                <div className="mt-1 text-2xl font-semibold text-amber-600">{formatNumber(Number(groupedDetail?.calculation_results?.apo_prl_abs ?? detailState.row?.apoPrl ?? 0))}</div>
+                <div className="text-[11px] text-amber-500">{groupedDetail?.calculation_results?.apo_prl_state ?? "-"}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-5">
+            <div className="text-sm font-semibold text-gray-900 mb-4">Additional Information</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">Submitted By</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.additional_information?.submitted_by_name ?? groupedDetail?.additional_information?.submitted_by ?? "-"}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">Submitted Date</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.additional_information?.submitted_at ?? "-"}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">Approved By</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.additional_information?.approved_by_name ?? groupedDetail?.additional_information?.approved_by ?? "-"}</div>
+              </div>
+              <div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">Approved Date</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.additional_information?.approved_at ?? groupedDetail?.additional_information?.approval_date ?? "-"}</div>
+              </div>
+              <div className="md:col-span-2">
+                <div className="text-[11px] font-medium text-gray-500 uppercase">Notes</div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 min-h-[44px]">{groupedDetail?.additional_information?.notes ?? "-"}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-5">
+            <div className="text-sm font-semibold text-gray-900 mb-4">History Log</div>
+            {groupedDetail?.history?.length ? (
+              <div className="overflow-hidden rounded-xl border border-gray-100">
+                <Table
+                  size="small"
+                  pagination={false}
+                  rowKey={(item, index) => `${item.date_time ?? "history"}-${index}`}
+                  dataSource={groupedDetail.history}
+                  columns={[
+                    {
+                      title: "Date & Time",
+                      dataIndex: "date_time",
+                      key: "date_time",
+                      render: (value: string) => value || "-",
+                    },
+                    {
+                      title: "Action",
+                      dataIndex: "action",
+                      key: "action",
+                      render: (value: string) => value || "-",
+                    },
+                    {
+                      title: "User",
+                      key: "user",
+                      render: (_, item) => item.user ?? item.user_id ?? "-",
+                    },
+                    {
+                      title: "Notes",
+                      dataIndex: "notes",
+                      key: "notes",
+                      render: (value: string) => value || "-",
+                    },
+                  ]}
+                />
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-gray-200 px-4 py-6 text-center text-sm text-gray-500">
+                No history available.
+              </div>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={editOpen}
+        onCancel={() => {
+          setEditOpen(false);
+          setEditRow(null);
+        }}
+        width={560}
+        destroyOnHidden
+        title={
+          <div>
+            <div className="text-sm font-semibold text-gray-900">
+              Update PO Budget
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              Update purchase request, PRL, percentages, and period
+            </div>
+          </div>
+        }
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              className="!rounded-lg"
+              onClick={() => {
+                setEditOpen(false);
+                setEditRow(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="primary" className="!rounded-lg" onClick={saveEditBudget}>
+              Save Changes
+            </Button>
+          </div>
+        }
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <div className="text-xs text-gray-600 mb-1">Purchase Request</div>
+            <InputNumber
+              min={0}
+              value={editForm.purchaseRequest}
+              onChange={(value) =>
+                setEditForm((prev) => ({ ...prev, purchaseRequest: Number(value || 0) }))
+              }
+              className="w-full"
+            />
+          </div>
+          <div>
+            <div className="text-xs text-gray-600 mb-1">PRL</div>
+            <InputNumber
+              min={0}
+              value={editForm.prl}
+              onChange={(value) =>
+                setEditForm((prev) => ({ ...prev, prl: Number(value || 0) }))
+              }
+              className="w-full"
+            />
+          </div>
+          <div>
+            <div className="text-xs text-gray-600 mb-1">PO1 %</div>
+            <InputNumber
+              min={0}
+              max={100}
+              value={editForm.po1Pct}
+              onChange={(value) =>
+                setEditForm((prev) => ({
+                  ...prev,
+                  po1Pct: Number(value || 0),
+                  po2Pct: Math.max(0, 100 - Number(value || 0)),
+                }))
+              }
+              className="w-full"
+            />
+          </div>
+          <div>
+            <div className="text-xs text-gray-600 mb-1">PO2 %</div>
+            <InputNumber
+              min={0}
+              max={100}
+              value={editForm.po2Pct}
+              onChange={(value) =>
+                setEditForm((prev) => ({
+                  ...prev,
+                  po2Pct: Number(value || 0),
+                  po1Pct: Math.max(0, 100 - Number(value || 0)),
+                }))
+              }
+              className="w-full"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <div className="text-xs text-gray-600 mb-1">Period</div>
+            <Select
+              value={editForm.period || undefined}
+              onChange={(value) => setEditForm((prev) => ({ ...prev, period: String(value ?? "") }))}
+              options={periodOptions}
+              className="w-full"
+            />
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
         open={addSupplierOpen}
         onCancel={() => setAddSupplierOpen(false)}
         width={520}
@@ -1633,10 +2650,15 @@ export default function PoBudgetPage() {
               onChange={(v) =>
                 setAddSupplierForm((p) => ({ ...p, supplier: v }))
               }
-              options={supplierOptions}
+              options={addSupplierModalOptions}
               placeholder="Select supplier"
               className="w-full"
             />
+            {activeAddSupplierItem ? (
+              <div className="text-[11px] text-gray-500 mt-1">
+                Showing suppliers for UNIQ {activeAddSupplierItem.uniq}
+              </div>
+            ) : null}
           </div>
 
           <div>

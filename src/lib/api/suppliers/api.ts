@@ -9,7 +9,13 @@ const parseArrayResponse = <T,>(response: unknown): T[] => {
   if (isRecord(response)) {
     const d = response.data;
     if (Array.isArray(d)) return d as T[];
-    if (isRecord(d) && Array.isArray(d.data)) return d.data as T[];
+    if (isRecord(d)) {
+      if (Array.isArray(d.items)) return d.items as T[];
+      if (Array.isArray(d.data)) return d.data as T[];
+      if (isRecord(d.data) && Array.isArray((d.data as UnknownRecord).items)) {
+        return (d.data as UnknownRecord).items as T[];
+      }
+    }
   }
   return [];
 };
@@ -17,8 +23,8 @@ const parseArrayResponse = <T,>(response: unknown): T[] => {
 const parseObjectResponse = <T,>(response: unknown): T | null => {
   if (isRecord(response)) {
     const d = response.data;
-    if (isRecord(d)) return d as T;
     if (isRecord(d) && isRecord(d.data)) return d.data as T;
+    if (isRecord(d)) return d as T;
   }
   if (isRecord(response)) return response as T;
   return null;
@@ -44,6 +50,7 @@ const parseNextCode = (response: unknown): string => {
 export type SupplierStatus = "Active" | "Inactive";
 
 export type SupplierRecord = {
+  row_id?: number;
   id?: string | number;
   supplier_code?: string;
   supplier_name?: string;
@@ -112,7 +119,7 @@ export const supplierApiSlice = apiSlice
     endpoints: (builder) => ({
       getNextSupplierCode: builder.query<string, void>({
         query: () => ({
-          url: "/api/suppliers/next-code",
+          url: "/suppliers/next-code",
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
@@ -121,7 +128,7 @@ export const supplierApiSlice = apiSlice
 
       listSuppliers: builder.query<SupplierRecord[], void>({
         query: () => ({
-          url: "/api/suppliers",
+          url: "/suppliers",
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
@@ -142,7 +149,7 @@ export const supplierApiSlice = apiSlice
 
       createSupplier: builder.mutation<SupplierRecord, CreateSupplierRequest>({
         query: (body) => ({
-          url: "/api/suppliers",
+          url: "/suppliers",
           method: "POST",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
@@ -153,7 +160,7 @@ export const supplierApiSlice = apiSlice
 
       getSupplierById: builder.query<SupplierRecord, string | number>({
         query: (id) => ({
-          url: `/api/suppliers/${encodeURIComponent(String(id))}`,
+          url: `/suppliers/${encodeURIComponent(String(id))}`,
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
@@ -163,7 +170,7 @@ export const supplierApiSlice = apiSlice
 
       updateSupplier: builder.mutation<SupplierRecord, { id: string | number; body: UpdateSupplierPutRequest }>({
         query: ({ id, body }) => ({
-          url: `/api/suppliers/${encodeURIComponent(String(id))}`,
+          url: `/suppliers/${encodeURIComponent(String(id))}`,
           method: "PUT",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
@@ -177,7 +184,7 @@ export const supplierApiSlice = apiSlice
 
       editSupplier: builder.mutation<SupplierRecord, { id: string | number; body: EditSupplierPatchRequest }>({
         query: ({ id, body }) => ({
-          url: `/api/suppliers/${encodeURIComponent(String(id))}`,
+          url: `/suppliers/${encodeURIComponent(String(id))}`,
           method: "PATCH",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
@@ -191,7 +198,7 @@ export const supplierApiSlice = apiSlice
 
       deleteSupplier: builder.mutation<{ success: boolean } | unknown, string | number>({
         query: (id) => ({
-          url: `/api/suppliers/${encodeURIComponent(String(id))}`,
+          url: `/suppliers/${encodeURIComponent(String(id))}`,
           method: "DELETE",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),

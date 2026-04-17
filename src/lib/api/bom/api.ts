@@ -1,17 +1,26 @@
-import { apiSlice } from "@/lib/api/instance";
+import { apiBaseUrl, apiSlice } from "@/lib/api/instance";
 import type { ApiResponse } from "@/types";
 
 export type BomStatus = "Active" | "Inactive";
 
 export type BackendBomNode = {
-  description: any;
-  quantity: any;
-  material_code: any;
-  unit_measurement: any;
-  process_routes: any;
-  material_specifications: any;
-  created_at: any;
-  updated_at: any;
+  // New BOM backend fields (best-effort mapped)
+  bom_id?: string;
+  bom_child_id?: string;
+  bom_line_id?: string;
+  bom_status?: any;
+  uniq_code?: string;
+  asset?: string;
+  model?: string;
+
+  description?: any;
+  quantity?: any;
+  material_code?: any;
+  unit_measurement?: any;
+  process_routes?: any;
+  material_specifications?: any;
+  created_at?: any;
+  updated_at?: any;
   // Some backends use `uuid` instead of `id`.
   id?: string;
   uuid?: string;
@@ -39,22 +48,22 @@ export type BackendBomNode = {
 };
 
 export type BomCreateRequest = {
-  assembly_code: string;
-  uniq?: string;
+  uniq_code: string;
   part_name: string;
   part_number?: string;
-  qpu?: number;
-  // Some backends use `quantity` instead of `qpu`
-  quantity?: number;
-  version?: string;
-  // Link to parent BOM item (UUID/id) for child parts.
-  parent_id?: string;
-  status?: BomStatus;
+  model?: string;
+  uom?: string | number;
+  uom_id?: string | number;
+  item_type?: string;
+  qty_per_uniq?: number;
+  scrap_factor?: number;
+  asset?: string;
+  level?: number;
+  status?: string;
   description?: string;
   process_routes?: unknown;
   material_spec?: unknown;
-  child_parts?: unknown;
-  imageFile?: File | null;
+  children?: unknown[];
 };
 
 export type BomUniqDetail = {
@@ -79,6 +88,10 @@ const parseTreeResponse = (response: unknown): BackendBomNode[] => {
   if (response && typeof response === "object") {
     const maybe = (response as Partial<{ data: unknown }>).data;
     if (Array.isArray(maybe)) return maybe as BackendBomNode[];
+    if (maybe && typeof maybe === "object") {
+      const items = (maybe as Partial<{ items: unknown }>).items;
+      if (Array.isArray(items)) return items as BackendBomNode[];
+    }
   }
   return [];
 };
@@ -110,6 +123,140 @@ const toBomUniqDetail = (raw: unknown): BomUniqDetail => {
     created_at: typeof r.created_at === "string" ? r.created_at : undefined,
     updated_at: typeof r.updated_at === "string" ? r.updated_at : undefined,
   };
+};
+
+const isRecord = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === "object";
+
+const pickString = (v: unknown): string => {
+  if (typeof v === "string") return v.trim();
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return "";
+};
+
+const resolveMaybeRelativeUrl = (url: string): string => {
+  const u = url.trim();
+  if (!u) return "";
+  if (/^https?:\/\//i.test(u)) return u;
+  if (!apiBaseUrl) return u;
+  if (u.startsWith("/")) return `${apiBaseUrl}${u}`;
+  return `${apiBaseUrl}/${u}`;
+};
+
+const pickAssetUrl = (v: unknown): string => {
+  if (typeof v === "string") return v.trim();
+  if (Array.isArray(v)) {
+    for (const item of v) {
+      const u = pickAssetUrl(item);
+      if (u) return u;
+    }
+  }
+  if (v && typeof v === "object") {
+    const direct =
+      (v as any)?.url ??
+      (v as any)?.path ??
+      (v as any)?.file_url ??
+      (v as any)?.fileUrl ??
+      (v as any)?.asset_url ??
+      (v as any)?.assetUrl;
+    if (typeof direct === "string") return direct.trim();
+
+    const nested = (v as any)?.file ?? (v as any)?.asset;
+    if (nested) {
+      const u = pickAssetUrl(nested);
+      if (u) return u;
+    }
+  }
+  return "";
+};
+
+const normalizeStatusToLabel = (v: unknown): BomStatus => {
+  const s = pickString(v).toLowerCase();
+  return s === "inactive" ? "Inactive" : "Active";
+};
+
+const mapNewNodeToLegacy = (raw: unknown): BackendBomNode => {
+  if (!isRecord(raw)) return { description: null, quantity: null, material_code: null, unit_measurement: null, process_routes: null, material_specifications: null, created_at: null, updated_at: null };
+
+  const uniqCode = pickString(raw.uniq_code);
+  const uniq = pickString(raw.uniq) || uniqCode;
+  const partName = pickString(raw.part_name);
+  const partNumber = pickString(raw.part_number);
+  const model = pickString(raw.model) || pickString((raw as any).product_model) || pickString(raw.assembly_code);
+
+  const childrenRaw = raw.children;
+  const children = Array.isArray(childrenRaw) ? childrenRaw.map(mapNewNodeToLegacy) : undefined;
+
+  // Keep both new + legacy field names so existing pages continue working.
+  const mapped: BackendBomNode = {
+    description: raw.description ?? null,
+    quantity: raw.quantity ?? raw.qpu ?? raw.qty_per_uniq ?? null,
+    material_code: raw.material_code ?? null,
+    unit_measurement: raw.unit_measurement ?? null,
+    process_routes: raw.process_routes ?? null,
+    material_specifications: raw.material_spec ?? raw.material_specifications ?? null,
+    created_at: raw.created_at ?? null,
+    updated_at: raw.updated_at ?? null,
+
+    bom_status: (raw as any).bom_status,
+
+    // IMPORTANT: bom_id must NOT fall back to internal id.
+    // Some endpoints return both { bom_id, id }, where id is an internal row id.
+    bom_id:
+      pickString(raw.bom_id) ||
+      pickString((raw as any).bomId) ||
+      pickString((raw as any).bomID),
+    bom_child_id: pickString(raw.bom_child_id),
+    bom_line_id: pickString(raw.bom_line_id),
+    uniq_code: uniqCode || uniq,
+    asset:
+      resolveMaybeRelativeUrl(
+        pickAssetUrl(raw.asset) ||
+      pickString((raw as any).asset_url) ||
+      pickString((raw as any).assetUrl) ||
+      pickString(raw.image_url) ||
+      pickString(raw.image) ||
+      pickString(raw.imageUrl) ||
+      pickString(raw.image_path) ||
+      pickString(raw.imagePath)
+      ),
+
+    id: pickString(raw.id) || pickString(raw.uuid) || pickString(raw._id),
+    uuid: pickString(raw.uuid),
+    _id: pickString(raw._id),
+    parent_id: raw.parent_id as any,
+    parentId: raw.parentId as any,
+    parent_uuid: raw.parent_uuid as any,
+    parentUuid: raw.parentUuid as any,
+    assembly_code: pickString(raw.assembly_code) || model,
+    uniq,
+    part_name: partName,
+    part_number: partNumber,
+    model,
+    qpu:
+      typeof raw.qpu === "number"
+        ? raw.qpu
+        : typeof raw.qty_per_uniq === "number"
+          ? raw.qty_per_uniq
+          : typeof raw.quantity === "number"
+            ? raw.quantity
+            : undefined,
+    version: pickString(raw.version),
+    status: pickString(raw.status) || normalizeStatusToLabel(raw.status),
+    level: typeof raw.level === "number" ? raw.level : undefined,
+    image_url: resolveMaybeRelativeUrl(
+      pickString(raw.image_url) ||
+        pickString((raw as any).asset_url) ||
+        pickString((raw as any).assetUrl) ||
+        pickAssetUrl(raw.asset)
+    ),
+    image: pickString(raw.image),
+    imageUrl: pickString(raw.imageUrl),
+    image_path: pickString(raw.image_path),
+    imagePath: pickString(raw.imagePath),
+    children,
+  };
+
+  return mapped;
 };
 
 const pickNodeId = (n: BackendBomNode): string => {
@@ -157,187 +304,137 @@ const buildTreeIfFlat = (nodes: BackendBomNode[]): BackendBomNode[] => {
 };
 
 const parseCreateId = (response: unknown): string => {
-  if (response && typeof response === "object") {
-    const r = response as Partial<{ id: unknown; uuid: unknown; data: unknown }>;
-    if (typeof r.id === "string") return r.id;
-    if (typeof r.uuid === "string") return r.uuid;
-    if (r.data && typeof r.data === "object") {
-      const d = r.data as Partial<{ id: unknown; uuid: unknown; data: unknown }>;
-      if (typeof d.id === "string") return d.id;
-      if (typeof d.uuid === "string") return d.uuid;
-      if (d.data && typeof d.data === "object") {
-        const dd = d.data as Partial<{ id: unknown; uuid: unknown }>;
-        if (typeof dd.id === "string") return dd.id;
-        if (typeof dd.uuid === "string") return dd.uuid;
-      }
-    }
-  }
-  return "";
+  if (!isRecord(response)) return "";
+  const direct = pickString(response.bom_id) || pickString(response.id) || pickString(response.uuid);
+  if (direct) return direct;
+  const data = response.data;
+  if (!isRecord(data)) return "";
+  return pickString(data.bom_id) || pickString(data.id) || pickString(data.uuid);
 };
 
-const appendImageFile = (formData: FormData, file: File) => {
-  // Most multer setups expect a single file field name, commonly `image`.
-  // Sending multiple file fields can cause server-side "Unexpected field" errors.
-  formData.append("image", file);
-};
+const BOM_TAG = { type: "BOM" as const, id: "TREE" as const };
 
 export const bomSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     getBomTree: builder.query<ApiResponse<BackendBomNode[]>, void>({
       query: () => ({
-        url: "/api/bom",
+        url: "/products/bom",
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) => {
         const arr = parseTreeResponse(response);
-        return ok(buildTreeIfFlat(arr));
+        const mapped = arr.map(mapNewNodeToLegacy);
+        return ok(buildTreeIfFlat(mapped));
       },
+      providesTags: [BOM_TAG],
     }),
 
     getBomById: builder.query<ApiResponse<BackendBomNode>, string>({
       query: (id) => ({
-        url: `/api/bom/${id}`,
-        method: "GET",
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => ok(response as BackendBomNode),
-    }),
-
-    getBomAssemblyCodes: builder.query<ApiResponse<string[]>, void>({
-      query: () => ({
-        url: "/api/bom/assembly-codes",
+        url: `/products/bom/${encodeURIComponent(id)}`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) => {
-        const arr = Array.isArray(response) ? (response as unknown[]) : [];
-        const codes = arr.map(String);
-        return ok(codes);
-      },
-    }),
-
-    getBomUniqs: builder.query<ApiResponse<string[]>, { assembly_code: string }>({
-      query: ({ assembly_code }) => ({
-        url: `/api/bom/uniqs?assembly_code=${encodeURIComponent(assembly_code)}`,
-        method: "GET",
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => {
-        const arr = Array.isArray(response) ? (response as unknown[]) : [];
-        const uniqs = arr.map(String);
-        return ok(uniqs);
-      },
-    }),
-
-    getBomUniqsDetails: builder.query<ApiResponse<BomUniqDetail[]>, void>({
-      query: () => ({
-        url: "/api/bom/uniqs-details",
-        method: "GET",
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => {
-        const arr = parseArrayResponse(response);
-        const mapped = arr.map(toBomUniqDetail).filter((x) => x.uniq.trim().length > 0);
-        mapped.sort((a, b) => a.uniq.localeCompare(b.uniq));
-        return ok(mapped);
+        if (response && typeof response === "object") {
+          const data = (response as Partial<{ data: unknown }>).data;
+          return ok(mapNewNodeToLegacy(data ?? response));
+        }
+        return ok(mapNewNodeToLegacy(response));
       },
     }),
 
     createBom: builder.mutation<ApiResponse<{ id: string }>, BomCreateRequest>({
-      query: (body) => {
-        const formData = new FormData();
-
-        // Backend expects multipart/form-data for create
-        formData.append("assembly_code", body.assembly_code);
-        if (body.uniq) formData.append("uniq", body.uniq);
-        formData.append("part_name", body.part_name);
-        if (body.part_number) formData.append("part_number", body.part_number);
-        if (body.version) formData.append("version", body.version);
-        const qpu = body.qpu ?? body.quantity;
-        if (typeof qpu === "number" && Number.isFinite(qpu)) {
-          // Send both names for compatibility
-          formData.append("qpu", String(qpu));
-          formData.append("quantity", String(qpu));
-        }
-        if (body.parent_id) formData.append("parent_id", body.parent_id);
-        if (body.status) formData.append("status", body.status);
-        if (body.description) formData.append("description", body.description);
-
-        if (body.process_routes != null) formData.append("process_routes", JSON.stringify(body.process_routes));
-        if (body.material_spec != null) formData.append("material_spec", JSON.stringify(body.material_spec));
-        if (body.child_parts != null) formData.append("child_parts", JSON.stringify(body.child_parts));
-
-        if (body.imageFile) appendImageFile(formData, body.imageFile);
-
-        return {
-          url: "/api/bom",
-          method: "POST",
-          body: formData,
-          meta: { useAuthorization: true, contentType: "multipart/form-data" },
-        };
-      },
-      transformResponse: (response: unknown) => {
-        return ok({ id: parseCreateId(response) }, "Created");
-      },
+      query: (body) => ({
+        url: "/products/bom",
+        method: "POST",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => ok({ id: parseCreateId(response) }, "Created"),
+      invalidatesTags: [BOM_TAG],
     }),
 
-    updateBom: builder.mutation<ApiResponse<{ id: string }>, { id: string; body: Partial<BomCreateRequest> }>({
-      query: ({ id, body }) => {
-        const formData = new FormData();
-
-        if (body.assembly_code) formData.append("assembly_code", body.assembly_code);
-        if (body.uniq) formData.append("uniq", body.uniq);
-        if (body.part_name) formData.append("part_name", body.part_name);
-        if (body.part_number) formData.append("part_number", body.part_number);
-        if (body.version) formData.append("version", body.version);
-        const qpu = body.qpu ?? body.quantity;
-        if (typeof qpu === "number" && Number.isFinite(qpu)) {
-          formData.append("qpu", String(qpu));
-          formData.append("quantity", String(qpu));
-        }
-        if (body.parent_id) formData.append("parent_id", body.parent_id);
-        if (body.status) formData.append("status", body.status);
-        if (body.description) formData.append("description", body.description);
-        if (body.process_routes != null) formData.append("process_routes", JSON.stringify(body.process_routes));
-        if (body.material_spec != null) formData.append("material_spec", JSON.stringify(body.material_spec));
-        if (body.child_parts != null) formData.append("child_parts", JSON.stringify(body.child_parts));
-        if (body.imageFile) appendImageFile(formData, body.imageFile);
-
-        return {
-          url: `/api/bom/${id}`,
-          method: "PUT",
-          body: formData,
-          meta: { useAuthorization: true, contentType: "multipart/form-data" },
-        };
-      },
-      transformResponse: (response: unknown) => {
-        const r = response as Partial<{ id: string; message: string }>;
-        return ok({ id: r?.id ?? "" }, r?.message ?? "Updated");
-      },
+    updateBom: builder.mutation<
+      ApiResponse<{ id: string }>,
+      { bom_id: string; body: Partial<BomCreateRequest> }
+    >({
+      query: ({ bom_id, body }) => ({
+        url: `/products/bom/${encodeURIComponent(bom_id)}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => ok({ id: parseCreateId(response) }, "Updated"),
+      invalidatesTags: [BOM_TAG],
     }),
 
-    deleteBom: builder.mutation<ApiResponse<{ id: string }>, string>({
-      query: (id) => ({
-        url: `/api/bom/${id}`,
+    deleteBomParent: builder.mutation<ApiResponse<{ id: string }>, { bom_id: string }>({
+      query: ({ bom_id }) => ({
+        url: `/products/bom/${encodeURIComponent(bom_id)}`,
         method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => {
-        const r = response as Partial<{ id: string }>;
-        return ok({ id: r?.id ?? "" }, "Deleted");
-      },
+      transformResponse: (response: unknown) => ok({ id: parseCreateId(response) }, "Deleted"),
+      invalidatesTags: [BOM_TAG],
+    }),
+
+    deleteBomChild: builder.mutation<
+      ApiResponse<{ id: string }>,
+      { bom_id: string; bom_child_id: string }
+    >({
+      query: ({ bom_id, bom_child_id }) => ({
+        url: `/products/bom/${encodeURIComponent(bom_id)}/children/${encodeURIComponent(bom_child_id)}`,
+        method: "DELETE",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => ok({ id: parseCreateId(response) }, "Deleted"),
+      invalidatesTags: [BOM_TAG],
+    }),
+
+    deleteBomLine: builder.mutation<
+      ApiResponse<{ id: string }>,
+      { bom_id: string; bom_child_id: string; bom_line_id: string }
+    >({
+      query: ({ bom_id, bom_child_id, bom_line_id }) => ({
+        url: `/products/bom/${encodeURIComponent(bom_id)}/children/${encodeURIComponent(bom_child_id)}/lines/${encodeURIComponent(bom_line_id)}`,
+        method: "DELETE",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => ok({ id: parseCreateId(response) }, "Deleted"),
+      invalidatesTags: [BOM_TAG],
+    }),
+
+    updateBomLine: builder.mutation<
+      ApiResponse<{ id: string }>,
+      {
+        bom_id: string;
+        bom_child_id: string;
+        bom_line_id: string;
+        body: Record<string, unknown>;
+      }
+    >({
+      query: ({ bom_id, bom_child_id, bom_line_id, body }) => ({
+        url: `/products/bom/${encodeURIComponent(bom_id)}/children/${encodeURIComponent(bom_child_id)}/lines/${encodeURIComponent(bom_line_id)}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => ok({ id: parseCreateId(response) }, "Updated"),
+      invalidatesTags: [BOM_TAG],
     }),
   }),
+  overrideExisting: true,
 });
 
 export const {
   useGetBomTreeQuery,
   useGetBomByIdQuery,
-  useGetBomAssemblyCodesQuery,
-  useGetBomUniqsQuery,
-  useGetBomUniqsDetailsQuery,
   useCreateBomMutation,
   useUpdateBomMutation,
-  useDeleteBomMutation,
+  useDeleteBomParentMutation,
+  useDeleteBomChildMutation,
+  useDeleteBomLineMutation,
+  useUpdateBomLineMutation,
 } = bomSlice;

@@ -10,6 +10,7 @@ import {
   useCreateDepartmentMutation,
   useGetDepartmentsQuery,
   useGetEmployeesQuery,
+  useGetRolesQuery,
 } from "@/lib/api/system-settings/api";
 
 type EmployeeRow = {
@@ -76,6 +77,9 @@ export default function AddDepartmentPage() {
   const { data: employeesApiData = [] } = useGetEmployeesQuery(undefined, {
     skip: !apiEnabled,
   });
+  const { data: rolesApiData = [] } = useGetRolesQuery(undefined, {
+    skip: !apiEnabled,
+  });
 
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [departments, setDepartments] = useState<DepartmentRow[]>([]);
@@ -109,12 +113,25 @@ export default function AddDepartmentPage() {
     form.setFieldsValue({ departmentCode: generatedCode });
   }, [form, generatedCode]);
 
+  const managerRoleIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of rolesApiData) {
+      const name = String(r?.name ?? "").toLowerCase();
+      if (name.includes("manager")) ids.add(String(r.id));
+    }
+    return ids;
+  }, [rolesApiData]);
+
   const managerOptions = useMemo(
     () =>
       apiEnabled
-        ? employeesApiData.map((e) => ({ label: e.full_name, value: e.full_name }))
-        : employees.map((e) => ({ label: e.name, value: e.name })),
-    [apiEnabled, employees, employeesApiData]
+        ? employeesApiData
+            .filter((e) => (e.role_id ? managerRoleIds.has(String(e.role_id)) : false))
+            .map((e) => ({ label: e.full_name, value: e.full_name }))
+        : employees
+            .filter((e) => Boolean(e.isManager))
+            .map((e) => ({ label: e.name, value: e.name })),
+    [apiEnabled, employees, employeesApiData, managerRoleIds]
   );
 
   const parentOptions = useMemo(

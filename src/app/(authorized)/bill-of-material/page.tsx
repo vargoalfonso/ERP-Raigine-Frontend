@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Table, Tag, Typography, message } from "antd";
+import { Button, Modal, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   BulbOutlined,
@@ -14,7 +14,15 @@ import {
   ScanOutlined,
 } from "@ant-design/icons";
 
-type BomStatus = "Active" | "Inactive";
+import {
+  useDeleteBomChildMutation,
+  useDeleteBomParentMutation,
+  useGetBomTreeQuery,
+} from "@/lib/api/bom/api";
+import type { BackendBomNode } from "@/lib/api/bom/api";
+import { apiBaseUrl, getCookiesFromBrowser } from "@/lib/api/instance";
+
+type BomStatus = string;
 
 type BomRow = {
   key: string;
@@ -23,103 +31,114 @@ type BomRow = {
   partNumber: string;
   imageSrc?: string;
   levelLabel: string;
+  isParent: boolean;
   qpu: string;
   version: string;
   cadAvailable: boolean;
   status: BomStatus;
   children?: BomRow[];
+
+  bomId?: string;
+  internalId?: string;
+  parentBomId?: string;
+  bomChildId?: string;
 };
 
-const bomData: BomRow[] = [
-  {
-    key: "LV7-001",
-    uniq: "LV7-001",
-    partName: "Engine Mount Assembly",
-    partNumber: "EMA-001-LV7",
-    imageSrc: "/mock/bom/engine-mount.svg",
-    levelLabel: "Parent",
-    qpu: "-",
-    version: "-",
-    cadAvailable: true,
-    status: "Active",
-    children: [
-      {
-        key: "LV7-001-A",
-        uniq: "LV7-001-A",
-        partName: "Main Bracket",
-        partNumber: "MB-001-LV7",
-        imageSrc: "/mock/bom/bracket.svg",
-        levelLabel: "Level 1",
-        qpu: "1 pcs",
-        version: "v2.1",
-        cadAvailable: true,
-        status: "Active",
-      },
-      {
-        key: "LV7-001-B",
-        uniq: "LV7-001-B",
-        partName: "Rubber Insulator",
-        partNumber: "RI-002-LV7",
-        imageSrc: "/mock/bom/insulator.svg",
-        levelLabel: "Level 1",
-        qpu: "2 pcs",
-        version: "v1.5",
-        cadAvailable: true,
-        status: "Active",
-      },
-      {
-        key: "LV7-001-C",
-        uniq: "LV7-001-C",
-        partName: "Bolt Assembly",
-        partNumber: "BA-003-LV7",
-        imageSrc: "/mock/bom/bolt.svg",
-        levelLabel: "Level 1",
-        qpu: "4 pcs",
-        version: "v1.2",
-        cadAvailable: true,
-        status: "Active",
-      },
-    ],
-  },
-  {
-    key: "LV8-002",
-    uniq: "LV8-002",
-    partName: "Suspension Arm",
-    partNumber: "SA-002-LV8",
-    imageSrc: "/mock/bom/suspension.svg",
-    levelLabel: "Parent",
-    qpu: "-",
-    version: "-",
-    cadAvailable: true,
-    status: "Active",
-    children: [],
-  },
-  {
-    key: "LV9-003",
-    uniq: "LV9-003",
-    partName: "Brake Assembly",
-    partNumber: "BRA-003-LV9",
-    imageSrc: "/mock/bom/brake.svg",
-    levelLabel: "Parent",
-    qpu: "-",
-    version: "-",
-    cadAvailable: true,
-    status: "Active",
-    children: [],
-  },
-];
+const toStatusLabel = (value: unknown): BomStatus => {
+  const s = typeof value === "string" ? value.trim() : "";
+  return s || "-";
+};
+
+const statusToColor = (value: string): string => {
+  const s = value.trim().toLowerCase();
+  if (s === "draft") return "gold";
+  if (s === "released") return "green";
+  if (s === "obsolete") return "default";
+  if (s === "active") return "green";
+  if (s === "inactive") return "default";
+  return "blue";
+};
+
+const mapNodeToRow = (
+  node: BackendBomNode,
+  opts: { parentBomId?: string; level?: number }
+): BomRow => {
+  const uniq = String(node.uniq ?? node.uniq_code ?? "").trim();
+  const bomId = String(node.bom_id ?? "").trim() || undefined;
+  const internalId = String(node.id ?? node.uuid ?? "").trim() || undefined;
+  const bomChildId = String(node.bom_child_id ?? "").trim() || undefined;
+  const depth = opts.level ?? 0; // 0 = parent, 1 = level 1, 2 = level 2 ...
+  const isParent = depth === 0;
+
+  const qpuNumber = typeof node.qpu === "number" && Number.isFinite(node.qpu) ? node.qpu : null;
+  const qpu = !isParent && qpuNumber != null ? `${qpuNumber} pcs` : "-";
+  const version = typeof node.version === "string" && node.version.trim() ? node.version : "-";
+  const imageSrc = typeof node.asset === "string" && node.asset.trim() ? node.asset : node.image_url;
+  const children = Array.isArray(node.children)
+    ? node.children.map((c) =>
+        mapNodeToRow(c, {
+          parentBomId: opts.parentBomId ?? bomId ?? internalId,
+          level: depth + 1,
+        })
+      )
+    : undefined;
+
+  return {
+    key: uniq || bomId || internalId || bomChildId || crypto.randomUUID(),
+    uniq: uniq || "-",
+    partName: String(node.part_name ?? "-") || "-",
+    partNumber: String(node.part_number ?? "-") || "-",
+    imageSrc: imageSrc || undefined,
+    levelLabel: isParent ? "Parent" : `Level ${depth}`,
+    isParent,
+    qpu,
+    version,
+    cadAvailable: Boolean(imageSrc),
+    status: toStatusLabel((node as any)?.bom_status ?? node.status),
+    children,
+    bomId,
+    internalId,
+    parentBomId: opts.parentBomId,
+    bomChildId,
+  };
+};
+
+const fetchBomIdByAnyId = async (anyId: string): Promise<string> => {
+  const token = getCookiesFromBrowser("Authorization");
+  if (!apiBaseUrl || !anyId) return "";
+  const res = await fetch(`${apiBaseUrl}/products/bom/${encodeURIComponent(anyId)}`, {
+    method: "GET",
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!res.ok) return "";
+  const json = await res.json().catch(() => null);
+  const data = json && typeof json === "object" && (json as any).data ? (json as any).data : json;
+  const bomId = data?.bom_id;
+  if (typeof bomId === "number" && Number.isFinite(bomId)) return String(bomId);
+  if (typeof bomId === "string" && bomId.trim()) return bomId.trim();
+  return "";
+};
 
 export default function BillOfMaterialPage() {
   const router = useRouter();
   const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([]);
   const [messageApi, contextHolder] = message.useMessage();
 
-  const parentCount = bomData.length;
-  const childCount = bomData.reduce(
+  const { data: bomTreeRes, isLoading: isBomLoading } = useGetBomTreeQuery();
+  const [deleteBomParent, { isLoading: isDeletingParent }] = useDeleteBomParentMutation();
+  const [deleteBomChild, { isLoading: isDeletingChild }] = useDeleteBomChildMutation();
+
+  const bomRows = useMemo(() => {
+    const tree = bomTreeRes?.data ?? [];
+    return tree.map((n) => mapNodeToRow(n, { level: 0 }));
+  }, [bomTreeRes?.data]);
+
+  const parentCount = bomRows.length;
+  const childCount = bomRows.reduce(
     (acc, row) => acc + (row.children?.length ?? 0),
     0
   );
-  const expandableParentKeys = bomData
+  const expandableParentKeys = bomRows
     .filter((r) => (r.children?.length ?? 0) > 0)
     .map((r) => r.key);
 
@@ -129,11 +148,10 @@ export default function BillOfMaterialPage() {
       key: "uniq",
       width: 140,
       render: (_: unknown, record: BomRow) => {
-        const isParent = record.levelLabel === "Parent";
         return (
           <span
             className={
-              isParent
+              record.isParent
                 ? "inline-flex items-center rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white"
                 : "inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700"
             }
@@ -177,10 +195,7 @@ export default function BillOfMaterialPage() {
       key: "level",
       width: 110,
       render: (_: unknown, record: BomRow) => {
-        if (record.levelLabel === "Parent") {
-          return <Tag color="gold">Parent</Tag>;
-        }
-        return <Tag color="blue">{record.levelLabel}</Tag>;
+        return <Tag color={record.isParent ? "gold" : "blue"}>{record.levelLabel}</Tag>;
       },
     },
     {
@@ -224,9 +239,7 @@ export default function BillOfMaterialPage() {
       key: "status",
       width: 110,
       render: (_: unknown, record: BomRow) => (
-        <Tag color={record.status === "Active" ? "green" : "default"}>
-          {record.status}
-        </Tag>
+        <Tag color={statusToColor(record.status)}>{record.status}</Tag>
       ),
     },
     {
@@ -240,7 +253,14 @@ export default function BillOfMaterialPage() {
             icon={<EyeOutlined />}
             onClick={(e) => {
               e.stopPropagation();
-              messageApi.info(`View ${record.uniq}`);
+              const targetId = record.isParent
+                ? record.bomId || record.internalId
+                : record.parentBomId;
+              if (!targetId) {
+                messageApi.error("Missing BOM id");
+                return;
+              }
+              router.push(`/bill-of-material/${encodeURIComponent(targetId)}`);
             }}
           />
           <Button
@@ -248,7 +268,16 @@ export default function BillOfMaterialPage() {
             icon={<EditOutlined />}
             onClick={(e) => {
               e.stopPropagation();
-              messageApi.info(`Edit ${record.uniq}`);
+              const targetId = record.isParent
+                ? record.bomId || record.internalId
+                : record.parentBomId;
+              if (!targetId) {
+                messageApi.error("Missing BOM id");
+                return;
+              }
+              router.push(
+                `/bill-of-material/${encodeURIComponent(targetId)}/edit`
+              );
             }}
           />
           <Button
@@ -257,7 +286,42 @@ export default function BillOfMaterialPage() {
             icon={<DeleteOutlined />}
             onClick={(e) => {
               e.stopPropagation();
-              messageApi.info(`Delete ${record.uniq}`);
+              Modal.confirm({
+                title: "Delete BOM item?",
+                content: `Delete ${record.uniq}?`,
+                okText: "Delete",
+                okButtonProps: { danger: true },
+                cancelText: "Cancel",
+                onOk: async () => {
+                  try {
+                    if (record.isParent) {
+                      const anyId = record.bomId || record.internalId;
+                      if (!anyId) {
+                        messageApi.error("Missing bom_id for parent item");
+                        return;
+                      }
+
+                      // Ensure we delete by bom_id when possible.
+                      const resolvedBomId = record.bomId || (await fetchBomIdByAnyId(anyId)) || anyId;
+                      await deleteBomParent({ bom_id: resolvedBomId }).unwrap();
+                      messageApi.success("Deleted");
+                      return;
+                    }
+
+                    if (!record.parentBomId || !record.bomChildId) {
+                      messageApi.error("Missing bom_id/bom_child_id for child item");
+                      return;
+                    }
+                    await deleteBomChild({
+                      bom_id: record.parentBomId,
+                      bom_child_id: record.bomChildId,
+                    }).unwrap();
+                    messageApi.success("Deleted");
+                  } catch (err) {
+                    messageApi.error("Delete failed");
+                  }
+                },
+              });
             }}
           />
         </div>
@@ -309,9 +373,10 @@ export default function BillOfMaterialPage() {
         <div className="px-5 pb-5">
           <Table<BomRow>
             columns={columns}
-            dataSource={bomData}
+            dataSource={bomRows}
             rowKey="key"
             bordered
+            loading={isBomLoading || isDeletingParent || isDeletingChild}
             pagination={{
               pageSize: 10,
               showSizeChanger: true,
@@ -355,9 +420,7 @@ export default function BillOfMaterialPage() {
                 messageApi.info(`Open CAD viewer for ${record.uniq}`);
               },
             })}
-            rowClassName={(record) =>
-              record.levelLabel === "Parent" ? "bg-blue-50" : ""
-            }
+              rowClassName={(record) => (record.isParent ? "bg-blue-50" : "")}
             scroll={{ x: "max-content" }}
           />
 

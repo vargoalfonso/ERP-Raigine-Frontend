@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -18,6 +18,9 @@ import {
   SearchOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { type InventoryRecord, useGetInventoryListQuery } from "@/lib/api/inventory/api";
 
 type IndirectRawMaterialRow = {
   id: string;
@@ -32,6 +35,30 @@ type IndirectRawMaterialRow = {
   safetyStockDays: number;
   status: "NORMAL" | "LOW STOCK";
   buyFlag: "BUY" | "NOT BUY";
+};
+
+type UnknownRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+
+const isMissingRouteError = (error: unknown): boolean => isRecord(error) && error.status === 404;
+
+const mapInventoryToIndirectRow = (record: InventoryRecord): IndirectRawMaterialRow => {
+  const currentStock = Number(record.stock_qty ?? 0);
+  return {
+    id: record.id,
+    uniq: record.uniq_code ?? "-",
+    partNumber: record.part_number ?? "-",
+    partName: record.part_name ?? record.item_name ?? record.uniq_code ?? "-",
+    warehouse: record.warehouse_location ?? "-",
+    currentStock,
+    toCompleteKanban: 0,
+    kanbanCount: 0,
+    stockDays: 0,
+    safetyStockDays: 0,
+    status: currentStock > 20 ? "NORMAL" : "LOW STOCK",
+    buyFlag: currentStock > 20 ? "NOT BUY" : "BUY",
+  };
 };
 
 const initialRows: IndirectRawMaterialRow[] = [
@@ -71,6 +98,27 @@ export default function IndirectRawMaterialsPage() {
 
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<IndirectRawMaterialRow[]>(initialRows);
+  const apiEnabled = Boolean(apiBaseUrl);
+  const listQuery = useGetInventoryListQuery(
+    { type: "indirect-materials", page: 1, limit: 20 },
+    { skip: !apiEnabled }
+  );
+
+  useEffect(() => {
+    if (!apiEnabled || !listQuery.error) return;
+    if (isMissingRouteError(listQuery.error)) {
+      messageApi.warning("Inventory indirect-materials API route is not available yet; showing mock data.");
+      return;
+    }
+    messageApi.error(getApiErrorMessage(listQuery.error, "Failed to load indirect materials inventory"));
+  }, [apiEnabled, listQuery.error, messageApi]);
+
+  const inventoryRows = useMemo(() => {
+    if (!apiEnabled || isMissingRouteError(listQuery.error)) return rows;
+    const items = listQuery.data?.data ?? [];
+    if (!items.length) return [];
+    return items.map(mapInventoryToIndirectRow);
+  }, [apiEnabled, listQuery.data, listQuery.error, rows]);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletingRow, setDeletingRow] = useState<IndirectRawMaterialRow | null>(
@@ -79,15 +127,15 @@ export default function IndirectRawMaterialsPage() {
 
   const filteredRows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => {
+    if (!q) return inventoryRows;
+    return inventoryRows.filter((r) => {
       return (
         r.uniq.toLowerCase().includes(q) ||
         r.partNumber.toLowerCase().includes(q) ||
         r.partName.toLowerCase().includes(q)
       );
     });
-  }, [query, rows]);
+  }, [inventoryRows, query]);
 
   const openDelete = (row: IndirectRawMaterialRow) => {
     setDeletingRow(row);
@@ -101,6 +149,11 @@ export default function IndirectRawMaterialsPage() {
 
   const confirmDelete = () => {
     if (!deletingRow) return;
+    if (apiEnabled && !isMissingRouteError(listQuery.error)) {
+      messageApi.info("Delete inventory is not integrated for this page yet.");
+      closeDelete();
+      return;
+    }
     setRows((prev) => prev.filter((r) => r.id !== deletingRow.id));
     messageApi.success("Deleted");
     closeDelete();
@@ -211,7 +264,7 @@ export default function IndirectRawMaterialsPage() {
             className="text-blue-600 hover:text-blue-800"
             onClick={() =>
               router.push(
-                `/indirect-raw-material/detail?uniq=${encodeURIComponent(row.uniq)}`
+                `/indirect-raw-material/detail?id=${encodeURIComponent(row.id)}&uniq=${encodeURIComponent(row.uniq)}`
               )
             }
           />
@@ -286,6 +339,7 @@ export default function IndirectRawMaterialsPage() {
             columns={columns}
             dataSource={filteredRows}
             rowKey="id"
+            loading={apiEnabled ? listQuery.isFetching : false}
             pagination={false}
             scroll={{ x: "max-content" }}
           />

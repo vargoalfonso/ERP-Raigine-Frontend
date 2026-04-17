@@ -1,283 +1,326 @@
 import { apiSlice } from "@/lib/api/instance";
 import { unwrapBackendData } from "@/lib/api/utils/unwrap";
-import type { ApiResponse, DataArray, DataObject } from "@/types";
+import type { ApiResponse } from "@/types";
 
 const TAG = "ProcurementPos" as const;
 
-export type ProcurementPoCategory = "RAW_MATERIAL" | "INDIRECT_RAW_MATERIAL" | "SUBCON";
+type UnknownRecord = Record<string, unknown>;
 
-export type ProcurementPoRecord = {
-	id: string;
-	po_category?: ProcurementPoCategory;
-	month?: string; // YYYY-MM
-	po_number?: string;
-	supplier_name?: string;
-	subcon_name?: string;
-	data_order?: string;
-	date_incoming?: string; // YYYY-MM-DD
-	total_po?: number;
-	total_incoming?: number;
-	expected_arrival?: string; // YYYY-MM-DD
-	status?: string;
-	notes?: string;
-	dn_created?: number;
-	dn_incoming?: number;
-	created_at?: string;
-	updated_at?: string;
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
+
+const toText = (value: unknown): string | undefined => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
 };
 
-export type ProcurementPoBoardRow = {
-	id: string;
-	po_id?: string;
-	po_category?: ProcurementPoCategory;
-	month?: string;
-	po_number?: string;
-	supplier_name?: string;
-	subcon_name?: string;
-	data_order?: string;
-	date_incoming?: string;
-	total_po?: number;
-	total_incoming?: number;
-	expected_arrival?: string;
-	dn_created?: number;
-	dn_incoming?: number;
-	open_po?: number;
-	po_alert?: number;
-	status?: string;
+const toNumber = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+};
+
+const ok = <T,>(data: T, message = "OK"): ApiResponse<T> => ({
+  message,
+  status: "success",
+  data,
+});
+
+const parseArrayResponse = <T,>(response: unknown): T[] => {
+  const unwrapped = unwrapBackendData<unknown>(response);
+  if (Array.isArray(unwrapped)) return unwrapped as T[];
+
+  if (isRecord(unwrapped)) {
+    if (Array.isArray(unwrapped.items)) return unwrapped.items as T[];
+    if (Array.isArray(unwrapped.data)) return unwrapped.data as T[];
+  }
+
+  if (!isRecord(response)) return [];
+  if (Array.isArray(response.data)) return response.data as T[];
+  if (isRecord(response.data) && Array.isArray(response.data.items)) return response.data.items as T[];
+  if (isRecord(response.data) && Array.isArray(response.data.data)) return response.data.data as T[];
+  return [];
+};
+
+const parseObjectResponse = <T,>(response: unknown): T | null => {
+  const unwrapped = unwrapBackendData<unknown>(response);
+  if (isRecord(unwrapped)) return unwrapped as T;
+
+  if (!isRecord(response)) return null;
+  if (isRecord(response.data) && isRecord(response.data.data)) return response.data.data as T;
+  if (isRecord(response.data)) return response.data as T;
+  return response as T;
+};
+
+export type ProcurementPoType = "raw_material" | "indirect" | "subcon";
+
+export type ProcurementPoSummary = {
+  total_pos?: number;
+  active_suppliers?: number;
+  total_po_value?: number;
+  late_deliveries?: number;
+};
+
+export type ProcurementPoRecord = {
+  id: string;
+  po_id?: string;
+  po_type?: ProcurementPoType;
+  po_stage?: number;
+  period?: string;
+  month?: string;
+  po_number?: string;
+  po_budget_ref?: string;
+  sales_plan?: number;
+  total_budget_po?: number;
+  total_quantity?: number;
+  total_uniq?: number;
+  total_weight?: number;
+  customer_id?: number | string;
+  contact_person?: string;
+  supplier_name?: string;
+  supplier_id?: string | number;
+  total_po?: number;
+  total_incoming?: number;
+  open_po?: number;
+  expected_arrival?: string;
+  po_alert?: number;
+  status?: string;
+  external_system?: string;
+  external_po_number?: string;
+  generate_mode?: string;
+  po_budget_entry_ids?: Array<string | number>;
+  data_order?: string;
+  notes?: string;
+  dn_created?: number;
+  dn_incoming?: number;
+  items?: Array<Record<string, unknown>>;
+};
+
+export type ProcurementPoItem = {
+  id?: string;
+  line_no?: number;
+  uniq_code?: string;
+  part_number?: string;
+  part_name?: string;
+  model?: string;
+  qty?: number;
+  uom?: string;
+  weight_kg?: number;
+  budget?: number;
+};
+
+export type ProcurementPoHistoryLog = {
+  action?: string;
+  notes?: string;
+  username?: string;
+  occurred_at?: string;
+};
+
+export type ProcurementPoDetail = {
+  po: ProcurementPoRecord;
+  items: ProcurementPoItem[];
+  history_logs: ProcurementPoHistoryLog[];
 };
 
 export type ProcurementPoFilters = {
-	category?: ProcurementPoCategory;
-	month?: string; // YYYY-MM
-	supplier?: string;
-	subcon?: string;
+  po_type: ProcurementPoType;
 };
 
-export type CreateProcurementPoRequest = {
-	po_category: ProcurementPoCategory;
-	month: string;
-	po_number: string;
-	supplier_name?: string;
-	subcon_name?: string;
-	data_order?: string;
-	date_incoming?: string;
-	total_po?: number;
-	total_budget_po?: number;
-	total_incoming?: number;
-	dn_created?: number;
-	dn_incoming?: number;
-	expected_arrival?: string;
-	status?: string;
-	notes?: string;
-
-	// Item-ish fields (optional, commonly used by UI)
-	uniq?: string;
-	spec_material?: string;
-	uom?: string;
-	weigh_kg?: number;
-	packing?: string;
-	pcs_kanban?: number;
-
-	// Budget linkage
-	po_budget_id?: number;
-	po_budget_number?: string;
+export type GenerateProcurementPoRequest = {
+  po_type: ProcurementPoType;
+  period: string;
+  po_budget_entry_ids: Array<string | number>;
+  external_system?: string;
+  external_po_number?: string;
+  generate_mode?: "both_stages" | "stage_1" | "stage_2" | string;
 };
 
-export type BulkCreateProcurementPoResult = {
-	count: number;
-	ids: string[];
+const toProcurementPo = (raw: unknown): ProcurementPoRecord => {
+  const record = isRecord(raw) ? raw : {};
+  const totalPo =
+    toNumber(record.total_po) ??
+    toNumber(record.total_amount) ??
+    toNumber(record.total_budget_po);
+  const totalIncoming = toNumber(record.total_incoming) ?? toNumber(record.qty_delivered);
+  const openPo =
+    toNumber(record.open_po) ??
+    (Number.isFinite(totalPo) && Number.isFinite(totalIncoming)
+      ? Number(totalPo) - Number(totalIncoming)
+      : undefined);
+
+  return {
+    id: toText(record.id) ?? toText(record.po_id) ?? "",
+    po_id: toText(record.po_id) ?? toText(record.id),
+    po_type: (toText(record.po_type) ?? toText(record.po_category)) as ProcurementPoType | undefined,
+    po_stage: toNumber(record.po_stage),
+    period: toText(record.period) ?? toText(record.month),
+    month: toText(record.month) ?? toText(record.period),
+    po_number: toText(record.po_number),
+    po_budget_ref: toText(record.po_budget_ref),
+    sales_plan: toNumber(record.sales_plan),
+    total_budget_po: toNumber(record.total_budget_po),
+    total_quantity: toNumber(record.total_quantity),
+    total_uniq: toNumber(record.total_uniq),
+    total_weight: toNumber(record.total_weight),
+    customer_id: toNumber(record.customer_id) ?? toText(record.customer_id),
+    contact_person: toText(record.contact_person),
+    supplier_name: toText(record.supplier_name) ?? toText(record.subcon_name),
+    supplier_id: toText(record.supplier_id),
+    total_po: totalPo,
+    total_incoming: totalIncoming,
+    open_po: openPo,
+    expected_arrival: toText(record.expected_arrival),
+    po_alert: toNumber(record.po_alert),
+    status: toText(record.status),
+    external_system: toText(record.external_system),
+    external_po_number: toText(record.external_po_number),
+    generate_mode: toText(record.generate_mode),
+    po_budget_entry_ids: Array.isArray(record.po_budget_entry_ids)
+      ? record.po_budget_entry_ids
+          .map((value) => toText(value) ?? (typeof value === "number" ? value : undefined))
+          .filter((value): value is string | number => value !== undefined)
+      : undefined,
+    data_order: toText(record.data_order),
+    notes: toText(record.notes),
+    dn_created: toNumber(record.dn_created),
+    dn_incoming: toNumber(record.dn_incoming),
+    items: Array.isArray(record.items)
+      ? record.items.filter((item): item is Record<string, unknown> => isRecord(item))
+      : undefined,
+  };
 };
 
-const getCategoryListEndpoint = (category?: ProcurementPoCategory) => {
-	if (category === "INDIRECT_RAW_MATERIAL") return "/api/procurement/po-indirectrm";
-	if (category === "SUBCON") return "/api/procurement/po-subcon";
-	return "/api/procurement/po-rm";
+const toProcurementPoItem = (raw: unknown): ProcurementPoItem => {
+  const record = isRecord(raw) ? raw : {};
+  return {
+    id: toText(record.id),
+    line_no: toNumber(record.line_no),
+    uniq_code: toText(record.uniq_code) ?? toText(record.item_uniq_code) ?? toText(record.uniq),
+    part_number: toText(record.part_number),
+    part_name: toText(record.part_name),
+    model: toText(record.model),
+    qty: toNumber(record.qty) ?? toNumber(record.quantity),
+    uom: toText(record.uom) ?? toText(record.unit),
+    weight_kg: toNumber(record.weight_kg) ?? toNumber(record.weight),
+    budget: toNumber(record.budget),
+  };
 };
 
-const ok = <T>(data: T, message = "OK"): ApiResponse<T> => ({
-	message,
-	status: "success",
-	data,
-});
-
-const toNumber = (value: unknown): number | undefined => {
-	const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
-	return Number.isFinite(n) ? n : undefined;
+const toProcurementPoHistoryLog = (raw: unknown): ProcurementPoHistoryLog => {
+  const record = isRecord(raw) ? raw : {};
+  return {
+    action: toText(record.action),
+    notes: toText(record.notes),
+    username: toText(record.username),
+    occurred_at: toText(record.occurred_at),
+  };
 };
 
-const toPo = (raw: unknown): ProcurementPoRecord => {
-	const r = (raw ?? {}) as Record<string, unknown>;
-	const id = String(r.id ?? r.po_id ?? r.uuid ?? r.key ?? "");
-	return {
-		id,
-		po_category: (r.po_category ?? r.poCategory) as ProcurementPoCategory | undefined,
-		month: (r.month ?? r.period) as string | undefined,
-		po_number: (r.po_number ?? r.poNumber) as string | undefined,
-		supplier_name: (r.supplier_name ?? r.supplierName) as string | undefined,
-		subcon_name: (r.subcon_name ?? r.subconName) as string | undefined,
-		data_order: (r.data_order ?? r.dataOrder) as string | undefined,
-		date_incoming: (r.date_incoming ?? r.dateIncoming) as string | undefined,
-		total_po: toNumber(r.total_po ?? r.totalPo),
-		total_incoming: toNumber(r.total_incoming ?? r.totalIncoming),
-		expected_arrival: (r.expected_arrival ?? r.expectedArrival) as string | undefined,
-		status: (r.status ?? r.po_status) as string | undefined,
-		notes: (r.notes ?? r.note) as string | undefined,
-		dn_created: toNumber(r.dn_created ?? r.dnCreated),
-		dn_incoming: toNumber(r.dn_incoming ?? r.dnIncoming),
-		created_at: (r.created_at ?? r.createdAt) as string | undefined,
-		updated_at: (r.updated_at ?? r.updatedAt) as string | undefined,
-	};
+const toProcurementPoDetail = (raw: unknown): ProcurementPoDetail => {
+  const parsed = parseObjectResponse<unknown>(raw);
+  const record = isRecord(parsed)
+    ? (parsed as UnknownRecord)
+    : isRecord(raw)
+      ? raw
+      : {};
+
+  const poRecord = isRecord(record.po) ? (record.po as UnknownRecord) : record;
+  const itemsRaw = Array.isArray(record.items) ? record.items : [];
+  const historyRaw = Array.isArray(record.history_logs) ? record.history_logs : [];
+
+  return {
+    po: toProcurementPo(poRecord),
+    items: itemsRaw.map(toProcurementPoItem),
+    history_logs: historyRaw.map(toProcurementPoHistoryLog),
+  };
 };
 
-const toBoardRow = (raw: unknown): ProcurementPoBoardRow => {
-	const r = (raw ?? {}) as Record<string, unknown>;
-	const id = String(r.id ?? r.po_id ?? r.poId ?? r.key ?? "");
-	return {
-		id,
-		po_id: (r.po_id ?? r.poId) as string | undefined,
-		po_category: (r.po_category ?? r.poCategory) as ProcurementPoCategory | undefined,
-		month: (r.month ?? r.period) as string | undefined,
-		po_number: (r.po_number ?? r.poNumber) as string | undefined,
-		supplier_name: (r.supplier_name ?? r.supplierName) as string | undefined,
-		subcon_name: (r.subcon_name ?? r.subconName) as string | undefined,
-		data_order: (r.data_order ?? r.dataOrder) as string | undefined,
-		date_incoming: (r.date_incoming ?? r.dateIncoming) as string | undefined,
-		total_po: toNumber(r.total_po ?? r.totalPo),
-		total_incoming: toNumber(r.total_incoming ?? r.totalIncoming),
-		expected_arrival: (r.expected_arrival ?? r.expectedArrival) as string | undefined,
-		dn_created: toNumber(r.dn_created ?? r.dnCreated),
-		dn_incoming: toNumber(r.dn_incoming ?? r.dnIncoming),
-		open_po: toNumber(r.open_po ?? r.openPo),
-		po_alert: toNumber(r.po_alert ?? r.poAlert),
-		status: (r.status ?? r.po_status) as string | undefined,
-	};
-};
-
-const toQueryString = (filters?: ProcurementPoFilters): string => {
-	if (!filters) return "";
-	const params = new URLSearchParams();
-	if (filters.month) params.set("month", filters.month);
-	if (filters.supplier) params.set("supplier", filters.supplier);
-	if (filters.subcon) params.set("subcon", filters.subcon);
-	const qs = params.toString();
-	return qs ? `?${qs}` : "";
+const toSummary = (response: unknown): ProcurementPoSummary => {
+  const parsed = parseObjectResponse<unknown>(response);
+  const record = isRecord(parsed) ? parsed : isRecord(response) ? response : {};
+  return {
+    total_pos:
+      toNumber(record.total_pos) ??
+      toNumber(record.total_po_count) ??
+      toNumber(record.total_purchase_orders),
+    active_suppliers:
+      toNumber(record.active_suppliers) ??
+      toNumber(record.total_suppliers),
+    total_po_value:
+      toNumber(record.total_po_value) ??
+      toNumber(record.total_amount),
+    late_deliveries:
+      toNumber(record.late_deliveries) ??
+      toNumber(record.po_alert),
+  };
 };
 
 export const procurementPoApiSlice = apiSlice
-	.enhanceEndpoints({ addTagTypes: [TAG] })
-	.injectEndpoints({
-	endpoints: (builder) => ({
-		getProcurementPoBoard: builder.query<ApiResponse<DataArray<ProcurementPoBoardRow>>, ProcurementPoFilters | void>({
-			query: (filters) => ({
-				url: `${getCategoryListEndpoint(filters?.category)}${toQueryString(filters || undefined)}`,
-				method: "GET",
-				meta: { useAuthorization: true, contentType: "application/json" },
-			}),
-			transformResponse: (response: unknown) => {
-				const unwrapped = unwrapBackendData<unknown>(response);
-				const list = Array.isArray(unwrapped)
-					? unwrapped
-					: unwrapped && typeof unwrapped === "object" && Array.isArray((unwrapped as Record<string, unknown>).data)
-						? ((unwrapped as Record<string, unknown>).data as unknown[])
-						: [];
-				return ok((list as unknown[]).map(toBoardRow));
-			},
-			providesTags: [{ type: TAG, id: "BOARD" }],
-		}),
+  .enhanceEndpoints({ addTagTypes: [TAG] })
+  .injectEndpoints({
+    endpoints: (builder) => ({
+      getProcurementPoSummary: builder.query<ApiResponse<ProcurementPoSummary>, ProcurementPoFilters>({
+        query: ({ po_type }) => ({
+          url: `/procurement/purchase-orders/summary?po_type=${encodeURIComponent(po_type)}`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => ok(toSummary(response)),
+        providesTags: (_result, _error, arg) => [{ type: TAG, id: `SUMMARY-${arg.po_type}` }],
+      }),
 
-		listProcurementPos: builder.query<ApiResponse<DataArray<ProcurementPoRecord>>, ProcurementPoFilters | void>({
-			query: (filters) => ({
-				url: `${getCategoryListEndpoint(filters?.category)}${toQueryString(filters || undefined)}`,
-				method: "GET",
-				meta: { useAuthorization: true, contentType: "application/json" },
-			}),
-			transformResponse: (response: unknown) => {
-				const unwrapped = unwrapBackendData<unknown>(response);
-				const list = Array.isArray(unwrapped)
-					? unwrapped
-					: unwrapped && typeof unwrapped === "object" && Array.isArray((unwrapped as Record<string, unknown>).data)
-						? ((unwrapped as Record<string, unknown>).data as unknown[])
-						: [];
-				return ok((list as unknown[]).map(toPo));
-			},
-			providesTags: [{ type: TAG, id: "LIST" }],
-		}),
+      listProcurementPos: builder.query<ApiResponse<ProcurementPoRecord[]>, ProcurementPoFilters>({
+        query: ({ po_type }) => ({
+          url: `/procurement/purchase-orders?po_type=${encodeURIComponent(po_type)}`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => ok(parseArrayResponse<unknown>(response).map(toProcurementPo)),
+        providesTags: (_result, _error, arg) => [
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: `LIST-${arg.po_type}` },
+        ],
+      }),
 
-		createProcurementPo: builder.mutation<ApiResponse<DataObject<ProcurementPoRecord>>, CreateProcurementPoRequest>({
-			query: (body) => ({
-				url: "/api/procurement/po-rm",
-				method: "POST",
-				body,
-				meta: { useAuthorization: true, contentType: "application/json" },
-			}),
-			transformResponse: (response: unknown) => ok(toPo(unwrapBackendData(response)), "Created"),
-			invalidatesTags: [{ type: TAG, id: "LIST" }, { type: TAG, id: "BOARD" }],
-		}),
+      getProcurementPoById: builder.query<ApiResponse<ProcurementPoDetail>, string | number>({
+        query: (po_id) => ({
+          url: `/procurement/purchase-orders/${encodeURIComponent(String(po_id))}`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => ok(toProcurementPoDetail(response)),
+        providesTags: (_result, _error, po_id) => [{ type: TAG, id: String(po_id) }],
+      }),
 
-		bulkCreateProcurementPos: builder.mutation<
-			ApiResponse<DataObject<BulkCreateProcurementPoResult>>,
-			CreateProcurementPoRequest[] | { items: CreateProcurementPoRequest[] }
-		>({
-			query: (body) => ({
-				url: "/api/procurement/po/bulk",
-				method: "POST",
-				body,
-				meta: { useAuthorization: true, contentType: "application/json" },
-			}),
-			transformResponse: (response: unknown) => {
-				const unwrapped = unwrapBackendData<unknown>(response);
-				if (unwrapped && typeof unwrapped === "object") {
-					const r = unwrapped as Record<string, unknown>;
-					const ids = Array.isArray(r.ids) ? r.ids.map((v) => String(v)) : [];
-					const count = typeof r.count === "number" ? r.count : ids.length;
-					return ok({ count, ids }, "Created");
-				}
-				return ok({ count: 0, ids: [] }, "Created");
-			},
-			invalidatesTags: [{ type: TAG, id: "LIST" }, { type: TAG, id: "BOARD" }],
-		}),
-
-		getProcurementPoById: builder.query<ApiResponse<DataObject<ProcurementPoRecord>>, string>({
-			query: (id) => ({
-				url: `/api/procurement/po/${encodeURIComponent(id)}`,
-				method: "GET",
-				meta: { useAuthorization: true, contentType: "application/json" },
-			}),
-			transformResponse: (response: unknown) => ok(toPo(unwrapBackendData(response))),
-			providesTags: (_res, _err, id) => [{ type: TAG, id }],
-		}),
-
-		patchProcurementPo: builder.mutation<ApiResponse<DataObject<ProcurementPoRecord>>, { id: string; body: Partial<CreateProcurementPoRequest> }>({
-			query: ({ id, body }) => ({
-				url: `/api/procurement/po/${encodeURIComponent(id)}`,
-				method: "PATCH",
-				body,
-				meta: { useAuthorization: true, contentType: "application/json" },
-			}),
-			transformResponse: (response: unknown) => ok(toPo(unwrapBackendData(response)), "Updated"),
-			invalidatesTags: (_res, _err, arg) => [{ type: TAG, id: "LIST" }, { type: TAG, id: "BOARD" }, { type: TAG, id: arg.id }],
-		}),
-
-		deleteProcurementPo: builder.mutation<ApiResponse<DataObject<{ id: string }>>, string>({
-			query: (id) => ({
-				url: `/api/procurement/po/${encodeURIComponent(id)}`,
-				method: "DELETE",
-				meta: { useAuthorization: true, contentType: "application/json" },
-			}),
-			transformResponse: (_response: unknown, _meta, arg) => ok({ id: arg }, "Deleted"),
-			invalidatesTags: (_res, _err, id) => [{ type: TAG, id: "LIST" }, { type: TAG, id: "BOARD" }, { type: TAG, id }],
-		}),
-	}),
-	});
+      generateProcurementPo: builder.mutation<ApiResponse<ProcurementPoRecord>, GenerateProcurementPoRequest>({
+        query: (body) => ({
+          url: "/procurement/purchase-orders/generate",
+          method: "POST",
+          body,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => ok(toProcurementPo(parseObjectResponse<unknown>(response)), "Generated"),
+        invalidatesTags: (_result, _error, arg) => [
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: `LIST-${arg.po_type}` },
+          { type: TAG, id: `SUMMARY-${arg.po_type}` },
+        ],
+      }),
+    }),
+  });
 
 export const {
-	useGetProcurementPoBoardQuery,
-	useListProcurementPosQuery,
-	useLazyListProcurementPosQuery,
-	useCreateProcurementPoMutation,
-	useBulkCreateProcurementPosMutation,
-	useGetProcurementPoByIdQuery,
-	usePatchProcurementPoMutation,
-	useDeleteProcurementPoMutation,
+  useGetProcurementPoSummaryQuery,
+  useListProcurementPosQuery,
+  useLazyListProcurementPosQuery,
+  useGetProcurementPoByIdQuery,
+  useGenerateProcurementPoMutation,
 } = procurementPoApiSlice;
 

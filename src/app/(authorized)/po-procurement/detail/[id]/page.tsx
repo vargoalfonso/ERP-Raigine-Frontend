@@ -8,6 +8,7 @@ import { useParams, useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetProcurementPoByIdQuery } from "@/lib/api/procurement-po/api";
 import { getApiErrorMessage } from "@/lib/api/error";
+import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -119,6 +120,7 @@ export default function PoProcurementDetailPage() {
 
   const apiEnabled = Boolean(apiBaseUrl);
   const poQuery = useGetProcurementPoByIdQuery(id, { skip: !apiEnabled });
+  const suppliersQuery = useListSuppliersQuery(undefined, { skip: !apiEnabled });
 
   const procurementApiAvailable = apiEnabled && !isMissingRouteError(poQuery.error);
 
@@ -134,27 +136,53 @@ export default function PoProcurementDetailPage() {
 
   const detail = useMemo(() => {
     if (!procurementApiAvailable) return buildMock(id);
-    const po = poQuery.data?.data;
+    const detail = poQuery.data?.data;
+    const po = detail?.po;
     if (!po) return buildMock(id);
 
-    const supplier = po.po_category === "SUBCON" ? po.subcon_name ?? po.supplier_name : po.supplier_name;
+    const supplierIdText = po.supplier_id == null ? "" : String(po.supplier_id).trim();
+    const supplierName =
+      po.supplier_name ??
+      (suppliersQuery.data ?? []).find((s) => {
+        const rowId = s.row_id ?? s.id;
+        return rowId != null && String(rowId).trim() === supplierIdText;
+      })?.supplier_name ??
+      (supplierIdText ? `Supplier #${supplierIdText}` : "-");
+
+    const poItems = detail?.items ?? [];
+    const mappedItems: PoItemRow[] = poItems.map((it, idx) => ({
+      key: `${po.po_number ?? po.id ?? id}-${idx + 1}`,
+      uniq: String(it.uniq_code ?? "-") || "-",
+      partNumber: String(it.part_number ?? "-") || "-",
+      partName: String(it.part_name ?? "-") || "-",
+      model: String(it.model ?? "-") || "-",
+      qty: Number(it.qty ?? 0),
+      uom: String(it.uom ?? "-") || "-",
+      packingNumber: "-",
+      pcsPerKanban: 0,
+      budgetPoIdr: Number(it.budget ?? 0),
+    }));
+
+    const totalQuantity =
+      Number(po.total_quantity ?? 0) ||
+      mappedItems.reduce((sum, row) => sum + Number(row.qty || 0), 0);
 
     return {
-      period: po.month ?? "-",
+      period: po.period ?? po.month ?? "-",
       poNumber: po.po_number ?? po.id,
-      poBudgetNumber: po.data_order ?? "-",
-      totalBudgetPo: Number(po.total_po ?? 0),
-      supplier: supplier ?? "-",
-      totalQuantity: Number(po.total_po ?? 0),
+      poBudgetNumber: po.po_budget_ref ?? (Array.isArray(po.po_budget_entry_ids) ? po.po_budget_entry_ids.join(", ") : po.data_order ?? "-"),
+      totalBudgetPo: Number(po.total_budget_po ?? po.total_po ?? 0),
+      supplier: supplierName,
+      totalQuantity,
       dnCreated: Number(po.dn_created ?? 0),
       dnIncoming: Number(po.dn_incoming ?? 0),
       status: po.status ?? "-",
       expectedArrival: po.expected_arrival ?? "-",
-      dateIncoming: po.date_incoming ?? "-",
+      dateIncoming: "-",
       notes: po.notes ?? "-",
-      items: [] as PoItemRow[],
+      items: mappedItems,
     };
-  }, [procurementApiAvailable, id, poQuery.data?.data]);
+  }, [procurementApiAvailable, id, poQuery.data?.data, suppliersQuery.data]);
 
   const items = detail.items;
 

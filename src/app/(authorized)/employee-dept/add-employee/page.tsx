@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Button, Form, Input, InputNumber, Select, message } from "antd";
+import { Button, DatePicker, Form, Input, InputNumber, Select, message } from "antd";
 import {
   ArrowLeftOutlined,
   SaveOutlined,
@@ -142,19 +142,57 @@ export default function AddEmployeePage() {
     [apiEnabled, departments, departmentsApiData]
   );
 
-  const supervisorOptions = useMemo(
-    () => [
-      ...(apiEnabled
-        ? employeesApiData.map((e) => ({ label: e.full_name, value: e.full_name }))
-        : employees.map((e) => ({ label: e.name, value: e.name }))),
-      { label: "Top Level", value: "Top Level" },
-    ],
-    [apiEnabled, employees, employeesApiData]
+  const roleOptions = useMemo(
+    () => rolesApiData.map((r) => ({ label: r.name, value: r.id })),
+    [rolesApiData]
   );
 
+  const toISOStringSafe = (value: unknown): string | null => {
+    if (!value) return null;
+    if (typeof value === "string") {
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? null : d.toISOString();
+    }
+    if (typeof value === "object" && value && "toISOString" in value) {
+      const fn = (value as any).toISOString;
+      if (typeof fn === "function") {
+        const out = fn.call(value);
+        return typeof out === "string" ? out : null;
+      }
+    }
+    return null;
+  };
+
+  const managerRoleIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of rolesApiData) {
+      const name = String(r?.name ?? "").toLowerCase();
+      if (name.includes("manager")) ids.add(String(r.id));
+    }
+    return ids;
+  }, [rolesApiData]);
+
+  const supervisorOptions = useMemo(() => {
+    if (!apiEnabled) {
+      return [
+        ...employees
+          .filter((e) => Boolean(e.isManager))
+          .map((e) => ({ label: e.name, value: e.name })),
+        { label: "Top Level", value: "Top Level" },
+      ];
+    }
+
+    return [
+      ...employeesApiData
+        .filter((e) => (e.role_id ? managerRoleIds.has(String(e.role_id)) : false))
+        .map((e) => ({ label: e.full_name, value: e.id })),
+      { label: "Top Level", value: null },
+    ];
+  }, [apiEnabled, employees, employeesApiData, managerRoleIds]);
+
   const employmentStatusOptions = [
-    { label: "Active", value: "Active" },
-    { label: "Inactive", value: "Inactive" },
+    { label: "Active", value: "active" },
+    { label: "Inactive", value: "inactive" },
   ];
 
   const positionOptions = [
@@ -165,11 +203,6 @@ export default function AddEmployeePage() {
     { label: "Department Head", value: "Department Head" },
     { label: "Director", value: "Director" },
   ];
-
-  const roleOptions = useMemo(
-    () => rolesApiData.map((r) => ({ label: r.name, value: r.id })),
-    [rolesApiData]
-  );
 
   const onCreate = async () => {
     try {
@@ -182,10 +215,13 @@ export default function AddEmployeePage() {
           email: values.workEmail || null,
           phone_number: values.phoneNumber || null,
           job_title: values.jobTitle || null,
-          status: values.employmentStatus || "Active",
+          status: values.employmentStatus || "active",
           unit_cost: values.unitCost != null ? Number(values.unitCost) : null,
-          role_id: values.roleId || null,
-          department_id: values.departmentId || null,
+          join_date: toISOStringSafe(values.joinDate),
+          role_id: values.roleId ?? null,
+          department_id: values.departmentId ?? null,
+          reports_to_id: values.reportsToId ?? null,
+          notes: values.employeeNotes ? String(values.employeeNotes) : null,
         }).unwrap();
 
         message.success("Employee created");
@@ -212,7 +248,7 @@ export default function AddEmployeePage() {
         role: values.positionRole || "Staff",
         roleHint: "Role-based Access",
         joinDate: todayMMDDYYYY(),
-        status: values.employmentStatus || "Active",
+        status: values.employmentStatus === "inactive" ? "Inactive" : "Active",
       };
 
       const updated = [newEmployee, ...employees];
@@ -305,7 +341,7 @@ export default function AddEmployeePage() {
               </Form.Item>
 
               {apiEnabled ? (
-                <Form.Item name="roleId" label="Role">
+                <Form.Item name="roleId" label="Role" rules={[{ required: true, message: "Select role" }]}>
                   <Select
                     className="!rounded-lg"
                     placeholder="Select role (optional)"
@@ -318,8 +354,17 @@ export default function AddEmployeePage() {
                   <Select className="!rounded-lg" placeholder="Select position" options={positionOptions} />
                 </Form.Item>
               )}
-              <Form.Item name="reportsTo" label="Reports To" rules={[{ required: true, message: "Select supervisor" }]}>
-                <Select className="!rounded-lg" placeholder="Select supervisor" options={supervisorOptions} />
+              <Form.Item
+                name={apiEnabled ? "reportsToId" : "reportsTo"}
+                label="Reports To"
+                rules={apiEnabled ? [{ required: false }] : [{ required: true, message: "Select supervisor" }]}
+              >
+                <Select
+                  className="!rounded-lg"
+                  placeholder="Select supervisor"
+                  options={supervisorOptions}
+                  allowClear
+                />
               </Form.Item>
             </div>
           </div>
@@ -331,6 +376,9 @@ export default function AddEmployeePage() {
             <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
               <Form.Item name="employmentStatus" label="Employment Status" rules={[{ required: true, message: "Select status" }]}>
                 <Select className="!rounded-lg" placeholder="Select status" options={employmentStatusOptions} />
+              </Form.Item>
+              <Form.Item name="joinDate" label="Join Date" rules={apiEnabled ? [{ required: true, message: "Select join date" }] : undefined}>
+                <DatePicker className="!rounded-lg w-full" placeholder="Select join date" />
               </Form.Item>
               <Form.Item name="unitCost" label="Unit Cost">
                 <InputNumber className="!rounded-lg w-full" min={0} addonAfter="Rupiah/hour" placeholder="0" />

@@ -13,19 +13,21 @@ import {
 } from "@ant-design/icons";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
+import { useListCustomersQuery } from "@/lib/api/customers/api";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { useGetGlobalWorkingDaysQuery } from "@/lib/api/system-settings/api";
 import {
-  useBulkCreatePrlForecastsMutation,
-  useUploadPrlExcelMutation,
+  useCreatePrlMutation,
+  useImportPrlsMutation,
 } from "@/lib/api/prl/api";
 
 type ForecastEntry = {
   id: string;
-  customerId?: string;
-  customer?: string;
-  period?: string;
-  uniq: string;
+  customerUuid?: string;
+  customerName?: string;
+  forecastPeriod?: string;
+  uniqCode: string;
   productModel: string;
   partName: string;
   partNumber: string;
@@ -35,10 +37,10 @@ type ForecastEntry = {
 function newEntry(seed?: Partial<ForecastEntry>): ForecastEntry {
   return {
     id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    customerId: seed?.customerId,
-    customer: seed?.customer,
-    period: seed?.period,
-    uniq: seed?.uniq ?? "",
+    customerUuid: seed?.customerUuid,
+    customerName: seed?.customerName,
+    forecastPeriod: seed?.forecastPeriod,
+    uniqCode: seed?.uniqCode ?? "",
     productModel: seed?.productModel ?? "",
     partName: seed?.partName ?? "",
     partNumber: seed?.partNumber ?? "",
@@ -48,13 +50,10 @@ function newEntry(seed?: Partial<ForecastEntry>): ForecastEntry {
 
 function isComplete(entry: ForecastEntry): boolean {
   const quantityValue = Number(entry.quantity);
-  const customerIdValue = Number(entry.customerId);
   return (
-    Number.isFinite(customerIdValue) &&
-    customerIdValue > 0 &&
-    !!entry.customer &&
-    !!entry.period &&
-    entry.uniq.trim().length > 0 &&
+    !!entry.customerUuid &&
+    !!entry.forecastPeriod &&
+    entry.uniqCode.trim().length > 0 &&
     entry.productModel.trim().length > 0 &&
     entry.partName.trim().length > 0 &&
     entry.partNumber.trim().length > 0 &&
@@ -69,9 +68,13 @@ export default function AddForecastPage() {
   const [entryMode, setEntryMode] = useState<"manual" | "bulk">("manual");
 
   const apiEnabled = Boolean(apiBaseUrl);
-  const [bulkCreate, bulkCreateState] = useBulkCreatePrlForecastsMutation();
-  const [uploadExcel, uploadExcelState] = useUploadPrlExcelMutation();
+  const [createPrl, createPrlState] = useCreatePrlMutation();
+  const [importPrls, importPrlsState] = useImportPrlsMutation();
+  const { data: customers = [] } = useListCustomersQuery(undefined, { skip: !apiEnabled });
   const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const { data: globalParameters = [] } = useGetGlobalWorkingDaysQuery(undefined, {
     skip: !apiEnabled,
   });
 
@@ -92,33 +95,71 @@ export default function AddForecastPage() {
     [bomIndex.options]
   );
 
-  const periodOptions = useMemo(
-    () => [
-      { label: "2024-Q1", value: "2024-Q1" },
-      { label: "2024-Q2", value: "2024-Q2" },
-      { label: "2024-Q3", value: "2024-Q3" },
-      { label: "2024-Q4", value: "2024-Q4" },
-    ],
-    []
+  const customerOptions = useMemo(
+    () =>
+      customers
+        .map((customer) => {
+          const value = String(customer.id ?? customer.customer_id ?? "").trim();
+          const label = String(customer.customer_name ?? "").trim();
+          if (!value || !label) return null;
+          return { label, value };
+        })
+        .filter((item): item is { label: string; value: string } => Boolean(item)),
+    [customers]
   );
 
-  const completeCount = useMemo(
-    () => entries.filter((e) => isComplete(e)).length,
-    [entries]
-  );
+  const periodOptions = useMemo(() => {
+    const activePlanningPeriods = globalParameters
+      .filter((item) => String(item.status ?? "active").trim().toLowerCase() === "active")
+      .filter((item) => {
+        const group = String(item.parameter_group ?? "").trim().toLowerCase();
+        return group === "planning";
+      })
+      .map((item) => String(item.period ?? "").trim())
+      .filter(Boolean);
+
+    const periods = (activePlanningPeriods.length ? activePlanningPeriods : globalParameters
+      .filter((item) => String(item.status ?? "active").trim().toLowerCase() === "active")
+      .map((item) => String(item.period ?? "").trim())
+      .filter(Boolean))
+      .filter((value, index, array) => array.indexOf(value) === index);
+
+    if (periods.length > 0) {
+      return periods.map((value) => ({ label: value, value }));
+    }
+
+    const currentYear = new Date().getFullYear();
+    const years = [currentYear, currentYear + 1, currentYear + 2];
+    return years.flatMap((year) =>
+      [1, 2, 3, 4].map((quarter) => ({
+        label: `${year}-Q${quarter}`,
+        value: `${year}-Q${quarter}`,
+      }))
+    );
+  }, [globalParameters]);
+
+  const completeCount = useMemo(() => entries.filter((e) => isComplete(e)).length, [entries]);
 
   const updateEntry = (id: string, patch: Partial<ForecastEntry>) => {
     setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   };
 
-  const handleUniqChange = (id: string, uniq?: string) => {
-    const nextUniq = String(uniq ?? "");
+  const handleCustomerChange = (id: string, customerUuid?: string) => {
+    const selected = customerOptions.find((customer) => customer.value === customerUuid);
+    updateEntry(id, {
+      customerUuid,
+      customerName: selected?.label ?? "",
+    });
+  };
+
+  const handleUniqChange = (id: string, uniqCode?: string) => {
+    const nextUniq = String(uniqCode ?? "").trim();
     const partName = bomIndex.partNameByUniq[nextUniq] ?? "";
     const partNumber = bomIndex.partNumberByUniq[nextUniq] ?? "";
-    const productModel = bomIndex.assemblyCodeByUniq[nextUniq] ?? "";
+    const productModel = bomIndex.modelByUniq[nextUniq] ?? bomIndex.assemblyCodeByUniq[nextUniq] ?? "";
 
     updateEntry(id, {
-      uniq: nextUniq,
+      uniqCode: nextUniq,
       productModel,
       partName,
       partNumber,
@@ -129,33 +170,41 @@ export default function AddForecastPage() {
     setEntries((prev) => [...prev, newEntry()]);
   };
 
+  const removeEntry = (id: string) => {
+    setEntries((prev) => (prev.length > 1 ? prev.filter((entry) => entry.id !== id) : prev));
+  };
+
   const saveAll = async () => {
     if (completeCount !== entries.length) {
-      message.error("Please complete all entries before saving");
+      message.error("Please complete all PRL entries before saving");
       return;
     }
 
     if (!apiEnabled) {
-      message.success(`Saved ${entries.length} forecast entries`);
+      message.success(`Saved ${entries.length} PRL entr${entries.length > 1 ? "ies" : "y"}`);
       router.push("/prl-management");
       return;
     }
 
     try {
-      await bulkCreate(
-        entries.map((e) => ({
-          customer_id: Number(e.customerId),
-          item_uniq_code: e.uniq.trim(),
-          quantity: Number(e.quantity),
-          period: String(e.period),
-          full_name: e.customer,
-        }))
-      ).unwrap();
+      await Promise.all(
+        entries.map((entry) =>
+          createPrl({
+            customer_uuid: String(entry.customerUuid ?? "").trim(),
+            uniq_code: entry.uniqCode.trim(),
+            product_model: entry.productModel.trim(),
+            part_name: entry.partName.trim(),
+            part_number: entry.partNumber.trim(),
+            forecast_period: String(entry.forecastPeriod ?? ""),
+            quantity: Number(entry.quantity),
+          }).unwrap(),
+        ),
+      );
 
-      message.success(`Saved ${entries.length} forecast entries`);
+      message.success(`Saved ${entries.length} PRL entr${entries.length > 1 ? "ies" : "y"}`);
       router.push("/prl-management");
     } catch (err) {
-      message.error(getApiErrorMessage(err, "Failed to save forecasts"));
+      message.error(getApiErrorMessage(err, "Failed to save PRL data"));
     }
   };
 
@@ -170,16 +219,16 @@ export default function AddForecastPage() {
     }
 
     if (!apiEnabled) {
-      message.success(`Uploaded ${file.name}`);
+      message.success(`Imported ${file.name}`);
       return false;
     }
 
     try {
-      await uploadExcel(file).unwrap();
-      message.success(`Uploaded ${file.name}`);
+      await importPrls(file).unwrap();
+      message.success(`Imported ${file.name}`);
       router.push("/prl-management");
     } catch (err) {
-      message.error(getApiErrorMessage(err, "Excel upload failed"));
+      message.error(getApiErrorMessage(err, "PRL import failed"));
     }
 
     return false;
@@ -200,15 +249,15 @@ export default function AddForecastPage() {
             </Link>
             <div className="mt-2">
               <h1 className="text-2xl font-bold text-gray-900">
-                {entryMode === "manual" ? "Add Multiple Forecasts" : "Bulk Forecast Operation"}
+                {entryMode === "manual" ? "Add PRL Forecast" : "Import PRL Forecast"}
               </h1>
               <div className="text-sm text-gray-500">
                 {entryMode === "manual" ? (
                   <>
-                    Create multiple forecast entries in bulk <span className="mx-2">•</span> {entries.length} entr{entries.length > 1 ? "ies" : "y"}
+                    Create PRL forecasts using customer and BOM data <span className="mx-2">•</span> {entries.length} entr{entries.length > 1 ? "ies" : "y"}
                   </>
                 ) : (
-                  <>Upload Excel forecast file through <span className="mx-2">•</span> /api/prl/upload-excel</>
+                  <>Upload Excel forecast file through <span className="mx-2">•</span> /prls/import</>
                 )}
               </div>
             </div>
@@ -222,9 +271,9 @@ export default function AddForecastPage() {
                 className="!rounded-lg"
                 icon={<SaveOutlined />}
                 onClick={saveAll}
-                loading={bulkCreateState.isLoading}
+                loading={createPrlState.isLoading}
               >
-                Save All Forecasts
+                Save PRL
               </Button>
             ) : null}
           </div>
@@ -267,9 +316,9 @@ export default function AddForecastPage() {
               <div className="flex items-start gap-3">
                 <FileExcelOutlined className="mt-0.5 text-blue-700" />
                 <div>
-                  <div className="text-sm font-semibold text-blue-800">Bulk Forecast Upload</div>
+                  <div className="text-sm font-semibold text-blue-800">Bulk PRL Import</div>
                   <div className="text-xs text-blue-700 mt-1">
-                    Use Excel upload for bulk operation. File will be sent to `POST /api/prl/upload-excel`.
+                    Use Excel upload for bulk operation. File will be sent to `POST /prls/import`.
                   </div>
                 </div>
               </div>
@@ -278,7 +327,7 @@ export default function AddForecastPage() {
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <div className="text-base font-semibold text-gray-900">Upload Excel File</div>
               <div className="text-sm text-gray-500 mt-1">
-                Upload forecast data in one go using Excel template.
+                Upload PRL data in one go using the backend import endpoint.
               </div>
 
               <div className="mt-4">
@@ -287,18 +336,18 @@ export default function AddForecastPage() {
                   multiple={false}
                   showUploadList={false}
                   beforeUpload={(file) => handleUploadExcel(file as File)}
-                  disabled={uploadExcelState.isLoading}
+                  disabled={importPrlsState.isLoading}
                 >
                   <div className="py-8">
                     <UploadOutlined className="text-3xl text-gray-400 mb-3" />
-                    <div className="text-sm font-semibold text-gray-900">Upload Excel File</div>
+                    <div className="text-sm font-semibold text-gray-900">Upload PRL Excel File</div>
                     <div className="text-xs text-gray-500 mt-1">
                       Drag and drop your Excel file here, or click to browse.
                     </div>
                     <Button
                       className="!rounded-lg mt-4"
                       type="primary"
-                      loading={uploadExcelState.isLoading}
+                      loading={importPrlsState.isLoading}
                     >
                       Choose File
                     </Button>
@@ -314,10 +363,9 @@ export default function AddForecastPage() {
           <div className="flex items-start gap-3">
             <div className="mt-0.5 text-blue-700">↗</div>
             <div>
-              <div className="text-sm font-semibold text-blue-800">Multiple Forecast Entry</div>
+              <div className="text-sm font-semibold text-blue-800">PRL Entry Rules</div>
               <div className="text-xs text-blue-700 mt-1">
-                Add multiple forecast entries in one go. Each entry will be saved as a separate forecast record.
-                You can add more entries using the “Add Another Forecast Entry” button.
+                Customer comes from Master Customer, UNIQ comes from BOM, and part name, part number, plus product model are auto-filled from BOM data.
               </div>
             </div>
           </div>
@@ -329,57 +377,59 @@ export default function AddForecastPage() {
             <div key={entry.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <div className="flex items-start justify-between gap-4 mb-6">
                 <div>
-                  <div className="text-base font-semibold text-gray-900">Forecast Entry #{idx + 1}</div>
+                  <div className="text-base font-semibold text-gray-900">PRL Entry #{idx + 1}</div>
                   <div className="text-sm text-gray-500">Configure forecast details for production planning</div>
                 </div>
-                <Tag className="!rounded-lg !px-3 !py-1" color="default">
-                  Entry {idx + 1}
-                </Tag>
+                <div className="flex items-center gap-2">
+                  <Tag className="!rounded-lg !px-3 !py-1" color="default">
+                    Entry {idx + 1}
+                  </Tag>
+                  {entries.length > 1 ? (
+                    <Button danger className="!rounded-lg" onClick={() => removeEntry(entry.id)}>
+                      Remove
+                    </Button>
+                  ) : null}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div>
-                  <div className="text-xs font-semibold text-gray-700 mb-1">Customer ID</div>
-                  <Input
-                    value={entry.customerId ?? ""}
-                    onChange={(e) => updateEntry(entry.id, { customerId: e.target.value.replace(/[^0-9]/g, "") })}
-                    placeholder="Input customer ID (number)"
-                    className="!rounded-lg"
-                    inputMode="numeric"
-                    allowClear
-                  />
-                </div>
-
-                <div>
                   <div className="text-xs font-semibold text-gray-700 mb-1">Customer Name</div>
-                  <Input
-                    value={entry.customer ?? ""}
-                    onChange={(e) => updateEntry(entry.id, { customer: e.target.value })}
-                    placeholder="Input customer name"
-                    className="!rounded-lg"
+                  <Select
+                    value={entry.customerUuid}
+                    onChange={(value) => handleCustomerChange(entry.id, value)}
+                    options={customerOptions}
+                    placeholder="Select customer"
+                    className="w-full"
+                    showSearch
                     allowClear
+                    filterOption={(input, option) =>
+                      String(option?.label ?? "")
+                        .toLowerCase()
+                        .includes(input.toLowerCase())
+                    }
                   />
                 </div>
 
                 <div>
                   <div className="text-xs font-semibold text-gray-700 mb-1">Forecast Period</div>
                   <Select
-                    value={entry.period}
-                    onChange={(v) => updateEntry(entry.id, { period: v })}
+                    value={entry.forecastPeriod}
+                    onChange={(v) => updateEntry(entry.id, { forecastPeriod: v })}
                     options={periodOptions}
-                    placeholder="Select period"
+                    placeholder="Select forecast period"
                     className="w-full"
                     allowClear
                   />
                 </div>
 
                 <div>
-                  <div className="text-xs font-semibold text-gray-700 mb-1">Uniq (Product Code)</div>
+                  <div className="text-xs font-semibold text-gray-700 mb-1">UNIQ Code</div>
                   <Select
-                    value={entry.uniq}
+                    value={entry.uniqCode}
                     onChange={(value) => handleUniqChange(entry.id, value)}
                     options={uniqOptions}
-                    placeholder="Select uniq from BOM"
+                    placeholder="Select UNIQ from BOM"
                     className="w-full"
                     showSearch
                     allowClear
@@ -395,7 +445,7 @@ export default function AddForecastPage() {
                   <div className="text-xs font-semibold text-gray-700 mb-1">Product Model</div>
                   <Input
                     value={entry.productModel}
-                    placeholder="Auto-filled from uniq"
+                    placeholder="Auto-filled from BOM model"
                     className="!rounded-lg"
                     readOnly
                   />
@@ -447,7 +497,7 @@ export default function AddForecastPage() {
 
           <div className="flex justify-center">
             <Button className="!rounded-lg" icon={<PlusOutlined />} onClick={addAnother}>
-              Add Another Forecast Entry
+              Add Another PRL Entry
             </Button>
           </div>
 
@@ -456,7 +506,7 @@ export default function AddForecastPage() {
             <div>
               <div className="text-sm font-semibold text-gray-900">Summary</div>
               <div className="text-xs text-gray-500 mt-1">
-                {completeCount} forecast entr{completeCount === 1 ? "y" : "ies"} ready to be saved
+                {completeCount} PRL entr{completeCount === 1 ? "y" : "ies"} ready to be saved
               </div>
             </div>
 

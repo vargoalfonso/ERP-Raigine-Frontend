@@ -3,10 +3,12 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Alert,
   Button,
   Input,
-  Select,
+  Popconfirm,
   Segmented,
+  Select,
   Table,
   Tag,
   Typography,
@@ -14,532 +16,401 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
-  DownloadOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  EyeOutlined,
   PlusOutlined,
   SearchOutlined,
-  UploadOutlined,
-  EyeOutlined,
-  EditOutlined,
-  DeleteOutlined,
 } from "@ant-design/icons";
+import {
+  type SupplierItemRecord,
+  useDeleteSupplierItemMutation,
+  useListSupplierItemsQuery,
+} from "@/lib/api/supplier-items/api";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { apiBaseUrl } from "@/lib/api/instance";
 
-type SupplierStatus = "Active" | "Inactive";
-
-type SupplierTab = "Raw Material" | "Indirect Raw Material" | "SubCon";
+type SupplierSection = "raw-material" | "indirect-raw-material" | "subcon";
 
 type SupplierRow = {
   key: string;
-  site: string;
-  uniq: string;
-  rawMaterialType: string;
-  type?: string;
+  id?: string;
+  section: SupplierSection;
+  supplierName: string;
+  uniqCode: string;
+  sebangoCode: string;
+  type: string;
   productModel: string;
   partName: string;
   partNumber: string;
   gradeSize: string;
-  qtyPerKanban: number;
+  quantity: number;
+  pcsPerKanban: number;
+  customerCycle: string;
   uom: string;
-  weightKg: number;
-  location: string;
-  supplierName: string;
-  cycleDays: number;
-  status: SupplierStatus;
-  tab: SupplierTab;
+  weight: number;
+  warehouse: string;
+  status: string;
 };
 
-const ALL_ROWS: SupplierRow[] = [
-  {
-    key: "SUP-001",
-    site: "Sebanggo",
-    uniq: "LV-001",
-    rawMaterialType: "Metal",
-    productModel: "Model A",
-    partName: "Steel Plate 10mm",
-    partNumber: "RM-ST-001",
-    gradeSize: "A / 10mm",
-    qtyPerKanban: 250,
-    uom: "pcs",
-    weightKg: 12.5,
-    location: "WH-001",
-    supplierName: "PT. Sumber Baja",
-    cycleDays: 15,
-    status: "Active",
-    tab: "Raw Material",
-  },
-  {
-    key: "SUP-002",
-    site: "Sebanggo",
-    uniq: "LV-002",
-    rawMaterialType: "Plastic",
-    productModel: "Model B",
-    partName: "Plastic Sheet 5mm",
-    partNumber: "RM-PL-002",
-    gradeSize: "B / 5mm",
-    qtyPerKanban: 100,
-    uom: "pcs",
-    weightKg: 4.2,
-    location: "WH-002",
-    supplierName: "CV. Polymer Indo",
-    cycleDays: 8,
-    status: "Active",
-    tab: "Raw Material",
-  },
-  {
-    key: "IND-001",
-    site: "-",
-    uniq: "-",
-    rawMaterialType: "-",
-    type: "Consumable",
-    productModel: "Universal",
-    partName: "Cutting Oil",
-    partNumber: "OIL-CUT-001",
-    gradeSize: "Grade A - 20L",
-    qtyPerKanban: 100,
-    uom: "liter",
-    weightKg: 18,
-    location: "Chemical Storage",
-    supplierName: "PT Chemical Supply",
-    cycleDays: 14,
-    status: "Active",
-    tab: "Indirect Raw Material",
-  },
-  {
-    key: "IND-002",
-    site: "-",
-    uniq: "-",
-    rawMaterialType: "-",
-    type: "Consumable",
-    productModel: "Universal",
-    partName: "Welding Wire",
-    partNumber: "WLD-WR-002",
-    gradeSize: "ER70S-6 - 1.2mm",
-    qtyPerKanban: 50,
-    uom: "kg",
-    weightKg: 15,
-    location: "Welding Area",
-    supplierName: "PT Welding Tech",
-    cycleDays: 7,
-    status: "Active",
-    tab: "Indirect Raw Material",
-  },
+const SECTION_OPTIONS: Array<{ label: string; value: SupplierSection }> = [
+  { label: "Raw Material", value: "raw-material" },
+  { label: "Indirect Raw Material", value: "indirect-raw-material" },
+  { label: "SubCon", value: "subcon" },
 ];
 
-const TAB_OPTIONS: SupplierTab[] = [
-  "Raw Material",
-  "Indirect Raw Material",
-  "SubCon",
-];
+const pickText = (...values: unknown[]) => {
+  for (const value of values) {
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) return trimmed;
+    }
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+  return "";
+};
+
+const pickNumber = (...values: unknown[]) => {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return 0;
+};
+
+const normalizeSection = (value: unknown): SupplierSection => {
+  const raw = pickText(value).toLowerCase();
+  if (raw.includes("indirect")) return "indirect-raw-material";
+  if (raw.includes("sub")) return "subcon";
+  return "raw-material";
+};
+
+const sectionLabel = (section: SupplierSection) =>
+  SECTION_OPTIONS.find((option) => option.value === section)?.label ?? "Raw Material";
+
+const toSupplierRow = (record: SupplierItemRecord, index: number): SupplierRow => {
+  const section = normalizeSection(record.material_type ?? record.type);
+  const grade = pickText(record.grade);
+  const size = pickText(record.size);
+
+  return {
+    key: String(record.id ?? record.supplier_item_uuid ?? record.uniq_code ?? index),
+    id: pickText(record.id, record.supplier_item_uuid),
+    section,
+    supplierName: pickText(record.supplier_name, record.supplier_code) || "-",
+    uniqCode: pickText(record.uniq_code) || "-",
+    sebangoCode: pickText(record.sebango_code) || "-",
+    type: pickText(record.type, record.material_type) || "-",
+    productModel: pickText(record.product_model) || "-",
+    partName: pickText(record.part_name, record.description, record.uniq_code) || "-",
+    partNumber: pickText(record.part_number) || "-",
+    gradeSize: [grade, size].filter(Boolean).join(" / ") || "-",
+    quantity: pickNumber(record.quantity),
+    pcsPerKanban: pickNumber(record.pcs_per_kanban),
+    customerCycle: pickText(record.customer_cycle) || "-",
+    uom: pickText(record.uom) || "-",
+    weight: pickNumber(record.weight),
+    warehouse: pickText(record.warehouse_name, record.warehouse_id) || "-",
+    status: pickText(record.status) || "Active",
+  };
+};
 
 export default function MasterSupplierPage() {
   const router = useRouter();
+  const apiEnabled = Boolean(apiBaseUrl);
   const [messageApi, contextHolder] = message.useMessage();
-  const [activeTab, setActiveTab] = useState<SupplierTab>("Raw Material");
-  const [searchValue, setSearchValue] = useState<string>("");
-  const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined);
+  const [activeSection, setActiveSection] = useState<SupplierSection>("raw-material");
+  const [searchValue, setSearchValue] = useState("");
+  const [typeFilter, setTypeFilter] = useState<string>();
+
+  const { data: supplierItems = [], isLoading, error, refetch } = useListSupplierItemsQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const [deleteSupplierItem, deleteState] = useDeleteSupplierItemMutation();
+
+  const rows = useMemo(
+    () => supplierItems.map((record, index) => toSupplierRow(record, index)),
+    [supplierItems]
+  );
 
   const typeOptions = useMemo(() => {
-    const unique = new Set(
-      ALL_ROWS.filter((r) => r.tab === activeTab)
-        .map((r) => (activeTab === "Indirect Raw Material" ? r.type : r.rawMaterialType))
-        .filter((v): v is string => Boolean(v && v !== "-"))
+    const uniqueTypes = new Set(
+      rows
+        .filter((row) => row.section === activeSection)
+        .map((row) => row.type)
+        .filter((value) => value && value !== "-")
     );
-    return Array.from(unique).sort();
-  }, [activeTab]);
+
+    return Array.from(uniqueTypes)
+      .sort((left, right) => left.localeCompare(right))
+      .map((value) => ({ label: value, value }));
+  }, [activeSection, rows]);
 
   const filteredRows = useMemo(() => {
-    const q = searchValue.trim().toLowerCase();
+    const query = searchValue.trim().toLowerCase();
 
-    return ALL_ROWS.filter((row) => row.tab === activeTab)
+    return rows
+      .filter((row) => row.section === activeSection)
+      .filter((row) => (typeFilter ? row.type === typeFilter : true))
       .filter((row) => {
-        if (!typeFilter) return true;
-        if (activeTab === "Indirect Raw Material") return row.type === typeFilter;
-        return row.rawMaterialType === typeFilter;
-      })
-      .filter((row) => {
-        if (!q) return true;
-        const haystack = [
-          row.uniq,
-          row.rawMaterialType,
+        if (!query) return true;
+        return [
+          row.supplierName,
+          row.uniqCode,
+          row.sebangoCode,
           row.type,
           row.productModel,
           row.partName,
           row.partNumber,
           row.gradeSize,
-          row.location,
-          row.supplierName,
-          row.site,
+          row.warehouse,
         ]
           .join(" ")
-          .toLowerCase();
-        return haystack.includes(q);
+          .toLowerCase()
+          .includes(query);
       });
-  }, [activeTab, searchValue, typeFilter]);
+  }, [activeSection, rows, searchValue, typeFilter]);
 
-  const columns: ColumnsType<SupplierRow> = useMemo(() => {
-    const commonActionsCol: ColumnsType<SupplierRow>[number] = {
-      title: "Actions",
-      key: "actions",
-      width: 120,
-      fixed: "right",
-      render: (_: unknown, record: SupplierRow) => (
-        <div className="flex items-center gap-2">
-          <Button
-            type="text"
-            icon={<EyeOutlined />}
-            size="small"
-            className="text-blue-600 hover:text-blue-800"
-            onClick={() => messageApi.info(`View ${record.partNumber}`)}
-          />
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            size="small"
-            className="text-green-600 hover:text-green-800"
-            onClick={() => messageApi.info(`Edit ${record.partNumber}`)}
-          />
-          <Button
-            type="text"
-            icon={<DeleteOutlined />}
-            size="small"
-            className="text-red-600 hover:text-red-800"
-            onClick={() => messageApi.info(`Delete ${record.partNumber}`)}
-          />
-        </div>
-      ),
-    };
+  const openCreatePage = (mode: "create" | "edit" | "view", row?: SupplierRow) => {
+    const params = new URLSearchParams({
+      section: row?.section ?? activeSection,
+    });
 
-    if (activeTab === "Indirect Raw Material") {
-      return [
-        {
-          title: "Product Model",
-          dataIndex: "productModel",
-          key: "productModel",
-          width: 140,
-          render: (value: string) => <span className="text-gray-700">{value}</span>,
-        },
-        {
-          title: "Part Name",
-          dataIndex: "partName",
-          key: "partName",
-          width: 200,
-          render: (value: string) => <span className="text-gray-900">{value}</span>,
-        },
-        {
-          title: "Part Number",
-          dataIndex: "partNumber",
-          key: "partNumber",
-          width: 140,
-          render: (value: string) => <span className="text-gray-700">{value}</span>,
-        },
-        {
-          title: "Grade/Size",
-          dataIndex: "gradeSize",
-          key: "gradeSize",
-          width: 150,
-          render: (value: string) => <span className="text-gray-700">{value}</span>,
-        },
-        {
-          title: "Qty/Kanban",
-          dataIndex: "qtyPerKanban",
-          key: "qtyPerKanban",
-          width: 120,
-          render: (value: number) => <span className="text-blue-600 font-semibold">{value}</span>,
-        },
-        {
-          title: "UOM",
-          dataIndex: "uom",
-          key: "uom",
-          width: 90,
-          render: (value: string) => <span className="text-gray-700">{value}</span>,
-        },
-        {
-          title: "Weight (kg)",
-          dataIndex: "weightKg",
-          key: "weightKg",
-          width: 110,
-          render: (value: number) => <span className="text-gray-700">{value}</span>,
-        },
-        {
-          title: "Lokasi",
-          dataIndex: "location",
-          key: "location",
-          width: 150,
-          render: (value: string) => <span className="text-gray-700">{value}</span>,
-        },
-        {
-          title: "Type",
-          dataIndex: "type",
-          key: "type",
-          width: 110,
-          render: (value?: string) => (
-            <span className="inline-flex items-center rounded-md bg-purple-50 px-2 py-1 text-xs font-semibold text-purple-700 border border-purple-100">
-              {value ?? "-"}
-            </span>
-          ),
-        },
-        {
-          title: "Supplier Name",
-          dataIndex: "supplierName",
-          key: "supplierName",
-          width: 180,
-          render: (value: string) => <span className="text-gray-700">{value}</span>,
-        },
-        {
-          title: "Cycle (days)",
-          dataIndex: "cycleDays",
-          key: "cycleDays",
-          width: 110,
-          render: (value: number) => (
-            <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700">
-              {value}d
-            </span>
-          ),
-        },
-        {
-          title: "Status",
-          dataIndex: "status",
-          key: "status",
-          width: 100,
-          render: (value: SupplierStatus) => (
-            <Tag color={value === "Active" ? "green" : "default"}>{value}</Tag>
-          ),
-        },
-        commonActionsCol,
-      ];
+    if (mode !== "create") params.set("mode", mode);
+    if (row?.id) params.set("id", row.id);
+
+    router.push(`/master-supplier/create?${params.toString()}`);
+  };
+
+  const handleDelete = async (row: SupplierRow) => {
+    if (!row.id) {
+      messageApi.error("Missing supplier item id");
+      return;
     }
 
-    return [
-      {
-        title: "Sebanggo",
-        dataIndex: "site",
-        key: "site",
-        width: 120,
-        render: (value: string) => (
-          <span className="text-gray-700 font-medium">{value}</span>
-        ),
+    try {
+      await deleteSupplierItem(row.id).unwrap();
+      messageApi.success(`Deleted ${row.partName}`);
+    } catch (deleteError) {
+      messageApi.error(getApiErrorMessage(deleteError, "Failed to delete supplier item"));
+    }
+  };
+
+  const columns: ColumnsType<SupplierRow> = [
+    {
+      title: "UNIQ",
+      dataIndex: "uniqCode",
+      key: "uniqCode",
+      width: 130,
+      render: (value: string) => (
+        <span className="inline-flex items-center rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white">
+          {value}
+        </span>
+      ),
+    },
+    {
+      title: "Sebango",
+      dataIndex: "sebangoCode",
+      key: "sebangoCode",
+      width: 150,
+    },
+    {
+      title: "Type",
+      dataIndex: "type",
+      key: "type",
+      width: 170,
+      render: (value: string) => <Tag color="purple">{value}</Tag>,
+    },
+    {
+      title: "Product Model",
+      dataIndex: "productModel",
+      key: "productModel",
+      width: 160,
+    },
+    {
+      title: "Part Name",
+      dataIndex: "partName",
+      key: "partName",
+      width: 220,
+      render: (value: string) => <span className="font-semibold text-gray-900">{value}</span>,
+    },
+    {
+      title: "Part Number",
+      dataIndex: "partNumber",
+      key: "partNumber",
+      width: 160,
+    },
+    {
+      title: "Grade / Size",
+      dataIndex: "gradeSize",
+      key: "gradeSize",
+      width: 160,
+    },
+    {
+      title: "Qty",
+      dataIndex: "quantity",
+      key: "quantity",
+      width: 100,
+    },
+    {
+      title: "Pcs / Kanban",
+      dataIndex: "pcsPerKanban",
+      key: "pcsPerKanban",
+      width: 120,
+    },
+    {
+      title: "Cycle",
+      dataIndex: "customerCycle",
+      key: "customerCycle",
+      width: 100,
+      render: (value: number) => `${value} day(s)`,
+    },
+    {
+      title: "UOM",
+      dataIndex: "uom",
+      key: "uom",
+      width: 100,
+    },
+    {
+      title: "Weight",
+      dataIndex: "weight",
+      key: "weight",
+      width: 100,
+    },
+    {
+      title: "Warehouse",
+      dataIndex: "warehouse",
+      key: "warehouse",
+      width: 180,
+    },
+    {
+      title: "Supplier",
+      dataIndex: "supplierName",
+      key: "supplierName",
+      width: 220,
+    },
+    {
+      title: "Status",
+      dataIndex: "status",
+      key: "status",
+      width: 110,
+      render: (value: string) => {
+        const lowered = value.toLowerCase();
+        return <Tag color={lowered === "active" ? "green" : "default"}>{value}</Tag>;
       },
-      {
-        title: "UNIQ",
-        dataIndex: "uniq",
-        key: "uniq",
-        width: 120,
-        render: (value: string) => (
-          <span className="inline-flex items-center rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white">
-            {value}
-          </span>
-        ),
-      },
-      {
-        title: "Type of Raw Material",
-        dataIndex: "rawMaterialType",
-        key: "rawMaterialType",
-        width: 170,
-        render: (value: string) => <span className="text-gray-700">{value}</span>,
-      },
-      {
-        title: "Product Model",
-        dataIndex: "productModel",
-        key: "productModel",
-        width: 140,
-        render: (value: string) => <span className="text-gray-700">{value}</span>,
-      },
-      {
-        title: "Part Name",
-        dataIndex: "partName",
-        key: "partName",
-        width: 220,
-        render: (value: string) => (
-          <span className="text-gray-900 font-semibold">{value}</span>
-        ),
-      },
-      {
-        title: "Part Number",
-        dataIndex: "partNumber",
-        key: "partNumber",
-        width: 140,
-        render: (value: string) => <span className="text-gray-700">{value}</span>,
-      },
-      {
-        title: "Grade / Size",
-        dataIndex: "gradeSize",
-        key: "gradeSize",
-        width: 130,
-        render: (value: string) => <span className="text-gray-700">{value}</span>,
-      },
-      {
-        title: "Qty / Kanban",
-        dataIndex: "qtyPerKanban",
-        key: "qtyPerKanban",
-        width: 120,
-        render: (value: number) => <span className="text-gray-700">{value}</span>,
-      },
-      {
-        title: "UOM",
-        dataIndex: "uom",
-        key: "uom",
-        width: 80,
-        render: (value: string) => <span className="text-gray-700">{value}</span>,
-      },
-      {
-        title: "Weight (kg)",
-        dataIndex: "weightKg",
-        key: "weightKg",
-        width: 110,
-        render: (value: number) => <span className="text-gray-700">{value}</span>,
-      },
-      {
-        title: "Lokasi",
-        dataIndex: "location",
-        key: "location",
-        width: 110,
-        render: (value: string) => <span className="text-gray-700">{value}</span>,
-      },
-      {
-        title: "Supplier Name",
-        dataIndex: "supplierName",
-        key: "supplierName",
-        width: 180,
-        render: (value: string) => <span className="text-gray-700">{value}</span>,
-      },
-      {
-        title: "Cycle (days)",
-        dataIndex: "cycleDays",
-        key: "cycleDays",
-        width: 110,
-        render: (value: number) => <span className="text-gray-700">{value}</span>,
-      },
-      {
-        title: "Status",
-        dataIndex: "status",
-        key: "status",
-        width: 100,
-        render: (value: SupplierStatus) => (
-          <Tag color={value === "Active" ? "green" : "default"}>{value}</Tag>
-        ),
-      },
-      commonActionsCol,
-    ];
-  }, [activeTab, messageApi]);
+    },
+    {
+      title: "Actions",
+      key: "actions",
+      width: 140,
+      fixed: "right",
+      render: (_value, row) => (
+        <div className="flex items-center gap-1">
+          <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openCreatePage("view", row)} />
+          <Button type="text" size="small" icon={<EditOutlined />} onClick={() => openCreatePage("edit", row)} />
+          <Popconfirm
+            title="Delete supplier item?"
+            description={`Remove ${row.partName} from ${sectionLabel(row.section)}.`}
+            okText="Delete"
+            cancelText="Cancel"
+            okButtonProps={{ danger: true, loading: deleteState.isLoading }}
+            onConfirm={() => handleDelete(row)}
+          >
+            <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 bg-gray-50 min-h-screen">
       {contextHolder}
 
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            Master List Supplier
-          </h1>
-          <p className="text-gray-600">
-            Supplier Directory and Master List Table for procurement and
-            planning
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Button
-            icon={<UploadOutlined />}
-            onClick={() => messageApi.info("Import Excel (coming soon)")}
-          >
-            Import Excel
-          </Button>
-          <Button
-            icon={<DownloadOutlined />}
-            onClick={() => messageApi.info("Export Data (coming soon)")}
-          >
-            Export Data
+      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <Typography.Title level={2} className="!mb-1">
+              Master Supplier
+            </Typography.Title>
+            <Typography.Text type="secondary">
+              Manage supplier item mappings for raw material, indirect raw material, and subcon.
+            </Typography.Text>
+          </div>
+
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => openCreatePage("create")}>
+            Add Supplier Item
           </Button>
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm">
-        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div>
-              <Typography.Title level={4} className="!mb-0">
-                Supplier Directory
-              </Typography.Title>
-              <Typography.Text type="secondary">
-                Track supplier mapping by raw material type, model, and location
-              </Typography.Text>
-            </div>
-            <Tag color="blue">{activeTab}</Tag>
-          </div>
+      {!apiEnabled ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="Backend is not configured"
+          description="Set NEXT_PUBLIC_API_URL to enable supplier item listing, detail, save, and delete operations."
+        />
+      ) : null}
+
+      {apiEnabled && error ? (
+        <Alert
+          type="error"
+          showIcon
+          message="Failed to load supplier items"
+          description={getApiErrorMessage(error, "Unable to load supplier item data")}
+          action={<Button onClick={() => refetch()}>Retry</Button>}
+        />
+      ) : null}
+
+      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <Segmented
+            options={SECTION_OPTIONS}
+            value={activeSection}
+            onChange={(value) => {
+              setActiveSection(value as SupplierSection);
+              setSearchValue("");
+              setTypeFilter(undefined);
+            }}
+          />
+
+          <div className="text-sm text-gray-500">{filteredRows.length} items</div>
         </div>
-        <div className="p-6 space-y-4">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <Segmented
-              options={TAB_OPTIONS}
-              value={activeTab}
-              onChange={(val) => {
-                const tab = val as SupplierTab;
-                setActiveTab(tab);
-                setSearchValue("");
-                setTypeFilter(undefined);
-              }}
-            />
 
-            <div className="flex items-center gap-3">
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => {
-                  const section =
-                    activeTab === "Indirect Raw Material" ? "indirect" : "raw";
-                  router.push(`/master-supplier/create?section=${section}`);
-                }}
-              >
-                Add Supplier
-              </Button>
-              <Button
-                icon={<DownloadOutlined />}
-                onClick={() => messageApi.info("Export (coming soon)")}
-              >
-                Export
-              </Button>
-            </div>
-          </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <Input
+            allowClear
+            value={searchValue}
+            onChange={(event) => setSearchValue(event.target.value)}
+            placeholder="Search by uniq, part, supplier, warehouse..."
+            prefix={<SearchOutlined />}
+            className="w-full md:w-[360px]"
+          />
 
-          <div className="flex items-center gap-3 flex-wrap">
-            <Input
-              allowClear
-              value={searchValue}
-              onChange={(e) => setSearchValue(e.target.value)}
-              placeholder="Search by Uniq or Machine Name..."
-              prefix={<SearchOutlined />}
-              className="w-full md:w-[360px]"
-            />
-
-            <Select
-              allowClear
-              value={typeFilter}
-              onChange={(v) => setTypeFilter(v)}
-              placeholder="All Types"
-              className="w-full md:w-[180px]"
-              options={typeOptions.map((t) => ({ label: t, value: t }))}
-            />
-          </div>
-
-          <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
-            <div className="min-w-[240px]">
-              <p className="text-gray-600 font-medium">Master List Table</p>
-              <p className="text-sm text-gray-500">
-                View by Assembly name, Uniq and cycle
-              </p>
-            </div>
-            <div className="flex items-center justify-end">
-              <span className="rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700">
-                {filteredRows.length} items
-              </span>
-            </div>
-          </div>
-          <Table<SupplierRow>
-            columns={columns}
-            dataSource={filteredRows}
-            pagination={{ pageSize: 10 }}
-            scroll={{ x: 1500 }}
-            size="middle"
+          <Select
+            allowClear
+            value={typeFilter}
+            onChange={(value) => setTypeFilter(value)}
+            placeholder="Filter by type"
+            options={typeOptions}
+            className="w-full md:w-[240px]"
           />
         </div>
+
+        <Table<SupplierRow>
+          columns={columns}
+          dataSource={apiEnabled ? filteredRows : []}
+          rowKey="key"
+          loading={apiEnabled && isLoading}
+          pagination={{ pageSize: 10 }}
+          scroll={{ x: 1800 }}
+        />
       </div>
     </div>
   );

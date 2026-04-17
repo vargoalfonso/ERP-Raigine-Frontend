@@ -13,6 +13,7 @@ import {
   Select,
   Table,
   Tag,
+  message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -31,6 +32,35 @@ import {
   AppstoreOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
+
+import { getApiErrorMessage } from "@/lib/api/error";
+import {
+  useCreateKanbanStandardMutation,
+  useCreateGlobalWorkingDaysMutation,
+  useCreateProcessMutation,
+  useCreateTypeParameterMutation,
+  useDeleteGlobalWorkingDaysMutation,
+  useDeleteProcessMutation,
+  useDeleteTypeParameterMutation,
+  useDeleteKanbanStandardMutation,
+  useDeleteRoleMutation,
+  useDeleteUomMutation,
+  useGetGlobalWorkingDaysByIdQuery,
+  useGetGlobalWorkingDaysQuery,
+  useGetProcessByIdQuery,
+  useGetProcessesQuery,
+  useGetTypeParametersQuery,
+  useGetUomsQuery,
+  useGetKanbanStandardsQuery,
+  useGetRolesQuery,
+  useCreateUomMutation,
+  useUpdateGlobalWorkingDaysMutation,
+  useUpdateProcessMutation,
+  useUpdateTypeParameterMutation,
+  useUpdateUomMutation,
+  useUpdateKanbanStandardMutation,
+} from "@/lib/api/system-settings/api";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 
 type StatusType = "Active" | "Inactive";
 
@@ -77,13 +107,11 @@ type TypeParameterRow = {
   status: StatusType;
 };
 
-type UomCategory = "Quantity" | "Weight" | "Length";
-
 type UomRow = {
   id: string;
   code: string;
   name: string;
-  category: UomCategory;
+  category?: string;
   status: StatusType;
 };
 
@@ -135,8 +163,10 @@ type MachinePatternRow = {
 
 type GlobalWorkingDaysRow = {
   id: string;
+  parameterGroup?: string;
   period: string;
   workingDays: number;
+  status: StatusType;
   createdDate: string;
 };
 
@@ -397,7 +427,7 @@ const initialTypeParameterRows: TypeParameterRow[] = [
 ];
 
 const initialUomRows: UomRow[] = [
-  { id: "UOM-PCS", code: "PCS", name: "Pieces", category: "Quantity", status: "Active" },
+  { id: "UOM-PCS", code: "PCS", name: "Pieces", category: "Count", status: "Active" },
   { id: "UOM-KG", code: "KG", name: "Kilogram", category: "Weight", status: "Active" },
   { id: "UOM-M", code: "M", name: "Meter", category: "Length", status: "Active" },
 ];
@@ -478,14 +508,18 @@ const initialMachinePatternRows: MachinePatternRow[] = [
 const initialGlobalWorkingDaysRows: GlobalWorkingDaysRow[] = [
   {
     id: "GWD-001",
+    parameterGroup: "working_days",
     period: "January 2024",
     workingDays: 22,
+    status: "Active",
     createdDate: "12/15/2023",
   },
   {
     id: "GWD-002",
+    parameterGroup: "working_days",
     period: "February 2024",
     workingDays: 22,
+    status: "Active",
     createdDate: "12/15/2023",
   },
 ];
@@ -517,7 +551,7 @@ type TypeParameterFormValues = {
 type UomFormValues = {
   code: string;
   name: string;
-  category: UomCategory;
+  category?: string;
   status: StatusType;
 };
 
@@ -548,8 +582,10 @@ type KanbanFormValues = {
 };
 
 type GlobalWorkingDaysFormValues = {
+  parameterGroup?: string;
   period: string;
   workingDays: number;
+  status: StatusType;
 };
 
 type ProcessFormValues = {
@@ -569,6 +605,47 @@ type MachinePatternFormValues = {
 
 export default function SystemSettingsPage() {
   const router = useRouter();
+
+  const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
+
+  const toBackendStatus = (s: StatusType): string =>
+    s === "Inactive" ? "inactive" : "active";
+
+  const fromBackendStatus = (s: unknown): StatusType => {
+    const raw = String(s ?? "active").toLowerCase();
+    return raw.includes("inact") ? "Inactive" : "Active";
+  };
+
+  const { data: rolesApiData } = useGetRolesQuery(undefined, { skip: !apiEnabled });
+  const [deleteRole] = useDeleteRoleMutation();
+
+  const { data: typeParametersApiData } = useGetTypeParametersQuery(undefined, { skip: !apiEnabled });
+  const [createTypeParameter] = useCreateTypeParameterMutation();
+  const [updateTypeParameter] = useUpdateTypeParameterMutation();
+  const [deleteTypeParameter] = useDeleteTypeParameterMutation();
+
+  const { data: processesApiData } = useGetProcessesQuery(undefined, { skip: !apiEnabled });
+  const [createProcess] = useCreateProcessMutation();
+  const [updateProcess] = useUpdateProcessMutation();
+  const [deleteProcess] = useDeleteProcessMutation();
+
+  const { data: globalParametersApiData } = useGetGlobalWorkingDaysQuery(undefined, { skip: !apiEnabled });
+  const [createGlobalWorkingDays] = useCreateGlobalWorkingDaysMutation();
+  const [updateGlobalWorkingDays] = useUpdateGlobalWorkingDaysMutation();
+  const [deleteGlobalWorkingDays] = useDeleteGlobalWorkingDaysMutation();
+
+  const { data: uomsApiData } = useGetUomsQuery(undefined, { skip: !apiEnabled });
+  const [createUom] = useCreateUomMutation();
+  const [updateUom] = useUpdateUomMutation();
+  const [deleteUom] = useDeleteUomMutation();
+
+  const { data: kanbanApiData } = useGetKanbanStandardsQuery(undefined, { skip: !apiEnabled });
+  const [createKanbanStandard] = useCreateKanbanStandardMutation();
+  const [updateKanbanStandard] = useUpdateKanbanStandardMutation();
+  const [deleteKanbanStandard] = useDeleteKanbanStandardMutation();
+
+  const { data: bomTreeApiData } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+
   const [selectedModuleId, setSelectedModuleId] = useState<string>(
     "access-control-matrix"
   );
@@ -637,9 +714,16 @@ export default function SystemSettingsPage() {
   const [globalWorkingDaysDetailOpen, setGlobalWorkingDaysDetailOpen] = useState(false);
   const [globalWorkingDaysDetailRow, setGlobalWorkingDaysDetailRow] =
     useState<GlobalWorkingDaysRow | null>(null);
+  const { data: globalParameterDetailApiData } = useGetGlobalWorkingDaysByIdQuery(
+    globalWorkingDaysDetailRow?.id ?? "",
+    { skip: !apiEnabled || !globalWorkingDaysDetailOpen || !globalWorkingDaysDetailRow?.id }
+  );
 
   const [processDetailOpen, setProcessDetailOpen] = useState(false);
   const [processDetailRow, setProcessDetailRow] = useState<ProcessRow | null>(null);
+  const { data: processDetailApiData } = useGetProcessByIdQuery(processDetailRow?.id ?? "", {
+    skip: !apiEnabled || !processDetailOpen || !processDetailRow?.id,
+  });
 
   const [machinePatternDetailOpen, setMachinePatternDetailOpen] = useState(false);
   const [machinePatternDetailRow, setMachinePatternDetailRow] =
@@ -767,11 +851,70 @@ export default function SystemSettingsPage() {
       });
   }, [query, rows, typeFilter]);
 
+  const roleRowsView = useMemo<RoleRow[]>(() => {
+    if (!apiEnabled || !rolesApiData) return roleRows;
+    return rolesApiData
+      .filter((r) => Boolean(r?.id))
+      .map((r) => {
+        const d = r.updated_at || r.created_at;
+        const lastUpdated = d ? new Date(d).toLocaleDateString("en-US") : "-";
+        return {
+          id: r.id,
+          roleName: r.name,
+          numberOfPeople: 0,
+          lastUpdated,
+        };
+      });
+  }, [apiEnabled, roleRows, rolesApiData]);
+
+  const kanbanRowsView = useMemo<KanbanRow[]>(() => {
+    if (!apiEnabled || !kanbanApiData) return kanbanRows;
+    return kanbanApiData
+      .filter((k) => Boolean(k?.id))
+      .map((k) => {
+        const statusRaw = String(k.status ?? "Active").toLowerCase();
+        const status: StatusType = statusRaw === "inactive" ? "Inactive" : "Active";
+        return {
+          id: k.id,
+          productName: k.item_name,
+          productCode: k.item_uniq_code,
+          kanbanQty: Number(k.kanban_qty ?? 0),
+          minStock: Number(k.min_stock ?? 0),
+          maxStock: Number(k.max_stock ?? 0),
+          status,
+        };
+      });
+  }, [apiEnabled, kanbanApiData, kanbanRows]);
+
+  const bomUniqOptions = useMemo(() => {
+    const uniqMap = new Map<string, { uniq: string; partName?: string }>();
+
+    const walk = (nodes: any[]) => {
+      for (const n of nodes) {
+        const uniq = String(n?.uniq_code ?? "").trim();
+        if (uniq) {
+          uniqMap.set(uniq, { uniq, partName: typeof n?.part_name === "string" ? n.part_name : undefined });
+        }
+        if (Array.isArray(n?.children) && n.children.length) walk(n.children);
+      }
+    };
+
+    const nodes = (bomTreeApiData as any)?.data;
+    if (Array.isArray(nodes)) walk(nodes);
+
+    return Array.from(uniqMap.values())
+      .sort((a, b) => a.uniq.localeCompare(b.uniq))
+      .map((x) => ({
+        label: x.partName ? `${x.uniq} — ${x.partName}` : x.uniq,
+        value: x.uniq,
+      }));
+  }, [bomTreeApiData]);
+
   const filteredRoles = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return roleRows;
-    return roleRows.filter((r) => r.roleName.toLowerCase().includes(q));
-  }, [query, roleRows]);
+    if (!q) return roleRowsView;
+    return roleRowsView.filter((r) => r.roleName.toLowerCase().includes(q));
+  }, [query, roleRowsView]);
 
   const filteredSafety = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -799,9 +942,22 @@ export default function SystemSettingsPage() {
       });
   }, [query, stockdaysRows, typeFilter]);
 
+  const typeParameterRowsView = useMemo<TypeParameterRow[]>(() => {
+    if (!apiEnabled || !typeParametersApiData) return typeParameterRows;
+    return typeParametersApiData
+      .filter((t) => Boolean(t?.id))
+      .map((t) => ({
+        id: String(t.id),
+        typeCode: String(t.type_code ?? ""),
+        typeName: String(t.type_name ?? ""),
+        description: String(t.description ?? ""),
+        status: fromBackendStatus(t.status),
+      }));
+  }, [apiEnabled, typeParameterRows, typeParametersApiData]);
+
   const filteredTypeParameters = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return typeParameterRows
+    return typeParameterRowsView
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -810,17 +966,74 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, typeParameterRows, typeFilter]);
+  }, [query, typeFilter, typeParameterRowsView]);
+
+  const uomRowsView = useMemo<UomRow[]>(() => {
+    if (!apiEnabled || !uomsApiData) return uomRows;
+    return uomsApiData
+      .filter((u) => Boolean(u?.id))
+      .map((u) => {
+        const status = fromBackendStatus(u.status);
+        return {
+          id: String(u.id),
+          code: String(u.code ?? u.unit_code ?? "").toUpperCase(),
+          name: String(u.name ?? u.unit_name ?? ""),
+          category:
+            typeof u.category === "string" && u.category.trim()
+              ? u.category.trim()
+              : undefined,
+          status,
+        };
+      });
+  }, [apiEnabled, uomRows, uomsApiData]);
+
+  const processRowsView = useMemo<ProcessRow[]>(() => {
+    if (!apiEnabled || !processesApiData) return processRows;
+    return processesApiData
+      .filter((p) => Boolean(p?.id))
+      .map((p) => ({
+        id: String(p.id),
+        processCode: String(p.process_code ?? ""),
+        processName: String(p.process_name ?? ""),
+        category: String(p.category ?? ""),
+        sequence: Number(p.sequence ?? 0),
+        status: fromBackendStatus(p.status),
+      }));
+  }, [apiEnabled, processRows, processesApiData]);
+
+  const globalWorkingDaysRowsView = useMemo<GlobalWorkingDaysRow[]>(() => {
+    if (!apiEnabled || !globalParametersApiData) return globalWorkingDaysRows;
+    return globalParametersApiData
+      .filter((g) => Boolean(g?.id))
+      .map((g) => {
+        const d = g.updated_at || g.created_at;
+        const createdDate = d ? new Date(d).toLocaleDateString("en-US") : "-";
+        return {
+          id: String(g.id),
+          parameterGroup:
+            typeof g.parameter_group === "string" && g.parameter_group.trim()
+              ? g.parameter_group
+              : undefined,
+          period: String(g.period ?? ""),
+          workingDays: Number(g.working_days ?? 0),
+          status: fromBackendStatus(g.status),
+          createdDate,
+        };
+      });
+  }, [apiEnabled, globalParametersApiData, globalWorkingDaysRows]);
 
   const filteredUom = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return uomRows
+    return uomRowsView
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
-        return [r.code, r.name, r.category].join(" ").toLowerCase().includes(q);
+        return [r.code, r.name, r.category ?? ""]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
       });
-  }, [query, uomRows, typeFilter]);
+  }, [query, typeFilter, uomRowsView]);
 
   const filteredPurchaseOrder = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -856,7 +1069,7 @@ export default function SystemSettingsPage() {
 
   const filteredKanban = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return kanbanRows
+    return kanbanRowsView
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -865,19 +1078,21 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, kanbanRows, typeFilter]);
+  }, [query, kanbanRowsView, typeFilter]);
 
   const filteredGlobalWorkingDays = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return globalWorkingDaysRows.filter((r) => {
+    return globalWorkingDaysRowsView
+      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) => {
       if (!q) return true;
-      return r.period.toLowerCase().includes(q);
+      return [r.period, r.parameterGroup ?? ""].join(" ").toLowerCase().includes(q);
     });
-  }, [query, globalWorkingDaysRows]);
+  }, [globalWorkingDaysRowsView, query, typeFilter]);
 
   const filteredProcess = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return processRows
+    return processRowsView
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -886,7 +1101,7 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, processRows, typeFilter]);
+  }, [processRowsView, query, typeFilter]);
 
   const filteredMachinePattern = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -956,6 +1171,14 @@ export default function SystemSettingsPage() {
       status: row.status,
     });
     setSafetyEditOpen(true);
+  };
+
+  const openCreateTypeParameter = () => {
+    setTypeParameterEditMode("create");
+    setTypeParameterEditingRow(null);
+    typeParameterForm.resetFields();
+    typeParameterForm.setFieldsValue({ status: "Active" });
+    setTypeParameterEditOpen(true);
   };
 
   const openEditTypeParameter = (row: TypeParameterRow) => {
@@ -1062,7 +1285,9 @@ export default function SystemSettingsPage() {
     setGlobalWorkingDaysEditingRow(null);
     globalWorkingDaysForm.resetFields();
     globalWorkingDaysForm.setFieldsValue({
+      parameterGroup: "planning",
       workingDays: 22,
+      status: "Active",
     });
     setGlobalWorkingDaysEditOpen(true);
   };
@@ -1105,8 +1330,10 @@ export default function SystemSettingsPage() {
     setGlobalWorkingDaysEditMode("edit");
     setGlobalWorkingDaysEditingRow(row);
     globalWorkingDaysForm.setFieldsValue({
+      parameterGroup: row.parameterGroup,
       period: row.period,
       workingDays: row.workingDays,
+      status: row.status,
     });
     setGlobalWorkingDaysEditOpen(true);
   };
@@ -1247,50 +1474,108 @@ export default function SystemSettingsPage() {
   };
 
   const saveTypeParameterEdit = async () => {
-    const values = await typeParameterForm.validateFields();
+    try {
+      const values = await typeParameterForm.validateFields();
 
-    const next: TypeParameterRow = {
-      id:
-        typeParameterEditMode === "create"
-          ? `TP-${String(typeParameterRows.length + 1).padStart(3, "0")}`
-          : (typeParameterEditingRow?.id ??
-              `TP-${String(typeParameterRows.length + 1).padStart(3, "0")}`),
-      typeCode: values.typeCode,
-      typeName: values.typeName,
-      description: values.description,
-      status: values.status,
-    };
+      if (apiEnabled) {
+        const payload = {
+          type_code: String(values.typeCode ?? ""),
+          type_name: String(values.typeName ?? ""),
+          description: String(values.description ?? ""),
+          status: toBackendStatus(values.status),
+        };
 
-    if (typeParameterEditMode === "create") {
-      setTypeParameterRows((prev) => [next, ...prev]);
-    } else {
-      setTypeParameterRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+        if (typeParameterEditMode === "edit") {
+          if (!typeParameterEditingRow?.id) throw new Error("Missing type parameter id");
+          await updateTypeParameter({ id: typeParameterEditingRow.id, body: payload }).unwrap();
+          message.success("Type parameter updated");
+        } else {
+          await createTypeParameter(payload).unwrap();
+          message.success("Type parameter created");
+        }
+
+        closeTypeParameterEdit();
+        return;
+      }
+
+      const next: TypeParameterRow = {
+        id:
+          typeParameterEditMode === "create"
+            ? `TP-${String(typeParameterRows.length + 1).padStart(3, "0")}`
+            : (typeParameterEditingRow?.id ??
+                `TP-${String(typeParameterRows.length + 1).padStart(3, "0")}`),
+        typeCode: values.typeCode,
+        typeName: values.typeName,
+        description: values.description,
+        status: values.status,
+      };
+
+      if (typeParameterEditMode === "create") {
+        setTypeParameterRows((prev) => [next, ...prev]);
+      } else {
+        setTypeParameterRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+      }
+
+      closeTypeParameterEdit();
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      message.error(getApiErrorMessage(err, "Failed to save type parameter"));
     }
-
-    closeTypeParameterEdit();
   };
 
   const saveUomEdit = async () => {
     const values = await uomForm.validateFields();
 
-    const next: UomRow = {
-      id:
-        uomEditMode === "create"
-          ? `UOM-${String(values.code || "NEW").toUpperCase()}`
-          : (uomEditingRow?.id ?? `UOM-${String(values.code || "NEW").toUpperCase()}`),
-      code: String(values.code || "").toUpperCase(),
-      name: values.name,
-      category: values.category,
-      status: values.status,
-    };
+    try {
+      if (apiEnabled) {
+        if (uomEditMode === "edit") {
+          if (!uomEditingRow?.id) throw new Error("Missing UOM id");
+          await updateUom({
+            id: uomEditingRow.id,
+            body: {
+              code: String(values.code ?? "").toUpperCase(),
+              name: String(values.name ?? ""),
+              category: values.category ? String(values.category) : "",
+              status: toBackendStatus(values.status),
+            },
+          }).unwrap();
+          message.success("UOM updated");
+        } else {
+          await createUom({
+            code: String(values.code ?? "").toUpperCase(),
+            name: String(values.name ?? ""),
+            category: values.category ? String(values.category) : "",
+            status: toBackendStatus(values.status),
+          }).unwrap();
+          message.success("UOM created");
+        }
 
-    if (uomEditMode === "create") {
-      setUomRows((prev) => [next, ...prev]);
-    } else {
-      setUomRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+        closeUomEdit();
+        return;
+      }
+
+      const next: UomRow = {
+        id:
+          uomEditMode === "create"
+            ? `UOM-${String(values.code || "NEW").toUpperCase()}`
+            : (uomEditingRow?.id ??
+                `UOM-${String(values.code || "NEW").toUpperCase()}`),
+        code: String(values.code || "").toUpperCase(),
+        name: String(values.name || ""),
+        category: values.category ? String(values.category) : undefined,
+        status: values.status,
+      };
+
+      if (uomEditMode === "create") {
+        setUomRows((prev) => [next, ...prev]);
+      } else {
+        setUomRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+      }
+
+      closeUomEdit();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to save UOM"));
     }
-
-    closeUomEdit();
   };
 
   const savePurchaseOrderEdit = async () => {
@@ -1345,80 +1630,173 @@ export default function SystemSettingsPage() {
   };
 
   const saveKanbanEdit = async () => {
-    const values = await kanbanForm.validateFields();
+    try {
+      const values = await kanbanForm.validateFields();
 
-    const next: KanbanRow = {
-      id:
-        kanbanEditMode === "create"
-          ? `KB-${String(kanbanRows.length + 1).padStart(3, "0")}`
-          : (kanbanEditingRow?.id ?? `KB-${String(kanbanRows.length + 1).padStart(3, "0")}`),
-      productName: values.productName,
-      productCode: values.productCode,
-      kanbanQty: Number(values.kanbanQty ?? 0),
-      minStock: Number(values.minStock ?? 0),
-      maxStock: Number(values.maxStock ?? 0),
-      status: values.status,
-    };
+      if (apiEnabled) {
+        const payload = {
+          item_name: values.productName,
+          item_uniq_code: values.productCode,
+          kanban_qty: Number(values.kanbanQty ?? 0),
+          min_stock: Number(values.minStock ?? 0),
+          max_stock: Number(values.maxStock ?? 0),
+        };
 
-    if (kanbanEditMode === "create") {
-      setKanbanRows((prev) => [next, ...prev]);
-    } else {
-      setKanbanRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+        if (kanbanEditMode === "create") {
+          await createKanbanStandard(payload).unwrap();
+          message.success("Kanban standard created");
+        } else {
+          if (!kanbanEditingRow?.id) throw new Error("Missing kanban id");
+          await updateKanbanStandard({ id: kanbanEditingRow.id, body: payload }).unwrap();
+          message.success("Kanban standard updated");
+        }
+
+        closeKanbanEdit();
+        return;
+      }
+
+      const next: KanbanRow = {
+        id:
+          kanbanEditMode === "create"
+            ? `KB-${String(kanbanRows.length + 1).padStart(3, "0")}`
+            : (kanbanEditingRow?.id ?? `KB-${String(kanbanRows.length + 1).padStart(3, "0")}`),
+        productName: values.productName,
+        productCode: values.productCode,
+        kanbanQty: Number(values.kanbanQty ?? 0),
+        minStock: Number(values.minStock ?? 0),
+        maxStock: Number(values.maxStock ?? 0),
+        status: values.status,
+      };
+
+      if (kanbanEditMode === "create") {
+        setKanbanRows((prev) => [next, ...prev]);
+      } else {
+        setKanbanRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+      }
+
+      closeKanbanEdit();
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      message.error(getApiErrorMessage(err, "Failed to save kanban standard"));
     }
-
-    closeKanbanEdit();
   };
 
   const saveGlobalWorkingDaysEdit = async () => {
-    const values = await globalWorkingDaysForm.validateFields();
+    try {
+      const values = await globalWorkingDaysForm.validateFields();
 
-    const createdDate = new Date().toLocaleDateString("en-US");
+      if (apiEnabled) {
+        const payload = {
+          parameter_group:
+            values.parameterGroup && String(values.parameterGroup).trim()
+              ? String(values.parameterGroup).trim()
+              : undefined,
+          period: String(values.period ?? ""),
+          working_days: Number(values.workingDays ?? 0),
+          status: toBackendStatus(values.status),
+        };
 
-    const next: GlobalWorkingDaysRow = {
-      id:
-        globalWorkingDaysEditMode === "create"
-          ? `GWD-${String(globalWorkingDaysRows.length + 1).padStart(3, "0")}`
-          : (globalWorkingDaysEditingRow?.id ??
-              `GWD-${String(globalWorkingDaysRows.length + 1).padStart(3, "0")}`),
-      period: values.period,
-      workingDays: Number(values.workingDays ?? 0),
-      createdDate:
-        globalWorkingDaysEditMode === "create"
-          ? createdDate
-          : (globalWorkingDaysEditingRow?.createdDate ?? createdDate),
-    };
+        if (globalWorkingDaysEditMode === "edit") {
+          if (!globalWorkingDaysEditingRow?.id) throw new Error("Missing global parameter id");
+          await updateGlobalWorkingDays({ id: globalWorkingDaysEditingRow.id, body: payload }).unwrap();
+          message.success("Global parameter updated");
+        } else {
+          await createGlobalWorkingDays(payload).unwrap();
+          message.success("Global parameter created");
+        }
 
-    if (globalWorkingDaysEditMode === "create") {
-      setGlobalWorkingDaysRows((prev) => [next, ...prev]);
-    } else {
-      setGlobalWorkingDaysRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+        closeGlobalWorkingDaysEdit();
+        return;
+      }
+
+      const createdDate = new Date().toLocaleDateString("en-US");
+
+      const next: GlobalWorkingDaysRow = {
+        id:
+          globalWorkingDaysEditMode === "create"
+            ? `GWD-${String(globalWorkingDaysRows.length + 1).padStart(3, "0")}`
+            : (globalWorkingDaysEditingRow?.id ??
+                `GWD-${String(globalWorkingDaysRows.length + 1).padStart(3, "0")}`),
+        parameterGroup: values.parameterGroup,
+        period: values.period,
+        workingDays: Number(values.workingDays ?? 0),
+        status: values.status,
+        createdDate:
+          globalWorkingDaysEditMode === "create"
+            ? createdDate
+            : (globalWorkingDaysEditingRow?.createdDate ?? createdDate),
+      };
+
+      if (globalWorkingDaysEditMode === "create") {
+        setGlobalWorkingDaysRows((prev) => [next, ...prev]);
+      } else {
+        setGlobalWorkingDaysRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+      }
+
+      closeGlobalWorkingDaysEdit();
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      message.error(getApiErrorMessage(err, "Failed to save global parameters"));
     }
-
-    closeGlobalWorkingDaysEdit();
   };
 
   const saveProcessEdit = async () => {
-    const values = await processForm.validateFields();
+    try {
+      const values = await processForm.validateFields();
 
-    const next: ProcessRow = {
-      id:
-        processEditMode === "create"
-          ? `PROC-${String(processRows.length + 1).padStart(3, "0")}`
-          : (processEditingRow?.id ?? `PROC-${String(processRows.length + 1).padStart(3, "0")}`),
-      processCode: values.processCode,
-      processName: values.processName,
-      category: values.category,
-      sequence: Number(values.sequence ?? 0),
-      status: values.status,
-    };
+      if (apiEnabled) {
+        const createPayload = {
+          process_code: String(values.processCode ?? ""),
+          process_name: String(values.processName ?? ""),
+          category: String(values.category ?? ""),
+          sequence: Number(values.sequence ?? 0),
+          status: toBackendStatus(values.status),
+        };
 
-    if (processEditMode === "create") {
-      setProcessRows((prev) => [next, ...prev]);
-    } else {
-      setProcessRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+        if (processEditMode === "edit") {
+          if (!processEditingRow?.id) throw new Error("Missing process id");
+          await updateProcess({
+            id: processEditingRow.id,
+            body: {
+              process_name: createPayload.process_name,
+              sequence: createPayload.sequence,
+              status: createPayload.status,
+            },
+          }).unwrap();
+          message.success("Process updated");
+        } else {
+          await createProcess(createPayload).unwrap();
+          message.success("Process created");
+        }
+
+        closeProcessEdit();
+        return;
+      }
+
+      const next: ProcessRow = {
+        id:
+          processEditMode === "create"
+            ? `PROC-${String(processRows.length + 1).padStart(3, "0")}`
+            : (processEditingRow?.id ??
+                `PROC-${String(processRows.length + 1).padStart(3, "0")}`),
+        processCode: values.processCode,
+        processName: values.processName,
+        category: values.category,
+        sequence: Number(values.sequence ?? 0),
+        status: values.status,
+      };
+
+      if (processEditMode === "create") {
+        setProcessRows((prev) => [next, ...prev]);
+      } else {
+        setProcessRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+      }
+
+      closeProcessEdit();
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      message.error(getApiErrorMessage(err, "Failed to save process"));
     }
-
-    closeProcessEdit();
   };
 
   const saveMachinePatternEdit = async () => {
@@ -1670,10 +2048,19 @@ export default function SystemSettingsPage() {
     closeDelete();
   };
 
-  const confirmRoleDelete = () => {
+  const confirmRoleDelete = async () => {
     if (!roleDeletingRow) return;
-    setRoleRows((prev) => prev.filter((r) => r.id !== roleDeletingRow.id));
-    closeRoleDelete();
+    try {
+      if (apiEnabled) {
+        await deleteRole(roleDeletingRow.id).unwrap();
+        message.success("Role deleted");
+      } else {
+        setRoleRows((prev) => prev.filter((r) => r.id !== roleDeletingRow.id));
+      }
+      closeRoleDelete();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to delete role"));
+    }
   };
 
   const confirmSafetyDelete = () => {
@@ -1682,18 +2069,34 @@ export default function SystemSettingsPage() {
     closeSafetyDelete();
   };
 
-  const confirmTypeParameterDelete = () => {
+  const confirmTypeParameterDelete = async () => {
     if (!typeParameterDeletingRow) return;
-    setTypeParameterRows((prev) =>
-      prev.filter((r) => r.id !== typeParameterDeletingRow.id)
-    );
-    closeTypeParameterDelete();
+    try {
+      if (apiEnabled) {
+        await deleteTypeParameter(typeParameterDeletingRow.id).unwrap();
+        message.success("Type parameter deleted");
+      } else {
+        setTypeParameterRows((prev) => prev.filter((r) => r.id !== typeParameterDeletingRow.id));
+      }
+      closeTypeParameterDelete();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to delete type parameter"));
+    }
   };
 
-  const confirmUomDelete = () => {
+  const confirmUomDelete = async () => {
     if (!uomDeletingRow) return;
-    setUomRows((prev) => prev.filter((r) => r.id !== uomDeletingRow.id));
-    closeUomDelete();
+    try {
+      if (apiEnabled) {
+        await deleteUom(uomDeletingRow.id).unwrap();
+        message.success("UOM deleted");
+      } else {
+        setUomRows((prev) => prev.filter((r) => r.id !== uomDeletingRow.id));
+      }
+      closeUomDelete();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to delete UOM"));
+    }
   };
 
   const confirmPurchaseOrderDelete = () => {
@@ -1708,22 +2111,51 @@ export default function SystemSettingsPage() {
     closeApprovalWorkflowDelete();
   };
 
-  const confirmKanbanDelete = () => {
+  const confirmKanbanDelete = async () => {
     if (!kanbanDeletingRow) return;
-    setKanbanRows((prev) => prev.filter((r) => r.id !== kanbanDeletingRow.id));
-    closeKanbanDelete();
+    try {
+      if (apiEnabled) {
+        await deleteKanbanStandard(kanbanDeletingRow.id).unwrap();
+        message.success("Kanban standard deleted");
+      } else {
+        setKanbanRows((prev) => prev.filter((r) => r.id !== kanbanDeletingRow.id));
+      }
+      closeKanbanDelete();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to delete kanban standard"));
+    }
   };
 
-  const confirmGlobalWorkingDaysDelete = () => {
+  const confirmGlobalWorkingDaysDelete = async () => {
     if (!globalWorkingDaysDeletingRow) return;
-    setGlobalWorkingDaysRows((prev) => prev.filter((r) => r.id !== globalWorkingDaysDeletingRow.id));
-    closeGlobalWorkingDaysDelete();
+    try {
+      if (apiEnabled) {
+        await deleteGlobalWorkingDays(globalWorkingDaysDeletingRow.id).unwrap();
+        message.success("Global parameter deleted");
+      } else {
+        setGlobalWorkingDaysRows((prev) =>
+          prev.filter((r) => r.id !== globalWorkingDaysDeletingRow.id)
+        );
+      }
+      closeGlobalWorkingDaysDelete();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to delete global parameters"));
+    }
   };
 
-  const confirmProcessDelete = () => {
+  const confirmProcessDelete = async () => {
     if (!processDeletingRow) return;
-    setProcessRows((prev) => prev.filter((r) => r.id !== processDeletingRow.id));
-    closeProcessDelete();
+    try {
+      if (apiEnabled) {
+        await deleteProcess(processDeletingRow.id).unwrap();
+        message.success("Process deleted");
+      } else {
+        setProcessRows((prev) => prev.filter((r) => r.id !== processDeletingRow.id));
+      }
+      closeProcessDelete();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to delete process"));
+    }
   };
 
   const confirmMachinePatternDelete = () => {
@@ -2044,12 +2476,8 @@ export default function SystemSettingsPage() {
       title: "Category",
       dataIndex: "category",
       key: "category",
-      width: 140,
-      render: (v: UomCategory) => (
-        <Tag className="rounded-md bg-white border border-gray-200 text-gray-700">
-          {v}
-        </Tag>
-      ),
+      width: 220,
+      render: (v?: string) => <div className="text-gray-700">{v || "-"}</div>,
     },
     {
       title: "Status",
@@ -2271,6 +2699,13 @@ export default function SystemSettingsPage() {
 
   const globalWorkingDaysColumns: ColumnsType<GlobalWorkingDaysRow> = [
     {
+      title: "Parameter Group",
+      dataIndex: "parameterGroup",
+      key: "parameterGroup",
+      width: 180,
+      render: (v?: string) => <span className="text-gray-700">{v || "-"}</span>,
+    },
+    {
       title: "Period",
       dataIndex: "period",
       key: "period",
@@ -2282,6 +2717,15 @@ export default function SystemSettingsPage() {
       key: "workingDays",
       width: 160,
       render: (v: number) => <span className="text-blue-600">{v} days</span>,
+    },
+    {
+      title: "Status",
+      dataIndex: "status",
+      key: "status",
+      width: 120,
+      render: (s: StatusType) => (
+        <Tag className="bg-blue-50 text-blue-700 border-blue-100">{s}</Tag>
+      ),
     },
     {
       title: "Created Date",
@@ -2690,7 +3134,7 @@ export default function SystemSettingsPage() {
             </div>
             <div>
               <div className="text-xs text-gray-500">Category</div>
-              <div className="font-medium text-gray-900">{uomDetailRow.category}</div>
+              <div className="font-medium text-gray-900">{uomDetailRow.category || "-"}</div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Status</div>
@@ -2826,17 +3270,35 @@ export default function SystemSettingsPage() {
         {globalWorkingDaysDetailRow && (
           <div className="space-y-3">
             <div>
+              <div className="text-xs text-gray-500">Parameter Group</div>
+              <div className="font-medium text-gray-900">
+                {globalParameterDetailApiData?.parameter_group || globalWorkingDaysDetailRow.parameterGroup || "-"}
+              </div>
+            </div>
+            <div>
               <div className="text-xs text-gray-500">Period</div>
-              <div className="font-medium text-gray-900">{globalWorkingDaysDetailRow.period}</div>
+              <div className="font-medium text-gray-900">{globalParameterDetailApiData?.period || globalWorkingDaysDetailRow.period}</div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs text-gray-500">Working Days</div>
-                <div className="font-medium text-gray-900">{globalWorkingDaysDetailRow.workingDays} days</div>
+                <div className="font-medium text-gray-900">
+                  {Number(globalParameterDetailApiData?.working_days ?? globalWorkingDaysDetailRow.workingDays)} days
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">Status</div>
+                <div className="font-medium text-gray-900">
+                  {globalParameterDetailApiData ? fromBackendStatus(globalParameterDetailApiData.status) : globalWorkingDaysDetailRow.status}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Created Date</div>
-                <div className="font-medium text-gray-900">{globalWorkingDaysDetailRow.createdDate}</div>
+                <div className="font-medium text-gray-900">
+                  {globalParameterDetailApiData?.updated_at || globalParameterDetailApiData?.created_at
+                    ? new Date(globalParameterDetailApiData.updated_at || globalParameterDetailApiData.created_at || "").toLocaleDateString("en-US")
+                    : globalWorkingDaysDetailRow.createdDate}
+                </div>
               </div>
             </div>
           </div>
@@ -2856,23 +3318,25 @@ export default function SystemSettingsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs text-gray-500">Process Code</div>
-                <div className="font-medium text-gray-900">{processDetailRow.processCode}</div>
+                <div className="font-medium text-gray-900">{processDetailApiData?.process_code || processDetailRow.processCode}</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Sequence</div>
-                <div className="font-medium text-gray-900">{processDetailRow.sequence}</div>
+                <div className="font-medium text-gray-900">{Number(processDetailApiData?.sequence ?? processDetailRow.sequence)}</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Process Name</div>
-                <div className="font-medium text-gray-900">{processDetailRow.processName}</div>
+                <div className="font-medium text-gray-900">{processDetailApiData?.process_name || processDetailRow.processName}</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Category</div>
-                <div className="font-medium text-gray-900">{processDetailRow.category}</div>
+                <div className="font-medium text-gray-900">{processDetailApiData?.category || processDetailRow.category}</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Status</div>
-                <div className="font-medium text-gray-900">{processDetailRow.status}</div>
+                <div className="font-medium text-gray-900">
+                  {processDetailApiData ? fromBackendStatus(processDetailApiData.status) : processDetailRow.status}
+                </div>
               </div>
             </div>
           </div>
@@ -3090,14 +3554,7 @@ export default function SystemSettingsPage() {
           </Form.Item>
 
           <Form.Item label="Category" name="category" rules={[{ required: true }]}>
-            <Select
-              placeholder="Select category"
-              options={[
-                { label: "Quantity", value: "Quantity" },
-                { label: "Weight", value: "Weight" },
-                { label: "Length", value: "Length" },
-              ]}
-            />
+            <Input placeholder="Count" />
           </Form.Item>
 
           <Form.Item label="Status" name="status" rules={[{ required: true }]}>
@@ -3246,7 +3703,15 @@ export default function SystemSettingsPage() {
               <Input placeholder="Bracket Assembly" />
             </Form.Item>
             <Form.Item label="Product Code" name="productCode" rules={[{ required: true }]}>
-              <Input placeholder="FG-001" />
+              <Select
+                showSearch
+                placeholder="Select BOM UNIQ"
+                options={bomUniqOptions}
+                optionFilterProp="label"
+                filterOption={(input, opt) =>
+                  String(opt?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                }
+              />
             </Form.Item>
           </div>
 
@@ -3275,7 +3740,7 @@ export default function SystemSettingsPage() {
       </Drawer>
 
       <Drawer
-        title={globalWorkingDaysEditMode === "create" ? "Add Parameter" : "Edit"}
+        title={globalWorkingDaysEditMode === "create" ? "Add Global Parameter" : "Edit Global Parameter"}
         placement="right"
         open={globalWorkingDaysEditOpen}
         onClose={closeGlobalWorkingDaysEdit}
@@ -3291,17 +3756,29 @@ export default function SystemSettingsPage() {
         }
       >
         <Form form={globalWorkingDaysForm} layout="vertical">
+          <Form.Item label="Parameter Group" name="parameterGroup">
+            <Input placeholder="planning" />
+          </Form.Item>
           <Form.Item label="Period" name="period" rules={[{ required: true }]}>
-            <Input placeholder="January 2024" />
+            <Input placeholder="2026-04" />
           </Form.Item>
           <Form.Item label="Working Days" name="workingDays" rules={[{ required: true }]}>
             <InputNumber className="w-full" min={0} placeholder="22" />
+          </Form.Item>
+          <Form.Item label="Status" name="status" rules={[{ required: true }]}>
+            <Select
+              placeholder="Select Status"
+              options={[
+                { label: "Active", value: "Active" },
+                { label: "Inactive", value: "Inactive" },
+              ]}
+            />
           </Form.Item>
         </Form>
       </Drawer>
 
       <Drawer
-        title={processEditMode === "create" ? "Add Parameter" : "Edit"}
+        title={processEditMode === "create" ? "Add Process" : "Edit Process"}
         placement="right"
         open={processEditOpen}
         onClose={closeProcessEdit}
@@ -3319,7 +3796,7 @@ export default function SystemSettingsPage() {
         <Form form={processForm} layout="vertical">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Form.Item label="Process Code" name="processCode" rules={[{ required: true }]}>
-              <Input placeholder="PRESS-01" />
+              <Input placeholder="PRC001" disabled={processEditMode === "edit" && apiEnabled} />
             </Form.Item>
             <Form.Item label="Sequence" name="sequence" rules={[{ required: true }]}>
               <InputNumber className="w-full" min={1} placeholder="1" />
@@ -3327,11 +3804,11 @@ export default function SystemSettingsPage() {
           </div>
 
           <Form.Item label="Process Name" name="processName" rules={[{ required: true }]}>
-            <Input placeholder="Pressing Process" />
+            <Input placeholder="Procurement" />
           </Form.Item>
 
           <Form.Item label="Category" name="category" rules={[{ required: true }]}>
-            <Input placeholder="Metal Forming" />
+            <Input placeholder="purchase" disabled={processEditMode === "edit" && apiEnabled} />
           </Form.Item>
 
           <Form.Item label="Status" name="status" rules={[{ required: true }]}>
@@ -3553,11 +4030,11 @@ export default function SystemSettingsPage() {
                       return;
                     }
                     if (selectedModuleId === "type-parameters") {
-                      router.push("/system-settings/type-parameters/create");
+                      openCreateTypeParameter();
                       return;
                     }
                     if (selectedModuleId === "uom-global") {
-                      router.push("/system-settings/uom-global/create");
+                      openCreateUom();
                       return;
                     }
                     if (selectedModuleId === "purchase-order") {
@@ -3573,11 +4050,11 @@ export default function SystemSettingsPage() {
                       return;
                     }
                     if (selectedModuleId === "global") {
-                      router.push("/system-settings/global/create");
+                      openCreateGlobalWorkingDays();
                       return;
                     }
                     if (selectedModuleId === "process") {
-                      router.push("/system-settings/process/create");
+                      openCreateProcess();
                       return;
                     }
                     if (selectedModuleId === "machine") {

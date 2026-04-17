@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Input,
@@ -25,17 +25,14 @@ import {
 import type { Dayjs } from "dayjs";
 import dayjs from "dayjs";
 import {
-  useCreateRawMaterialMutation,
-  useUpdateRawMaterialMutation,
-  useGetRawMaterialByIdQuery,
-} from "@/lib/api/raw-materials/api";
-import {
-  CreateRawMaterialRequest,
-  UpdateRawMaterialRequest,
   StatusStock,
   SaveAs,
 } from "@/lib/api/raw-materials/interface";
 import { validateRawMaterialData } from "@/lib/api/raw-materials/utils";
+import { useCreateInventoryMutation, useUpdateInventoryMutation } from "@/lib/api/inventory/api";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex, type BomUniqIndex } from "@/lib/utils/bomUniq";
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -78,12 +75,39 @@ interface FormEntry {
 type IndirectMaterialRow = {
   entryId: number;
   uniq?: string;
+  partName?: string;
   category?: string;
   master_list_supplier_id?: string;
   warehouse_id?: string;
   stock?: number;
   unit?: string;
 };
+
+const LOCAL_RAW_MATERIALS: RawMaterialFormData[] = [
+  {
+    uniq: "LV-001",
+    code: "RM-ST-001",
+    name: "Steel Plate 10mm",
+    category: "Metal",
+    master_list_supplier_id: "Process",
+    warehouse_id: "warehouse1",
+    stock: 1000,
+    unit: "pcs",
+    kanban_quantity: 250,
+    total_kanban: 500,
+    stock_days: 15,
+    safety_stock: 500,
+    price: 150000,
+    order_flag: false,
+    notes: "High quality steel plate",
+    status: "Available",
+    is_buyed: true,
+    save_as: "Published",
+    po_reference: "PO-2024-001",
+    batch_number: "2024/2025",
+    quality_status: "Goods",
+  },
+];
 
 // Component untuk render single form
 const RawMaterialForm = ({
@@ -94,6 +118,7 @@ const RawMaterialForm = ({
   showRemove = true,
   initialValues,
   formRef,
+  bomIndex,
 }: {
   entryNumber: number;
   onFinish: (values: RawMaterialFormData) => Promise<void>;
@@ -102,9 +127,42 @@ const RawMaterialForm = ({
   showRemove?: boolean;
   initialValues?: RawMaterialFormData;
   formRef?: React.MutableRefObject<FormInstance | null>;
+  bomIndex?: BomUniqIndex;
 }) => {
   const [form] = Form.useForm();
   const [mounted, setMounted] = useState(false);
+
+  const selectedUniq = Form.useWatch("uniq", form) as string | undefined;
+  const selectedPartName = Form.useWatch("name", form) as string | undefined;
+
+  const normalizeRmSource = (value: string): string => {
+    const v = value.trim();
+    const lowered = v.toLowerCase();
+    if (lowered === "supplier") return "supplier";
+    if (lowered === "process") return "process";
+    if (lowered === "direct") return "direct";
+    return v;
+  };
+
+  const applyBomAutofill = (uniq: string | undefined) => {
+    if (!uniq || !bomIndex) return;
+    const partName = bomIndex.partNameByUniq[uniq];
+    const partNumber = bomIndex.partNumberByUniq[uniq];
+    const uom = bomIndex.uomByUniq[uniq];
+    const rmType = bomIndex.rawMaterialTypeByUniq[uniq];
+    const rmSource = bomIndex.rmSourceByUniq[uniq];
+    const weightKg = bomIndex.weightKgByUniq[uniq];
+
+    const nextValues: Partial<RawMaterialFormData> = {};
+    if (partName) nextValues.name = partName;
+    if (partNumber) nextValues.part_no = partNumber;
+    if (uom) nextValues.unit = uom;
+    if (rmType) nextValues.category = rmType;
+    if (rmSource) nextValues.master_list_supplier_id = normalizeRmSource(rmSource);
+    if (typeof weightKg === "number" && Number.isFinite(weightKg)) nextValues.price = weightKg;
+
+    if (Object.keys(nextValues).length > 0) form.setFieldsValue(nextValues);
+  };
 
   // Set mounted state
   useEffect(() => {
@@ -118,6 +176,13 @@ const RawMaterialForm = ({
       form.setFieldsValue(initialValues);
     }
   }, [mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    if (!selectedUniq) return;
+    applyBomAutofill(selectedUniq);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, selectedUniq, bomIndex]);
 
   // Expose form instance to parent component
   useEffect(() => {
@@ -162,6 +227,11 @@ const RawMaterialForm = ({
             ? "Update raw material entry information"
             : "Add raw material entry with automatic safety stock calculation"}
         </p>
+        <div className="mt-2">
+          <Text type="secondary">
+            Part Name: <span className="font-semibold text-gray-800">{selectedPartName || "-"}</span>
+          </Text>
+        </div>
       </div>
 
       <Form form={form} layout="vertical" onFinish={onFinish}>
@@ -172,10 +242,26 @@ const RawMaterialForm = ({
             name="uniq"
             rules={[{ required: true, message: "Please input uniq!" }]}
           >
-            <Select placeholder="LV-001" size="large" allowClear>
-              <Option value="LV-001">LV-001</Option>
-              <Option value="LV-002">LV-002</Option>
-              <Option value="LV-003">LV-003</Option>
+            <Select
+              placeholder="Select UNIQ from BOM"
+              size="large"
+              allowClear
+              showSearch
+              optionFilterProp="children"
+              onChange={(value) => applyBomAutofill(typeof value === "string" ? value : undefined)}
+            >
+              {(bomIndex?.options?.length
+                ? bomIndex.options
+                : [
+                    { label: "LV-001", value: "LV-001" },
+                    { label: "LV-002", value: "LV-002" },
+                    { label: "LV-003", value: "LV-003" },
+                  ]
+              ).map((opt) => (
+                <Option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </Option>
+              ))}
             </Select>
           </Form.Item>
 
@@ -199,9 +285,9 @@ const RawMaterialForm = ({
             rules={[{ required: true, message: "Please select source!" }]}
           >
             <Select placeholder="Process" size="large" allowClear>
-              <Option value="Process">Process</Option>
-              <Option value="Direct">Direct</Option>
-              <Option value="Supplier">Supplier</Option>
+              <Option value="process">Process</Option>
+              <Option value="direct">Direct</Option>
+              <Option value="supplier">Supplier</Option>
             </Select>
           </Form.Item>
 
@@ -211,10 +297,20 @@ const RawMaterialForm = ({
             rules={[{ required: true, message: "Please select warehouse!" }]}
           >
             <Select placeholder="WH-001" size="large" allowClear>
-              <Option value="warehouse1">WH-001</Option>
-              <Option value="warehouse2">WH-002</Option>
-              <Option value="warehouse3">WH-003</Option>
+              <Option value="WH-001">WH-001</Option>
+              <Option value="WH-002">WH-002</Option>
+              <Option value="WH-003">WH-003</Option>
             </Select>
+          </Form.Item>
+        </div>
+
+        {/* Row 1b: Part No + Part Name (auto-filled from BOM) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Form.Item label="Part Number" name="part_no">
+            <Input placeholder="Auto-filled from BOM" size="large" />
+          </Form.Item>
+          <Form.Item label="Part Name" name="name">
+            <Input placeholder="Auto-filled from BOM" size="large" />
           </Form.Item>
         </div>
 
@@ -252,12 +348,12 @@ const RawMaterialForm = ({
             name="price"
             tooltip={{ title: "For RM Type: Wire", color: "blue" }}
           >
-            <Input placeholder="Weight" size="large" />
-            <div >
-            <Text type="secondary" className="text-blue-600">
-              For RM Type: Wire
-            </Text>
-          </div>
+            <InputNumber placeholder="Weight (kg)" size="large" style={{ width: "100%" }} min={0} />
+            <div>
+              <Text type="secondary" className="text-blue-600">
+                For RM Type: Wire
+              </Text>
+            </div>
           </Form.Item>
 
           
@@ -274,6 +370,12 @@ export default function CreateRawMaterialPage() {
   const [mounted, setMounted] = useState(false);
   const [formEntries, setFormEntries] = useState<FormEntry[]>([]);
   const [indirectRows, setIndirectRows] = useState<IndirectMaterialRow[]>([]);
+  const [createInventory] = useCreateInventoryMutation();
+  const [updateInventory] = useUpdateInventoryMutation();
+
+  const apiEnabled = Boolean(apiBaseUrl);
+  const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeQuery.data?.data ?? []), [bomTreeQuery.data]);
 
   // Initialize first form entry
   useEffect(() => {
@@ -281,10 +383,6 @@ export default function CreateRawMaterialPage() {
       setFormEntries([{ id: 1, key: "form-1", formRef: { current: null } }]);
     }
   }, [mounted, formEntries.length]);
-
-  // API hooks
-  const [createRawMaterial] = useCreateRawMaterialMutation();
-  const [updateRawMaterial] = useUpdateRawMaterialMutation();
 
   // Set mounted state
   useEffect(() => {
@@ -294,10 +392,14 @@ export default function CreateRawMaterialPage() {
   // Check if this is edit mode
   const isEditMode = searchParams.get("mode") === "edit";
   const itemId = searchParams.get("id");
-
-  // Get data for edit mode
-  const { data: existingData, isLoading: isLoadingData } =
-    useGetRawMaterialByIdQuery(itemId || "", { skip: !isEditMode || !itemId });
+  const existingData = isEditMode && itemId
+    ? {
+        data:
+          LOCAL_RAW_MATERIALS.find((item) => item.uniq === itemId) ??
+          LOCAL_RAW_MATERIALS[0],
+      }
+    : undefined;
+  const isLoadingData = false;
 
   const getInitialValues = (): RawMaterialFormData | undefined => {
     // Return initial values for edit mode
@@ -335,10 +437,6 @@ export default function CreateRawMaterialPage() {
 
   const handleSubmitForm = async (values: RawMaterialFormData) => {
     try {
-      console.log("handleSubmitForm called with values:", values);
-      console.log("isEditMode:", isEditMode);
-      console.log("itemId:", itemId);
-
       // Validate form data - convert Dayjs objects to strings for validation
       const validationData = {
         ...values,
@@ -355,74 +453,44 @@ export default function CreateRawMaterialPage() {
         return;
       }
 
-      if (isEditMode && itemId) {
-        // Update existing raw material
-        const updateData: UpdateRawMaterialRequest = {
-          warehouse_id: values.warehouse_id,
-          master_list_supplier_id: values.master_list_supplier_id,
-          code: values.code,
-          name: values.name,
-          category: values.category,
-          stock: values.stock,
-          price: values.price,
-          unit: values.unit,
-          po_reference: values.po_reference,
-          received_date: values.received_date
-            ? dayjs(values.received_date)
-            : undefined,
-          batch_number: values.batch_number,
-          expiry_date: values.expiry_date
-            ? dayjs(values.expiry_date)
-            : undefined,
-          quality_status: values.quality_status,
-          notes: values.notes,
-          kanban_quantity: values.kanban_quantity,
-          total_kanban: values.total_kanban,
-          stock_days: values.stock_days,
-          safety_stock: values.safety_stock,
-          order_flag: values.order_flag,
-          status: values.status,
-          is_buyed: values.is_buyed,
-          save_as: values.save_as,
-          updated_by: "current-user-id", // Replace with actual user ID
-        };
-
-        console.log("Sending updateData to API:", updateData);
-        console.log("Original existingData:", existingData?.data);
-        await updateRawMaterial({ id: itemId, body: updateData }).unwrap();
-        message.success("Raw material updated successfully!");
-      } else {
-        // Create new raw material
-        const createData: CreateRawMaterialRequest = {
-          code: values.code!,
-          name: values.name!,
-          category: values.category,
-          stock: values.stock,
-          price: values.price,
-          notes: values.notes,
-          unit: values.unit,
-          po_reference: values.po_reference,
-          received_date: values.received_date
-            ? dayjs(values.received_date)
-            : undefined,
-          warehouse_id: values.warehouse_id,
-          master_list_supplier_id: values.master_list_supplier_id,
-          batch_number: values.batch_number,
-          expiry_date: values.expiry_date
-            ? dayjs(values.expiry_date)
-            : undefined,
-          quality_status: values.quality_status,
-          // save_as: values.save_as,
-          // created_by: "current-user-id",
-        };
-
-        await createRawMaterial(createData).unwrap();
-        message.success("Raw material created successfully!");
+      const uniq_code = values.uniq?.trim() ?? "";
+      if (!uniq_code) {
+        message.error("Uniq is required");
+        return;
       }
 
-      // Don't navigate immediately - let handleSubmitAll handle navigation
+      const rm_source = typeof values.master_list_supplier_id === "string" ? values.master_list_supplier_id.trim().toLowerCase() : undefined;
+      const warehouse_location = typeof values.warehouse_id === "string" ? values.warehouse_id.trim() : undefined;
+      const uom = typeof values.unit === "string" ? values.unit.trim() : undefined;
+      const stock_qty = Number(values.stock ?? 0);
+
+      // Backend contract (manual create): only these fields.
+      const createBody = {
+        uniq_code,
+        raw_material_type: values.category,
+        rm_source,
+        warehouse_location,
+        uom,
+        stock_qty,
+      };
+
+      // For update/edit mode, keep sending the fuller payload so existing edit behavior remains intact.
+      const updateBody = {
+        ...createBody,
+        stock_weight_kg:
+          typeof values.price === "number" ? values.price : Number(values.price ?? 0),
+        part_name: values.name,
+        part_number: values.part_no,
+      };
+
+      if (isEditMode && itemId) {
+        await updateInventory({ type: "raw-materials", id: itemId, body: updateBody }).unwrap();
+        message.success("Raw material updated successfully!");
+      } else {
+        await createInventory({ type: "raw-materials", body: createBody }).unwrap();
+        message.success("Raw material created successfully!");
+      }
     } catch (error: unknown) {
-      // console.error("Error saving raw material:", error);
       message.error(
         (error as { data?: { message?: string } })?.data?.message ||
           "Failed to save raw material"
@@ -448,6 +516,7 @@ export default function CreateRawMaterialPage() {
         const nextRow: IndirectMaterialRow = {
           entryId: currentEntry.id,
           uniq: values.uniq,
+          partName: values.name,
           category: values.category,
           master_list_supplier_id: values.master_list_supplier_id,
           warehouse_id: values.warehouse_id,
@@ -532,10 +601,8 @@ export default function CreateRawMaterialPage() {
         }
       }
 
-      // Navigate back to raw materials list after all forms are submitted
-      // router.push("/raw-materials");
+      router.push("/raw-materials");
     } catch (error) {
-      console.error("Error submitting forms:", error);
       message.error("Failed to submit forms");
     } finally {
       setLoading(false);
@@ -639,6 +706,7 @@ export default function CreateRawMaterialPage() {
                   showRemove={formEntries.length > 1}
                   initialValues={index === 0 ? getInitialValues() : undefined}
                   formRef={entry.formRef}
+                  bomIndex={bomIndex}
                 />
               </div>
             ))}
@@ -689,6 +757,15 @@ export default function CreateRawMaterialPage() {
                       width: 110,
                       render: (v: string | undefined) => (
                         <span className="font-mono text-xs">{v ?? "-"}</span>
+                      ),
+                    },
+                    {
+                      title: "Part Name",
+                      dataIndex: "partName",
+                      key: "partName",
+                      width: 160,
+                      render: (v: string | undefined) => (
+                        <span className="text-xs">{v ?? "-"}</span>
                       ),
                     },
                     {

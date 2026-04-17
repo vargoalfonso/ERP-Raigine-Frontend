@@ -14,8 +14,13 @@ import {
 } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
-import { useGetProcurementPoBoardQuery } from "@/lib/api/procurement-po/api";
+import {
+  useGetProcurementPoSummaryQuery,
+  useListProcurementPosQuery,
+  type ProcurementPoType,
+} from "@/lib/api/procurement-po/api";
 import { getApiErrorMessage } from "@/lib/api/error";
+import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -28,14 +33,22 @@ const isMissingRouteError = (error: unknown): boolean => {
 
 type ProcurementTab = "raw" | "indirect" | "subcon";
 
+const tabToPoType = (tab: ProcurementTab): ProcurementPoType => {
+  if (tab === "raw") return "raw_material";
+  if (tab === "indirect") return "indirect";
+  return "subcon";
+};
+
 type PoRow = {
   key: string;
   period: string;
   poNumber: string;
+  poStage?: number;
   budgetIdr: number;
   qtyDelivered: number;
   uniq: string;
   supplier: string;
+  supplierId?: string;
   dnCreated: number;
   dnIncoming: number;
   openPo: number;
@@ -47,6 +60,21 @@ type PoRowBase = Omit<PoRow, "dnIncoming" | "openPo" | "expectedArrival" | "poAl
 
 const formatNumber = (n: number) => new Intl.NumberFormat("en-US").format(n);
 const formatIdr = (n: number) => `${formatNumber(n)} IDR`;
+
+const extractUniqSummary = (items: Array<Record<string, unknown>> | undefined): string | undefined => {
+  if (!Array.isArray(items) || items.length === 0) return undefined;
+  const uniqs = items
+    .map((it) => {
+      const raw = (it as UnknownRecord).uniq_code ?? (it as UnknownRecord).item_uniq_code ?? (it as UnknownRecord).uniq;
+      return typeof raw === "string" ? raw.trim() : typeof raw === "number" ? String(raw) : "";
+    })
+    .filter(Boolean);
+
+  if (uniqs.length === 0) return undefined;
+
+  const deduped = Array.from(new Set(uniqs));
+  return deduped.length > 3 ? `${deduped.slice(0, 3).join(", ")} +${deduped.length - 3}` : deduped.join(", ");
+};
 
 const makeRows = (prefix: string): PoRow[] => {
   const baseRows: PoRowBase[] = (() => {
@@ -224,7 +252,7 @@ function PoProcurementPageContent() {
     return "PO - SubCon Management";
   }, [activeTab]);
 
-  const boardTitle = "RM Purchase Order Board";
+  const boardTitle = "Purchase Order Board";
 
   const rowsByTab = useMemo(
     () => ({
@@ -235,39 +263,45 @@ function PoProcurementPageContent() {
     []
   );
 
-  const category = useMemo(() => {
-    if (activeTab === "raw") return "RAW_MATERIAL" as const;
-    if (activeTab === "indirect") return "INDIRECT_RAW_MATERIAL" as const;
-    return "SUBCON" as const;
-  }, [activeTab]);
+  const poType = useMemo(() => tabToPoType(activeTab), [activeTab]);
 
-  const monthFilter = searchParams.get("month") ?? undefined;
-  const supplierFilter = searchParams.get("supplier") ?? undefined;
-  const subconFilter = searchParams.get("subcon") ?? undefined;
+  const summaryQuery = useGetProcurementPoSummaryQuery({ po_type: poType }, { skip: !apiEnabled });
+  const poListQuery = useListProcurementPosQuery({ po_type: poType }, { skip: !apiEnabled });
+  const suppliersQuery = useListSuppliersQuery(undefined, { skip: !apiEnabled });
 
-  const poBoardQuery = useGetProcurementPoBoardQuery(
-    { category, month: monthFilter, supplier: supplierFilter, subcon: subconFilter },
-    { skip: !apiEnabled }
-  );
-
-  const procurementApiAvailable = apiEnabled && !isMissingRouteError(poBoardQuery.error);
+  const procurementApiAvailable =
+    apiEnabled &&
+    !isMissingRouteError(poListQuery.error) &&
+    !isMissingRouteError(summaryQuery.error);
 
   const rows = useMemo<PoRow[]>(() => {
     if (!procurementApiAvailable) return rowsByTab[activeTab];
-    const list = poBoardQuery.data?.data ?? [];
+    const list = poListQuery.data?.data ?? [];
     return list.map((r) => {
-      const supplierName = activeTab === "subcon" ? r.subcon_name ?? r.supplier_name : r.supplier_name;
       const totalPo = Number(r.total_po ?? 0);
       const totalIncoming = Number(r.total_incoming ?? 0);
       const openPo = Number(r.open_po ?? totalPo - totalIncoming);
+
+      const supplierIdText = r.supplier_id == null ? "" : String(r.supplier_id).trim();
+      const resolvedSupplierName =
+        r.supplier_name ??
+        (suppliersQuery.data ?? []).find((s) => {
+          const rowId = s.row_id ?? s.id;
+          return rowId != null && String(rowId).trim() === supplierIdText;
+        })?.supplier_name ??
+        (supplierIdText ? `Supplier #${supplierIdText}` : "-");
+
+      const uniqSummary = extractUniqSummary(r.items);
       return {
         key: r.po_id ?? r.id,
-        period: r.month ?? "-",
+        period: r.period ?? r.month ?? "-",
         poNumber: r.po_number ?? String(r.po_id ?? r.id),
+        poStage: r.po_stage,
         budgetIdr: totalPo,
         qtyDelivered: totalIncoming,
-        uniq: r.data_order ?? r.po_category ?? "-",
-        supplier: supplierName ?? "-",
+        uniq: uniqSummary ?? r.data_order ?? "-",
+        supplier: resolvedSupplierName,
+        supplierId: supplierIdText || undefined,
         dnCreated: Number(r.dn_created ?? 0),
         dnIncoming: Number(r.dn_incoming ?? 0),
         openPo,
@@ -275,7 +309,7 @@ function PoProcurementPageContent() {
         poAlert: r.po_alert,
       };
     });
-  }, [activeTab, procurementApiAvailable, poBoardQuery.data?.data, rowsByTab]);
+  }, [activeTab, procurementApiAvailable, poListQuery.data?.data, rowsByTab, suppliersQuery.data]);
 
   const poBadgeByNumber = useMemo(() => {
     const map = new Map<string, number>();
@@ -289,23 +323,30 @@ function PoProcurementPageContent() {
     return map;
   }, [rows]);
 
-  const totalPOs = rows.length;
-  const activeSuppliers = useMemo(() => new Set(rows.map((r) => r.supplier).filter((s) => s && s !== "-")).size, [rows]);
-  const totalPoValue = useMemo(() => rows.reduce((sum, r) => sum + (r.budgetIdr || 0), 0), [rows]);
+  const totalPOs = Number(summaryQuery.data?.data?.total_pos ?? rows.length);
+  const activeSuppliers = useMemo(
+    () => Number(summaryQuery.data?.data?.active_suppliers ?? new Set(rows.map((r) => r.supplier).filter((s) => s && s !== "-")).size),
+    [rows, summaryQuery.data?.data?.active_suppliers],
+  );
+  const totalPoValue = useMemo(
+    () => Number(summaryQuery.data?.data?.total_po_value ?? rows.reduce((sum, r) => sum + (r.budgetIdr || 0), 0)),
+    [rows, summaryQuery.data?.data?.total_po_value],
+  );
   const lateDeliveries = useMemo(() => {
     if (!procurementApiAvailable) return 1;
-    return (poBoardQuery.data?.data ?? []).filter((r) => Number(r.po_alert ?? 0) > 0).length;
-  }, [procurementApiAvailable, poBoardQuery.data?.data]);
+    return Number(summaryQuery.data?.data?.late_deliveries ?? (poListQuery.data?.data ?? []).filter((r) => Number(r.po_alert ?? 0) > 0).length);
+  }, [procurementApiAvailable, poListQuery.data?.data, summaryQuery.data?.data?.late_deliveries]);
 
   useEffect(() => {
     if (!apiEnabled) return;
-    if (!poBoardQuery.error) return;
-    if (isMissingRouteError(poBoardQuery.error)) {
+    const error = poListQuery.error ?? summaryQuery.error;
+    if (!error) return;
+    if (isMissingRouteError(error)) {
       message.warning("Procurement PO API route is not available on this backend yet; showing mock data.");
       return;
     }
-    message.error(getApiErrorMessage(poBoardQuery.error, "Failed to load PO board"));
-  }, [apiEnabled, poBoardQuery.error]);
+    message.error(getApiErrorMessage(error, "Failed to load purchase orders"));
+  }, [apiEnabled, poListQuery.error, summaryQuery.error]);
 
   const pagedRows = useMemo(() => {
     const start = (page - 1) * pageSize;
@@ -326,11 +367,23 @@ function PoProcurementPageContent() {
       dataIndex: "poNumber",
       key: "poNumber",
       width: 170,
-      render: (v: string) => {
+      render: (_v: string, record: PoRow) => {
+        const v = record.poNumber;
         const badge = poBadgeByNumber.get(v);
+        const stage = record.poStage;
         return (
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-gray-800">{v}</span>
+            {stage === 1 && (
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-blue-50 px-1.5 text-[11px] font-semibold text-blue-700 border border-blue-200">
+                1
+              </span>
+            )}
+            {stage === 2 && (
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-green-50 px-1.5 text-[11px] font-semibold text-green-700 border border-green-200">
+                2
+              </span>
+            )}
             {activeTab === "indirect" && typeof badge === "number" && (
               <Tag color="blue" className="!rounded-full !px-2 !py-0 !text-xs">
                 {badge}
@@ -347,14 +400,14 @@ function PoProcurementPageContent() {
       width: 170,
       render: (v: number) => <span className="text-sm text-gray-800">{formatNumber(v)}</span>,
     },
-    {
-      title: "Total Incoming",
-      dataIndex: "qtyDelivered",
-      key: "qtyDelivered",
-      width: 140,
-      align: "right",
-      render: (v: number) => <span className="text-sm text-gray-800">{formatNumber(v)}</span>,
-    },
+    // {
+    //   title: "Total Incoming",
+    //   dataIndex: "qtyDelivered",
+    //   key: "qtyDelivered",
+    //   width: 140,
+    //   align: "right",
+    //   render: (v: number) => <span className="text-sm text-gray-800">{formatNumber(v)}</span>,
+    // },
     {
       title: "Uniq",
       dataIndex: "uniq",
@@ -396,45 +449,9 @@ function PoProcurementPageContent() {
         </div>
       ),
     },
-    {
-      title: "DN Incoming",
-      dataIndex: "dnIncoming",
-      key: "dnIncoming",
-      width: 120,
-      align: "right",
-      render: (v: number) => <span className="text-sm text-gray-800">{formatNumber(v)}</span>,
-    },
-    {
-      title: "Open PO",
-      dataIndex: "openPo",
-      key: "openPo",
-      width: 120,
-      align: "right",
-      render: (v: number) => <span className="text-sm font-semibold text-gray-900">{formatNumber(v)}</span>,
-    },
-    {
-      title: "Expected Arrival",
-      dataIndex: "expectedArrival",
-      key: "expectedArrival",
-      width: 160,
-      render: (v?: string) => <span className="text-xs text-gray-600">{v ? String(v).slice(0, 10) : "-"}</span>,
-    },
-    {
-      title: "Alert",
-      dataIndex: "poAlert",
-      key: "poAlert",
-      width: 110,
-      render: (_: unknown, record) => {
-        const hasAlert = Number(record.poAlert ?? 0) > 0;
-        if (!hasAlert) return <span className="text-xs text-gray-400">-</span>;
-        return (
-          <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-700">
-            <WarningOutlined />
-            Late
-          </span>
-        );
-      },
-    },
+    
+    
+    
     {
       title: "Actions",
       key: "actions",
@@ -583,7 +600,7 @@ function PoProcurementPageContent() {
                 Track PO totals, incoming deliveries, and supplier performance with DN monitoring
               </div>
               <div className="mt-2 text-xs text-gray-500">{rows.length} purchase orders</div>
-              {apiEnabled && poBoardQuery.isFetching && <div className="mt-1 text-xs text-gray-400">Loading from API…</div>}
+              {apiEnabled && (poListQuery.isFetching || summaryQuery.isFetching) && <div className="mt-1 text-xs text-gray-400">Loading from API…</div>}
             </div>
 
             <Button

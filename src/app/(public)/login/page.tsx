@@ -7,6 +7,8 @@ import { Button, Card, Form, Input, message, Typography } from "antd";
 import { useRouter } from "next/navigation";
 import React from "react";
 import Cookies from "js-cookie";
+import { useLoginMutation } from "@/lib/api/auth/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 interface LoginFormValues {
   email: string;
@@ -17,18 +19,38 @@ const { Title, Link } = Typography;
 
 export default function LoginPage() {
   const router = useRouter();
+  const [login, loginState] = useLoginMutation();
+  const [messageApi, contextHolder] = message.useMessage();
 
   const handleLogin = async (values: LoginFormValues) => {
-    // Simpan token dummy
-    Cookies.set("Authorization", "DUMMY_TOKEN", { expires: 7 });
+    try {
+      const tokenData = await login({
+        email: values.email,
+        password: values.password,
+      }).unwrap();
 
-    message.success("Login bypassed (DEV MODE)");
+      const accessToken = tokenData.access_token?.trim();
+      if (!accessToken) throw new Error("Missing access_token from login response");
 
-    router.push("/dashboard");
+      const expiresAt = tokenData.expires_at ? new Date(tokenData.expires_at) : null;
+      const cookieExpires = expiresAt && !Number.isNaN(expiresAt.getTime()) ? expiresAt : 7;
+
+      Cookies.set("Authorization", accessToken, {
+        expires: cookieExpires,
+        path: "/",
+        sameSite: "lax",
+      });
+
+      messageApi.success("Login success");
+      router.push("/dashboard");
+    } catch (e) {
+      messageApi.error(getApiErrorMessage(e, "Login failed"));
+    }
   };
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      {contextHolder}
       {/* Navbar */}
       {/* <Navbar
         text={
@@ -89,9 +111,10 @@ export default function LoginPage() {
             <Form.Item>
               <button
                 type="submit"
+                disabled={loginState.isLoading}
                 className={`w-full bg-blue-500 text-white py-2 px-4 rounded-lg hover:bg-blue-600 cursor-pointer`}
               >
-                Login
+                {loginState.isLoading ? "Logging in..." : "Login"}
               </button>
             </Form.Item>
           </Form>

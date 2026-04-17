@@ -6,6 +6,7 @@ import { Button, Input, Modal, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   DeleteOutlined,
+  EditOutlined,
   EyeOutlined,
   PlusOutlined,
   SearchOutlined,
@@ -13,6 +14,7 @@ import {
 import {
   type SupplierRecord,
   useDeleteSupplierMutation,
+  useGetSupplierByIdQuery,
   useListSuppliersQuery,
 } from "@/lib/api/suppliers/api";
 import { apiBaseUrl } from "@/lib/api/instance";
@@ -61,6 +63,11 @@ export default function MasterSupplierOnlyPage() {
   const [selectedRow, setSelectedRow] = useState<SupplierOnlyRow | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+
+  const selectedId = selectedRow?.id;
+  const supplierDetailQuery = useGetSupplierByIdQuery(selectedId ?? "", {
+    skip: !apiEnabled || !detailOpen || !selectedId,
+  });
 
   const rows = useMemo(
     () => supplierList.map((record, index) => toSupplierOnlyRow(record, index)),
@@ -142,12 +149,16 @@ export default function MasterSupplierOnlyPage() {
       dataIndex: "status",
       key: "status",
       width: 100,
-      render: (value: string) => <Tag color={value === "Active" ? "green" : "default"}>{value}</Tag>,
+      render: (value: string) => {
+        const v = String(value ?? "").toLowerCase();
+        const isActive = v === "active" || v === "1" || v === "true";
+        return <Tag color={isActive ? "green" : "default"}>{value}</Tag>;
+      },
     },
     {
       title: "Actions",
       key: "actions",
-      width: 100,
+      width: 140,
       fixed: "right",
       render: (_value, row) => (
         <div className="flex items-center gap-1">
@@ -158,6 +169,18 @@ export default function MasterSupplierOnlyPage() {
             onClick={() => {
               setSelectedRow(row);
               setDetailOpen(true);
+            }}
+          />
+          <Button
+            type="text"
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => {
+              if (!row.id) {
+                message.error("Missing supplier id");
+                return;
+              }
+              router.push(`/master-supplier/only/${encodeURIComponent(String(row.id))}/edit`);
             }}
           />
           <Button
@@ -234,17 +257,54 @@ export default function MasterSupplierOnlyPage() {
         title="Supplier Only Detail"
       >
         {selectedRow ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-            <div><div className="text-gray-500">Supplier Code</div><div className="font-semibold text-gray-900">{selectedRow.supplierCode}</div></div>
-            <div><div className="text-gray-500">Supplier Name</div><div className="font-semibold text-gray-900">{selectedRow.supplierName}</div></div>
-            <div><div className="text-gray-500">Contact Person</div><div className="text-gray-900">{selectedRow.contactPerson}</div></div>
-            <div><div className="text-gray-500">Contact Number</div><div className="text-gray-900">{selectedRow.contactNumber}</div></div>
-            <div><div className="text-gray-500">Email</div><div className="text-gray-900">{selectedRow.emailAddress}</div></div>
-            <div><div className="text-gray-500">Category</div><div className="text-gray-900">{selectedRow.materialCategory}</div></div>
-            <div><div className="text-gray-500">Payment Terms</div><div className="text-gray-900">{selectedRow.paymentTerms}</div></div>
-            <div><div className="text-gray-500">Lead Time</div><div className="text-gray-900">{selectedRow.leadTimeDays} days</div></div>
-            <div className="md:col-span-2"><div className="text-gray-500">Address</div><div className="text-gray-900">{selectedRow.fullAddress}</div></div>
-          </div>
+          supplierDetailQuery.isFetching ? (
+            <div className="text-sm text-gray-500">Loading detail...</div>
+          ) : supplierDetailQuery.isError ? (
+            <div className="text-sm text-red-600">
+              {getApiErrorMessage(supplierDetailQuery.error, "Failed to load supplier detail")}
+            </div>
+          ) : (
+            (() => {
+              const d = supplierDetailQuery.data;
+              const supplierCode = String(d?.supplier_code ?? selectedRow.supplierCode ?? "-");
+              const supplierName = String(d?.supplier_name ?? selectedRow.supplierName ?? "-");
+              const contactPerson = String(d?.contact_person ?? selectedRow.contactPerson ?? "-");
+              const contactNumber = String(d?.contact_number ?? selectedRow.contactNumber ?? "-");
+              const emailAddress = String(d?.email_address ?? selectedRow.emailAddress ?? "-");
+              const materialCategory = String(d?.material_category ?? selectedRow.materialCategory ?? "-");
+              const paymentTerms = String(d?.payment_terms ?? selectedRow.paymentTerms ?? "-");
+              const leadTimeDays = Number(d?.delivery_lead_time_days ?? selectedRow.leadTimeDays ?? 0);
+              const fullAddress = String(d?.full_address ?? selectedRow.fullAddress ?? "-");
+              const city = String(d?.city ?? "-");
+              const province = String(d?.province ?? "-");
+              const country = String(d?.country ?? "-");
+              const taxId = String(d?.tax_id_npwp ?? "-");
+              const bankName = String(d?.bank_name ?? "-");
+              const bankAccountNumber = String(d?.bank_account_number ?? "-");
+              const bankAccountName = String(d?.bank_account_name ?? "-");
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                  <div><div className="text-gray-500">Supplier Code</div><div className="font-semibold text-gray-900">{supplierCode}</div></div>
+                  <div><div className="text-gray-500">Supplier Name</div><div className="font-semibold text-gray-900">{supplierName}</div></div>
+                  <div><div className="text-gray-500">Contact Person</div><div className="text-gray-900">{contactPerson}</div></div>
+                  <div><div className="text-gray-500">Contact Number</div><div className="text-gray-900">{contactNumber}</div></div>
+                  <div><div className="text-gray-500">Email</div><div className="text-gray-900">{emailAddress}</div></div>
+                  <div><div className="text-gray-500">Category</div><div className="text-gray-900">{materialCategory}</div></div>
+                  <div><div className="text-gray-500">Payment Terms</div><div className="text-gray-900">{paymentTerms}</div></div>
+                  <div><div className="text-gray-500">Lead Time</div><div className="text-gray-900">{leadTimeDays} days</div></div>
+                  <div><div className="text-gray-500">City</div><div className="text-gray-900">{city}</div></div>
+                  <div><div className="text-gray-500">Province</div><div className="text-gray-900">{province}</div></div>
+                  <div><div className="text-gray-500">Country</div><div className="text-gray-900">{country}</div></div>
+                  <div><div className="text-gray-500">NPWP</div><div className="text-gray-900">{taxId}</div></div>
+                  <div><div className="text-gray-500">Bank</div><div className="text-gray-900">{bankName}</div></div>
+                  <div><div className="text-gray-500">Bank Account No</div><div className="text-gray-900">{bankAccountNumber}</div></div>
+                  <div><div className="text-gray-500">Bank Account Name</div><div className="text-gray-900">{bankAccountName}</div></div>
+                  <div className="md:col-span-2"><div className="text-gray-500">Address</div><div className="text-gray-900">{fullAddress}</div></div>
+                </div>
+              );
+            })()
+          )
         ) : null}
       </Modal>
 

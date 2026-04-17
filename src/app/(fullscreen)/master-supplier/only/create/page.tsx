@@ -53,6 +53,15 @@ const generateSupplierCode = (): string => {
   return `SUP-${String(n).padStart(4, "0")}`;
 };
 
+const normalizeStatusToApi = (status: SupplierStatus | string | undefined) => {
+  const s = String(status ?? "").trim().toLowerCase();
+  if (!s) return undefined;
+  if (s === "active") return "active";
+  if (s === "inactive") return "inactive";
+  if (s === "active" || s === "inactive") return s;
+  return String(status);
+};
+
 export default function CreateSupplierOnlyPage() {
   const router = useRouter();
   const [form] = Form.useForm<CreateSupplierOnlyForm>();
@@ -90,7 +99,7 @@ export default function CreateSupplierOnlyPage() {
         contact_person: v.contactPerson,
         contact_number: v.contactNumber,
         email_address: v.email,
-        material_category: v.materialCategory,
+        ...(v.materialCategory?.trim() ? { material_category: v.materialCategory.trim() } : {}),
         full_address: v.fullAddress,
         city: v.city,
         province: v.province,
@@ -101,7 +110,7 @@ export default function CreateSupplierOnlyPage() {
         bank_account_name: v.bankAccountName,
         payment_terms: v.paymentTerms,
         delivery_lead_time_days: v.deliveryLeadTimeDays,
-        status: v.status,
+        ...(v.status ? { status: normalizeStatusToApi(v.status) } : {}),
       }).unwrap();
 
       messageApi.success("Supplier created");
@@ -198,11 +207,12 @@ export default function CreateSupplierOnlyPage() {
               <Form.Item
                 label="Category"
                 name="materialCategory"
-                rules={[{ required: true, message: "Category is required" }]}
               >
                 <Select
                   className="!rounded-lg"
+                  allowClear
                   options={[
+                    { label: "(Kosong)", value: "" },
                     { label: "Raw Materials", value: "Raw Material" },
                     { label: "Indirect Material Raw", value: "Indirect Material Raw" },
                     { label: "Sub Con Materials", value: "Sub Con Materials" },
@@ -320,6 +330,7 @@ export default function CreateSupplierOnlyPage() {
                     { label: "7D", value: "7D" },
                     { label: "30D", value: "30D" },
                     { label: "60D", value: "60D" },
+                    { label: "Net 30", value: "Net 30" },
                   ]}
                 />
               </Form.Item>

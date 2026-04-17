@@ -20,10 +20,17 @@ export interface User {
   updated_at: string;
 }
 
+export interface LoginTokenData {
+  access_token: string;
+  expires_at?: string;
+  token_type?: string;
+}
+
 export interface LoginStatusType {
-  message: string;
-  status: string;
-  data: AuthResponse;
+  request_id?: string;
+  status?: number | string;
+  message?: string;
+  data: LoginTokenData;
 }
 
 export interface AuthResponse {
