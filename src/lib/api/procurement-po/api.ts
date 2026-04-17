@@ -76,6 +76,7 @@ export type ProcurementPoRecord = {
   period?: string;
   month?: string;
   po_number?: string;
+  uniq_code?: string;
   po_budget_ref?: string;
   sales_plan?: number;
   total_budget_po?: number;
@@ -163,6 +164,7 @@ const toProcurementPo = (raw: unknown): ProcurementPoRecord => {
     period: toText(record.period) ?? toText(record.month),
     month: toText(record.month) ?? toText(record.period),
     po_number: toText(record.po_number),
+    uniq_code: toText(record.uniq_code) ?? toText(record.item_uniq_code) ?? toText(record.uniq),
     po_budget_ref: toText(record.po_budget_ref),
     sales_plan: toNumber(record.sales_plan),
     total_budget_po: toNumber(record.total_budget_po),
