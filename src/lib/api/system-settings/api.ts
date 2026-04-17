@@ -30,8 +30,10 @@ const normalizeArrayResponse = <T>(response: unknown): T[] => {
     const maybeData = (response as Record<string, unknown>).data;
     if (Array.isArray(maybeData)) return maybeData as T[];
     if (maybeData && typeof maybeData === "object") {
-      const nestedData = (maybeData as Record<string, unknown>).data;
-      if (Array.isArray(nestedData)) return nestedData as T[];
+      const inner = maybeData as Record<string, unknown>;
+      // Handle { data: { items: [...] } } — paginated backend responses
+      if (Array.isArray(inner.items)) return inner.items as T[];
+      if (Array.isArray(inner.data)) return inner.data as T[];
     }
   }
   return [];
@@ -903,7 +905,18 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) =>
-        normalizeArrayResponse<ProcessRecord>(response),
+        normalizeArrayResponse<unknown>(response).map((item) => {
+          const r = (item ?? {}) as Record<string, unknown>;
+          // Backend returns Go PascalCase; normalize to snake_case.
+          return {
+            id: String(r.id ?? r.ID ?? ""),
+            process_code: String(r.process_code ?? r.ProcessCode ?? ""),
+            process_name: String(r.process_name ?? r.ProcessName ?? ""),
+            category: String(r.category ?? r.Category ?? ""),
+            sequence: Number(r.sequence ?? r.Sequence ?? 0),
+            status: String(r.status ?? r.Status ?? ""),
+          } satisfies ProcessRecord;
+        }),
       providesTags: (result) => {
         const base = [{ type: "SystemSettingsProcess" as const, id: "LIST" }];
         const ids = (result ?? [])

@@ -30,11 +30,13 @@ type BomRow = {
   partName: string;
   partNumber: string;
   imageSrc?: string;
+  assetLabel: string;
+  assetType: string;
+  cadViewable: boolean;
   levelLabel: string;
   isParent: boolean;
   qpu: string;
   version: string;
-  cadAvailable: boolean;
   status: BomStatus;
   children?: BomRow[];
 
@@ -74,6 +76,9 @@ const mapNodeToRow = (
   const qpu = !isParent && qpuNumber != null ? `${qpuNumber} pcs` : "-";
   const version = typeof node.version === "string" && node.version.trim() ? node.version : "-";
   const imageSrc = typeof node.asset === "string" && node.asset.trim() ? node.asset : node.image_url;
+  const assetLabel = node.asset_label || (imageSrc ? "2D Available" : "-");
+  const assetType = node.asset_type || "";
+  const cadViewable = Boolean(node.cad_viewable);
   const children = Array.isArray(node.children)
     ? node.children.map((c) =>
         mapNodeToRow(c, {
@@ -89,11 +94,13 @@ const mapNodeToRow = (
     partName: String(node.part_name ?? "-") || "-",
     partNumber: String(node.part_number ?? "-") || "-",
     imageSrc: imageSrc || undefined,
+    assetLabel,
+    assetType,
+    cadViewable,
     levelLabel: isParent ? "Parent" : `Level ${depth}`,
     isParent,
     qpu,
     version,
-    cadAvailable: Boolean(imageSrc),
     status: toStatusLabel((node as any)?.bom_status ?? node.status),
     children,
     bomId,
@@ -220,19 +227,27 @@ export default function BillOfMaterialPage() {
       title: "2D/3D CAD",
       key: "cad",
       width: 160,
-      render: (_: unknown, record: BomRow) => (
-        <Button
-          type="default"
-          size="small"
-          icon={<EyeOutlined />}
-          onClick={(e) => {
-            e.stopPropagation();
-            messageApi.info(`Open CAD viewer for ${record.uniq}`);
-          }}
-        >
-          {record.cadAvailable ? "3D Available" : "Not Available"}
-        </Button>
-      ),
+      render: (_: unknown, record: BomRow) => {
+        const hasAsset = record.assetLabel !== "-";
+        return (
+          <Button
+            type={hasAsset ? "default" : "text"}
+            size="small"
+            icon={<EyeOutlined />}
+            disabled={!hasAsset}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (record.cadViewable) {
+                messageApi.info(`Open CAD viewer for ${record.uniq}`);
+              } else if (record.imageSrc) {
+                window.open(record.imageSrc, "_blank");
+              }
+            }}
+          >
+            {record.assetLabel}
+          </Button>
+        );
+      },
     },
     {
       title: "Status",

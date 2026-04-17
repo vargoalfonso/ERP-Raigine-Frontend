@@ -11,6 +11,9 @@ export type BackendBomNode = {
   bom_status?: any;
   uniq_code?: string;
   asset?: string;
+  asset_type?: string;
+  asset_label?: string;
+  cad_viewable?: boolean;
   model?: string;
 
   description?: any;
@@ -137,6 +140,8 @@ const resolveMaybeRelativeUrl = (url: string): string => {
   const u = url.trim();
   if (!u) return "";
   if (/^https?:\/\//i.test(u)) return u;
+  // /uploads/ paths are proxied via Next.js rewrites in next.config.ts — use as-is
+  if (u.startsWith("/uploads/")) return u;
   if (!apiBaseUrl) return u;
   if (u.startsWith("/")) return `${apiBaseUrl}${u}`;
   return `${apiBaseUrl}/${u}`;
@@ -219,6 +224,21 @@ const mapNewNodeToLegacy = (raw: unknown): BackendBomNode => {
       pickString(raw.image_path) ||
       pickString(raw.imagePath)
       ),
+    asset_type: (() => {
+      const a = raw.asset;
+      if (a && typeof a === "object") return pickString((a as any).asset_type) || undefined;
+      return undefined;
+    })(),
+    asset_label: (() => {
+      const a = raw.asset;
+      if (a && typeof a === "object") return pickString((a as any).label) || undefined;
+      return undefined;
+    })(),
+    cad_viewable: (() => {
+      const a = raw.asset;
+      if (a && typeof a === "object") return Boolean((a as any).cad_viewable);
+      return false;
+    })(),
 
     id: pickString(raw.id) || pickString(raw.uuid) || pickString(raw._id),
     uuid: pickString(raw.uuid),
@@ -303,13 +323,26 @@ const buildTreeIfFlat = (nodes: BackendBomNode[]): BackendBomNode[] => {
   return roots;
 };
 
-const parseCreateId = (response: unknown): string => {
-  if (!isRecord(response)) return "";
-  const direct = pickString(response.bom_id) || pickString(response.id) || pickString(response.uuid);
-  if (direct) return direct;
-  const data = response.data;
-  if (!isRecord(data)) return "";
-  return pickString(data.bom_id) || pickString(data.id) || pickString(data.uuid);
+const pickId = (...values: unknown[]): string => {
+  for (const v of values) {
+    if (v !== undefined && v !== null) {
+      const s = String(v).trim();
+      if (s && s !== "0") return s;
+    }
+  }
+  return "";
+};
+
+const parseCreateIds = (response: unknown): { id: string; bom_id: string } => {
+  const empty = { id: "", bom_id: "" };
+  if (!isRecord(response)) return empty;
+  const data = isRecord(response.data) ? response.data : response;
+  // `id` = item ID (used for upload sessions)
+  // `bom_id` = BOM header ID (used for BOM GET/UPDATE URLs)
+  return {
+    id: pickId(data.id, data.uuid),
+    bom_id: pickId(data.bom_id, data.id, data.uuid),
+  };
 };
 
 const BOM_TAG = { type: "BOM" as const, id: "TREE" as const };
@@ -345,14 +378,14 @@ export const bomSlice = apiSlice.injectEndpoints({
       },
     }),
 
-    createBom: builder.mutation<ApiResponse<{ id: string }>, BomCreateRequest>({
+    createBom: builder.mutation<ApiResponse<{ id: string; bom_id: string }>, BomCreateRequest>({
       query: (body) => ({
         url: "/products/bom",
         method: "POST",
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok({ id: parseCreateId(response) }, "Created"),
+      transformResponse: (response: unknown) => ok(parseCreateIds(response), "Created"),
       invalidatesTags: [BOM_TAG],
     }),
 
