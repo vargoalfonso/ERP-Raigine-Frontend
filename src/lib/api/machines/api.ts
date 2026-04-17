@@ -12,7 +12,11 @@ const normalizeArrayResponse = <T,>(response: unknown): T[] => {
   if (isRecord(response)) {
     const data = response.data;
     if (Array.isArray(data)) return data as T[];
-    if (isRecord(data) && Array.isArray(data.data)) return data.data as T[];
+    if (isRecord(data)) {
+      // Handle { data: { items: [...] } } — paginated backend responses
+      if (Array.isArray(data.items)) return data.items as T[];
+      if (Array.isArray(data.data)) return data.data as T[];
+    }
   }
   return [];
 };
@@ -69,11 +73,14 @@ const toMachineRecord = (raw: unknown): MachineRecord => {
   const record = isRecord(raw) ? raw : {};
   const nestedProcess = isRecord(record.process) ? record.process : undefined;
 
+  const rawId = record.id ?? record.uuid ?? record.machine_id ?? record.machineId;
+  const resolvedId =
+    rawId !== undefined && rawId !== null
+      ? String(rawId)
+      : (getString(record, ["machine_number", "machineNumber"]) ?? "");
+
   return {
-    id:
-      getString(record, ["id", "uuid", "machine_id", "machineId"]) ??
-      getString(record, ["machine_number", "machineNumber"]) ??
-      "",
+    id: resolvedId,
     machine_name:
       getString(record, ["machine_name", "machineName", "name"]) ?? "",
     machine_number:
@@ -112,7 +119,7 @@ export const machinesApiSlice = apiSlice
     endpoints: (builder) => ({
       getMachines: builder.query<MachineRecord[], void>({
         query: () => ({
-          url: "/api/master/machines",
+          url: "/machines",
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
@@ -131,7 +138,7 @@ export const machinesApiSlice = apiSlice
       }),
       createMachine: builder.mutation<MachineRecord, CreateMachineRequest>({
         query: (body) => ({
-          url: "/api/master/machines",
+          url: "/machines",
           method: "POST",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },

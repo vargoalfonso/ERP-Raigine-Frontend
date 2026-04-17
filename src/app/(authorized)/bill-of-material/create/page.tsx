@@ -149,13 +149,14 @@ export default function CreateBomPage() {
   const processOptions = useMemo<Array<{ value: string | number; label: string }>>(() => {
     return (processes ?? [])
       .map((p: any) => {
-        const rawId = p?.id;
+        // Handle both snake_case (normalized) and PascalCase (raw Go response)
+        const rawId = p?.id ?? p?.ID;
         const idStr = typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
         if (!idStr) return null;
         const asNumber = Number(idStr);
         const value: string | number = Number.isFinite(asNumber) ? asNumber : idStr;
-        const code = typeof p?.process_code === "string" ? p.process_code.trim() : "";
-        const name = typeof p?.process_name === "string" ? p.process_name.trim() : "";
+        const code = String(p?.process_code ?? p?.ProcessCode ?? "").trim();
+        const name = String(p?.process_name ?? p?.ProcessName ?? "").trim();
         return {
           value,
           label: code && name ? `${code} — ${name}` : name || code || idStr,
@@ -210,8 +211,10 @@ export default function CreateBomPage() {
         const code = String((u as any).code ?? (u as any).unit_code ?? "").trim();
         const name = String((u as any).name ?? (u as any).unit_name ?? "").trim();
         if (!id) return null;
+        // Backend expects UOM code string (e.g. "PCS"), not numeric ID.
+        const value = code || id;
         return {
-          value: id,
+          value,
           label: code && name ? `${code} — ${name}` : code || name || id,
         };
       })
@@ -220,9 +223,9 @@ export default function CreateBomPage() {
 
   const seededUomOptions = useMemo<Array<{ value: string; label: string }>>(
     () => [
-      { value: "1", label: "PCS — Pieces" },
-      { value: "2", label: "KG — Kilogram" },
-      { value: "3", label: "M — Meter" },
+      { value: "PCS", label: "PCS — Pieces" },
+      { value: "KG", label: "KG — Kilogram" },
+      { value: "M", label: "M — Meter" },
     ],
     []
   );
@@ -527,7 +530,7 @@ export default function CreateBomPage() {
             };
             if (childRoutes.length > 0) childBody.process_routes = childRoutes;
             if (childSpec !== undefined) childBody.material_spec = childSpec;
-            if (nested.length > 0) childBody.children = nested;
+            childBody.children = nested; // always send [], backend contract
             return childBody;
           })
           .filter(Boolean);
@@ -573,7 +576,7 @@ export default function CreateBomPage() {
       const parentStatus = toApiStatus(values.status);
       if (parentStatus) payload.status = parentStatus;
       if (parentRoutes.length > 0) payload.process_routes = parentRoutes;
-      if (childrenPayload.length > 0) payload.children = childrenPayload;
+      payload.children = childrenPayload; // always send [], backend contract
 
       if (skippedChildren.length > 0) {
         messageApi.warning(
@@ -585,7 +588,10 @@ export default function CreateBomPage() {
       console.debug("[BOM] create payload", payload);
 
       const created = await createBom(payload as any).unwrap();
-      const bomId = (created as any)?.data?.id as string | undefined;
+      // itemId = item's own ID → used as item_id in upload sessions
+      // bomId  = BOM header ID → used in BOM GET/UPDATE URLs
+      const itemId = (created as any)?.data?.id as string | undefined;
+      const bomId = (created as any)?.data?.bom_id as string | undefined;
 
       const updateBomBody = async (id: string, body: Record<string, unknown>) => {
         const token = getCookiesFromBrowser("Authorization");
@@ -614,7 +620,7 @@ export default function CreateBomPage() {
       };
 
       const parentFile = asFile(fileList?.[0]?.originFileObj);
-      if (bomId && parentFile) {
+      if (itemId && parentFile) {
         messageApi.open({
           key: "bom-upload-parent",
           type: "loading",
@@ -623,7 +629,7 @@ export default function CreateBomPage() {
         });
 
         const sessionArgs: CreateUploadSessionArgs = {
-          item_id: bomId,
+          item_id: itemId,
           asset_type: "drawing",
           file_name: parentFile.name,
           mime_type: parentFile.type || "application/octet-stream",
@@ -640,10 +646,6 @@ export default function CreateBomPage() {
           session: sessionArgs,
         });
 
-        const asset = uploaded.asset || uploaded.url;
-        if (asset) {
-          await updateBomBody(bomId, { asset });
-        }
         messageApi.destroy("bom-upload-parent");
       }
 
@@ -663,17 +665,17 @@ export default function CreateBomPage() {
           ? detailData.children
           : [];
 
+        const toStrId = (v: unknown): string => {
+          if (v === undefined || v === null) return "";
+          const s = String(v).trim();
+          return s !== "0" ? s : "";
+        };
+
         const uniqToChildId = new Map<string, string>();
         for (const c of childrenFromApi) {
           const uniq = typeof c?.uniq_code === "string" ? c.uniq_code : typeof c?.uniq === "string" ? c.uniq : "";
-          const childId =
-            typeof c?.bom_child_id === "string"
-              ? c.bom_child_id
-              : typeof c?.id === "string"
-                ? c.id
-                : typeof c?.uuid === "string"
-                  ? c.uuid
-                  : "";
+          // `id` is the item ID needed for upload sessions (numeric in API response)
+          const childId = toStrId(c?.id) || toStrId(c?.uuid) || toStrId(c?.bom_child_id);
           if (uniq && childId) uniqToChildId.set(uniq, childId);
         }
 

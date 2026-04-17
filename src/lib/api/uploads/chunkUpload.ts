@@ -170,10 +170,12 @@ export const completeUploadSession = async (args: {
 
   const data = isRecord(json) && isRecord(json.data) ? json.data : isRecord(json) ? json : null;
   const asset = pickString(
+    data?.final_url,
     data?.asset,
     data?.file_url,
     data?.url,
     data?.path,
+    (data?.data as any)?.final_url,
     (data?.data as any)?.asset,
     (data?.data as any)?.file_url,
     (data?.data as any)?.url,
@@ -188,18 +190,11 @@ export const uploadFileInChunks = async (
   file: File,
   opts?: { onProgress?: (percent: number) => void; session?: CreateUploadSessionArgs }
 ) => {
-  const chunkSize =
-    typeof opts?.session?.chunk_size === "number" &&
-    Number.isFinite(opts.session.chunk_size) &&
-    opts.session.chunk_size > 0
-      ? opts.session.chunk_size
-      : 65536;
-  const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize));
   const sessionArgs = opts?.session ?? {};
-  const { sessionId } = await createUploadSession(file, {
-    ...sessionArgs,
-    chunk_size: sessionArgs.chunk_size ?? chunkSize,
-  });
+  // Use chunkSize returned by the server so chunk slicing stays in sync with
+  // what was negotiated in the session (server is the source of truth).
+  const { sessionId, chunkSize } = await createUploadSession(file, sessionArgs);
+  const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize));
   for (let idx = 0; idx < totalChunks; idx++) {
     const start = idx * chunkSize;
     const end = Math.min(file.size, start + chunkSize);
