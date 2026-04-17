@@ -69,6 +69,7 @@ type ScanEventRow = {
 
 type LineCard = {
   key: string;
+  machineId: string;
   lineName: string;
   lineCode: string;
   status: LineStatus;
@@ -106,6 +107,7 @@ const tabs: Array<{ id: ShopFloorTabId; label: string }> = [
 const lines: LineCard[] = [
   {
     key: "1",
+    machineId: "1",
     lineName: "Assembly Line Alpha",
     lineCode: "LINE-A1",
     status: "Running",
@@ -129,6 +131,7 @@ const lines: LineCard[] = [
   },
   {
     key: "2",
+    machineId: "2",
     lineName: "CNC Machining Center",
     lineCode: "LINE-B2",
     status: "Running",
@@ -152,6 +155,7 @@ const lines: LineCard[] = [
   },
   {
     key: "3",
+    machineId: "3",
     lineName: "Brake Assembly Line",
     lineCode: "LINE-C3",
     status: "Changeover",
@@ -175,6 +179,7 @@ const lines: LineCard[] = [
   },
   {
     key: "4",
+    machineId: "4",
     lineName: "Stamping Press",
     lineCode: "LINE-D4",
     status: "Issue",

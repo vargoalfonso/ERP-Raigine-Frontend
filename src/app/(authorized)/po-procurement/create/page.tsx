@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { Button, DatePicker, Input, InputNumber, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { LeftOutlined, PlusOutlined } from "@ant-design/icons";
@@ -44,7 +44,7 @@ const procurementTypeToBudgetType = (type: ProcurementPoType): PoBudgetType => {
   return "indirect";
 };
 
-export default function CreatePoProcurementPage() {
+function CreatePoProcurementPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -383,5 +383,13 @@ export default function CreatePoProcurementPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function CreatePoProcurementPage() {
+  return (
+    <Suspense fallback={null}>
+      <CreatePoProcurementPageContent />
+    </Suspense>
   );
 }

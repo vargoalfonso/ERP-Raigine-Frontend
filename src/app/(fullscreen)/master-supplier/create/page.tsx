@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { Suspense, useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Alert,
@@ -147,7 +147,7 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
   };
 };
 
-export default function MasterSupplierCreatePage() {
+function MasterSupplierCreatePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [messageApi, contextHolder] = message.useMessage();
@@ -554,5 +554,13 @@ export default function MasterSupplierCreatePage() {
         ) : null}
       </div>
     </div>
+  );
+}
+
+export default function MasterSupplierCreatePage() {
+  return (
+    <Suspense fallback={null}>
+      <MasterSupplierCreatePageContent />
+    </Suspense>
   );
 }

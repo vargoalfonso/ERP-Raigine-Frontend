@@ -345,6 +345,8 @@ const parseCreateIds = (response: unknown): { id: string; bom_id: string } => {
   };
 };
 
+const parseCreateId = (response: unknown): string => parseCreateIds(response).id;
+
 const BOM_TAG = { type: "BOM" as const, id: "TREE" as const };
 
 export const bomSlice = apiSlice.injectEndpoints({

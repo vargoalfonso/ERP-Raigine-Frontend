@@ -390,12 +390,14 @@ function EmployeeDeptPageContent() {
     const list = employeesApiData ?? [];
 
     return list.map((e) => {
-      const ac = accessControlByEmployeeId[e.employee_id];
+      const employeeId = e.employee_id ?? e.id;
+      const ac = accessControlByEmployeeId[employeeId];
       const departmentName = e.department_id ? departmentById[e.department_id]?.department_name : undefined;
       const department = departmentName ?? ac?.department ?? "-";
-      const roleId = e.role_id ?? ac?.role_id;
+      const rawRoleId = e.role_id ?? ac?.role_id;
+      const roleId = rawRoleId == null ? undefined : String(rawRoleId);
       const roleName = roleId ? rolesById[roleId] ?? roleId : "-";
-      const isManager = roleId ? managerRoleIds.has(String(roleId)) : false;
+      const isManager = roleId ? managerRoleIds.has(roleId) : false;
 
       const managerName = e.reports_to_id ? employeeById[String(e.reports_to_id)] : undefined;
 
@@ -406,8 +408,8 @@ function EmployeeDeptPageContent() {
         key: e.id,
         apiId: e.id,
         accessControlId: ac?.id,
-        departmentId: e.department_id ?? undefined,
-        empId: e.employee_id,
+        departmentId: e.department_id == null ? undefined : String(e.department_id),
+        empId: employeeId,
         name: ac?.full_name || e.full_name,
         isManager,
         jobTitle: e.job_title ?? "-",

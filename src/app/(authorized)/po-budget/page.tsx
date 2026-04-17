@@ -5,15 +5,18 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import {
   useGetPoBudgetListQuery,
+  useGetPoBudgetSummaryQuery,
   useAddPoBudgetEntryMutation,
   useAddPoBudgetBulkMutation,
   useGetPoBudgetDetailQuery,
   useUpdatePoBudgetEntryMutation,
+  type PoBudgetRow as ApiPoBudgetRow,
   type PoBudgetType,
   type PoBudgetEntryRequest,
   type PoBudgetGroupedDetail,
   type PoBudgetUpdateRequest,
 } from "@/lib/api/po-budget/api";
+import type { ApiResponse } from "@/types";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import {
   useListSuppliersQuery,
@@ -56,6 +59,14 @@ import {
 } from "react-icons/md";
 
 type BudgetTabId = "raw" | "subcon" | "indirect";
+
+type TabPaginationState = Record<BudgetTabId, { page: number; pageSize: number }>;
+
+const EMPTY_PO_BUDGET_RESPONSE: ApiResponse<ApiPoBudgetRow[]> = {
+  message: "OK",
+  status: "success",
+  data: [],
+};
 
 type BulkBudgetType = "adhoc" | "kanban";
 
@@ -255,6 +266,11 @@ export default function PoBudgetPage() {
   );
 
   const [activeTab, setActiveTab] = useState<BudgetTabId>("raw");
+  const [paginationByTab, setPaginationByTab] = useState<TabPaginationState>({
+    raw: { page: 1, pageSize: 20 },
+    subcon: { page: 1, pageSize: 20 },
+    indirect: { page: 1, pageSize: 20 },
+  });
 
   const initialRawRows = useMemo<PoBudgetRow[]>(
     () => [
@@ -370,18 +386,30 @@ export default function PoBudgetPage() {
   );
 
   const {
-    data: rawListRes = { data: [] as PoBudgetRow[] },
-  } = useGetPoBudgetListQuery({ type: "raw-material" as PoBudgetType, limit: 20, page: 1 }, {
+    data: rawListRes = EMPTY_PO_BUDGET_RESPONSE,
+  } = useGetPoBudgetListQuery({
+    type: "raw-material" as PoBudgetType,
+    limit: paginationByTab.raw.pageSize,
+    page: paginationByTab.raw.page,
+  }, {
     skip: !useApi,
   });
   const {
-    data: subconListRes = { data: [] as PoBudgetRow[] },
-  } = useGetPoBudgetListQuery({ type: "subcon" as PoBudgetType, limit: 20, page: 1 }, {
+    data: subconListRes = EMPTY_PO_BUDGET_RESPONSE,
+  } = useGetPoBudgetListQuery({
+    type: "subcon" as PoBudgetType,
+    limit: paginationByTab.subcon.pageSize,
+    page: paginationByTab.subcon.page,
+  }, {
     skip: !useApi,
   });
   const {
-    data: indirectListRes = { data: [] as PoBudgetRow[] },
-  } = useGetPoBudgetListQuery({ type: "indirect" as PoBudgetType, limit: 20, page: 1 }, {
+    data: indirectListRes = EMPTY_PO_BUDGET_RESPONSE,
+  } = useGetPoBudgetListQuery({
+    type: "indirect" as PoBudgetType,
+    limit: paginationByTab.indirect.pageSize,
+    page: paginationByTab.indirect.page,
+  }, {
     skip: !useApi,
   });
 
@@ -399,6 +427,12 @@ export default function PoBudgetPage() {
     subcon: subconListRes.data,
     indirect: indirectListRes.data,
   }), [rawListRes.data, subconListRes.data, indirectListRes.data]);
+
+  const paginationMetaByTab = useMemo(() => ({
+    raw: rawListRes.pagination,
+    subcon: subconListRes.pagination,
+    indirect: indirectListRes.pagination,
+  }), [rawListRes.pagination, subconListRes.pagination, indirectListRes.pagination]);
 
   const [addOpen, setAddOpen] = useState(false);
   const [detailState, setDetailState] = useState<DetailState>({ open: false, row: null });
@@ -759,7 +793,7 @@ export default function PoBudgetPage() {
   }, [addForm.customer, addForm.customerId, approvedPrls, customerIdByName]);
 
   const filteredRows = useMemo(() => {
-    const sourceRows = rowsByTab[activeTab].length
+    const sourceRows = useApi
       ? rowsByTab[activeTab]
       : activeTab === "raw"
         ? initialRawRows
@@ -793,6 +827,38 @@ export default function PoBudgetPage() {
     initialSubconRows,
     initialIndirectRows,
   ]);
+
+  const activeApiType = useMemo(() => getApiType(activeTab), [activeTab]);
+  const activePagination = paginationByTab[activeTab];
+  const activePaginationMeta = paginationMetaByTab[activeTab];
+
+  const { data: summaryRes } = useGetPoBudgetSummaryQuery(
+    { type: activeApiType },
+    { skip: !useApi },
+  );
+
+  const fallbackSummary = useMemo(() => {
+    const totalEntries = filteredRows.length;
+    const totalSalesPlan = filteredRows.reduce((sum, row) => sum + (Number(row.salesPlan) || 0), 0);
+    const totalPo = filteredRows.reduce((sum, row) => sum + (Number(row.totalPo) || 0), 0);
+    const totalPrl = filteredRows.reduce((sum, row) => sum + (Number(row.prl) || 0), 0);
+    const deltaApoPrl = filteredRows.reduce((sum, row) => sum + (Number(row.apoPrl) || 0), 0);
+    const pendingApprovals = filteredRows.reduce((sum, row) => sum + (row.status === "pending" ? 1 : 0), 0);
+
+    return {
+      total_entries: totalEntries,
+      total_sales_plan: totalSalesPlan,
+      total_po: totalPo,
+      total_prl: totalPrl,
+      delta_apo_prl: deltaApoPrl,
+      pending_approvals: pendingApprovals,
+    };
+  }, [filteredRows]);
+
+  const summary = useMemo(() => {
+    if (useApi && summaryRes?.data) return summaryRes.data;
+    return fallbackSummary;
+  }, [fallbackSummary, summaryRes?.data]);
 
   const periodOptions = useMemo(
     () =>
@@ -1735,37 +1801,37 @@ export default function PoBudgetPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3 mb-6">
         <StatCard
           label="Total Entries"
-          value={4}
+          value={formatNumber(summary.total_entries)}
           icon={<MdDescription size={18} />}
           accent="bg-blue-50 text-blue-600"
         />
         <StatCard
           label="Sales Plan"
-          value={"40,500"}
+          value={formatNumber(summary.total_sales_plan)}
           icon={<MdOutlineShowChart size={18} />}
           accent="bg-pink-50 text-pink-600"
         />
         <StatCard
           label="Total PO"
-          value={"43,200"}
+          value={formatNumber(summary.total_po)}
           icon={<MdAttachMoney size={18} />}
           accent="bg-green-50 text-green-600"
         />
         <StatCard
           label="Total PRL"
-          value={"41,900"}
+          value={formatNumber(summary.total_prl)}
           icon={<MdQueryStats size={18} />}
           accent="bg-purple-50 text-purple-600"
         />
         <StatCard
           label="APO - PRL"
-          value={"1,300"}
+          value={formatNumber(summary.delta_apo_prl)}
           icon={<MdInventory2 size={18} />}
           accent="bg-orange-50 text-orange-600"
         />
         <StatCard
           label="Pending Approvals"
-          value={2}
+          value={formatNumber(summary.pending_approvals)}
           icon={<MdSchedule size={18} />}
           accent="bg-amber-50 text-amber-700"
         />
@@ -1788,7 +1854,34 @@ export default function PoBudgetPage() {
             columns={columns}
             rowKey="key"
             size="middle"
-            pagination={false}
+            pagination={{
+              current: activePagination.page,
+              pageSize: activePagination.pageSize,
+              total: useApi
+                ? (activePaginationMeta?.total ?? filteredRows.length)
+                : filteredRows.length,
+              showSizeChanger: true,
+              pageSizeOptions: ["10", "20", "50", "100"],
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+              onChange: (page, pageSize) => {
+                setPaginationByTab((prev) => ({
+                  ...prev,
+                  [activeTab]: {
+                    page,
+                    pageSize: pageSize ?? prev[activeTab].pageSize,
+                  },
+                }));
+              },
+              onShowSizeChange: (_current, size) => {
+                setPaginationByTab((prev) => ({
+                  ...prev,
+                  [activeTab]: {
+                    page: 1,
+                    pageSize: size,
+                  },
+                }));
+              },
+            }}
             scroll={{ x: 1600 }}
           />
         </div>

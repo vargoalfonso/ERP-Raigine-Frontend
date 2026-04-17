@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { Button, Input, message } from "antd";
 import { LeftOutlined } from "@ant-design/icons";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetProcurementDnByIdQuery, useLazyScanProcurementDnPackingQuery } from "@/lib/api/procurement-dn/api";
@@ -79,17 +79,21 @@ function mockItems(): DnDetailItem[] {
   ];
 }
 
-export default function DnRawMaterialDetailPage() {
+function DnRawMaterialDetailPageContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const params = useParams<{ dnNumber: string }>();
   const dnNumber = params?.dnNumber ?? "XXX";
-  const tab = searchParams.get("tab") ?? "raw";
+  const [tab, setTab] = useState("raw");
   const apiEnabled = Boolean(apiBaseUrl);
 
   const detailQuery = useGetProcurementDnByIdQuery(dnNumber, { skip: !apiEnabled || !dnNumber });
   const [runScan, scanState] = useLazyScanProcurementDnPackingQuery();
   const [scanPacking, setScanPacking] = useState("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setTab(new URLSearchParams(window.location.search).get("tab") ?? "raw");
+  }, []);
 
   useEffect(() => {
     if (!apiEnabled || !detailQuery.error) return;
@@ -516,5 +520,13 @@ export default function DnRawMaterialDetailPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function DnRawMaterialDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <DnRawMaterialDetailPageContent />
+    </Suspense>
   );
 }

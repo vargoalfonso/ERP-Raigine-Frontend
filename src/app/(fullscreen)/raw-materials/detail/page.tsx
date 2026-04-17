@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 import { Table, Tabs, Card, Tag, Button, message } from "antd";
@@ -30,7 +30,7 @@ type RowHistory = {
 
 const formatNumber = (value: number | undefined) => new Intl.NumberFormat("en-US").format(Number(value ?? 0));
 
-export default function RawMaterialsDetailPage() {
+function RawMaterialsDetailPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState("1");
@@ -224,5 +224,13 @@ export default function RawMaterialsDetailPage() {
         </Button>
       </div>
     </div>
+  );
+}
+
+export default function RawMaterialsDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <RawMaterialsDetailPageContent />
+    </Suspense>
   );
 }

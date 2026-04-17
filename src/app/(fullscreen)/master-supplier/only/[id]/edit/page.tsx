@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { skipToken } from "@reduxjs/toolkit/query";
+import { useParams, useRouter } from "next/navigation";
 import {
   Button,
   Card,
@@ -64,17 +65,17 @@ const normalizeStatusToUi = (status: unknown): SupplierStatusUi => {
   return s === "inactive" ? "Inactive" : "Active";
 };
 
-export default function EditSupplierOnlyPage({ params }: { params: { id: string } }) {
+export default function EditSupplierOnlyPage() {
   const router = useRouter();
+  const params = useParams<{ id?: string | string[] }>();
   const [form] = Form.useForm<EditSupplierOnlyForm>();
   const [messageApi, contextHolder] = message.useMessage();
   const apiEnabled = Boolean(apiBaseUrl);
 
-  const supplierId = params.id;
+  const supplierId = Array.isArray(params?.id) ? params.id[0] : params?.id;
+  const supplierQueryArg = apiEnabled && supplierId ? supplierId : skipToken;
 
-  const supplierQuery = useGetSupplierByIdQuery(supplierId, {
-    skip: !apiEnabled || !supplierId,
-  });
+  const supplierQuery = useGetSupplierByIdQuery(supplierQueryArg);
 
   const [updateSupplier, updateState] = useUpdateSupplierMutation();
 
@@ -118,6 +119,10 @@ export default function EditSupplierOnlyPage({ params }: { params: { id: string 
 
       const supplierCode = v.supplierCode?.trim();
 
+      if (!supplierId) {
+        messageApi.error("Missing supplier id");
+        return;
+      }
       await updateSupplier({
         id: supplierId,
         body: {

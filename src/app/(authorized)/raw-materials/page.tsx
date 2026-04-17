@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -37,7 +37,12 @@ import { FaRegEdit, FaRegTrashAlt } from "react-icons/fa";
 import { RawMaterialRecord } from "@/lib/api/raw-materials/interface";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
-import { type InventoryRecord, useGetInventoryListQuery } from "@/lib/api/inventory/api";
+import {
+  type InventoryKanbanSummary,
+  type InventoryRecord,
+  useGetInventoryListQuery,
+  useLazyGetInventoryKanbanSummaryQuery,
+} from "@/lib/api/inventory/api";
 import {
   formatNumber,
   getStatusStockColor,
@@ -117,6 +122,27 @@ const deriveStatus = (stockQty: number): RawMaterialRecord["status"] => {
   if (stockQty <= 0) return "OutOfStock";
   if (stockQty <= 20) return "LowStock";
   return "Available";
+};
+
+const mapKanbanStatusToUi = (
+  value: unknown,
+): RawMaterialRecord["status"] | null => {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return null;
+  if (raw.includes("out")) return "OutOfStock";
+  if (raw.includes("low")) return "LowStock";
+  if (raw.includes("avail") || raw.includes("in_stock") || raw.includes("in stock")) return "Available";
+  return null;
+};
+
+const isBuyValue = (value: unknown): boolean | null => {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === "buy") return true;
+  if (raw === "not_buy" || raw === "not buy" || raw === "no") return false;
+  if (raw.includes("not")) return false;
+  if (raw.includes("buy")) return true;
+  return null;
 };
 
 const mapInventoryToRawMaterial = (record: InventoryRecord): RawMaterialRecord => {
@@ -400,6 +426,11 @@ export default function RawMaterialsPage() {
     { skip: !apiEnabled }
   );
 
+  const [triggerKanbanSummary] = useLazyGetInventoryKanbanSummaryQuery();
+  const [kanbanSummaryByUniq, setKanbanSummaryByUniq] = useState<Record<string, InventoryKanbanSummary>>({});
+  const requestedUniqsRef = useRef<Set<string>>(new Set());
+  const [kanbanApiMissing, setKanbanApiMissing] = useState(false);
+
   useEffect(() => {
     if (!apiEnabled || !listQuery.error) return;
     if (isMissingRouteError(listQuery.error)) {
@@ -425,6 +456,38 @@ export default function RawMaterialsPage() {
         .some((value) => String(value).toLowerCase().includes(q));
     });
   }, [inventoryRows, searchValue]);
+
+  useEffect(() => {
+    if (!apiEnabled) return;
+    if (kanbanApiMissing) return;
+    if (isMissingRouteError(listQuery.error)) return;
+
+    const uniqs = Array.from(
+      new Set(
+        filteredRows
+          .map((row) => String(row.uniq ?? "").trim())
+          .filter(Boolean),
+      ),
+    );
+
+    uniqs.forEach((uniq) => {
+      if (requestedUniqsRef.current.has(uniq)) return;
+      requestedUniqsRef.current.add(uniq);
+
+      triggerKanbanSummary({ uniq_code: uniq })
+        .unwrap()
+        .then((res) => {
+          const summary = res?.data;
+          if (!summary) return;
+          setKanbanSummaryByUniq((prev) => ({ ...prev, [uniq]: summary }));
+        })
+        .catch((err) => {
+          if (isMissingRouteError(err)) {
+            setKanbanApiMissing(true);
+          }
+        });
+    });
+  }, [apiEnabled, filteredRows, kanbanApiMissing, listQuery.error, triggerKanbanSummary]);
 
   const paginationTotal = searchValue.trim()
     ? filteredRows.length
@@ -570,19 +633,26 @@ export default function RawMaterialsPage() {
     {
       title: "Kanban Info",
       key: "kanban_quantity",
-      width: 120,
+      width: 160,
       render: (record: RawMaterialRecord) => (
-        <div>
-          <div className="text-sm font-semibold">
-            {formatNumber(record.kanban_quantity || 0)}
-          </div>
-          <div className="text-xs text-gray-500">
-            Need:{" "}
-            {formatNumber(
-              (record.safety_stock || 0) - (record.kanban_quantity || 0)
-            )}
-          </div>
-        </div>
+        (() => {
+          const summary = kanbanSummaryByUniq[String(record.uniq ?? "").trim()];
+          const totalneeded = Number(summary?.kanbans_needed ?? record.kanban_quantity ?? 0);
+          const needed = Number(
+            
+            summary?.stock_to_complete ??
+              (record.safety_stock || 0) - (record.kanban_quantity || 0),
+          );
+
+          return (
+            <div>
+              <div className="text-sm font-semibold">
+                {formatNumber(totalneeded)} Kanban
+              </div>
+              <div className="text-xs text-gray-500">Stock to Complete: {formatNumber(needed)}</div>
+            </div>
+          );
+        })()
       ),
     },
     {
@@ -590,8 +660,11 @@ export default function RawMaterialsPage() {
       key: "status",
       width: 110,
       render: (record: RawMaterialRecord) => {
-        const statusColor = getStatusStockColor(record.status);
-        return <Tag className={statusColor}>{record.status || "-"}</Tag>;
+        const summary = kanbanSummaryByUniq[String(record.uniq ?? "").trim()];
+        const mapped = mapKanbanStatusToUi(summary?.status);
+        const status = mapped ?? record.status;
+        const statusColor = getStatusStockColor(status);
+        return <Tag className={statusColor}>{status || "-"}</Tag>;
       },
     },
     {
@@ -599,15 +672,18 @@ export default function RawMaterialsPage() {
       key: "is_buyed",
       width: 110,
       render: (record: RawMaterialRecord) => {
+        const summary = kanbanSummaryByUniq[String(record.uniq ?? "").trim()];
+        const mapped = isBuyValue(summary?.buy_not_buy);
+        const isBuyed = mapped ?? record.is_buyed;
         return (
           <Tag
             className={`${
-              record.is_buyed
+              isBuyed
                 ? "text-green-600 bg-green-50"
                 : "text-red-600 bg-red-50"
             }`}
           >
-            {record.is_buyed ? "Buy" : "Not Buy"}
+            {isBuyed ? "Buy" : "Not Buy"}
           </Tag>
         );
       },
@@ -617,10 +693,16 @@ export default function RawMaterialsPage() {
       key: "stock_days",
       width: 110,
       render: (record: RawMaterialRecord) => (
-        <div className="text-sm font-medium">
-          {formatNumber(record.stock_days || 0)}
-          <p className="text-xs text-gray-500 font-normal">days</p>
-        </div>
+        (() => {
+          const summary = kanbanSummaryByUniq[String(record.uniq ?? "").trim()];
+          const stockDays = Number(summary?.stock_days ?? record.stock_days ?? 0);
+          return (
+            <div className="text-sm font-medium">
+              {formatNumber(stockDays)}
+              <p className="text-xs text-gray-500 font-normal">days</p>
+            </div>
+          );
+        })()
       ),
     },
     {
@@ -628,10 +710,22 @@ export default function RawMaterialsPage() {
       key: "safety_stock",
       width: 120,
       render: (record: RawMaterialRecord) => (
-        <div className="text-sm font-medium">
-          {formatNumber(record.safety_stock || 0)}
-          <p className="text-xs text-gray-500 font-normal">threshold</p>
-        </div>
+        (() => {
+          const summary = kanbanSummaryByUniq[String(record.uniq ?? "").trim()];
+          const stockQty = Number(summary?.stock_qty ?? record.stock ?? 0);
+          const stockToComplete = Number(summary?.stock_to_complete ?? 0);
+          const safetyStock = Math.ceil(
+            summary
+              ? stockQty + stockToComplete
+              : Number(record.safety_stock ?? 0),
+          );
+          return (
+            <div className="text-sm font-medium">
+              {formatNumber(safetyStock)}
+              <p className="text-xs text-gray-500 font-normal">threshold</p>
+            </div>
+          );
+        })()
       ),
     },
     {

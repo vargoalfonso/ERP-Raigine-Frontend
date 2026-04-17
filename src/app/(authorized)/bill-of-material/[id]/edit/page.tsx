@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { skipToken } from "@reduxjs/toolkit/query";
+import { useParams, useRouter } from "next/navigation";
 import {
   Button,
   Card,
@@ -21,8 +22,6 @@ import { useGetProcessesQuery } from "@/lib/api/system-settings/api";
 import { useGetMachinesQuery } from "@/lib/api/machines/api";
 
 const { Title, Text } = Typography;
-
-type RouteParams = { id: string };
 
 type ProcessRouteForm = {
   op_seq?: number;
@@ -70,17 +69,17 @@ const cleanText = (v: unknown): string | undefined => {
   return s ? s : undefined;
 };
 
-export default function BomEditPage({ params }: { params: RouteParams }) {
+export default function BomEditPage() {
   const router = useRouter();
+  const params = useParams<{ id?: string | string[] }>();
   const [messageApi, contextHolder] = message.useMessage();
   const [form] = Form.useForm<EditValues>();
 
   const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
-  const id = params?.id;
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id;
+  const queryArg = apiEnabled && id ? id : skipToken;
 
-  const { data, isLoading, error } = useGetBomByIdQuery(id, {
-    skip: !apiEnabled || !id,
-  });
+  const { data, isLoading, error } = useGetBomByIdQuery(queryArg);
   const [updateBom, updateState] = useUpdateBomMutation();
 
   const bom = (data as any)?.data ?? data;
@@ -91,6 +90,8 @@ export default function BomEditPage({ params }: { params: RouteParams }) {
     if (typeof bomId === "string" && bomId.trim()) return bomId.trim();
     return id;
   }, [bom, id]);
+
+  const resolvedBomId = canonicalBomId ?? id ?? "";
 
   useEffect(() => {
     if (canonicalBomId && id && canonicalBomId !== id) {
@@ -251,9 +252,14 @@ export default function BomEditPage({ params }: { params: RouteParams }) {
         return;
       }
 
-      await updateBom({ bom_id: canonicalBomId, body }).unwrap();
+      if (!resolvedBomId) {
+        messageApi.error("Missing BOM id");
+        return;
+      }
+
+      await updateBom({ bom_id: resolvedBomId, body }).unwrap();
       messageApi.success("Updated");
-      router.push(`/bill-of-material/${encodeURIComponent(canonicalBomId)}`);
+      router.push(`/bill-of-material/${encodeURIComponent(resolvedBomId)}`);
     } catch {
       // antd shows errors
     }
@@ -268,12 +274,13 @@ export default function BomEditPage({ params }: { params: RouteParams }) {
           <Title level={3} className="!mb-0">
             Edit BOM
           </Title>
-          <Text type="secondary">/products/bom/{canonicalBomId}</Text>
+          <Text type="secondary">/products/bom/{resolvedBomId}</Text>
         </div>
         <div className="flex items-center gap-2">
           <Button
             icon={<ArrowLeftOutlined />}
-            onClick={() => router.push(`/bill-of-material/${encodeURIComponent(canonicalBomId)}`)}
+            onClick={() => router.push(`/bill-of-material/${encodeURIComponent(resolvedBomId)}`)}
+            disabled={!resolvedBomId}
           >
             Back
           </Button>

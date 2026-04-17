@@ -3,6 +3,15 @@ import type { ApiResponse } from "@/types";
 
 export type PoBudgetType = "raw-material" | "subcon" | "indirect";
 
+export type PoBudgetSummary = {
+  total_entries: number;
+  total_sales_plan: number;
+  total_po: number;
+  total_prl: number;
+  delta_apo_prl: number;
+  pending_approvals: number;
+};
+
 export interface PoBudgetEntryRequest {
   customer_id: number | string;
   customer_name: string;
@@ -132,10 +141,11 @@ export type PoBudgetGroupedDetail = {
   }>;
 };
 
-const ok = <T,>(data: T, message = "OK"): ApiResponse<T> => ({
+const ok = <T,>(data: T, message = "OK", pagination?: ApiResponse<T>["pagination"]): ApiResponse<T> => ({
   message,
   status: "success",
   data,
+  ...(pagination ? { pagination } : {}),
 });
 
 type UnknownRecord = Record<string, unknown>;
@@ -179,6 +189,35 @@ const normalizeObjectResponse = (response: unknown): unknown => {
   if (isRecord(response.data) && isRecord(response.data.data)) return response.data.data;
   if (isRecord(response.data)) return response.data;
   return response;
+};
+
+const parsePagination = (response: unknown): ApiResponse<unknown>["pagination"] | undefined => {
+  if (!isRecord(response)) return undefined;
+
+  const direct = isRecord(response.pagination) ? response.pagination : undefined;
+  const nested = isRecord(response.data) && isRecord(response.data.pagination) ? response.data.pagination : undefined;
+  const source = direct ?? nested;
+  if (!source) return undefined;
+
+  return {
+    total: getNumber(source, ["total"]) ?? 0,
+    page: getNumber(source, ["page"]) ?? 1,
+    perPage: getNumber(source, ["perPage", "per_page", "limit"]) ?? 20,
+    totalPages: getNumber(source, ["totalPages", "total_pages"]) ?? 1,
+  };
+};
+
+const toPoBudgetSummary = (payload: unknown): PoBudgetSummary => {
+  const record = isRecord(payload) ? payload : {};
+
+  return {
+    total_entries: getNumber(record, ["total_entries", "totalEntries"]) ?? 0,
+    total_sales_plan: getNumber(record, ["total_sales_plan", "totalSalesPlan", "sales_plan_total"]) ?? 0,
+    total_po: getNumber(record, ["total_po", "totalPo"]) ?? 0,
+    total_prl: getNumber(record, ["total_prl", "totalPrl"]) ?? 0,
+    delta_apo_prl: getNumber(record, ["delta_apo_prl", "deltaApoPrl", "apo_prl_delta"]) ?? 0,
+    pending_approvals: getNumber(record, ["pending_approvals", "pendingApprovals"]) ?? 0,
+  };
 };
 
 const toPoBudgetRow = (item: unknown, index: number): PoBudgetRow => {
@@ -229,13 +268,28 @@ export const poBudgetSlice = apiSlice
   .enhanceEndpoints({ addTagTypes: ["PoBudget"] })
   .injectEndpoints({
     endpoints: (builder) => ({
+      getPoBudgetSummary: builder.query<ApiResponse<PoBudgetSummary>, { type: PoBudgetType }>({
+        query: ({ type }) => ({
+          url: `/po-budget/${type}/budget/summary`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => ok(toPoBudgetSummary(normalizeObjectResponse(response))),
+        providesTags: (_result, _error, arg) => [{ type: "PoBudget", id: arg.type }],
+      }),
+
       getPoBudgetList: builder.query<ApiResponse<PoBudgetRow[]>, { type: PoBudgetType; page?: number; limit?: number }>({
         query: ({ type, page = 1, limit = 20 }) => ({
           url: `/po-budget/${type}/budget?limit=${limit}&page=${page}`,
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => ok(normalizeListResponse(response).map((item, index) => toPoBudgetRow(item, index))),
+        transformResponse: (response: unknown) =>
+          ok(
+            normalizeListResponse(response).map((item, index) => toPoBudgetRow(item, index)),
+            "OK",
+            parsePagination(response),
+          ),
         providesTags: (_result, _error, arg) => [{ type: "PoBudget", id: arg.type }],
       }),
 
@@ -289,6 +343,7 @@ export const poBudgetSlice = apiSlice
   });
 
 export const {
+  useGetPoBudgetSummaryQuery,
   useGetPoBudgetListQuery,
   useAddPoBudgetEntryMutation,
   useAddPoBudgetBulkMutation,

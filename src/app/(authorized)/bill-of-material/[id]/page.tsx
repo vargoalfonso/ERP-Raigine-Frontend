@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { skipToken } from "@reduxjs/toolkit/query";
+import { useParams, useRouter } from "next/navigation";
 import { Button, Card, Descriptions, Divider, Spin, Table, Tag, Typography, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { ArrowLeftOutlined, EditOutlined } from "@ant-design/icons";
@@ -9,8 +10,6 @@ import { ArrowLeftOutlined, EditOutlined } from "@ant-design/icons";
 import { useGetBomByIdQuery } from "@/lib/api/bom/api";
 
 const { Title, Text } = Typography;
-
-type RouteParams = { id: string };
 
 type ProcessRouteRow = {
   key: string;
@@ -59,16 +58,16 @@ const asString = (v: unknown): string | undefined => {
   return s ? s : undefined;
 };
 
-export default function BomDetailPage({ params }: { params: RouteParams }) {
+export default function BomDetailPage() {
   const router = useRouter();
+  const params = useParams<{ id?: string | string[] }>();
   const [messageApi, contextHolder] = message.useMessage();
 
   const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
-  const id = params?.id;
+  const id = Array.isArray(params?.id) ? params.id[0] : params?.id;
+  const queryArg = apiEnabled && id ? id : skipToken;
 
-  const { data, isLoading, error, refetch } = useGetBomByIdQuery(id, {
-    skip: !apiEnabled || !id,
-  });
+  const { data, isLoading, error, refetch } = useGetBomByIdQuery(queryArg);
 
   const bom = (data as any)?.data ?? data;
 
@@ -78,6 +77,8 @@ export default function BomDetailPage({ params }: { params: RouteParams }) {
     if (typeof bomId === "string" && bomId.trim()) return bomId.trim();
     return id;
   }, [bom, id]);
+
+  const resolvedBomId = canonicalBomId ?? id ?? "";
 
   useEffect(() => {
     if (canonicalBomId && id && canonicalBomId !== id) {
@@ -217,7 +218,7 @@ export default function BomDetailPage({ params }: { params: RouteParams }) {
           <Title level={3} className="!mb-0">
             BOM Detail
           </Title>
-          <Text type="secondary">/products/bom/{canonicalBomId}</Text>
+          <Text type="secondary">/products/bom/{resolvedBomId}</Text>
         </div>
         <div className="flex items-center gap-2">
           <Button icon={<ArrowLeftOutlined />} onClick={() => router.push("/bill-of-material")}>
@@ -226,9 +227,8 @@ export default function BomDetailPage({ params }: { params: RouteParams }) {
           <Button
             type="primary"
             icon={<EditOutlined />}
-            onClick={() =>
-              router.push(`/bill-of-material/${encodeURIComponent(canonicalBomId)}/edit`)
-            }
+            onClick={() => router.push(`/bill-of-material/${encodeURIComponent(resolvedBomId)}/edit`)}
+            disabled={!resolvedBomId}
           >
             Edit
           </Button>

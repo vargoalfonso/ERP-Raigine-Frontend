@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Alert,
@@ -28,11 +28,16 @@ type FormValues = {
   plant_id?: string;
 };
 
-const WAREHOUSE_TYPE_OPTIONS = ["RM", "Finished Goods", "Indirect RM", "Subcon"];
+const WAREHOUSE_TYPE_OPTIONS = [
+  { label: "Raw Material", value: "raw_material" },
+  { label: "Finished Goods", value: "finished_goods" },
+  { label: "Indirect Material", value: "indirect_material" },
+  { label: "Subcon", value: "subcon" },
+];
 const PLANT_OPTIONS = [
-  { label: "Plant 1", value: "1" },
-  { label: "Plant 2", value: "2" },
-  { label: "Plant 3", value: "3" },
+  { label: "Plant 1", value: "plant 1" },
+  { label: "Plant 2", value: "plant 2" },
+  { label: "Plant 3", value: "plant 3" },
 ];
 
 const pickText = (...values: unknown[]) => {
@@ -48,13 +53,14 @@ const pickText = (...values: unknown[]) => {
 
 const normalizePlantId = (value: unknown) => {
   const raw = pickText(value);
-  if (raw === "Plant 1") return "1";
-  if (raw === "Plant 2") return "2";
-  if (raw === "Plant 3") return "3";
+  const lowered = raw.toLowerCase();
+  if (lowered === "plant 1" || raw === "1") return "plant 1";
+  if (lowered === "plant 2" || raw === "2") return "plant 2";
+  if (lowered === "plant 3" || raw === "3") return "plant 3";
   return raw;
 };
 
-export default function CreateMasterWarehousePage() {
+function CreateMasterWarehousePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [messageApi, contextHolder] = message.useMessage();
@@ -186,7 +192,7 @@ export default function CreateMasterWarehousePage() {
                 <Select
                   size="large"
                   placeholder="Select warehouse type"
-                  options={WAREHOUSE_TYPE_OPTIONS.map((value) => ({ label: value, value }))}
+                  options={WAREHOUSE_TYPE_OPTIONS}
                 />
               </Form.Item>
 
@@ -202,5 +208,13 @@ export default function CreateMasterWarehousePage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function CreateMasterWarehousePage() {
+  return (
+    <Suspense fallback={null}>
+      <CreateMasterWarehousePageContent />
+    </Suspense>
   );
 }

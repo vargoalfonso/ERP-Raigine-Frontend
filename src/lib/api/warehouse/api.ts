@@ -78,7 +78,7 @@ export const warehouseApiSlice = apiSlice
     endpoints: (builder) => ({
       listWarehouses: builder.query<WarehouseRecord[], void>({
         query: () => ({
-          url: "/api/v1/warehouses",
+          url: "/warehouses",
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
@@ -97,7 +97,7 @@ export const warehouseApiSlice = apiSlice
 
       getWarehouseById: builder.query<WarehouseRecord, string | number>({
         query: (id) => ({
-          url: `/api/v1/warehouses/${encodeURIComponent(String(id))}`,
+          url: `/warehouses/${encodeURIComponent(String(id))}`,
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
@@ -107,7 +107,7 @@ export const warehouseApiSlice = apiSlice
 
       createWarehouse: builder.mutation<WarehouseRecord, WarehouseMutationRequest>({
         query: (body) => ({
-          url: "/api/v1/warehouses",
+          url: "/warehouses",
           method: "POST",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
@@ -118,7 +118,7 @@ export const warehouseApiSlice = apiSlice
 
       updateWarehouse: builder.mutation<WarehouseRecord, { id: string | number; body: Partial<WarehouseMutationRequest> & Record<string, unknown> }>({
         query: ({ id, body }) => ({
-          url: `/api/v1/warehouses/${encodeURIComponent(String(id))}`,
+          url: `/warehouses/${encodeURIComponent(String(id))}`,
           method: "PUT",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
@@ -132,7 +132,7 @@ export const warehouseApiSlice = apiSlice
 
       deleteWarehouse: builder.mutation<{ success: boolean } | unknown, string | number>({
         query: (id) => ({
-          url: `/api/v1/warehouses/${encodeURIComponent(String(id))}`,
+          url: `/warehouses/${encodeURIComponent(String(id))}`,
           method: "DELETE",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),

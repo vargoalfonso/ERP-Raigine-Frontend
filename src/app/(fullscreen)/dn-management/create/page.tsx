@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Button, Card, DatePicker, Input, InputNumber, Select, Tag, message } from "antd";
 import { LeftOutlined, SaveOutlined, PlusOutlined } from "@ant-design/icons";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { apiBaseUrl } from "@/lib/api/instance";
@@ -116,9 +116,9 @@ const typeCopy = (type: DnManagementType) => {
 
 export default function DnRawMaterialCreatePage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const apiEnabled = Boolean(apiBaseUrl);
-  const dnType = tabToType((searchParams.get("tab") ?? "raw").toLowerCase());
+  const [tabParam, setTabParam] = useState("raw");
+  const dnType = tabToType(tabParam);
   const copy = typeCopy(dnType);
   const [createProcurementDn, { isLoading: saving }] = useCreateProcurementDnMutation();
   const [previewProcurementDn, { isLoading: previewing }] = usePreviewProcurementDnMutation();
@@ -130,6 +130,12 @@ export default function DnRawMaterialCreatePage() {
   const [draft, setDraft] = useState<Step2Draft>({});
 
   const [items, setItems] = useState<DnItemRow[]>([]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const nextTab = new URLSearchParams(window.location.search).get("tab")?.toLowerCase() ?? "raw";
+    setTabParam(nextTab);
+  }, []);
 
   const poType = managementTypeToPoType(dnType);
   const poListQuery = useListProcurementPosQuery({ po_type: poType }, { skip: !apiEnabled });

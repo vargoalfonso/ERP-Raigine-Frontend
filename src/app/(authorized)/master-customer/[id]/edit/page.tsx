@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { skipToken } from "@reduxjs/toolkit/query";
+import { useParams, useRouter } from "next/navigation";
 import {
   Button,
   Card,
@@ -30,17 +31,17 @@ type EditCustomerForm = {
   bankAccountNumber?: string;
 };
 
-export default function EditCustomerPage({ params }: { params: { id: string } }) {
+export default function EditCustomerPage() {
   const router = useRouter();
+  const params = useParams<{ id?: string | string[] }>();
   const [form] = Form.useForm<EditCustomerForm>();
   const [messageApi, contextHolder] = message.useMessage();
 
   const apiEnabled = Boolean(apiBaseUrl);
-  const customerId = params.id;
+  const customerId = Array.isArray(params?.id) ? params.id[0] : params?.id;
+  const customerQueryArg = apiEnabled && customerId ? customerId : skipToken;
 
-  const customerQuery = useGetCustomerByIdQuery(customerId, {
-    skip: !apiEnabled || !customerId,
-  });
+  const customerQuery = useGetCustomerByIdQuery(customerQueryArg);
 
   const [billingSame, setBillingSame] = useState(true);
   const [updateCustomer, updateState] = useUpdateCustomerMutation();
@@ -81,6 +82,11 @@ export default function EditCustomerPage({ params }: { params: { id: string } })
   const onSave = async () => {
     try {
       const v = await form.validateFields();
+
+      if (!customerId) {
+        messageApi.error("Missing customer id");
+        return;
+      }
 
       await updateCustomer({
         id: customerId,

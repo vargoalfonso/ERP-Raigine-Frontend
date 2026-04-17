@@ -11,7 +11,6 @@ import {
   EyeOutlined,
   PlusOutlined,
   RightOutlined,
-  ScanOutlined,
 } from "@ant-design/icons";
 
 import {
@@ -23,6 +22,8 @@ import type { BackendBomNode } from "@/lib/api/bom/api";
 import { apiBaseUrl, getCookiesFromBrowser } from "@/lib/api/instance";
 
 type BomStatus = string;
+
+type UnknownRecord = Record<string, unknown>;
 
 type BomRow = {
   key: string;
@@ -50,6 +51,9 @@ const toStatusLabel = (value: unknown): BomStatus => {
   const s = typeof value === "string" ? value.trim() : "";
   return s || "-";
 };
+
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
 
 const statusToColor = (value: string): string => {
   const s = value.trim().toLowerCase();
@@ -101,7 +105,7 @@ const mapNodeToRow = (
     isParent,
     qpu,
     version,
-    status: toStatusLabel((node as any)?.bom_status ?? node.status),
+    status: toStatusLabel((isRecord(node) ? node.bom_status : undefined) ?? node.status),
     children,
     bomId,
     internalId,
@@ -119,8 +123,8 @@ const fetchBomIdByAnyId = async (anyId: string): Promise<string> => {
   });
   if (!res.ok) return "";
   const json = await res.json().catch(() => null);
-  const data = json && typeof json === "object" && (json as any).data ? (json as any).data : json;
-  const bomId = data?.bom_id;
+  const data = isRecord(json) && "data" in json ? json.data : json;
+  const bomId = isRecord(data) ? data.bom_id : undefined;
   if (typeof bomId === "number" && Number.isFinite(bomId)) return String(bomId);
   if (typeof bomId === "string" && bomId.trim()) return bomId.trim();
   return "";
@@ -130,6 +134,7 @@ export default function BillOfMaterialPage() {
   const router = useRouter();
   const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([]);
   const [messageApi, contextHolder] = message.useMessage();
+  const [deleteTarget, setDeleteTarget] = useState<BomRow | null>(null);
 
   const { data: bomTreeRes, isLoading: isBomLoading } = useGetBomTreeQuery();
   const [deleteBomParent, { isLoading: isDeletingParent }] = useDeleteBomParentMutation();
@@ -140,14 +145,41 @@ export default function BillOfMaterialPage() {
     return tree.map((n) => mapNodeToRow(n, { level: 0 }));
   }, [bomTreeRes?.data]);
 
-  const parentCount = bomRows.length;
-  const childCount = bomRows.reduce(
-    (acc, row) => acc + (row.children?.length ?? 0),
-    0
-  );
   const expandableParentKeys = bomRows
     .filter((r) => (r.children?.length ?? 0) > 0)
     .map((r) => r.key);
+
+  const handleDelete = async (record: BomRow): Promise<boolean> => {
+    try {
+      if (record.isParent) {
+        const anyId = record.bomId || record.internalId;
+        if (!anyId) {
+          messageApi.error("Missing bom_id for parent item");
+          return false;
+        }
+
+        const resolvedBomId = record.bomId || (await fetchBomIdByAnyId(anyId)) || anyId;
+        await deleteBomParent({ bom_id: resolvedBomId }).unwrap();
+        messageApi.success("Deleted");
+        return true;
+      }
+
+      if (!record.parentBomId || !record.bomChildId) {
+        messageApi.error("Missing bom_id/bom_child_id for child item");
+        return false;
+      }
+
+      await deleteBomChild({
+        bom_id: record.parentBomId,
+        bom_child_id: record.bomChildId,
+      }).unwrap();
+      messageApi.success("Deleted");
+      return true;
+    } catch {
+      messageApi.error("Delete failed");
+      return false;
+    }
+  };
 
   const columns: ColumnsType<BomRow> = [
     {
@@ -301,42 +333,7 @@ export default function BillOfMaterialPage() {
             icon={<DeleteOutlined />}
             onClick={(e) => {
               e.stopPropagation();
-              Modal.confirm({
-                title: "Delete BOM item?",
-                content: `Delete ${record.uniq}?`,
-                okText: "Delete",
-                okButtonProps: { danger: true },
-                cancelText: "Cancel",
-                onOk: async () => {
-                  try {
-                    if (record.isParent) {
-                      const anyId = record.bomId || record.internalId;
-                      if (!anyId) {
-                        messageApi.error("Missing bom_id for parent item");
-                        return;
-                      }
-
-                      // Ensure we delete by bom_id when possible.
-                      const resolvedBomId = record.bomId || (await fetchBomIdByAnyId(anyId)) || anyId;
-                      await deleteBomParent({ bom_id: resolvedBomId }).unwrap();
-                      messageApi.success("Deleted");
-                      return;
-                    }
-
-                    if (!record.parentBomId || !record.bomChildId) {
-                      messageApi.error("Missing bom_id/bom_child_id for child item");
-                      return;
-                    }
-                    await deleteBomChild({
-                      bom_id: record.parentBomId,
-                      bom_child_id: record.bomChildId,
-                    }).unwrap();
-                    messageApi.success("Deleted");
-                  } catch (err) {
-                    messageApi.error("Delete failed");
-                  }
-                },
-              });
+              setDeleteTarget(record);
             }}
           />
         </div>
@@ -368,6 +365,24 @@ export default function BillOfMaterialPage() {
         </div>
       </div>
       {contextHolder}
+      <Modal
+        open={Boolean(deleteTarget)}
+        title="Delete BOM item?"
+        okText="Delete"
+        cancelText="Cancel"
+        okButtonProps={{ danger: true, loading: isDeletingParent || isDeletingChild }}
+        onCancel={() => setDeleteTarget(null)}
+        onOk={async () => {
+          if (!deleteTarget) return;
+          const deleted = await handleDelete(deleteTarget);
+          if (deleted) {
+            setDeleteTarget(null);
+          }
+        }}
+        destroyOnHidden
+      >
+        <p>Delete {deleteTarget?.uniq ?? "this BOM item"}?</p>
+      </Modal>
       <div className="bg-white rounded-lg shadow-sm border border-gray-100">
         <div className="p-5 flex items-center justify-between">
           <div className="flex items-center gap-3">

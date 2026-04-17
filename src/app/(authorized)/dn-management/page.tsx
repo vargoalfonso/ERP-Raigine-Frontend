@@ -13,6 +13,8 @@ import {
 
 type ProcurementTab = "raw" | "indirect" | "subcon";
 
+type TabPaginationState = Record<ProcurementTab, { page: number; pageSize: number }>;
+
 type DnRow = {
   key: string;
   id: string;
@@ -97,6 +99,11 @@ export default function DnManagementPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<ProcurementTab>("raw");
   const [hiddenDn, setHiddenDn] = useState<Set<string>>(() => new Set());
+  const [paginationByTab, setPaginationByTab] = useState<TabPaginationState>({
+    raw: { page: 1, pageSize: 10 },
+    indirect: { page: 1, pageSize: 10 },
+    subcon: { page: 1, pageSize: 10 },
+  });
 
   const [barcodeDnId, setBarcodeDnId] = useState<string | null>(null);
   const [barcodeCopies, setBarcodeCopies] = useState<number>(1);
@@ -143,6 +150,25 @@ export default function DnManagementPage() {
       })
       .filter((row) => !hiddenDn.has(row.dnNumber));
   }, [activeTab, hiddenDn, listQuery.data, procurementApiAvailable]);
+
+  const activePagination = paginationByTab[activeTab];
+  const totalPages = Math.max(1, Math.ceil(rows.length / activePagination.pageSize));
+  const currentPage = Math.min(activePagination.page, totalPages);
+
+  const pagedRows = useMemo(() => {
+    const start = (currentPage - 1) * activePagination.pageSize;
+    return rows.slice(start, start + activePagination.pageSize);
+  }, [activePagination.pageSize, currentPage, rows]);
+
+  const rangeStart = rows.length === 0 ? 0 : (currentPage - 1) * activePagination.pageSize + 1;
+  const rangeEnd = rows.length === 0 ? 0 : Math.min(currentPage * activePagination.pageSize, rows.length);
+
+  const paginationItems = useMemo<(number | "ellipsis")[]>(() => {
+    if (totalPages <= 5) return Array.from({ length: totalPages }, (_, index) => index + 1);
+    if (currentPage <= 3) return [1, 2, 3, 4, "ellipsis", totalPages];
+    if (currentPage >= totalPages - 2) return [1, "ellipsis", totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+    return [1, "ellipsis", currentPage - 1, currentPage, currentPage + 1, "ellipsis", totalPages];
+  }, [currentPage, totalPages]);
 
   const totalDns = useMemo(() => rows.length, [rows]);
   const fullyReceived = useMemo(() => rows.filter((r) => r.progressPercent >= 100).length, [rows]);
@@ -524,7 +550,7 @@ export default function DnManagementPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {rows.map((r) => {
+                  {pagedRows.map((r) => {
                     const status = receiptStatus(r.progressPercent);
                     const isComplete = status === "Fully Received";
                     const progressColor = isComplete ? "bg-green-500" : "bg-orange-500";
@@ -608,6 +634,13 @@ export default function DnManagementPage() {
                       </tr>
                     );
                   })}
+                  {pagedRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-10 text-center text-sm text-gray-500">
+                        No delivery notes found.
+                      </td>
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>
@@ -615,25 +648,113 @@ export default function DnManagementPage() {
             <div className="px-4 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-t border-gray-100 bg-white">
               <div className="flex items-center gap-2 text-xs text-gray-500">
                 <span>Show rows</span>
-                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-gray-200 bg-white text-gray-700">
-                  10
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </span>
-                <span>1-10 of 521390 Results</span>
+                <select
+                  value={activePagination.pageSize}
+                  onChange={(e) => {
+                    const nextSize = Number(e.target.value) || 10;
+                    setPaginationByTab((prev) => ({
+                      ...prev,
+                      [activeTab]: { page: 1, pageSize: nextSize },
+                    }));
+                  }}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-gray-200 bg-white text-gray-700"
+                >
+                  {[10, 20, 50, 100].map((size) => (
+                    <option key={size} value={size}>{size}</option>
+                  ))}
+                </select>
+                <span>{rangeStart}-{rangeEnd} of {rows.length} Results</span>
               </div>
 
               <div className="flex items-center gap-2">
-                <button type="button" className="w-8 h-8 rounded-md border border-gray-200 bg-gray-50 text-gray-400">&lt;</button>
-                <button type="button" className="w-8 h-8 rounded-md border border-blue-200 bg-blue-50 text-blue-700 text-sm font-medium">1</button>
-                <button type="button" className="w-8 h-8 rounded-md border border-gray-200 bg-white text-gray-600 text-sm">2</button>
-                <span className="px-1 text-gray-400">…</span>
-                <button type="button" className="px-2 h-8 rounded-md border border-gray-200 bg-white text-gray-600 text-sm">12345</button>
-                <button type="button" className="w-8 h-8 rounded-md border border-gray-200 bg-white text-gray-600">&gt;</button>
+                <button
+                  type="button"
+                  disabled={currentPage <= 1}
+                  onClick={() =>
+                    setPaginationByTab((prev) => ({
+                      ...prev,
+                      [activeTab]: { ...prev[activeTab], page: Math.max(1, currentPage - 1) },
+                    }))
+                  }
+                  className={`w-8 h-8 rounded-md border text-sm ${
+                    currentPage <= 1
+                      ? "border-gray-200 bg-gray-50 text-gray-400"
+                      : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  &lt;
+                </button>
+                {paginationItems.map((item, index) =>
+                  item === "ellipsis" ? (
+                    <span key={`ellipsis-${index}`} className="px-1 text-gray-400">…</span>
+                  ) : (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() =>
+                        setPaginationByTab((prev) => ({
+                          ...prev,
+                          [activeTab]: { ...prev[activeTab], page: item },
+                        }))
+                      }
+                      className={`min-w-8 px-2 h-8 rounded-md border text-sm ${
+                        item === currentPage
+                          ? "border-blue-200 bg-blue-50 text-blue-700 font-medium"
+                          : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                      }`}
+                    >
+                      {item}
+                    </button>
+                  ),
+                )}
+                <button
+                  type="button"
+                  disabled={currentPage >= totalPages}
+                  onClick={() =>
+                    setPaginationByTab((prev) => ({
+                      ...prev,
+                      [activeTab]: { ...prev[activeTab], page: Math.min(totalPages, currentPage + 1) },
+                    }))
+                  }
+                  className={`w-8 h-8 rounded-md border text-sm ${
+                    currentPage >= totalPages
+                      ? "border-gray-200 bg-gray-50 text-gray-400"
+                      : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  &gt;
+                </button>
                 <span className="ml-3 text-xs text-gray-500">Go to Page</span>
-                <input className="w-14 h-8 rounded-md border border-gray-200 px-2 text-sm" defaultValue="" />
-                <button type="button" className="h-8 px-3 rounded-md border border-blue-500 bg-white text-blue-600 text-sm font-medium">Go</button>
+                <input
+                  className="w-14 h-8 rounded-md border border-gray-200 px-2 text-sm"
+                  value={String(currentPage)}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    if (!Number.isFinite(next)) return;
+                    setPaginationByTab((prev) => ({
+                      ...prev,
+                      [activeTab]: {
+                        ...prev[activeTab],
+                        page: Math.min(Math.max(1, next), totalPages),
+                      },
+                    }));
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPaginationByTab((prev) => ({
+                      ...prev,
+                      [activeTab]: {
+                        ...prev[activeTab],
+                        page: Math.min(Math.max(1, prev[activeTab].page), totalPages),
+                      },
+                    }))
+                  }
+                  className="h-8 px-3 rounded-md border border-blue-500 bg-white text-blue-600 text-sm font-medium"
+                >
+                  Go
+                </button>
               </div>
             </div>
           </div>

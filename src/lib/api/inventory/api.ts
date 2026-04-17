@@ -119,7 +119,14 @@ export type InventoryIncomingRecord = {
 
 export type InventoryKanbanSummary = {
   uniq_code?: string;
+  stock_qty?: number;
   total_kanban?: number;
+  kanbans_needed?: number;
+  stock_to_complete?: number;
+  kanban_pkg_qty?: number;
+  safety_stock_qty?: number;
+  status?: string;
+  buy_not_buy?: string;
   stock_to_complete_kanban?: number;
   kanban_count?: number;
   stock_days?: number;
@@ -200,7 +207,14 @@ const toInventoryKanbanSummary = (raw: unknown): InventoryKanbanSummary => {
   const record = isRecord(parseObjectResponse<unknown>(raw)) ? (parseObjectResponse<unknown>(raw) as UnknownRecord) : isRecord(raw) ? raw : {};
   return {
     uniq_code: toText(record.uniq_code ?? record.uniq ?? record.UniqCode ?? record.Uniq),
+    stock_qty: toNumber(record.stock_qty ?? record.stock ?? record.StockQty),
     total_kanban: toNumber(record.total_kanban ?? record.TotalKanban),
+    kanbans_needed: toNumber(record.kanbans_needed ?? record.kanban_needed ?? record.KanbansNeeded),
+    stock_to_complete: toNumber(record.stock_to_complete ?? record.StockToComplete),
+    kanban_pkg_qty: toNumber(record.kanban_pkg_qty ?? record.KanbanPkgQty),
+    safety_stock_qty: toNumber(record.safety_stock_qty ?? record.SafetyStockQty),
+    status: toText(record.status ?? record.Status),
+    buy_not_buy: toText(record.buy_not_buy ?? record.buyNotBuy ?? record.BuyNotBuy),
     stock_to_complete_kanban: toNumber(
       record.stock_to_complete_kanban ?? record.to_complete_kanban ?? record.StockToCompleteKanban
     ),
@@ -291,6 +305,7 @@ export const {
   useGetInventoryHistoryQuery,
   useGetInventoryIncomingQuery,
   useGetInventoryKanbanSummaryQuery,
+  useLazyGetInventoryKanbanSummaryQuery,
   useCreateInventoryMutation,
   useUpdateInventoryMutation,
 } = inventoryApiSlice;

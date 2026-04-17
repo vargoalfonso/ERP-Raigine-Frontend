@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Input,
@@ -33,6 +33,7 @@ import { useCreateInventoryMutation, useUpdateInventoryMutation } from "@/lib/ap
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex, type BomUniqIndex } from "@/lib/utils/bomUniq";
+import { useListWarehousesQuery } from "@/lib/api/warehouse/api";
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -119,6 +120,7 @@ const RawMaterialForm = ({
   initialValues,
   formRef,
   bomIndex,
+  warehouseOptions,
 }: {
   entryNumber: number;
   onFinish: (values: RawMaterialFormData) => Promise<void>;
@@ -128,6 +130,7 @@ const RawMaterialForm = ({
   initialValues?: RawMaterialFormData;
   formRef?: React.MutableRefObject<FormInstance | null>;
   bomIndex?: BomUniqIndex;
+  warehouseOptions?: Array<{ label: string; value: string }>;
 }) => {
   const [form] = Form.useForm();
   const [mounted, setMounted] = useState(false);
@@ -296,11 +299,20 @@ const RawMaterialForm = ({
             name="warehouse_id"
             rules={[{ required: true, message: "Please select warehouse!" }]}
           >
-            <Select placeholder="WH-001" size="large" allowClear>
-              <Option value="WH-001">WH-001</Option>
-              <Option value="WH-002">WH-002</Option>
-              <Option value="WH-003">WH-003</Option>
-            </Select>
+            <Select
+              placeholder="Select warehouse"
+              size="large"
+              allowClear
+              options={
+                warehouseOptions?.length
+                  ? warehouseOptions
+                  : [
+                      { label: "WH-001", value: "WH-001" },
+                      { label: "WH-002", value: "WH-002" },
+                      { label: "WH-003", value: "WH-003" },
+                    ]
+              }
+            />
           </Form.Item>
         </div>
 
@@ -363,7 +375,7 @@ const RawMaterialForm = ({
   );
 };
 
-export default function CreateRawMaterialPage() {
+function CreateRawMaterialPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
@@ -375,7 +387,22 @@ export default function CreateRawMaterialPage() {
 
   const apiEnabled = Boolean(apiBaseUrl);
   const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const warehousesQuery = useListWarehousesQuery(undefined, { skip: !apiEnabled });
   const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeQuery.data?.data ?? []), [bomTreeQuery.data]);
+  const warehouseOptions = useMemo(
+    () =>
+      (warehousesQuery.data ?? [])
+        .filter((warehouse) => {
+          const type = String(warehouse.type_warehouse ?? "").trim().toLowerCase();
+          return !type || type === "raw_material" || type === "raw-material";
+        })
+        .map((warehouse) => {
+          const warehouseName = String(warehouse.warehouse_name ?? "").trim();
+          return warehouseName ? { label: warehouseName, value: warehouseName } : null;
+        })
+        .filter((item): item is { label: string; value: string } => Boolean(item)),
+    [warehousesQuery.data],
+  );
 
   // Initialize first form entry
   useEffect(() => {
@@ -707,6 +734,7 @@ export default function CreateRawMaterialPage() {
                   initialValues={index === 0 ? getInitialValues() : undefined}
                   formRef={entry.formRef}
                   bomIndex={bomIndex}
+                  warehouseOptions={warehouseOptions}
                 />
               </div>
             ))}
@@ -849,5 +877,13 @@ export default function CreateRawMaterialPage() {
         </div>
       </Card>
     </div>
+  );
+}
+
+export default function CreateRawMaterialPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#f3f4f6]" />}>
+      <CreateRawMaterialPageContent />
+    </Suspense>
   );
 }

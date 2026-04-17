@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeftOutlined, EyeOutlined } from "@ant-design/icons";
 import { Button, Card, Table, Tabs, Tag } from "antd";
@@ -15,7 +15,7 @@ interface RowHistory {
   lastUpdate: string;
 }
 
-export default function WorkInProgressDetailPage() {
+function WorkInProgressDetailPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const uniq = searchParams.get("uniq") ?? "LV7-001";
@@ -226,5 +226,13 @@ export default function WorkInProgressDetailPage() {
         </Button>
       </div>
     </div>
+  );
+}
+
+export default function WorkInProgressDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <WorkInProgressDetailPageContent />
+    </Suspense>
   );
 }

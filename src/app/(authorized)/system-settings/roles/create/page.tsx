@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { Suspense, useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button, Card, Form, Input, Typography, message } from "antd";
 
@@ -56,7 +56,7 @@ const parsePermissions = (raw: string): RolePermissions => {
   return parsed as RolePermissions;
 };
 
-export default function RoleCreatePage() {
+function RoleCreatePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -231,5 +231,13 @@ export default function RoleCreatePage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+export default function RoleCreatePage() {
+  return (
+    <Suspense fallback={null}>
+      <RoleCreatePageContent />
+    </Suspense>
   );
 }

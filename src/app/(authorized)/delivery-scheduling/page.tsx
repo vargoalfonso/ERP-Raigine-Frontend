@@ -160,7 +160,9 @@ export default function DeliverySchedulingPage() {
         rows: [],
       };
 
-      const rows = schedule.items.length
+      const cycle: ScheduleRow["cycle"] = schedule.cycle === "Weekly" ? "Weekly" : "Daily";
+
+      const rows: ScheduleRow[] = schedule.items.length
         ? schedule.items.map((item, index) => ({
             key: `${schedule.id || schedule.poDnName || deliveryDate}-${item.uniq}-${index}`,
             scheduleId: schedule.id,
@@ -173,7 +175,7 @@ export default function DeliverySchedulingPage() {
             partNo: item.partNo,
             partName: item.partName,
             quantity: item.quantity,
-            cycle: schedule.cycle === "Weekly" ? "Weekly" : "Daily",
+            cycle,
             dnNumber: toScheduleStatus(schedule.status) === "Approved" ? schedule.poDnName || "-" : "-",
             status: toScheduleStatus(schedule.status),
           }))
@@ -190,7 +192,7 @@ export default function DeliverySchedulingPage() {
               partNo: "-",
               partName: "-",
               quantity: 0,
-              cycle: schedule.cycle === "Weekly" ? "Weekly" : "Daily",
+              cycle,
               dnNumber: toScheduleStatus(schedule.status) === "Approved" ? schedule.poDnName || "-" : "-",
               status: toScheduleStatus(schedule.status),
             },
