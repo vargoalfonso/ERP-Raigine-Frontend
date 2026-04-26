@@ -278,32 +278,67 @@ export const approvalManagerApiSlice = apiSlice
       }),
 
       submitApprovalManagerDecision: builder.mutation<unknown, ApprovalManagerSubmitDecisionRequest>({
-        query: ({ approval_url, action, remarks, module_kind }) => {
-          const decisionUrl = buildDecisionUrl(approval_url, action, module_kind);
-          const urlLower = decisionUrl.toLowerCase();
+        async queryFn(arg, _api, _extraOptions, fetchWithBQ) {
+          const { approval_url, action, remarks, module_kind } = arg;
           const trimmed = remarks?.trim();
 
-          const actionInPath = urlLower.endsWith("/approve") || urlLower.endsWith("/reject");
-          const method = actionInPath ? "PUT" : "POST";
+          const normalizedApprovalUrl = normalizeBackendPath(approval_url);
+          const decisionUrl = buildDecisionUrl(approval_url, action, module_kind);
+          const urlLower = decisionUrl.toLowerCase();
 
-          return {
+          const actionInPath = urlLower.endsWith("/approve") || urlLower.endsWith("/reject");
+          const primaryMethod = actionInPath ? "PUT" : "POST";
+
+          const primaryBody = actionInPath
+            ? {
+                ...(trimmed ? { remarks: trimmed } : {}),
+              }
+            : {
+                action,
+                decision: action,
+                ...(trimmed ? { remarks: trimmed } : {}),
+              };
+
+          const primary = await fetchWithBQ({
             url: decisionUrl,
-            method,
-            body: actionInPath
-              ? {
-                  ...(trimmed ? { remarks: trimmed } : {}),
-                }
-              : {
-                  action,
-                  decision: action,
-                  ...(trimmed ? { remarks: trimmed } : {}),
-                },
+            method: primaryMethod,
+            body: primaryBody,
             meta: { useAuthorization: true, contentType: "application/json" },
-            // Avoid PARSING_ERROR when upstream returns non-JSON.
             responseHandler: (response: Response) => response.text(),
-          };
+          });
+
+          const unwrapText = (raw: unknown) => unwrapBackendData<unknown>(safeParseMaybeJson(raw));
+
+          if (!primary.error) {
+            return { data: unwrapText(primary.data) };
+          }
+
+          const kind = (module_kind ?? "").trim().toLowerCase();
+          const shouldFallback =
+            actionInPath &&
+            decisionUrl !== normalizedApprovalUrl &&
+            (kind === "bom" || kind === "prl" || kind === "po_budget") &&
+            (primary.error.status === 404 || primary.error.status === 405);
+
+          if (!shouldFallback) {
+            return { error: primary.error };
+          }
+
+          const fallback = await fetchWithBQ({
+            url: normalizedApprovalUrl,
+            method: "POST",
+            body: {
+              action,
+              decision: action,
+              ...(trimmed ? { remarks: trimmed } : {}),
+            },
+            meta: { useAuthorization: true, contentType: "application/json" },
+            responseHandler: (response: Response) => response.text(),
+          });
+
+          if (fallback.error) return { error: fallback.error };
+          return { data: unwrapText(fallback.data) };
         },
-        transformResponse: (response: unknown) => unwrapBackendData<unknown>(safeParseMaybeJson(response)),
         invalidatesTags: [{ type: TAG, id: "LIST" }],
       }),
     }),
