@@ -19,33 +19,27 @@ import { useRouter } from "next/navigation";
 import dayjs, { type Dayjs } from "dayjs";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
-import { useGetBomTreeQuery } from "@/lib/api/bom/api";
-import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
-import { useListPrlForecastsQuery } from "@/lib/api/prl/api";
-import { useGenerateBulkWorkOrderMutation } from "@/lib/api/work-orders/api";
+import {
+  type BulkDocumentItemOption,
+  useCreateBulkWorkOrdersMutation,
+  useLazyGetBulkDocumentItemsQuery,
+} from "@/lib/api/work-orders/bulk/api";
 
 type WorkOrderType = "New" | "Assembly" | "Rework" | "Additional";
 
-type PrlItem = {
+type SourceDocumentType = "PO" | "SO" | "DN" | "OTHER";
+
+type BulkItem = {
   key: string;
+  sourceLineId: string;
   uniq: string;
   partName: string;
   partNumber: string;
-  qty: number;
+  uom: string;
+  quantity: number;
+  kanbanQty: number;
   kanbanCount: number;
-  targetDate?: string; // DD/MM/YYYY
-};
-
-type PrlOption = {
-  label: string;
-  value: string;
-};
-
-const fmtDDMMYYYY = (d: Date) => {
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
+  targetDate?: string; // YYYY-MM-DD
 };
 
 const tabHint = () => {
@@ -53,62 +47,45 @@ const tabHint = () => {
   return "/work-orders";
 };
 
+const computeKanbanCount = (quantity: number, kanbanQty: number) => {
+  const q = Number(quantity) || 0;
+  const k = Number(kanbanQty) || 0;
+  if (q <= 0) return 0;
+  if (k <= 0) return 1;
+  return Math.max(1, Math.ceil(q / k));
+};
+
+const mapDocumentItemsToBulkItems = (items: BulkDocumentItemOption[]): BulkItem[] => {
+  return items.map((it, index) => {
+    const quantity = Number(it.quantity ?? 0);
+    const kanbanQty = Number(it.kanban_qty ?? 100);
+    const kanbanCount = Number(it.kanban_count ?? computeKanbanCount(quantity, kanbanQty));
+
+    return {
+      key: `${it.source_line_id}-${it.item_uniq_code}-${index}`,
+      sourceLineId: it.source_line_id,
+      uniq: it.item_uniq_code,
+      partName: it.part_name ?? "-",
+      partNumber: it.part_number ?? "-",
+      uom: it.uom ?? "",
+      quantity,
+      kanbanQty,
+      kanbanCount,
+      targetDate: it.target_date,
+    };
+  });
+};
+
 export default function CreateBulkWorkOrderPage() {
   const router = useRouter();
   const [form] = Form.useForm();
   const { TextArea } = Input;
   const apiEnabled = Boolean(apiBaseUrl);
-  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
-  const prlListQuery = useListPrlForecastsQuery(undefined, { skip: !apiEnabled });
-  const [generateBulkWorkOrder, generateBulkState] = useGenerateBulkWorkOrderMutation();
+  const [loadDocumentItems, documentItemsQuery] = useLazyGetBulkDocumentItemsQuery();
+  const [createBulkWorkOrders, createBulkState] = useCreateBulkWorkOrdersMutation();
 
-  const bomIndex = useMemo(
-    () => buildBomUniqIndex(bomTreeRes?.data ?? []),
-    [bomTreeRes?.data]
-  );
-
-  const fallbackPrlOptions: PrlOption[] = [
-    { label: "PRL-2024-001 - Toyota (Camry 2024)", value: "PRL-2024-001" },
-    { label: "PRL-2024-002 - Honda (Civic 2024)", value: "PRL-2024-002" },
-  ];
-
-  const prlSummaries = useMemo(() => {
-    const list = prlListQuery.data ?? [];
-    const map = new Map<string, { label: string; value: string; customerName: string | null; productModel: string | null }>();
-
-    list.forEach((item) => {
-      const prlId = item.prl_id ?? item.id;
-      if (!prlId || map.has(prlId)) return;
-      const customerName = item.customer?.customer_name ?? (item.customer_id != null ? `Customer #${item.customer_id}` : null);
-      const uniq = item.item_uniq_code ?? "";
-      const productModel = item.product_details?.description ?? bomIndex.assemblyCodeByUniq[uniq] ?? null;
-      map.set(prlId, {
-        value: prlId,
-        label: `${prlId}${customerName ? ` - ${customerName}` : ""}${productModel ? ` (${productModel})` : ""}`,
-        customerName,
-        productModel,
-      });
-    });
-
-    return Array.from(map.values());
-  }, [bomIndex.assemblyCodeByUniq, prlListQuery.data]);
-
-  const prlOptions: PrlOption[] = prlSummaries.length ? prlSummaries : fallbackPrlOptions;
-
-  const approvalManagers = [
-    { label: "Jane Smith - Operations Mgr", value: "Jane Smith - Operations Mgr" },
-    { label: "Mike Johnson - Manufacturing Head", value: "Mike Johnson - Manufacturing Head" },
-    { label: "John Smith - Production Manager", value: "John Smith - Production Manager" },
-  ];
-
-  const [items, setItems] = useState<PrlItem[]>([]);
+  const [items, setItems] = useState<BulkItem[]>([]);
   const [note, setNote] = useState("");
-  const selectedPrl = Form.useWatch("prl", form) as string | undefined;
-
-  const selectedPrlSummary = useMemo(
-    () => prlSummaries.find((item) => item.value === selectedPrl),
-    [prlSummaries, selectedPrl]
-  );
 
   const totals = useMemo(() => {
     const totalUniqs = items.length;
@@ -116,52 +93,49 @@ export default function CreateBulkWorkOrderPage() {
     return { totalUniqs, totalKanbans };
   }, [items]);
 
-  const loadPrlItems = () => {
-    const prl = form.getFieldValue("prl");
-    if (!prl) {
-      message.error("Select PRL first");
+  const loadItemsFromDocument = async () => {
+    const sourceDocumentId = String(form.getFieldValue("sourceDocumentId") ?? "").trim();
+    if (!sourceDocumentId) {
+      message.error("Document ID is required");
       return;
     }
 
-    if (apiEnabled && prlListQuery.data?.length) {
-      const filtered = prlListQuery.data.filter((item) => (item.prl_id ?? item.id) === prl);
-      const mapped = filtered.map((item, index) => {
-        const uniq = item.item_uniq_code ?? "";
-        const qty = Number(item.quantity ?? 0);
-        return {
-          key: item.id || `${prl}-${uniq}-${index}`,
-          uniq,
-          partName: item.product_details?.part_name ?? bomIndex.partNameByUniq[uniq] ?? "-",
-          partNumber: item.product_details?.part_number ?? bomIndex.partNumberByUniq[uniq] ?? "-",
-          qty,
-          kanbanCount: qty > 0 ? Math.max(1, Math.ceil(qty / 100)) : 0,
-          targetDate: undefined,
-        } satisfies PrlItem;
-      });
-
-      setItems(mapped);
-      message.success("PRL items loaded");
+    if (!apiEnabled) {
+      setItems(
+        mapDocumentItemsToBulkItems([
+          {
+            source_line_id: "mock-line-1",
+            item_uniq_code: "EMA-LV7-001",
+            part_name: "Engine Mount Assembly",
+            part_number: "EMA-001-LV7",
+            uom: "",
+            quantity: 60,
+            kanban_qty: 100,
+            kanban_count: 1,
+            target_date: "2026-04-10",
+          },
+        ])
+      );
+      message.success("Document items loaded (mock)");
       return;
     }
 
-    const mock: PrlItem[] = [
-      { key: "i-1", uniq: "LV7-001", partName: "Engine Mount Assembly", partNumber: "EM-001-A", qty: 500, kanbanCount: 5 },
-      { key: "i-2", uniq: "LV8-002", partName: "Suspension Arm", partNumber: "SA-002-B", qty: 400, kanbanCount: 4 },
-      { key: "i-3", uniq: "LW0-003", partName: "Brake Caliper", partNumber: "BC-003-C", qty: 600, kanbanCount: 6 },
-      { key: "i-4", uniq: "MB6-004", partName: "Control Module", partNumber: "CM-004-D", qty: 300, kanbanCount: 3 },
-    ];
-
-    setItems(mock);
-    message.success("PRL items loaded");
+    try {
+      const options = await loadDocumentItems({ document_id: sourceDocumentId }).unwrap();
+      setItems(mapDocumentItemsToBulkItems(options));
+      message.success("Document items loaded");
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to load document items"));
+    }
   };
 
-  const updateItem = (key: string, patch: Partial<PrlItem>) => {
+  const updateItem = (key: string, patch: Partial<BulkItem>) => {
     setItems((prev) =>
       prev.map((it) => {
         if (it.key !== key) return it;
         const next = { ...it, ...patch };
-        if (patch.qty != null) {
-          next.kanbanCount = patch.qty > 0 ? Math.max(1, Math.ceil(patch.qty / 100)) : 0;
+        if (patch.quantity != null || patch.kanbanQty != null) {
+          next.kanbanCount = computeKanbanCount(next.quantity, next.kanbanQty);
         }
         return next;
       })
@@ -171,15 +145,15 @@ export default function CreateBulkWorkOrderPage() {
   const onGenerate = async () => {
     try {
       const values = await form.validateFields();
-      const bulkTargetDate = values.targetDate as Dayjs;
+      const bulkTargetDate = values.targetDate as Dayjs | undefined;
 
       if (!items.length) {
-        message.error("Load PRL items first");
+        message.error("Load document items first");
         return;
       }
 
       const missingTarget = items.some(
-        (it) => !(it.targetDate || (bulkTargetDate ? fmtDDMMYYYY(bulkTargetDate.toDate()) : ""))
+        (it) => !(it.targetDate || (bulkTargetDate ? dayjs(bulkTargetDate).format("YYYY-MM-DD") : ""))
       );
       if (missingTarget) {
         message.error("Fill target date for all items");
@@ -192,29 +166,34 @@ export default function CreateBulkWorkOrderPage() {
         return;
       }
 
-      const generated = await generateBulkWorkOrder({
-        prl_reference: values.prl ?? null,
-        customer_name: selectedPrlSummary?.customerName ?? null,
-        product_model: selectedPrlSummary?.productModel ?? null,
-        wo_type: values.woType,
-        target_date: dayjs(bulkTargetDate).format("YYYY-MM-DD"),
+      const created = await createBulkWorkOrders({
+        source_document_id: String(values.sourceDocumentId).trim(),
+        source_document_type: String(values.sourceDocumentType),
+        wo_type: String(values.woType),
         items: items.map((it) => ({
-          uniq_code: it.uniq,
-          qty: Number(it.qty ?? 0),
-          kanban_count: Number.isFinite(Number(it.kanbanCount)) ? Number(it.kanbanCount) : null,
-          item_target_date: it.targetDate
-            ? dayjs(it.targetDate, "DD/MM/YYYY").format("YYYY-MM-DD")
+          source_line_id: it.sourceLineId,
+          item_uniq_code: it.uniq,
+          part_name: it.partName,
+          part_number: it.partNumber,
+          uom: it.uom ?? "",
+          quantity: Number(it.quantity ?? 0),
+          kanban_qty: Number(it.kanbanQty ?? 0),
+          kanban_count: Number(it.kanbanCount ?? 0),
+          target_date: it.targetDate
+            ? it.targetDate
             : bulkTargetDate
               ? dayjs(bulkTargetDate).format("YYYY-MM-DD")
-              : null,
+              : "",
         })),
+        notes: note.trim() || undefined,
       }).unwrap();
 
-      message.success("Bulk work order generated successfully");
-      router.push(generated.id ? `/work-orders/detail/${encodeURIComponent(generated.id)}` : tabHint());
+      void created;
+      message.success("Bulk work order created successfully");
+      router.push(tabHint());
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error(getApiErrorMessage(err, "Failed to generate bulk work order"));
+      message.error(getApiErrorMessage(err, "Failed to create bulk work order"));
     }
   };
 
@@ -240,7 +219,7 @@ export default function CreateBulkWorkOrderPage() {
               className="!rounded-lg"
               icon={<SaveOutlined />}
               onClick={onGenerate}
-              loading={generateBulkState.isLoading}
+              loading={createBulkState.isLoading}
             >
               Generate Bulk WO
             </Button>
@@ -249,31 +228,44 @@ export default function CreateBulkWorkOrderPage() {
 
         <div className="mt-4">
           <div className="text-2xl font-bold text-gray-900">Create Bulk Work Order</div>
-          <div className="text-sm text-gray-500">Generate multiple work orders from PRL (Production Requirement List)</div>
+          <div className="text-sm text-gray-500">Generate multiple work orders from a source document (PO / SO / etc.)</div>
         </div>
       </div>
 
-      <Form form={form} layout="vertical" initialValues={{ woType: "New" }}>
+      <Form
+        form={form}
+        layout="vertical"
+        initialValues={{ woType: "New", sourceDocumentType: "PO" as SourceDocumentType }}
+      >
         <div className="space-y-6">
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <div className="text-sm font-semibold text-gray-900">Select PRL &amp; Date</div>
-            <div className="text-xs text-gray-500 mt-1">Choose Production Requirement List and target date</div>
+            <div className="text-sm font-semibold text-gray-900">Select Document &amp; Date</div>
+            <div className="text-xs text-gray-500 mt-1">Choose source document and default target date (optional)</div>
 
             <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
               <Form.Item
-                name="prl"
-                label="Production Requirement List (PRL) or Production Planning"
-                rules={[{ required: true, message: "Select PRL" }]}
+                name="sourceDocumentType"
+                label="Source Document Type"
+                rules={[{ required: true, message: "Select source document type" }]}
               >
                 <Select
                   className="!rounded-lg"
-                  placeholder="Select PRL"
-                  options={prlOptions}
+                  placeholder="Select type"
+                  options={[
+                    { label: "PO", value: "PO" },
+                    { label: "SO", value: "SO" },
+                    { label: "DN", value: "DN" },
+                    { label: "Other", value: "OTHER" },
+                  ] satisfies Array<{ label: string; value: SourceDocumentType }>}
                 />
               </Form.Item>
 
-              <Form.Item name="targetDate" label="Target Date" rules={[{ required: true, message: "Select target date" }]}>
-                <DatePicker className="!rounded-lg w-full" placeholder="dd/mm/yyyy" format="DD/MM/YYYY" />
+              <Form.Item
+                name="sourceDocumentId"
+                label="Source Document ID"
+                rules={[{ required: true, message: "Enter source document id" }]}
+              >
+                <Input className="!rounded-lg" placeholder="Paste document UUID" />
               </Form.Item>
 
               <Form.Item name="woType" label="Work Order Type" rules={[{ required: true }]}>
@@ -288,34 +280,34 @@ export default function CreateBulkWorkOrderPage() {
                 />
               </Form.Item>
 
+              <Form.Item name="targetDate" label="Default Target Date (optional)">
+                <DatePicker className="!rounded-lg w-full" placeholder="yyyy-mm-dd" format="YYYY-MM-DD" />
+              </Form.Item>
+
               <div className="flex items-end justify-end">
-                <Button className="!rounded-lg" type="primary" icon={<CloudDownloadOutlined />} onClick={loadPrlItems}>
-                  Load PRL Items
+                <Button
+                  className="!rounded-lg"
+                  type="primary"
+                  icon={<CloudDownloadOutlined />}
+                  onClick={loadItemsFromDocument}
+                  loading={documentItemsQuery.isFetching}
+                >
+                  Load Document Items
                 </Button>
               </div>
             </div>
-
-            {selectedPrlSummary ? (
-              <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-xs text-gray-600">
-                Customer: {selectedPrlSummary.customerName ?? "-"} <span className="mx-2">•</span> Product Model: {selectedPrlSummary.productModel ?? "-"}
-              </div>
-            ) : null}
           </div>
 
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-            <div className="text-sm font-semibold text-gray-900">PRL Items - Edit UNIQ &amp; Quantity</div>
-            <div className="text-xs text-gray-500 mt-1">Each UNIQ equals 1 Kanban. Edit quantities and target dates as needed.</div>
-
-            <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
-              <span className="font-semibold">Note:</span> 1 UNIQ = 1 Kanban. Adjust quantities to generate appropriate number of Kanbans.
-            </div>
+            <div className="text-sm font-semibold text-gray-900">Document Items - Edit Qty &amp; Target Date</div>
+            <div className="text-xs text-gray-500 mt-1">Edit quantities, kanban sizing, and target dates before generating bulk WOs.</div>
 
             <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
               <div className="px-4 py-3 bg-gray-50 text-xs font-semibold text-gray-600 grid grid-cols-12 gap-3">
                 <div className="col-span-2">UNIQ</div>
                 <div className="col-span-3">Part Name</div>
                 <div className="col-span-2">Part Number</div>
-                <div className="col-span-2">Quantity (Editable)</div>
+                <div className="col-span-2">Quantity</div>
                 <div className="col-span-1">Kanban Count</div>
                 <div className="col-span-2">Target Date (Editable)</div>
               </div>
@@ -331,24 +323,23 @@ export default function CreateBulkWorkOrderPage() {
                         <InputNumber
                           className="!rounded-lg w-full"
                           min={0}
-                          value={it.qty}
-                          onChange={(v) => updateItem(it.key, { qty: typeof v === "number" ? v : 0 })}
+                          value={it.quantity}
+                          onChange={(v) => updateItem(it.key, { quantity: typeof v === "number" ? v : 0 })}
                         />
                       </div>
                       <div className="col-span-1 text-sm text-gray-800">{it.kanbanCount} Kanban</div>
                       <div className="col-span-2">
                         <DatePicker
                           className="!rounded-lg w-full"
-                          placeholder="dd/mm/yyyy"
-                          format="DD/MM/YYYY"
-                          value={it.targetDate ? dayjs(it.targetDate, "DD/MM/YYYY") : undefined}
+                          placeholder="yyyy-mm-dd"
+                          format="YYYY-MM-DD"
+                          value={it.targetDate ? dayjs(it.targetDate, "YYYY-MM-DD") : undefined}
                           onChange={(val) => {
                             if (!val) {
                               updateItem(it.key, { targetDate: undefined });
                               return;
                             }
-                            const jsDate = (val as Dayjs).toDate();
-                            updateItem(it.key, { targetDate: fmtDDMMYYYY(jsDate) });
+                            updateItem(it.key, { targetDate: dayjs(val as Dayjs).format("YYYY-MM-DD") });
                           }}
                         />
                       </div>
@@ -356,22 +347,13 @@ export default function CreateBulkWorkOrderPage() {
                   ))}
                 </div>
               ) : (
-                <div className="p-10 text-center text-sm text-gray-500">No items loaded. Click “Load PRL Items”.</div>
+                <div className="p-10 text-center text-sm text-gray-500">No items loaded. Click “Load Document Items”.</div>
               )}
             </div>
 
-            <div className="mt-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <div className="text-xs font-semibold text-green-800">Ready to Generate</div>
-                <div className="text-xs text-green-700 mt-1">Total UNIQs: {totals.totalUniqs} | Total Kanbans: {totals.totalKanbans}</div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="text-xs text-gray-600">Approval Manager:</div>
-                <Form.Item name="approvalManager" className="!mb-0" rules={[{ required: true, message: "Select approval manager" }]}>
-                  <Select className="!rounded-lg w-64" options={approvalManagers} placeholder="Select manager" />
-                </Form.Item>
-              </div>
+            <div className="mt-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3">
+              <div className="text-xs font-semibold text-green-800">Ready to Generate</div>
+              <div className="text-xs text-green-700 mt-1">Total Items: {totals.totalUniqs} | Total Kanbans: {totals.totalKanbans}</div>
             </div>
 
             <div className="mt-4">

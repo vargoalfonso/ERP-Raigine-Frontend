@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Drawer, Form, Input, InputNumber, Modal, Select, Table, Tag, message } from "antd";
+import { Button, Drawer, Form, Input, Modal, Select, Table, Tag, message } from "antd";
 import {
   DownloadOutlined,
   EyeOutlined,
@@ -13,6 +13,9 @@ import {
 } from "@ant-design/icons";
 import type { ColumnType } from "antd/es/table";
 import StatsCard from "@/components/StatsCard";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { type WipListRow, useGetWipListQuery, useUpdateWipMutation } from "@/lib/api/wip/api";
 import { BsBoxSeam } from "react-icons/bs";
 import { HiOutlineArchiveBox } from "react-icons/hi2";
 import { LuChartColumn } from "react-icons/lu";
@@ -20,18 +23,22 @@ import { FaRegEdit, FaRegTrashAlt } from "react-icons/fa";
 
 type WipRecord = {
   id: string;
-  process: "Assembly" | "Machining" | "Quality Check";
+  apiId?: string;
+  process: string;
   uniq: string;
   partNumber: string;
   partName: string;
-  model: string;
   woNumber: string;
   stock: number;
   kanbanCode: string;
-  type: "Child Part" | "Warehouse FG";
+  type: string;
   stockToCompleteKanban: number;
   kanban: number;
 };
+
+type UnknownRecord = Record<string, unknown>;
+const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+const isMissingRouteError = (error: unknown): boolean => isRecord(error) && error.status === 404;
 
 const dummyWipData: WipRecord[] = [
   {
@@ -40,11 +47,10 @@ const dummyWipData: WipRecord[] = [
     uniq: "LV7-001",
     partNumber: "EMA7-001",
     partName: "Engine Mount Assembly",
-    model: "Camry 2024",
     woNumber: "WO-001-2024",
     stock: 200,
     kanbanCode: "KBN-001-2024",
-    type: "Child Part",
+    type: "draft",
     stockToCompleteKanban: 250,
     kanban: 5,
   },
@@ -54,11 +60,10 @@ const dummyWipData: WipRecord[] = [
     uniq: "LV7-001",
     partNumber: "EMA7-001",
     partName: "Engine Mount Assembly",
-    model: "Camry 2024",
     woNumber: "WO-001-2024",
     stock: 200,
     kanbanCode: "KBN-001-2024",
-    type: "Child Part",
+    type: "draft",
     stockToCompleteKanban: 250,
     kanban: 5,
   },
@@ -68,11 +73,10 @@ const dummyWipData: WipRecord[] = [
     uniq: "LV8-002",
     partNumber: "SA8-002",
     partName: "Suspension Arm",
-    model: "Camry 2024",
     woNumber: "WO-002-2024",
     stock: 200,
     kanbanCode: "KBN-002-2024",
-    type: "Warehouse FG",
+    type: "draft",
     stockToCompleteKanban: 25,
     kanban: 2,
   },
@@ -82,11 +86,10 @@ const dummyWipData: WipRecord[] = [
     uniq: "LW0-003",
     partNumber: "BC0-003",
     partName: "Brake Caliper",
-    model: "Camry 2024",
     woNumber: "WO-003-2024",
     stock: 200,
     kanbanCode: "KBN-003-2024",
-    type: "Warehouse FG",
+    type: "draft",
     stockToCompleteKanban: 25,
     kanban: 2,
   },
@@ -96,24 +99,17 @@ const dummyWipData: WipRecord[] = [
     uniq: "MB6-004",
     partNumber: "CM6-004",
     partName: "Control Module",
-    model: "Camry 2024",
     woNumber: "WO-004-2024",
     stock: 200,
     kanbanCode: "KBN-004-2024",
-    type: "Warehouse FG",
+    type: "draft",
     stockToCompleteKanban: 29,
     kanban: 2,
   },
 ];
 
 type WipEditFormValues = {
-  uniq?: string;
-  woNumber?: string;
-  kanbanCode?: string;
-  type?: WipRecord["type"];
-  process?: WipRecord["process"];
-  stock?: number;
-  stockToCompleteKanban?: number;
+  status?: string;
 };
 
 export default function WorkInProgressPage() {
@@ -122,6 +118,10 @@ export default function WorkInProgressPage() {
   const [searchValue, setSearchValue] = useState("");
   const [tab, setTab] = useState("wip");
   const [processFilter, setProcessFilter] = useState<string>("all");
+
+  const apiEnabled = Boolean(apiBaseUrl);
+  const listQuery = useGetWipListQuery({ page: 1, limit: 10 }, { skip: !apiEnabled });
+  const [updateWip] = useUpdateWipMutation();
 
   const [wipData, setWipData] = useState<WipRecord[]>(dummyWipData);
 
@@ -132,38 +132,56 @@ export default function WorkInProgressPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletingWip, setDeletingWip] = useState<WipRecord | null>(null);
 
-  const uniqTargets = useMemo(() => {
-    return new Map<string, number>([
-      ["LV7-001", 250],
-      ["LV8-002", 250],
-      ["LW0-003", 250],
-      ["MB6-004", 250],
-    ]);
-  }, []);
+  useEffect(() => {
+    if (!apiEnabled || !listQuery.error) return;
+    if (isMissingRouteError(listQuery.error)) {
+      messageApi.warning("WIP API route is not available yet; showing mock data.");
+      return;
+    }
+    messageApi.error(getApiErrorMessage(listQuery.error, "Failed to load WIP inventory"));
+  }, [apiEnabled, listQuery.error, messageApi]);
 
-  const updateAutoFill = () => {
-    const uniq = editForm.getFieldValue("uniq");
-    const stock = editForm.getFieldValue("stock");
-    const target = uniq ? uniqTargets.get(uniq) ?? 250 : 250;
-    const next = Math.max(0, target - (Number(stock) || 0));
-    editForm.setFieldValue("stockToCompleteKanban", next);
+  const mapApiRowToRecord = (row: WipListRow, index: number): WipRecord => {
+    const fallbackId = `${row.wo_number ?? "-"}-${row.uniq ?? "-"}-${row.process ?? "-"}-${index}`;
+    return {
+      id: row.id ?? fallbackId,
+      apiId: row.id,
+      process: row.process ?? "-",
+      uniq: row.uniq ?? "-",
+      partNumber: row.part_number ?? "-",
+      partName: row.part_info ?? "-",
+      woNumber: row.wo_number ?? "-",
+      stock: Number(row.stock ?? 0),
+      kanbanCode: row.kanban_number ?? "-",
+      type: row.type ?? "-",
+      stockToCompleteKanban: Number(row.stock_to_complete_kanban ?? 0),
+      kanban: Number(row.kanban ?? 0),
+    };
   };
 
+  const tableRows = useMemo(() => {
+    if (!apiEnabled || isMissingRouteError(listQuery.error)) return wipData;
+    const items = listQuery.data?.data ?? [];
+    if (!items.length) return [];
+    return items.map(mapApiRowToRecord);
+  }, [apiEnabled, listQuery.data, listQuery.error, wipData]);
+
   const openWipDetail = (record: WipRecord) => {
+    const fromApi = apiEnabled && !isMissingRouteError(listQuery.error);
+    if (fromApi) {
+      if (!record.apiId) {
+        messageApi.warning("WIP id is missing; cannot open detail.");
+        return;
+      }
+      router.push(`/work-in-progress/detail?id=${encodeURIComponent(record.apiId)}&uniq=${encodeURIComponent(record.uniq)}`);
+      return;
+    }
     router.push(`/work-in-progress/detail?uniq=${encodeURIComponent(record.uniq)}`);
   };
 
   const openEditDrawer = (record: WipRecord) => {
     setEditingWip(record);
-    editForm.setFieldsValue({
-      uniq: record.uniq,
-      woNumber: record.woNumber,
-      kanbanCode: record.kanbanCode,
-      type: record.type,
-      process: record.process,
-      stock: record.stock,
-      stockToCompleteKanban: record.stockToCompleteKanban,
-    });
+    editForm.setFieldsValue({ status: record.type });
     setEditOpen(true);
   };
 
@@ -178,24 +196,22 @@ export default function WorkInProgressPage() {
       const values = await editForm.validateFields();
       if (!editingWip) return;
 
-      setWipData((prev) =>
-        prev.map((row) => {
-          if (row.id !== editingWip.id) return row;
-          return {
-            ...row,
-            uniq: values.uniq ?? row.uniq,
-            woNumber: values.woNumber ?? row.woNumber,
-            kanbanCode: values.kanbanCode ?? row.kanbanCode,
-            type: (values.type ?? row.type) as WipRecord["type"],
-            process: (values.process ?? row.process) as WipRecord["process"],
-            stock: Number(values.stock ?? row.stock),
-            stockToCompleteKanban: Number(
-              values.stockToCompleteKanban ?? row.stockToCompleteKanban
-            ),
-          };
-        })
-      );
+      const nextStatus = String(values.status ?? "").trim();
+      if (!nextStatus) {
+        messageApi.error("Status is required");
+        return;
+      }
 
+      const fromApi = apiEnabled && !isMissingRouteError(listQuery.error);
+      if (fromApi && editingWip.apiId) {
+        await updateWip({ id: editingWip.apiId, body: { status: nextStatus } }).unwrap();
+        messageApi.success("Status updated");
+        listQuery.refetch();
+        closeEditDrawer();
+        return;
+      }
+
+      setWipData((prev) => prev.map((row) => (row.id === editingWip.id ? { ...row, type: nextStatus } : row)));
       messageApi.success("Saved");
       closeEditDrawer();
     } catch {
@@ -215,6 +231,11 @@ export default function WorkInProgressPage() {
 
   const handleConfirmDelete = () => {
     if (!deletingWip) return;
+    if (apiEnabled && !isMissingRouteError(listQuery.error)) {
+      messageApi.info("Delete WIP is not integrated for this page yet.");
+      closeDeleteModal();
+      return;
+    }
     setWipData((prev) => prev.filter((row) => row.id !== deletingWip.id));
     if (editingWip?.id === deletingWip.id) {
       closeEditDrawer();
@@ -223,7 +244,7 @@ export default function WorkInProgressPage() {
     closeDeleteModal();
   };
 
-  const filteredData = wipData.filter((row) => {
+  const filteredData = tableRows.filter((row) => {
     const matchesSearch =
       !searchValue ||
       [
@@ -231,7 +252,6 @@ export default function WorkInProgressPage() {
         row.uniq,
         row.partNumber,
         row.partName,
-        row.model,
         row.woNumber,
         row.kanbanCode,
         row.type,
@@ -245,6 +265,16 @@ export default function WorkInProgressPage() {
 
     return matchesSearch && matchesProcess;
   });
+
+  const summaryStats = useMemo(() => {
+    const totalQuantity = tableRows.reduce((sum, row) => sum + Number(row.stock ?? 0), 0);
+    const activeStations = new Set(tableRows.map((r) => r.process).filter(Boolean)).size;
+    return {
+      activeWip: tableRows.length,
+      totalQuantity,
+      activeStations,
+    };
+  }, [tableRows]);
 
   const columns: ColumnType<WipRecord>[] = [
     {
@@ -276,7 +306,7 @@ export default function WorkInProgressPage() {
       render: (_: unknown, record: WipRecord) => (
         <div>
           <div className="font-semibold text-gray-900">{record.partName}</div>
-          <div className="text-xs text-gray-400">{record.model}</div>
+          <div className="text-xs text-gray-400">{record.partNumber}</div>
         </div>
       ),
     },
@@ -356,11 +386,17 @@ export default function WorkInProgressPage() {
             icon={<ReloadOutlined />}
             size="small"
             className="text-gray-600 hover:text-gray-800"
+            onClick={() => listQuery.refetch()}
           />
         </div>
       ),
     },
   ];
+
+  const processOptions = useMemo(() => {
+    const values = new Set(tableRows.map((row) => row.process).filter(Boolean));
+    return [{ label: "All Process", value: "all" }, ...Array.from(values).map((p) => ({ label: p, value: p }))];
+  }, [tableRows]);
 
   return (
     <div className="p-6 space-y-6">
@@ -381,7 +417,7 @@ export default function WorkInProgressPage() {
       </Modal>
 
       <Drawer
-        title={<div className="font-semibold">Edit</div>}
+        title={<div className="font-semibold">Update Status</div>}
         placement="right"
         width={380}
         open={editOpen}
@@ -400,91 +436,20 @@ export default function WorkInProgressPage() {
           form={editForm}
           layout="vertical"
           requiredMark={false}
-          onValuesChange={() => updateAutoFill()}
         >
           <Form.Item
-            label="Uniq"
-            name="uniq"
-            rules={[{ required: true, message: "Uniq is required" }]}
+            label="Status"
+            name="status"
+            rules={[{ required: true, message: "Status is required" }]}
           >
             <Select
-              placeholder="Select Uniq"
+              placeholder="Select status"
               options={[
-                { label: "LV7-001", value: "LV7-001" },
-                { label: "LV8-002", value: "LV8-002" },
-                { label: "LW0-003", value: "LW0-003" },
-                { label: "MB6-004", value: "MB6-004" },
+                { label: "draft", value: "draft" },
+                { label: "in_progress", value: "in_progress" },
+                { label: "completed", value: "completed" },
               ]}
             />
-          </Form.Item>
-
-          <Form.Item
-            label="Work Order Number"
-            name="woNumber"
-            rules={[{ required: true, message: "Work Order Number is required" }]}
-          >
-            <Select
-              placeholder="Select Work Order"
-              options={[
-                { label: "WO-001-2024", value: "WO-001-2024" },
-                { label: "WO-002-2024", value: "WO-002-2024" },
-                { label: "WO-003-2024", value: "WO-003-2024" },
-                { label: "WO-004-2024", value: "WO-004-2024" },
-              ]}
-            />
-          </Form.Item>
-
-          <Form.Item
-            label="Packing Number"
-            name="kanbanCode"
-            rules={[{ required: true, message: "Packing Number is required" }]}
-          >
-            <Input placeholder="Packing Number" />
-          </Form.Item>
-
-          <Form.Item
-            label="WIP Type"
-            name="type"
-            rules={[{ required: true, message: "WIP Type is required" }]}
-          >
-            <Select
-              placeholder="Select Type"
-              options={[
-                { label: "Child Part", value: "Child Part" },
-                { label: "Warehouse FG", value: "Warehouse FG" },
-              ]}
-            />
-          </Form.Item>
-
-          <Form.Item
-            label="Process"
-            name="process"
-            rules={[{ required: true, message: "Process is required" }]}
-          >
-            <Select
-              placeholder="Select Process"
-              options={[
-                { label: "Assembly", value: "Assembly" },
-                { label: "Machining", value: "Machining" },
-                { label: "Quality Check", value: "Quality Check" },
-              ]}
-            />
-          </Form.Item>
-
-          <Form.Item
-            label="Stock Process"
-            name="stock"
-            rules={[{ required: true, message: "Stock Process is required" }]}
-          >
-            <InputNumber className="w-full" min={0} placeholder="250" />
-          </Form.Item>
-
-          <Form.Item
-            label="Stock to Complete Kanban"
-            name="stockToCompleteKanban"
-            rules={[{ required: true, message: "Stock to Complete is required" }]}
-          >
-            <InputNumber className="w-full" min={0} placeholder="50" />
           </Form.Item>
         </Form>
       </Drawer>
@@ -536,28 +501,28 @@ export default function WorkInProgressPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatsCard
           title="Active WIP"
-          value={3}
+          value={summaryStats.activeWip}
           icon={<BsBoxSeam size={22} />}
           bgColor=""
           textColor="text-blue-600"
         />
         <StatsCard
           title="Total Quantity"
-          value={105}
+          value={summaryStats.totalQuantity}
           icon={<LuChartColumn size={22} />}
           bgColor=""
           textColor="text-green-600"
         />
         <StatsCard
           title="Avg Aging"
-          value="4.3h"
+          value="-"
           icon={<HiOutlineArchiveBox size={22} />}
           bgColor=""
           textColor="text-orange-600"
         />
         <StatsCard
           title="Active Stations"
-          value={3}
+          value={summaryStats.activeStations}
           icon={<LuChartColumn size={22} />}
           bgColor=""
           textColor="text-purple-600"
@@ -611,12 +576,7 @@ export default function WorkInProgressPage() {
                   value={processFilter}
                   onChange={setProcessFilter}
                   style={{ width: 200 }}
-                  options={[
-                    { label: "All Process", value: "all" },
-                    { label: "Assembly", value: "Assembly" },
-                    { label: "Machining", value: "Machining" },
-                    { label: "Quality Check", value: "Quality Check" },
-                  ]}
+                  options={processOptions}
                 />
               </div>
 
@@ -625,6 +585,7 @@ export default function WorkInProgressPage() {
                   columns={columns}
                   dataSource={filteredData}
                   rowKey="id"
+                  loading={apiEnabled ? listQuery.isFetching : false}
                   pagination={false}
                   bordered
                   scroll={{ x: "max-content" }}

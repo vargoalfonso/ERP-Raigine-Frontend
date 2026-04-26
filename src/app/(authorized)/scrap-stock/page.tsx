@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -29,70 +29,26 @@ import { BsBoxSeam } from "react-icons/bs";
 import { FiAlertTriangle } from "react-icons/fi";
 import { HiOutlineArchiveBox } from "react-icons/hi2";
 import { LuChartColumn } from "react-icons/lu";
-import { IoLocationOutline } from "react-icons/io5";
 import { FinishedGoodsRecord } from "@/lib/api/finished-goods/interface";
 import { FaRegEdit, FaRegTrashAlt } from "react-icons/fa";
 import dayjs from "dayjs";
+import { apiBaseUrl } from "@/lib/api/instance";
+import {
+  type ScrapStockRecord,
+  useGetScrapStocksQuery,
+  useGetScrapStocksStatsQuery,
+} from "@/lib/api/scrap-stock/api";
+import {
+  type ScrapReleaseRecord,
+  useGetScrapReleasesLegacyQuery,
+  useGetScrapReleasesQuery,
+} from "@/lib/api/scrap-release/api";
 
-// Scrap record type and dummy data matching the scrap stock table
-type ScrapRecord = {
-  id: string;
-  uniq: string;
-  part_number: string;
-  part_info: { name: string; model?: string };
-  date_received: string;
-  packing_number: string;
-  scrap_type: string;
-  reasons: string;
-  quantity: number;
-};
+type ScrapRecord = ScrapStockRecord;
 
-const dummyScrapData: ScrapRecord[] = [
-  {
-    id: "LV7-001",
-    uniq: "LV7-001",
-    part_number: "EMA-001",
-    part_info: { name: "Engine Mount Assembly", model: "Camry 2024" },
-    date_received: "2024-01-15",
-    packing_number: "KBN-001-2024",
-    scrap_type: "Setting Machine Scrap",
-    reasons: "Dump",
-    quantity: 50,
-  },
-  {
-    id: "LV8-002",
-    uniq: "LV8-002",
-    part_number: "SPA-001",
-    part_info: { name: "Suspension Arm", model: "Camry 2024" },
-    date_received: "2024-01-15",
-    packing_number: "KBN-002-2024",
-    scrap_type: "Process Scrap",
-    reasons: "Inventory",
-    quantity: 23,
-  },
-  {
-    id: "LW0-003",
-    uniq: "LW0-003",
-    part_number: "BRC-001",
-    part_info: { name: "Brake Caliper", model: "Camry 2024" },
-    date_received: "2024-01-15",
-    packing_number: "KBN-003-2024",
-    scrap_type: "Process Scrap",
-    reasons: "Inventory",
-    quantity: 50,
-  },
-  {
-    id: "MB6-004",
-    uniq: "MB6-004",
-    part_number: "COM-001",
-    part_info: { name: "Control Module", model: "Camry 2024" },
-    date_received: "2024-01-15",
-    packing_number: "KBN-004-2024",
-    scrap_type: "Product Return Scrap",
-    reasons: "Sell",
-    quantity: 50,
-  },
-];
+type ReleaseRecord = ScrapReleaseRecord;
+
+const dummyScrapData: ScrapRecord[] = [];
 
 const makeScrapColumns = (actions: {
   onEdit: (record: ScrapRecord) => void;
@@ -100,74 +56,106 @@ const makeScrapColumns = (actions: {
   onDelete: (record: ScrapRecord) => void;
 }): ColumnType<ScrapRecord>[] => [
   {
-    title: "Uniq",
-    key: "uniq",
-    width: 120,
-    render: (record: ScrapRecord) => (
-      <div className="text-sm text-gray-700">{record.uniq}</div>
-    ),
-  },
-  {
-    title: "Part Number",
-    key: "partNumber",
-    width: 140,
-    render: (record: ScrapRecord) => (
-      <div className="font-semibold">{record.part_number}</div>
-    ),
-  },
-  {
     title: "Part Info",
     key: "partInfo",
-    width: 300,
-    render: (record: ScrapRecord) => (
+    width: 260,
+    render: (_: unknown, record: ScrapRecord) => (
       <div>
-        <div className="font-semibold text-gray-900">{record.part_info.name}</div>
-        <div className="text-sm text-gray-500">{record.part_number}</div>
-        <div className="text-xs text-gray-400">{record.part_info.model}</div>
+        <div className="font-semibold text-gray-900">{record.part_name || "-"}</div>
+        <div className="text-sm text-gray-500">{record.wo_number ?? "-"}</div>
       </div>
+    ),
+  },
+  {
+    title: "UNIQ",
+    key: "uniq",
+    width: 180,
+    render: (_: unknown, record: ScrapRecord) => (
+      <div>
+        <div className="font-semibold text-gray-900">{record.uniq || "-"}</div>
+        <div className="text-sm text-gray-500">{record.part_number || "-"}</div>
+      </div>
+    ),
+  },
+  {
+    title: "Model",
+    key: "model",
+    width: 120,
+    render: (_: unknown, record: ScrapRecord) => (
+      <div className="text-sm text-gray-700">{record.model || "-"}</div>
+    ),
+  },
+  {
+    title: "Scrap Type",
+    key: "scrapType",
+    width: 160,
+    render: (_: unknown, record: ScrapRecord) => {
+      const v = String(record.scrap_type || "-");
+      const lowered = v.toLowerCase();
+      const color = lowered.includes("return") ? "blue" : lowered.includes("process") ? "geekblue" : "purple";
+      return <Tag color={color}>{v}</Tag>;
+    },
+  },
+  {
+    title: "UoM",
+    key: "uom",
+    width: 80,
+    render: (_: unknown, record: ScrapRecord) => (
+      <div className="text-sm text-gray-700">{record.uom || "-"}</div>
+    ),
+  },
+  {
+    title: "Qty",
+    key: "quantity",
+    width: 90,
+    render: (_: unknown, record: ScrapRecord) => (
+      <div className="text-sm font-semibold text-gray-900">{record.quantity ?? 0}</div>
+    ),
+  },
+  {
+    title: "Weight (kg)",
+    key: "weightKg",
+    width: 110,
+    render: (_: unknown, record: ScrapRecord) => (
+      <div className="text-sm text-gray-700">{Number(record.weight_kg ?? 0)}</div>
     ),
   },
   {
     title: "Date Received",
     key: "dateReceived",
     width: 140,
-    render: (record: ScrapRecord) => (
-      <div className="text-sm text-gray-600">{record.date_received}</div>
+    render: (_: unknown, record: ScrapRecord) => (
+      <div className="text-sm text-gray-600">
+        {record.date_received ? dayjs(record.date_received).format("YYYY-MM-DD") : "-"}
+      </div>
     ),
   },
   {
     title: "Packing Number",
     key: "packingNumber",
-    width: 160,
-    render: (record: ScrapRecord) => (
-      <div className="text-sm text-gray-600">{record.packing_number}</div>
+    width: 210,
+    render: (_: unknown, record: ScrapRecord) => (
+      <div className="text-sm text-gray-700">{record.packing_number || "-"}</div>
     ),
   },
   {
-    title: "Scrap Type",
-    key: "scrapType",
-    width: 180,
-    render: (record: ScrapRecord) => (
-      <Tag color={record.scrap_type.includes("Product") ? "blue" : "geekblue"}>
-        {record.scrap_type}
-      </Tag>
+    title: "Validator",
+    key: "validator",
+    width: 140,
+    render: (_: unknown, record: ScrapRecord) => (
+      <div className="text-sm text-gray-700">{record.validator || "-"}</div>
     ),
   },
   {
-    title: "Reasons",
-    key: "reasons",
-    width: 120,
-    render: (record: ScrapRecord) => (
-      <Tag color={record.reasons === "Dump" ? "red" : "default"}>{record.reasons}</Tag>
-    ),
-  },
-  {
-    title: "Quantity",
-    key: "quantity",
-    width: 100,
-    render: (record: ScrapRecord) => (
-      <div className="text-lg font-semibold">{record.quantity}</div>
-    ),
+    title: "Status",
+    key: "status",
+    width: 110,
+    render: (_: unknown, record: ScrapRecord) => {
+      const v = String(record.status || "-");
+      const lowered = v.toLowerCase();
+      const color = lowered.includes("active") ? "green" : lowered.includes("close") ? "default" : "blue";
+      return <Tag color={color}>{v}</Tag>;
+    },
   },
   {
     title: "Actions",
@@ -211,57 +199,6 @@ type ScrapEditFormValues = {
   quantity?: number;
 };
 
-const dummyInventoryData: FinishedGoodsRecord[] = [
-  {
-    id: "1",
-    master_list: {
-      id: "1",
-      part_name: "Engine Mount Assembly",
-      uniq_code: "LV7-001",
-      model: "EM-2024",
-      threshold_kanban: 100,
-    },
-    work_order: {
-      id: "1",
-      wo_number: "WO-2024-001",
-    },
-    warehouse: {
-      id: "1",
-      code: "WH-01",
-    },
-    current_stock: 80,
-    target_stock: 120,
-    stock_to_complete: 40,
-    total_kanban: 150,
-    quality_status: "Medium",
-    updated_at: "2025-09-25T10:30:00Z",
-  },
-  {
-    id: "2",
-    master_list: {
-      id: "2",
-      part_name: "Transmission Case",
-      uniq_code: "TRC-002",
-      model: "TC-2024",
-      threshold_kanban: 50,
-    },
-    work_order: {
-      id: "2",
-      wo_number: "WO-2024-002",
-    },
-    warehouse: {
-      id: "2",
-      code: "WH-02",
-    },
-    current_stock: 60,
-    target_stock: 80,
-    stock_to_complete: 20,
-    total_kanban: 90,
-    quality_status: "High",
-    updated_at: "2025-09-25T11:00:00Z",
-  },
-];
-
 const dummyStatusData: FinishedGoodsRecord[] = [
   {
     id: "3",
@@ -289,6 +226,164 @@ const dummyStatusData: FinishedGoodsRecord[] = [
   },
 ];
 
+const isNotFoundError = (error: unknown) => {
+  if (!error || typeof error !== "object") return false;
+  const e = error as { status?: unknown };
+  return e.status === 404;
+};
+
+const makeReleaseColumns = (actions: {
+  onView: (record: ReleaseRecord) => void;
+  getScrapStockDisplay?: (scrapStockId: number) => {
+    part_name?: string;
+    wo_number?: string | null;
+    uniq?: string;
+    part_number?: string;
+    model?: string;
+    uom?: string;
+  } | null;
+}): ColumnType<ReleaseRecord>[] => [
+  {
+    title: "Release Number",
+    key: "releaseNumber",
+    width: 150,
+    render: (_: unknown, record: ReleaseRecord) => (
+      <div className="text-sm font-semibold text-gray-900">{record.release_number || "-"}</div>
+    ),
+  },
+  {
+    title: "Release Date",
+    key: "releaseDate",
+    width: 140,
+    render: (_: unknown, record: ReleaseRecord) => (
+      <div className="text-sm text-gray-600">
+        {record.release_date ? dayjs(record.release_date).format("YYYY-MM-DD") : "-"}
+      </div>
+    ),
+  },
+  {
+    title: "Type",
+    key: "releaseType",
+    width: 110,
+    render: (_: unknown, record: ReleaseRecord) => {
+      const v = String(record.release_type || "-");
+      const lowered = v.toLowerCase();
+      const color = lowered.includes("sell") ? "blue" : lowered.includes("dump") ? "red" : "default";
+      return <Tag color={color}>{v}</Tag>;
+    },
+  },
+  {
+    title: "Part Info",
+    key: "partInfo",
+    width: 220,
+    render: (_: unknown, record: ReleaseRecord) => {
+      const display = actions.getScrapStockDisplay?.(record.scrap_stock_id) ?? null;
+      return (
+        <div>
+          <div className="font-semibold text-gray-900">{display?.part_name || `#${record.scrap_stock_id}`}</div>
+          <div className="text-sm text-gray-500">{display?.wo_number ?? "-"}</div>
+        </div>
+      );
+    },
+  },
+  {
+    title: "UNIQ / Part Number",
+    key: "uniqPart",
+    width: 200,
+    render: (_: unknown, record: ReleaseRecord) => {
+      const display = actions.getScrapStockDisplay?.(record.scrap_stock_id) ?? null;
+      return (
+        <div>
+          <div className="font-semibold text-gray-900">{display?.uniq || "-"}</div>
+          <div className="text-sm text-gray-500">{display?.part_number || "-"}</div>
+        </div>
+      );
+    },
+  },
+  {
+    title: "Model",
+    key: "model",
+    width: 110,
+    render: (_: unknown, record: ReleaseRecord) => {
+      const display = actions.getScrapStockDisplay?.(record.scrap_stock_id) ?? null;
+      return <div className="text-sm text-gray-700">{display?.model || "-"}</div>;
+    },
+  },
+  {
+    title: "Qty Released",
+    key: "qty",
+    width: 120,
+    render: (_: unknown, record: ReleaseRecord) => {
+      const display = actions.getScrapStockDisplay?.(record.scrap_stock_id) ?? null;
+      return (
+        <div className="text-sm font-semibold text-gray-900">
+          {record.release_qty ?? 0} {display?.uom || ""}
+        </div>
+      );
+    },
+  },
+  {
+    title: "Weight (kg)",
+    key: "weight",
+    width: 110,
+    render: (_: unknown, record: ReleaseRecord) => (
+      <div className="text-sm text-gray-700">{record.weight_released ?? "-"}</div>
+    ),
+  },
+  {
+    title: "Buyer / Disposal",
+    key: "buyer",
+    width: 210,
+    render: (_: unknown, record: ReleaseRecord) => (
+      <div>
+        <div className="text-sm text-gray-900">{record.customer_name || "-"}</div>
+        <div className="text-xs text-gray-500">{record.disposal_reason || "-"}</div>
+      </div>
+    ),
+  },
+  {
+    title: "Value",
+    key: "value",
+    width: 140,
+    render: (_: unknown, record: ReleaseRecord) => (
+      <div className="text-sm text-gray-900">{record.total_value ?? "-"}</div>
+    ),
+  },
+  {
+    title: "Validator",
+    key: "validator",
+    width: 160,
+    render: (_: unknown, record: ReleaseRecord) => (
+      <div className="text-sm text-gray-700">{record.validator || "-"}</div>
+    ),
+  },
+  {
+    title: "Status",
+    key: "status",
+    width: 120,
+    render: (_: unknown, record: ReleaseRecord) => {
+      const v = String(record.approval_status || "-");
+      const lowered = v.toLowerCase();
+      const color = lowered.includes("pending") ? "orange" : lowered.includes("approve") ? "green" : "blue";
+      return <Tag color={color}>{v}</Tag>;
+    },
+  },
+  {
+    title: "Actions",
+    key: "actions",
+    width: 80,
+    render: (_: unknown, record: ReleaseRecord) => (
+      <Button
+        type="text"
+        icon={<EyeOutlined />}
+        size="small"
+        className="text-blue-600 hover:text-blue-800"
+        onClick={() => actions.onView(record)}
+      />
+    ),
+  },
+];
+
 export default function ScrapStockPage() {
   const router = useRouter();
   const [messageApi, contextHolder] = message.useMessage();
@@ -297,6 +392,39 @@ export default function ScrapStockPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [tab, setTab] = useState("scrap");
+  const apiEnabled = Boolean(apiBaseUrl);
+
+  const scrapStocksQuery = useGetScrapStocksQuery(
+    { page: currentPage, limit: pageSize },
+    { skip: !apiEnabled || tab !== "scrap" }
+  );
+  const scrapStatsQuery = useGetScrapStocksStatsQuery(undefined, {
+    skip: !apiEnabled,
+  });
+
+  const releasesQueryPlural = useGetScrapReleasesQuery(
+    { page: currentPage, limit: pageSize },
+    { skip: !apiEnabled || tab !== "release" }
+  );
+  const useLegacyReleases = apiEnabled && tab === "release" && isNotFoundError(releasesQueryPlural.error);
+  const releasesQueryLegacy = useGetScrapReleasesLegacyQuery(
+    { page: currentPage, limit: pageSize },
+    { skip: !useLegacyReleases }
+  );
+
+  const releasesQuery = useLegacyReleases ? releasesQueryLegacy : releasesQueryPlural;
+
+  const scrapStockMapQuery = useGetScrapStocksQuery(
+    { page: 1, limit: 500 },
+    { skip: !apiEnabled || tab !== "release" }
+  );
+  const scrapStockById = useMemo(() => {
+    const map = new Map<number, ScrapRecord>();
+    for (const item of scrapStockMapQuery.data?.items ?? []) {
+      map.set(item.id, item);
+    }
+    return map;
+  }, [scrapStockMapQuery.data?.items]);
 
   const [scrapData, setScrapData] = useState<ScrapRecord[]>(dummyScrapData);
 
@@ -339,7 +467,8 @@ export default function ScrapStockPage() {
   };
 
   const openScrapDetail = (record: ScrapRecord) => {
-    router.push(`/scrap-stock/detail?uniq=${encodeURIComponent(record.uniq)}`);
+    const id = record.uuid || String(record.id);
+    router.push(`/scrap-stock/detail?id=${encodeURIComponent(id)}`);
   };
 
   const openDeleteModal = (record: ScrapRecord) => {
@@ -369,154 +498,26 @@ export default function ScrapStockPage() {
     onDelete: (record) => openDeleteModal(record),
   });
 
-  const columns: ColumnType<FinishedGoodsRecord>[] = [
-    {
-      title: "Product Info",
-      key: "productInfo",
-      width: 250,
-      render: (record: FinishedGoodsRecord) => (
-        <div>
-          <div className="font-semibold text-gray-900">
-            {record.master_list?.part_name}
-          </div>
-          <div className="text-sm text-gray-500">
-            {record.master_list?.uniq_code}
-          </div>
-          <div className="text-xs text-gray-400">
-            {record.master_list?.model}
-          </div>
-        </div>
-      ),
-    },
-    {
-      title: "WO Number",
-      key: "workOrder",
-      width: 200,
-      render: (_: FinishedGoodsRecord, record: FinishedGoodsRecord) => (
-        <span className="border px-2  rounded-lg border-gray-300">
-          {record.work_order?.wo_number}
-        </span>
-      ),
-    },
-    {
-      title: "Warehouse",
-      key: "warehouse",
-      width: 100,
-      render: (_: FinishedGoodsRecord, record: FinishedGoodsRecord) => (
-        <div className="flex items-center gap-1">
-          <div className="text-gray-400 ">
-            <IoLocationOutline size={20} />
-          </div>
-          <span className="text-sm text-gray-600 bg-[#FAFBFC] px-2">
-            {record.warehouse?.code}
-          </span>
-        </div>
-      ),
-    },
+  const openReleaseDetail = (record: ReleaseRecord) => {
+    const id = record.uuid || String(record.id);
+    router.push(`/scrap-stock/release/detail?id=${encodeURIComponent(id)}`);
+  };
 
-    {
-      title: "Current Stock",
-      key: "currentStock",
-      width: 120,
-      render: (_: FinishedGoodsRecord, record: FinishedGoodsRecord) => (
-        <div>
-          <div className="text-lg font-semibold">{record.current_stock}</div>
-          <div className="text-xs text-gray-500">
-            Target: {record.target_stock}
-          </div>
-        </div>
-      ),
-    },
-    {
-      title: "Kanban Status",
-      key: "kanbanStatus",
-      width: 120,
-      render: (_: FinishedGoodsRecord, record: FinishedGoodsRecord) => (
-        <div>
-          <div className="text-sm font-semibold">
-            {record.current_stock} Kanban
-          </div>
-          <div className="text-xs text-gray-500">
-            Need: {record.stock_to_complete} more
-          </div>
-        </div>
-      ),
-    },
-    {
-      title: "Stock Status",
-      key: "stockStatus",
-      width: 120,
-      render: (_: FinishedGoodsRecord, record: FinishedGoodsRecord) => {
-        let status = "normal";
-        if (
-          record?.current_stock ||
-          0 < (record.master_list?.threshold_kanban ?? 0)
-        )
-          status = "low";
-        if ((record?.current_stock ?? 0) > (record.total_kanban ?? 0))
-          status = "overstock";
+  const releaseColumns = makeReleaseColumns({
+    onView: openReleaseDetail,
+    getScrapStockDisplay: (scrapStockId) => scrapStockById.get(scrapStockId) ?? null,
+  });
 
-        const getStatusConfig = (status: string) => {
-          switch (status) {
-            case "low":
-              return { color: "red", icon: <AlertOutlined /> };
-            case "overstock":
-              return { color: "orange", icon: <WarningOutlined /> };
-            case "normal":
-            default:
-              return { color: "green", icon: <CheckCircleOutlined /> };
-          }
-        };
+  const liveScrapRows = scrapStocksQuery.data?.items ?? [];
+  const scrapRows = apiEnabled ? liveScrapRows : scrapData;
+  const scrapTotal = apiEnabled
+    ? scrapStocksQuery.data?.pagination?.total ?? liveScrapRows.length
+    : scrapData.length;
 
-        const config = getStatusConfig(status);
-
-        return (
-          <Tag color={config.color} icon={config.icon}>
-            {status.charAt(0).toUpperCase() + status.slice(1)}
-          </Tag>
-        );
-      },
-    },
-    {
-      title: "Last Updated",
-      key: "lastUpdated",
-      width: 140,
-      render: (_: FinishedGoodsRecord, record: FinishedGoodsRecord) => (
-        <span className="text-sm text-gray-600">
-          {record.updated_at
-            ? new Date(record.updated_at).toLocaleString()
-            : "-"}
-        </span>
-      ),
-    },
-    {
-      title: "Actions",
-      key: "actions",
-      width: 100,
-      render: () => (
-        <div className="flex items-center gap-2">
-          <Button
-            type="text"
-            icon={<EyeOutlined />}
-            size="small"
-            className="text-blue-600 hover:text-blue-800"
-          />
-          <Button
-            type="text"
-            icon={<FaRegEdit />}
-            size="small"
-            className="text-green-600 hover:text-green-800"
-          />
-          <Button
-            type="text"
-            icon={<FaRegTrashAlt color="red" />}
-            size="small"
-            className="text-red-600 hover:text-gray-800"
-          />
-        </div>
-      ),
-    },
-  ];
+  const releaseRows = apiEnabled ? releasesQuery.data?.items ?? [] : [];
+  const releaseTotal = apiEnabled
+    ? releasesQuery.data?.pagination?.total ?? releaseRows.length
+    : releaseRows.length;
   const columnsStatus: ColumnType<FinishedGoodsRecord>[] = [
     {
       title: "Alert Type",
@@ -771,6 +772,13 @@ export default function ScrapStockPage() {
             Scan Scrap
           </Button>
           <Button
+            icon={<PlusOutlined />}
+            className="flex items-center gap-2"
+            onClick={() => router.push("/scrap-stock/release/create")}
+          >
+            Add Scrap Release
+          </Button>
+          <Button
             type="primary"
             icon={<PlusOutlined />}
             className="flex items-center gap-2"
@@ -785,28 +793,28 @@ export default function ScrapStockPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatsCard
           title="Total Scrap Items"
-          value={2}
+          value={apiEnabled ? scrapStatsQuery.data?.total_items ?? 0 : scrapTotal}
           icon={<BsBoxSeam size={30} />}
           bgColor=""
           textColor="text-blue-600"
         />
         <StatsCard
           title="Total Scrap Qty"
-          value="1"
+          value={apiEnabled ? scrapStatsQuery.data?.total_qty ?? 0 : scrapRows.reduce((acc, r) => acc + (r.quantity ?? 0), 0)}
           icon={<FiAlertTriangle size={30} />}
           bgColor=""
           textColor="text-red-600"
         />
         <StatsCard
-          title="Total Cost"
-          value="1,150"
+          title="Total Weight (kg)"
+          value={apiEnabled ? scrapStatsQuery.data?.total_weight_kg ?? 0 : scrapRows.reduce((acc, r) => acc + Number(r.weight_kg ?? 0), 0)}
           icon={<HiOutlineArchiveBox size={30} />}
           bgColor=""
           textColor="text-green-600"
         />
         <StatsCard
-          title="Active Cases"
-          value="3"
+          title="Scrap Types"
+          value={apiEnabled ? scrapStatsQuery.data?.scrap_types ?? 0 : new Set(scrapRows.map((r) => r.scrap_type)).size}
           icon={<LuChartColumn size={30} />}
           bgColor=""
           textColor="text-orange-600"
@@ -826,41 +834,85 @@ export default function ScrapStockPage() {
               Scrap Database
             </div>
             <div
-              onClick={() => setTab("incoming")}
+              onClick={() => setTab("release")}
               className={`${
-                tab === "incoming" ? "bg-white" : ""
+                tab === "release" ? "bg-white" : ""
               } rounded-xl text-center p-1`}
             >
-              Incoming Scrap
+              Scrap Release History
             </div>
           </div>
         </div>
 
         <div className="p-6">
-          <TableTemplate
-            columns={
-              (tab === "scrap"
-                ? scrapColumns
-                : columnsStatus) as unknown as (ColumnType<FinishedGoodsRecord> & {
-                sortFieldKey?: string;
-              })[]
-            }
-            data={
-              (tab === "scrap"
-                ? scrapData
-                : dummyStatusData) as unknown as FinishedGoodsRecord[]
-            }
-            rowKey="id"
-            searchValue={searchValue}
-            onSearchChange={setSearchValue}
-            searchPlaceholder="Search scrap..."
-            pageSize={pageSize}
-            currentPage={currentPage}
-            total={tab === "scrap" ? scrapData.length : dummyStatusData.length}
-            onPageChange={setCurrentPage}
-            onPageSizeChange={setPageSize}
-            loading={loading}
-          />
+          {tab === "scrap" ? (
+            <TableTemplate<ScrapRecord>
+              columns={scrapColumns as (ColumnType<ScrapRecord> & { sortFieldKey?: string })[]}
+              data={scrapRows.filter((r) => {
+                const q = searchValue.trim().toLowerCase();
+                if (!q) return true;
+                return [
+                  r.part_name,
+                  r.wo_number ?? "",
+                  r.uniq,
+                  r.part_number,
+                  r.model,
+                  r.scrap_type,
+                  r.packing_number,
+                  r.validator,
+                  r.status,
+                ]
+                  .join(" ")
+                  .toLowerCase()
+                  .includes(q);
+              })}
+              rowKey={(r) => r.uuid || String(r.id)}
+              searchValue={searchValue}
+              onSearchChange={setSearchValue}
+              searchPlaceholder="Search scrap..."
+              pageSize={pageSize}
+              currentPage={currentPage}
+              total={scrapTotal}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={setPageSize}
+              loading={loading || scrapStocksQuery.isFetching}
+            />
+          ) : (
+            <TableTemplate<ReleaseRecord>
+              columns={releaseColumns as (ColumnType<ReleaseRecord> & { sortFieldKey?: string })[]}
+              data={releaseRows.filter((r) => {
+                const q = searchValue.trim().toLowerCase();
+                if (!q) return true;
+                const stock = scrapStockById.get(r.scrap_stock_id);
+                return [
+                  r.release_number,
+                  r.release_type,
+                  r.customer_name ?? "",
+                  r.disposal_reason ?? "",
+                  r.approval_status,
+                  r.validator ?? "",
+                  String(r.scrap_stock_id),
+                  stock?.uniq ?? "",
+                  stock?.part_number ?? "",
+                  stock?.part_name ?? "",
+                  stock?.model ?? "",
+                ]
+                  .join(" ")
+                  .toLowerCase()
+                  .includes(q);
+              })}
+              rowKey={(r) => r.uuid || String(r.id)}
+              searchValue={searchValue}
+              onSearchChange={setSearchValue}
+              searchPlaceholder="Search release..."
+              pageSize={pageSize}
+              currentPage={currentPage}
+              total={releaseTotal}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={setPageSize}
+              loading={loading || releasesQuery.isFetching || scrapStockMapQuery.isFetching}
+            />
+          )}
         </div>
       </div>
     </div>

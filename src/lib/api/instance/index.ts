@@ -81,6 +81,7 @@ export const apiBaseUrl = rawApiBaseUrl.replace(/\/$/, "");
 export const apiSlice = createApi({
   reducerPath: "api",
   tagTypes: [
+    "FinishedGoods",
     "BOM",
     "PoBudget",
     "ProductReturns",

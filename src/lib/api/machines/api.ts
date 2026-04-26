@@ -34,6 +34,7 @@ const getString = (record: UnknownRecord, keys: string[]): string | undefined =>
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) return value;
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
   }
   return undefined;
 };
@@ -65,8 +66,9 @@ export type CreateMachineRequest = {
   machine_name: string;
   machine_number: string;
   production_line: string;
-  process_id: string;
-  machine_capacity: number;
+  process_id: string | number;
+  machine_capacity?: number | null;
+  status?: string;
 };
 
 const toMachineRecord = (raw: unknown): MachineRecord => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button, Input, InputNumber, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -8,90 +8,264 @@ import {
   DeleteOutlined,
   EditOutlined,
   InfoCircleOutlined,
+  PlusOutlined,
   SaveOutlined,
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import type { Dayjs } from "dayjs";
+import dayjs from "dayjs";
+
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useListCustomersQuery } from "@/lib/api/customers/api";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { useCreateDeliveryScheduleMutation } from "@/lib/api/delivery-schedule/api";
+import { useGetCustomerOrderByIdQuery, useListCustomerOrdersQuery } from "@/lib/api/customer-orders/api";
 
 type ReviewRow = {
   key: string;
+  itemUuid: string;
   uniq: string;
   partNo: string;
   partName: string;
   model: string;
   totalOrder: number;
   totalDelivery: number;
+  uom: string;
 };
 
-type DnRef = {
+type UniqOption = {
   value: string;
   label: string;
-  customer: string;
-  deliverySchedule: string;
-  cycle: string;
-  rows: ReviewRow[];
+  itemUuid: string;
+  partNo: string;
+  partName: string;
+  model: string;
+  totalOrder: number;
+  uom: string;
 };
+
+const toPositiveInt = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.trunc(value);
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.trunc(parsed);
+  }
+  return null;
+};
+
+const formatOffsetDateTime = (value: Dayjs): string => value.format("YYYY-MM-DDTHH:mm:ssZ");
 
 export default function AddNewDeliverySchedulePage() {
   const router = useRouter();
 
-  const dnRefs: DnRef[] = useMemo(
-    () => [
-      {
-        value: "DN-TMC-2025-001",
-        label: "DN-TMC-2025-001",
-        customer: "Toyota Motor Indonesia",
-        deliverySchedule: "10/10/2025",
-        cycle: "Daily",
-        rows: [
-          {
-            key: "r-1",
-            uniq: "LV-001",
-            partNo: "BRK-001-A",
-            partName: "Bracket Assembly",
-            model: "Avanza Model A",
-            totalOrder: 100,
-            totalDelivery: 50,
-          },
-          {
-            key: "r-2",
-            uniq: "LV-001",
-            partNo: "SA-001-A",
-            partName: "Suspension Arm",
-            model: "Avanza Model A",
-            totalOrder: 100,
-            totalDelivery: 50,
-          },
-          {
-            key: "r-3",
-            uniq: "LV-001",
-            partNo: "SA-001-A",
-            partName: "Suspension Arm",
-            model: "Avanza Model A",
-            totalOrder: 100,
-            totalDelivery: 50,
-          },
-        ],
-      },
-    ],
-    []
+  const apiEnabled = Boolean(apiBaseUrl);
+  const customersQuery = useListCustomersQuery(undefined, { skip: !apiEnabled });
+  const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeQuery.data?.data ?? []), [bomTreeQuery.data]);
+
+  const dnListQuery = useListCustomerOrdersQuery(
+    { document_type: "DN", page: 1, limit: 200 },
+    { skip: !apiEnabled }
   );
 
-  const dnRefOptions = useMemo(() => [{ label: "Select DN Number", value: "" }, ...dnRefs.map((d) => ({ label: d.label, value: d.value }))], [dnRefs]);
+  const [createDeliverySchedule, createState] = useCreateDeliveryScheduleMutation();
 
-  const [dnReference, setDnReference] = useState<string>(dnRefs[0]?.value ?? "");
-  const selectedRef = useMemo(() => dnRefs.find((d) => d.value === dnReference) ?? null, [dnRefs, dnReference]);
+  const [customerOrderUuid, setCustomerOrderUuid] = useState<string>("");
+  const dnDetailQuery = useGetCustomerOrderByIdQuery(customerOrderUuid, {
+    skip: !apiEnabled || !customerOrderUuid,
+  });
 
-  const [customer, setCustomer] = useState<string>(selectedRef?.customer ?? "");
+  const dnRefOptions = useMemo(() => {
+    if (!apiEnabled) {
+      return [
+        { label: "Select DN Number", value: "" },
+        { label: "DN-2026-0001", value: "2f057f77-9006-4ffe-afd6-942133012bb3" },
+      ];
+    }
+    const items = dnListQuery.data?.items ?? [];
+    return [
+      { label: "Select DN Number", value: "" },
+      ...items
+        .filter((o) => o.id && o.document_number)
+        .map((o) => ({ label: o.document_number, value: o.id })),
+    ];
+  }, [apiEnabled, dnListQuery.data]);
 
-  const [rows, setRows] = useState<ReviewRow[]>(selectedRef?.rows ?? []);
+  const customerOptions = useMemo(() => {
+    if (!apiEnabled) {
+      return [
+        { value: 1, label: "PT Endpoint Check Customer" },
+        { value: 2, label: "Toyota Motor" },
+      ];
+    }
+    const customers = customersQuery.data ?? [];
+    return customers
+      .map((c) => {
+        const id =
+          toPositiveInt(c.id) ??
+          toPositiveInt(c.row_id) ??
+          toPositiveInt(c.customer_id) ??
+          toPositiveInt(c.customer_code);
+        const name = String(c.customer_name ?? "").trim();
+        if (!id || !name) return null;
+        return { value: id, label: name };
+      })
+      .filter((x): x is { value: number; label: string } => Boolean(x));
+  }, [apiEnabled, customersQuery.data]);
 
-  // Keep dependent state in sync when DN reference changes
-  const syncFromRef = (refValue: string) => {
-    setDnReference(refValue);
-    const ref = dnRefs.find((d) => d.value === refValue) ?? null;
-    setCustomer(ref?.customer ?? "");
-    setRows(ref?.rows ?? []);
+  const [customerId, setCustomerId] = useState<number | null>(null);
+  const [customerName, setCustomerName] = useState<string>("");
+
+  const [deliveryDate, setDeliveryDate] = useState<Dayjs | null>(dayjs());
+  const [cycle, setCycle] = useState<string>("daily");
+  const [priority] = useState<string>("normal");
+  const [transportCompany] = useState<string>("");
+  const [vehicleNumber] = useState<string>("");
+  const [driverName] = useState<string>("");
+  const [driverContact] = useState<string>("");
+  const [departureAt] = useState<Dayjs | null>(null);
+  const [arrivalAt] = useState<Dayjs | null>(null);
+  const [deliveryInstructions] = useState<string>("");
+
+  const [draftUniq, setDraftUniq] = useState<string>("");
+  const [draftQty, setDraftQty] = useState<number>(0);
+
+  const [rows, setRows] = useState<ReviewRow[]>([]);
+
+  const uniqOptions = useMemo<UniqOption[]>(() => {
+    if (!apiEnabled) {
+      return [
+        {
+          value: "LV-001",
+          label: "LV-001",
+          itemUuid: "item-1",
+          partNo: "BRK-001-A",
+          partName: "Bracket Assembly",
+          model: "Avanza Model A",
+          totalOrder: 100,
+          uom: "pcs",
+        },
+      ];
+    }
+
+    const order = dnDetailQuery.data;
+    const orderItems = order?.items ?? [];
+    const mapped = orderItems
+      .map((item, idx) => {
+        const uniq = String(item.item_uniq_code ?? "").trim();
+        if (!uniq) return null;
+        const partNo = String(item.part_number ?? bomIndex.partNumberByUniq[uniq] ?? "").trim();
+        const partName = String(item.part_name ?? bomIndex.partNameByUniq[uniq] ?? "").trim();
+        const model = String(item.model ?? bomIndex.modelByUniq[uniq] ?? "").trim();
+        const uom = String(bomIndex.uomByUniq[uniq] ?? "pcs").trim() || "pcs";
+        const totalOrder = Number(item.quantity ?? 0);
+        const itemUuid = String(item.id ?? `item-${idx}`);
+
+        return {
+          value: uniq,
+          label: uniq,
+          itemUuid,
+          partNo,
+          partName,
+          model,
+          totalOrder,
+          uom,
+        } satisfies UniqOption;
+      })
+      .filter((v): v is UniqOption => v !== null);
+
+    const deduped = new Map<string, UniqOption>();
+    mapped.forEach((m) => {
+      if (!deduped.has(m.value)) deduped.set(m.value, m);
+    });
+    return Array.from(deduped.values());
+  }, [apiEnabled, bomIndex, dnDetailQuery.data]);
+
+  const selectedUniq = useMemo(
+    () => uniqOptions.find((o) => o.value === draftUniq) ?? null,
+    [draftUniq, uniqOptions]
+  );
+
+  const addDraftItem = () => {
+    if (!draftUniq.trim()) {
+      message.error("Uniq is required");
+      return;
+    }
+    if (!draftQty || draftQty <= 0) {
+      message.error("Quantity to deliver must be greater than 0");
+      return;
+    }
+    const option = selectedUniq;
+    if (!option) {
+      message.error("Invalid uniq selection");
+      return;
+    }
+
+    setRows((prev) => {
+      const exists = prev.some((r) => r.itemUuid === option.itemUuid || r.uniq === option.value);
+      if (exists) {
+        message.warning("This UNIQ already exists in the review list");
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          key: `r-${option.itemUuid}`,
+          itemUuid: option.itemUuid,
+          uniq: option.value,
+          partNo: option.partNo,
+          partName: option.partName,
+          model: option.model,
+          totalOrder: option.totalOrder,
+          totalDelivery: Math.min(draftQty, option.totalOrder || draftQty),
+          uom: option.uom,
+        },
+      ];
+    });
+
+    setDraftUniq("");
+    setDraftQty(0);
   };
+
+  useEffect(() => {
+    if (!apiEnabled) {
+      if (!customerId) setCustomerId(1);
+      if (!customerName) setCustomerName("PT Endpoint Check Customer");
+      if (!customerOrderUuid) setCustomerOrderUuid("2f057f77-9006-4ffe-afd6-942133012bb3");
+      return;
+    }
+
+    const order = dnDetailQuery.data;
+    if (!order || !order.id) return;
+
+    setCustomerId(order.customer_id);
+    setCustomerName(order.customer_name ?? "");
+
+    if (!deliveryDate && order.document_date) {
+      const parsed = dayjs(order.document_date);
+      if (parsed.isValid()) setDeliveryDate(parsed);
+    }
+
+  }, [apiEnabled, customerId, customerName, deliveryDate, dnDetailQuery.data, customerOrderUuid]);
+
+  const cycleLabel = useMemo(() => {
+    if (!cycle) return "-";
+    const normalized = String(cycle).toLowerCase();
+    if (normalized === "weekly") return "Weekly";
+    if (normalized === "monthly") return "Monthly";
+    return "Daily";
+  }, [cycle]);
+
+  const deliveryDateLabel = useMemo(() => {
+    if (!deliveryDate) return "-";
+    return deliveryDate.format("MM/DD/YYYY");
+  }, [deliveryDate]);
+
+  const selectedOrderReference = useMemo(() => {
+    return String(dnRefOptions.find((o) => o.value === customerOrderUuid)?.label ?? "").trim();
+  }, [dnRefOptions, customerOrderUuid]);
 
   const columns: ColumnsType<ReviewRow> = [
     { title: "Uniq", dataIndex: "uniq", key: "uniq", width: 120, render: (v: string) => <span className="text-sm text-gray-800">{v}</span> },
@@ -128,7 +302,16 @@ export default function AddNewDeliverySchedulePage() {
       fixed: "right",
       render: (_: unknown, record) => (
         <div className="flex items-center justify-end gap-2">
-          <Button size="small" type="text" icon={<EditOutlined />} onClick={() => message.info(`Edit ${record.partNo} (mock)`)} />
+          <Button
+            size="small"
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setDraftUniq(record.uniq);
+              setDraftQty(record.totalDelivery);
+              setRows((prev) => prev.filter((r) => r.key !== record.key));
+            }}
+          />
           <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => setRows((prev) => prev.filter((r) => r.key !== record.key))} />
         </div>
       ),
@@ -137,6 +320,20 @@ export default function AddNewDeliverySchedulePage() {
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
+      <style jsx global>{`
+        .ds-highlight .ant-select-selector {
+          background: #fef9c3 !important;
+          border-color: #fde68a !important;
+        }
+        .ds-highlight .ant-input-number {
+          background: #fef9c3 !important;
+          border-color: #fde68a !important;
+        }
+        .ds-highlight .ant-input-number-input {
+          background: transparent !important;
+        }
+      `}</style>
+
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
         <div className="flex items-center justify-between gap-3">
           <button
@@ -155,9 +352,61 @@ export default function AddNewDeliverySchedulePage() {
               className="!rounded-lg"
               icon={<SaveOutlined />}
               onClick={() => {
-                message.success("Saved delivery schedule (mock)");
-                router.push("/delivery-scheduling");
+                if (!customerOrderUuid || !selectedOrderReference) {
+                  message.error("DN Reference is required");
+                  return;
+                }
+                if (!customerId || !customerName.trim()) {
+                  message.error("Customer is required");
+                  return;
+                }
+                if (!rows.length) {
+                  message.error("Items are required");
+                  return;
+                }
+
+                const req = {
+                  customer_order_document_uuid: customerOrderUuid,
+                  customer_order_reference: selectedOrderReference,
+                  customer_id: customerId,
+                  customer_name: customerName.trim(),
+                  delivery_date: (deliveryDate ?? dayjs()).format("YYYY-MM-DD"),
+                  cycle,
+                  priority,
+                  transport_company: transportCompany,
+                  vehicle_number: vehicleNumber,
+                  driver_name: driverName,
+                  driver_contact: driverContact,
+                  departure_at: departureAt ? formatOffsetDateTime(departureAt) : "",
+                  arrival_at: arrivalAt ? formatOffsetDateTime(arrivalAt) : "",
+                  delivery_instructions: deliveryInstructions,
+                  items: rows.map((r) => ({
+                    customer_order_document_item_uuid: r.itemUuid,
+                    item_uniq_code: r.uniq,
+                    part_no: r.partNo,
+                    part_name: r.partName,
+                    model: r.model,
+                    total_order: Number(r.totalOrder ?? 0),
+                    total_delivery: Number(r.totalDelivery ?? 0),
+                    uom: r.uom,
+                  })),
+                };
+
+                if (!apiEnabled) {
+                  message.success("Saved delivery schedule (mock)");
+                  router.push("/delivery-scheduling");
+                  return;
+                }
+
+                createDeliverySchedule(req)
+                  .unwrap()
+                  .then(() => {
+                    message.success("Saved delivery schedule");
+                    router.push("/delivery-scheduling");
+                  })
+                  .catch((error) => message.error(getApiErrorMessage(error, "Failed to save delivery schedule")));
               }}
+              loading={createState.isLoading}
             >
               Save Delivery Schedule
             </Button>
@@ -166,7 +415,7 @@ export default function AddNewDeliverySchedulePage() {
 
         <div className="mt-4">
           <div className="text-2xl font-bold text-gray-900">Add New Delivery Schedule</div>
-          <div className="text-sm text-gray-500">Create DN for incoming raw material receipt and tracking  1 entry</div>
+          <div className="text-sm text-gray-500">Create DN for incoming raw material receipt and tracking • 1 entry</div>
         </div>
       </div>
 
@@ -180,27 +429,121 @@ export default function AddNewDeliverySchedulePage() {
             <Tag color="blue" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">Required</Tag>
           </div>
 
-          <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="flex items-center gap-4">
-              <div className="w-28 text-sm text-gray-600">DN Reference</div>
+          <div className="mt-5 grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div>
+              <div className="text-xs font-semibold text-gray-500">PO/DN Reference</div>
               <Select
-                value={dnReference}
-                onChange={(v) => syncFromRef(v)}
+                value={customerOrderUuid}
+                onChange={(v) => {
+                  setCustomerOrderUuid(v);
+                  setRows([]);
+                  setDraftUniq("");
+                  setDraftQty(0);
+                }}
                 options={dnRefOptions}
-                className="!rounded-lg"
-                style={{ width: 260 }}
+                className="w-full !rounded-lg mt-1"
+                loading={dnListQuery.isFetching || dnDetailQuery.isFetching}
+                showSearch
+                filterOption={(input, option) =>
+                  String(option?.label ?? "")
+                    .toLowerCase()
+                    .includes(input.trim().toLowerCase())
+                }
               />
             </div>
-            <div className="flex items-center gap-4 md:justify-end">
-              <div className="w-28 text-sm text-gray-600">Customer</div>
-              <Input
+            <div>
+              <div className="text-xs font-semibold text-gray-500">Customer</div>
+              <Select
+                value={customerId ?? undefined}
+                onChange={(v, option) => {
+                  const id = toPositiveInt(v);
+                  if (!id) {
+                    setCustomerId(null);
+                    setCustomerName("");
+                    return;
+                  }
+                  setCustomerId(id);
+                  setCustomerName(String((option as { label?: string } | undefined)?.label ?? "").trim());
+                }}
+                options={customerOptions}
+                className="w-full !rounded-lg mt-1"
+                loading={customersQuery.isFetching}
+                showSearch
                 allowClear
-                value={customer}
-                onChange={(e) => setCustomer(e.target.value)}
-                placeholder="Customer Name"
-                className="!rounded-lg"
-                style={{ width: 260 }}
+                filterOption={(input, option) =>
+                  String(option?.label ?? "")
+                    .toLowerCase()
+                    .includes(input.trim().toLowerCase())
+                }
               />
+            </div>
+
+            <div className="ds-highlight">
+              <div className="text-xs font-semibold text-gray-500">Uniq</div>
+              <Select
+                value={draftUniq || undefined}
+                onChange={(v) => {
+                  const nextUniq = String(v ?? "");
+                  setDraftUniq(nextUniq);
+                  const matched = uniqOptions.find((o) => o.value === nextUniq);
+                  setDraftQty(matched?.totalOrder ? Math.max(0, matched.totalOrder) : 0);
+                }}
+                options={[{ label: "Select Uniq", value: "" }, ...uniqOptions.map((u) => ({ label: u.label, value: u.value }))]}
+                className="w-full !rounded-lg mt-1"
+                showSearch
+                filterOption={(input, option) =>
+                  String(option?.label ?? "")
+                    .toLowerCase()
+                    .includes(input.trim().toLowerCase())
+                }
+              />
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold text-gray-500">Model</div>
+              <Input className="!rounded-lg mt-1" value={selectedUniq?.model ?? ""} disabled placeholder="Auto-filled" />
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div>
+              <div className="text-xs font-semibold text-gray-500">Part Name</div>
+              <Input className="!rounded-lg mt-1" value={selectedUniq?.partName ?? ""} disabled placeholder="Auto-filled" />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-gray-500">Part Number</div>
+              <Input className="!rounded-lg mt-1" value={selectedUniq?.partNo ?? ""} disabled placeholder="Auto-filled" />
+            </div>
+
+            <div className="ds-highlight">
+              <div className="text-xs font-semibold text-gray-500">Quantity to Deliver</div>
+              <InputNumber
+                className="w-full !rounded-lg mt-1"
+                min={0}
+                value={draftQty}
+                onChange={(v) => setDraftQty(typeof v === "number" ? v : 0)}
+                placeholder="0"
+              />
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold text-gray-500">Cycle Pengiriman</div>
+              <Select
+                className="w-full !rounded-lg mt-1"
+                value={cycle}
+                onChange={(v) => setCycle(v)}
+                options={[
+                  { label: "Daily", value: "daily" },
+                  { label: "Weekly", value: "weekly" },
+                  { label: "Monthly", value: "monthly" },
+                ]}
+              />
+
+              <div className="mt-3 flex justify-end">
+                <Button type="primary" className="!rounded-lg" icon={<PlusOutlined />} onClick={addDraftItem}>
+                  + Add Item
+                </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -217,15 +560,15 @@ export default function AddNewDeliverySchedulePage() {
           <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-6">
             <div>
               <div className="text-xs font-semibold text-gray-500">Customer</div>
-              <div className="text-sm text-gray-900 mt-1">{customer || "-"}</div>
+              <div className="text-sm text-gray-900 mt-1">{customerName || "-"}</div>
             </div>
             <div>
               <div className="text-xs font-semibold text-gray-500">Delivery Schedule</div>
-              <div className="text-sm text-gray-900 mt-1">{selectedRef?.deliverySchedule ?? "-"}</div>
+              <div className="text-sm text-gray-900 mt-1">{deliveryDateLabel}</div>
             </div>
             <div>
               <div className="text-xs font-semibold text-gray-500">Cycle</div>
-              <div className="text-sm text-gray-900 mt-1">{selectedRef?.cycle ?? "-"}</div>
+              <div className="text-sm text-gray-900 mt-1">{cycleLabel}</div>
             </div>
           </div>
 

@@ -1,54 +1,53 @@
 "use client";
 
 import React, { Suspense, useEffect, useMemo, useState } from "react";
-import { Button, Card, Table, Tabs, Tag, message } from "antd";
+import { Button, Card, Input, Modal, Table, Tabs, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeftOutlined,
-  CheckOutlined,
-  CloseOutlined,
   FileTextOutlined,
   HistoryOutlined,
 } from "@ant-design/icons";
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
-  type StockOpnameDetailResponse,
-  useGetStockOpnameDetailQuery,
-  useSubmitStockOpnameMutation,
+  type StockInventoryType,
+  useApproveStockOpnameSessionMutation,
+  useGetStockOpnameHistoryLogsQuery,
+  useGetStockOpnameSessionByIdQuery,
 } from "@/lib/api/stock-opname/api";
 
-type DetailLine = {
-  key: string;
-  itemId: number;
-  uniq: string;
-  partNumber: string;
-  partName: string;
-  currentStock: number;
-  countedQty: number;
-  userCounted: string;
-  decision?: "approved" | "rejected";
-};
-
-type HistoryLog = {
-  key: string;
-  at: string;
-  by: string;
-  action: string;
-  note?: string;
-};
-
 type DetailData = {
-  opnameId: string;
+  sessionId: string;
+  sessionNumber: string;
+  inventoryLabel: string;
   period: string;
-  uniqContext: string;
-  statusImpact: "Approved" | "Waiting for Approval" | "Pending Verification";
+  location: string;
+  scheduleDate?: string;
+  countedDate?: string;
+  statusLabel: string;
+  impactLabel: string;
   systemQty: number;
   physicalQty: number;
   costImpact: number;
-  lines: DetailLine[];
-  logs: HistoryLog[];
+  submittedBy?: string | null;
+  approvedBy?: string | null;
+  approvalRemarks?: string | null;
 };
+
+const TAB_TO_INVENTORY_TYPE: Record<string, StockInventoryType> = {
+  finished: "FG",
+  raw: "RM",
+  indirect: "IDR",
+  wip: "WIP",
+};
+
+function inventoryLabelFromTab(tab: string) {
+  if (tab === "raw") return "Raw Material";
+  if (tab === "indirect") return "Indirect";
+  if (tab === "wip") return "WIP";
+  return "Finished Goods";
+}
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
@@ -66,57 +65,12 @@ function variance(systemQty: number, physicalQty: number) {
   return { diff, pct };
 }
 
-function inventoryLabelFromId(opnameId: string) {
-  const upper = opnameId.toUpperCase();
-  if (upper.includes("SO-FG")) return "Finished Good";
-  if (upper.includes("SO-RM")) return "Raw Material";
-  if (upper.includes("SO-IND")) return "Indirect";
-  if (upper.includes("SO-WIP")) return "WIP";
-  return "Stock";
-}
-
-function normalizeStatusImpact(value?: string): DetailData["statusImpact"] {
+function normalizeStatus(value?: string): { statusLabel: string; impactLabel: string } {
   const lower = (value ?? "").toLowerCase();
-  if (lower.includes("approved") || lower.includes("complete")) return "Approved";
-  if (lower.includes("waiting")) return "Waiting for Approval";
-  return "Pending Verification";
-}
-
-function mapDetailResponse(id: string, response: StockOpnameDetailResponse): DetailData {
-  const session = response.session;
-  const summary = session.summary;
-  return {
-    opnameId: session.opname_number || id,
-    period: session.period ?? "-",
-    uniqContext: response.items[0]?.uniq ?? session.location ?? "-",
-    statusImpact: normalizeStatusImpact(session.status_label ?? session.status),
-    systemQty: summary?.system_total ?? 0,
-    physicalQty: summary?.physical_total ?? 0,
-    costImpact: summary?.cost_impact ?? 0,
-    lines: response.items.map((item) => ({
-      key: String(item.id),
-      itemId: item.id,
-      uniq: item.uniq,
-      partNumber: item.part_number ?? "-",
-      partName: item.item_name ?? "-",
-      currentStock: item.system_quantity ?? 0,
-      countedQty: item.counted_quantity ?? 0,
-      userCounted: item.user_counter ?? "-",
-      decision:
-        item.verification_status === "verified"
-          ? "approved"
-          : item.verification_status === "rejected"
-          ? "rejected"
-          : undefined,
-    })),
-    logs: response.logs.map((log) => ({
-      key: String(log.id),
-      at: log.createdAt ?? "-",
-      by: log.performed_by ?? "-",
-      action: log.action ?? "-",
-      note: log.description,
-    })),
-  };
+  if (lower.includes("approved") || lower.includes("complete")) return { statusLabel: "Completed", impactLabel: "Approved" };
+  if (lower.includes("reject")) return { statusLabel: "Rejected", impactLabel: "Rejected" };
+  if (lower.includes("waiting")) return { statusLabel: "Waiting Approval", impactLabel: "Waiting for Approval" };
+  return { statusLabel: "In Progress", impactLabel: "Pending" };
 }
 
 export default function StockOpnameDetailPage() {
@@ -135,267 +89,115 @@ function StockOpnameDetailPageContent() {
 
   const id = useMemo(() => decodeURIComponent(params?.id ?? ""), [params?.id]);
   const tab = (searchParams.get("tab") ?? "finished").toLowerCase();
+  const inventoryType = TAB_TO_INVENTORY_TYPE[tab] ?? "FG";
+  const inventoryLabel = inventoryLabelFromTab(tab);
 
-  const { data: detailResponse, isFetching, refetch } = useGetStockOpnameDetailQuery(
-    {
-      opname_number: id,
-      item_status: "all",
-      page: 1,
-      limit: 100,
-    },
-    {
-      skip: !apiEnabled || !id,
-    }
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approvalAction, setApprovalAction] = useState<"approve" | "reject">("approve");
+  const [approvalRemarks, setApprovalRemarks] = useState<string>("");
+
+  const [uniqCode, setUniqCode] = useState<string>(() => searchParams.get("uniq_code") ?? "");
+  const [logsPage, setLogsPage] = useState(1);
+  const [logsLimit, setLogsLimit] = useState(20);
+
+  const { data: session, isFetching, refetch } = useGetStockOpnameSessionByIdQuery(
+    { id },
+    { skip: !apiEnabled || !id }
   );
-  const [submitStockOpname, { isLoading: submitting }] = useSubmitStockOpnameMutation();
+  const [approveSession, { isLoading: approving }] = useApproveStockOpnameSessionMutation();
+
+  const { data: history, isFetching: logsLoading } = useGetStockOpnameHistoryLogsQuery(
+    { type: inventoryType, uniq_code: uniqCode, page: logsPage, limit: logsLimit },
+    { skip: !apiEnabled || !uniqCode }
+  );
 
   const fallbackData = useMemo<DetailData>(() => {
-    // Mock based on screenshot (Finished Good)
-    const base: DetailData = {
-      opnameId: id || "SO-FG-012024",
-      period: "01/2024",
-      uniqContext: "LV7-001",
-      statusImpact: "Approved",
+    const norm = normalizeStatus("approved");
+    return {
+      sessionId: id || "mock-session",
+      sessionNumber: id || "SO-FG-012024",
+      inventoryLabel,
+      period: "Sep 2025",
+      location: "-",
+      scheduleDate: "2025-09-24",
+      countedDate: "2025-09-24",
+      statusLabel: norm.statusLabel,
+      impactLabel: norm.impactLabel,
       systemQty: 17890,
       physicalQty: 17888,
       costImpact: 250,
-      lines: [
-        {
-          key: "l1",
-          itemId: 1,
-          uniq: "FG-001",
-          partNumber: "SP-001-A",
-          partName: "Steel Plate",
-          currentStock: 245,
-          countedQty: 240,
-          userCounted: "WO-2024-001",
-        },
-        {
-          key: "l2",
-          itemId: 2,
-          uniq: "FG-001",
-          partNumber: "SP-001-A",
-          partName: "Steel Plate",
-          currentStock: 245,
-          countedQty: 200,
-          userCounted: "WO-2024-001",
-        },
-        {
-          key: "l3",
-          itemId: 3,
-          uniq: "FG-001",
-          partNumber: "SP-001-A",
-          partName: "Steel Plate",
-          currentStock: 230,
-          countedQty: 230,
-          userCounted: "WO-2024-001",
-        },
-      ],
-      logs: [
-        {
-          key: "h1",
-          at: "2025-09-24 09:12",
-          by: "Admin PPIC",
-          action: "Created Stock Opname",
-          note: "Session initialized",
-        },
-        {
-          key: "h2",
-          at: "2025-09-24 10:05",
-          by: "John Meijer",
-          action: "Counted items",
-          note: "3 lines updated",
-        },
-        {
-          key: "h3",
-          at: "2025-09-24 10:40",
-          by: "Admin PPIC",
-          action: "Approved",
-          note: "Variance accepted",
-        },
-      ],
+      submittedBy: "Admin PPIC",
+      approvedBy: "Admin PPIC",
+      approvalRemarks: "OK",
     };
+  }, [id, inventoryLabel]);
 
-    // Quick variants by id prefix
-    const upper = (id || "").toUpperCase();
-    if (upper.includes("SO-RM")) {
-      if (upper.includes("SO-RM-012024")) {
-        return {
-          ...base,
-          opnameId: id,
-          uniqContext: "RMV-010",
-          systemQty: 17890,
-          physicalQty: 17888,
-          costImpact: 250,
-          statusImpact: "Approved",
-        };
-      }
-      if (upper.includes("SO-RM-122023")) {
-        return {
-          ...base,
-          opnameId: id,
-          uniqContext: "RMV-010",
-          systemQty: 19200,
-          physicalQty: 19195,
-          costImpact: 425,
-          statusImpact: "Waiting for Approval",
-        };
-      }
-      if (upper.includes("SO-RM-112023")) {
-        return {
-          ...base,
-          opnameId: id,
-          uniqContext: "RMV-010",
-          systemQty: 120,
-          physicalQty: 122,
-          costImpact: 180,
-          statusImpact: "Approved",
-        };
-      }
-      return {
-        ...base,
-        opnameId: id,
-        uniqContext: "RMV-010",
-        systemQty: 17890,
-        physicalQty: 17888,
-        costImpact: 250,
-        statusImpact: "Approved",
-      };
-    }
-    if (upper.includes("SO-IND")) {
-      return {
-        ...base,
-        opnameId: id,
-        uniqContext: "IND-001",
-        systemQty: 420,
-        physicalQty: 419,
-        costImpact: 75,
-        statusImpact: "Waiting for Approval",
-      };
-    }
-    if (upper.includes("SO-WIP")) {
-      return {
-        ...base,
-        opnameId: id,
-        uniqContext: "WIP-007",
-        systemQty: 320,
-        physicalQty: 320,
-        costImpact: 0,
-        statusImpact: "Approved",
-      };
-    }
-
-    return base;
-  }, [id]);
-
-  const data = useMemo(
-    () => (apiEnabled && detailResponse ? mapDetailResponse(id, detailResponse) : fallbackData),
-    [apiEnabled, detailResponse, fallbackData, id]
-  );
-
-  const [lines, setLines] = useState<DetailLine[]>(data.lines);
-
-  useEffect(() => {
-    setLines(data.lines);
-  }, [data.lines]);
+  const data = useMemo<DetailData>(() => {
+    if (!apiEnabled || !session) return fallbackData;
+    const norm = normalizeStatus(session.status_label ?? session.status);
+    return {
+      sessionId: session.uuid || String(session.id),
+      sessionNumber: session.session_number ?? id,
+      inventoryLabel,
+      period: session.period_label ?? "-",
+      location: session.warehouse_location ?? "-",
+      scheduleDate: session.schedule_date ?? undefined,
+      countedDate: session.counted_date ?? undefined,
+      statusLabel: session.status_label ?? norm.statusLabel,
+      impactLabel: session.impact_label ?? norm.impactLabel,
+      systemQty: session.system_qty_total ?? 0,
+      physicalQty: session.physical_qty_total ?? 0,
+      costImpact: session.cost_impact ?? 0,
+      submittedBy: session.submitted_by ?? session.created_by ?? null,
+      approvedBy: session.approved_by ?? null,
+      approvalRemarks: session.approval_remarks ?? null,
+    };
+  }, [apiEnabled, fallbackData, id, inventoryLabel, session]);
 
   const v = useMemo(() => variance(data.systemQty, data.physicalQty), [data.physicalQty, data.systemQty]);
   const vColor = v.diff < 0 ? "text-red-600" : v.diff > 0 ? "text-green-600" : "text-slate-500";
   const vDiffText = v.diff === 0 ? "0" : `${v.diff > 0 ? "+" : ""}${v.diff}`;
   const vPctText = v.diff === 0 ? "0%" : `${v.pct > 0 ? "+" : ""}${v.pct.toFixed(1)}%`;
 
-  const titleLabel = useMemo(() => {
-    const inv = inventoryLabelFromId(data.opnameId);
-    return `Stock Opname ${inv} Details`;
-  }, [data.opnameId]);
+  const titleLabel = useMemo(() => `Stock Opname ${data.inventoryLabel} Details`, [data.inventoryLabel]);
 
-  const detailCopyLabel = useMemo(() => inventoryLabelFromId(data.opnameId), [data.opnameId]);
+  const canApprove = useMemo(() => {
+    const lower = (session?.status ?? session?.status_label ?? "").toLowerCase();
+    if (!apiEnabled) return false;
+    if (!id) return false;
+    if (!session) return false;
+    if (lower.includes("approved") || lower.includes("complete") || lower.includes("reject")) return false;
+    return true;
+  }, [apiEnabled, id, session?.status, session?.status_label]);
 
-  const handleDecision = async (line: DetailLine, decision: "approved" | "rejected") => {
-    if (!apiEnabled || !detailResponse?.session.id) {
-      setLines((prev) => prev.map((x) => (x.key === line.key ? { ...x, decision } : x)));
-      message.success(decision === "approved" ? "Approved" : "Rejected");
-      return;
-    }
-
+  async function submitApproval(action: "approve" | "reject") {
     try {
-      await submitStockOpname({
-        opname_id: detailResponse.session.id,
-        action: decision === "approved" ? "approved" : "rejected",
-        verified_by: line.userCounted || null,
-        items: [
-          {
-            item_id: line.itemId,
-            verification_status: decision === "approved" ? "verified" : "rejected",
-            ...(decision === "rejected" ? { reject_reason: "Rejected from stock opname detail" } : {}),
-          },
-        ],
-      }).unwrap();
-
-      setLines((prev) => prev.map((x) => (x.key === line.key ? { ...x, decision } : x)));
-      message.success(decision === "approved" ? "Approved" : "Rejected");
-      await refetch();
+      await approveSession({ id, body: { action, remarks: approvalRemarks } }).unwrap();
+      message.success(action === "approve" ? "Approved" : "Rejected");
+      setApprovalOpen(false);
+      setApprovalRemarks("");
+      void refetch();
     } catch {
-      message.error(`Failed to ${decision === "approved" ? "approve" : "reject"} item`);
+      message.error("Failed to submit approval");
     }
-  };
+  }
 
-  const columns = useMemo<ColumnsType<DetailLine>>(
+  const historyColumns = useMemo<ColumnsType<{ key: string; uniq_code: string; packing: string; qty_change: number; reason: string; qty: number; last_update: string }>>(
     () => [
-      { title: "Uniq", dataIndex: "uniq", key: "uniq", width: 120 },
-      { title: "Part Number", dataIndex: "partNumber", key: "partNumber", width: 160 },
-      { title: "Part Name", dataIndex: "partName", key: "partName" },
+      { title: "Uniq", dataIndex: "uniq_code", key: "uniq_code", width: 140 },
+      { title: "Packing", dataIndex: "packing", key: "packing", width: 120 },
       {
-        title: "Current Stock",
-        dataIndex: "currentStock",
-        key: "currentStock",
-        align: "right",
-        width: 130,
-        render: (v2: number) => <span className="text-sm text-slate-700">{formatNumber(v2)}</span>,
+        title: "Qty Change",
+        dataIndex: "qty_change",
+        key: "qty_change",
+        width: 120,
+        render: (v2: number) => <span className={v2 < 0 ? "text-red-600" : v2 > 0 ? "text-green-600" : "text-slate-600"}>{v2}</span>,
       },
-      {
-        title: "Counted Qty",
-        dataIndex: "countedQty",
-        key: "countedQty",
-        align: "right",
-        width: 130,
-        render: (v2: number) => <span className="text-sm text-slate-700">{formatNumber(v2)}</span>,
-      },
-      { title: "User Counted", dataIndex: "userCounted", key: "userCounted", width: 160 },
-      {
-        title: "Approval",
-        key: "approval",
-        align: "center",
-        width: 220,
-        render: (_, r) => {
-          const decided = r.decision;
-          return (
-            <div className="flex items-center justify-center gap-2">
-              <Button
-                danger
-                className="!rounded-lg"
-                icon={<CloseOutlined />}
-                disabled={decided === "approved"}
-                loading={submitting}
-                onClick={() => void handleDecision(r, "rejected")}
-              >
-                Reject
-              </Button>
-              <Button
-                className="!rounded-lg !border-green-200 !text-green-700"
-                icon={<CheckOutlined />}
-                disabled={decided === "rejected"}
-                loading={submitting}
-                onClick={() => void handleDecision(r, "approved")}
-              >
-                Approve
-              </Button>
-            </div>
-          );
-        },
-      },
+      { title: "Reason", dataIndex: "reason", key: "reason" },
+      { title: "Qty", dataIndex: "qty", key: "qty", width: 100 },
+      { title: "Last Update", dataIndex: "last_update", key: "last_update", width: 180 },
     ],
-    [submitting]
+    []
   );
 
   return (
@@ -404,83 +206,109 @@ function StockOpnameDetailPageContent() {
         <button
           type="button"
           className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
-          onClick={() => router.push("/stock-opname")}
+          onClick={() => router.push(`/stock-opname?tab=${tab}`)}
         >
           <ArrowLeftOutlined />
-          Back to Stock Opname {tab === "finished" ? "Finished Good" : tab === "raw" ? "Raw Material" : tab === "indirect" ? "Indirect" : "WIP"} Details
+          Back
         </button>
 
-        <div className="text-sm text-slate-500">{/* placeholder for top-right profile area */}</div>
-      </div>
-
-      <div className="mb-5">
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-          <div className="text-2xl font-bold text-gray-900">{titleLabel}</div>
+        <div className="flex items-center gap-2">
+          {canApprove && (
+            <>
+              <Button
+                className="!rounded-lg"
+                onClick={() => {
+                  setApprovalAction("reject");
+                  setApprovalOpen(true);
+                }}
+                danger
+              >
+                Reject
+              </Button>
+              <Button
+                type="primary"
+                className="!rounded-lg"
+                onClick={() => {
+                  setApprovalAction("approve");
+                  setApprovalOpen(true);
+                }}
+              >
+                Approve
+              </Button>
+            </>
+          )}
+          <Button className="!rounded-lg" onClick={() => void refetch()} loading={isFetching}>
+            Refresh
+          </Button>
         </div>
       </div>
 
-      <Card
-        className="!rounded-xl !border-gray-100 !shadow-sm"
-        title={
+      <div className="mb-5">
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 flex items-start justify-between">
           <div>
-            <div className="text-xl font-bold text-gray-900">Details</div>
-            <div className="text-sm text-slate-500">Complete {detailCopyLabel} Detail for {data.uniqContext}</div>
+            <div className="text-2xl font-bold text-gray-900">{titleLabel}</div>
+            <div className="text-sm text-gray-500 mt-1">
+              {data.sessionNumber}
+              <span className="mx-2">•</span>
+              <span className="text-gray-400">Period: {data.period}</span>
+            </div>
+            <div className="text-xs text-gray-400 mt-1">
+              Location: {data.location}
+              {data.scheduleDate ? <span className="mx-2">•</span> : null}
+              {data.scheduleDate ? `Schedule: ${data.scheduleDate}` : null}
+              {data.countedDate ? <span className="mx-2">•</span> : null}
+              {data.countedDate ? `Counted: ${data.countedDate}` : null}
+            </div>
           </div>
-        }
-      >
+          <div className="flex items-center gap-2">
+            <Tag className="!rounded-full !px-3 !py-0.5">{data.statusLabel}</Tag>
+            <Tag className="!rounded-full !px-3 !py-0.5">{data.impactLabel}</Tag>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-5">
+        <Card className="!rounded-xl !border-gray-100 !shadow-sm">
+          <div className="text-xs text-gray-500">System Qty Total</div>
+          <div className="text-xl font-bold mt-1">{formatNumber(data.systemQty)}</div>
+        </Card>
+        <Card className="!rounded-xl !border-gray-100 !shadow-sm">
+          <div className="text-xs text-gray-500">Physical Qty Total</div>
+          <div className="text-xl font-bold mt-1">{formatNumber(data.physicalQty)}</div>
+        </Card>
+        <Card className="!rounded-xl !border-gray-100 !shadow-sm">
+          <div className="text-xs text-gray-500">Variance</div>
+          <div className={"text-xl font-bold mt-1 " + vColor}>
+            {vDiffText} <span className="text-sm font-semibold">({vPctText})</span>
+          </div>
+        </Card>
+        <Card className="!rounded-xl !border-gray-100 !shadow-sm">
+          <div className="text-xs text-gray-500">Cost Impact</div>
+          <div className="text-xl font-bold mt-1">{formatMoney(data.costImpact)}</div>
+        </Card>
+      </div>
+
+      <Card className="!rounded-xl !border-gray-100 !shadow-sm" bodyStyle={{ padding: 0 }}>
         <Tabs
-          defaultActiveKey="details"
+          defaultActiveKey="detail"
           items={[
             {
-              key: "details",
+              key: "detail",
               label: (
                 <span className="inline-flex items-center gap-2">
                   <FileTextOutlined /> Details
                 </span>
               ),
               children: (
-                <div>
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                    <div>
-                      <div className="text-xs text-slate-500">Stock Opname ID</div>
-                      <div className="text-sm text-slate-800 mt-1">{data.opnameId}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-slate-500">Period</div>
-                      <div className="text-sm text-slate-800 mt-1">{data.period}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs text-slate-500">System:</div>
-                      <div className="text-sm font-semibold text-slate-800">{formatNumber(data.systemQty)}</div>
-                      <div className="text-xs text-slate-500 mt-1">Physical:</div>
-                      <div className="text-sm font-semibold text-blue-600">{formatNumber(data.physicalQty)}</div>
-                    </div>
-
-                    <div>
-                      <div className="text-xs text-slate-500">Status & Impact</div>
-                      <div className="text-sm text-slate-800 mt-1">{data.statusImpact}</div>
-                    </div>
-
-                    <div>
-                      <div className={"text-sm font-semibold mt-5 " + vColor}>
-                        {vDiffText} <span className="font-normal">({vPctText})</span>
-                      </div>
-                      <div className="text-xs text-slate-500 mt-1">{formatMoney(data.costImpact)}</div>
-                    </div>
+                <div className="p-4">
+                  <div className="text-sm text-gray-500">
+                    Submitted By: {data.submittedBy ?? "-"}
+                    <span className="mx-2">•</span>
+                    Approved By: {data.approvedBy ?? "-"}
                   </div>
-
-                  <div className="text-2xl font-bold text-gray-900 mb-1">{data.opnameId}</div>
-                  <div className="text-sm text-slate-500 mb-4">Complete Stock Opname {detailCopyLabel} Detail for {data.uniqContext}</div>
-
-                  <div className="overflow-hidden rounded-xl border border-gray-100">
-                    <Table<DetailLine>
-                      dataSource={lines}
-                      columns={columns}
-                      rowKey="key"
-                      loading={isFetching}
-                      pagination={false}
-                      size="middle"
-                    />
+                  <div className="text-sm text-gray-500 mt-1">Approval Remarks: {data.approvalRemarks ?? "-"}</div>
+                  <div className="mt-3 text-xs text-gray-400">
+                    Note: item-level lines are not fetched here (backend detail endpoint not specified for session items).
                   </div>
                 </div>
               ),
@@ -489,27 +317,60 @@ function StockOpnameDetailPageContent() {
               key: "history",
               label: (
                 <span className="inline-flex items-center gap-2">
-                  <HistoryOutlined /> History Logs
+                  <HistoryOutlined /> Audit Logs
                 </span>
               ),
               children: (
-                <div className="space-y-3">
-                  {data.logs.map((l) => (
-                    <div key={l.key} className="rounded-xl border border-gray-100 bg-white p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="text-sm font-semibold text-slate-800">{l.action}</div>
-                        <Tag className="!rounded-full !px-3 !py-0.5 !text-xs">{l.at}</Tag>
-                      </div>
-                      <div className="text-xs text-slate-500 mt-1">By: {l.by}</div>
-                      {l.note && <div className="text-xs text-slate-600 mt-2">{l.note}</div>}
-                    </div>
-                  ))}
+                <div className="p-4">
+                  <div className="flex flex-col lg:flex-row lg:items-center gap-2 mb-3">
+                    <Input
+                      placeholder="Uniq Code (e.g. LV7-001)"
+                      value={uniqCode}
+                      onChange={(e) => {
+                        setUniqCode(e.target.value);
+                        setLogsPage(1);
+                      }}
+                      className="max-w-md"
+                    />
+                    <div className="text-xs text-gray-400">Type: {inventoryType}</div>
+                  </div>
+                  <div className="overflow-hidden rounded-xl border border-gray-100">
+                    <Table
+                      dataSource={(history?.items ?? []).map((r, idx) => ({ key: `${r.uniq_code}-${idx}`, ...r }))}
+                      rowKey="key"
+                      size="middle"
+                      loading={logsLoading}
+                      columns={historyColumns}
+                      pagination={{
+                        current: logsPage,
+                        pageSize: logsLimit,
+                        total: history?.pagination.total ?? 0,
+                        showSizeChanger: true,
+                        onChange: (p, s) => {
+                          setLogsPage(p);
+                          if (typeof s === "number") setLogsLimit(s);
+                        },
+                      }}
+                    />
+                  </div>
                 </div>
               ),
             },
           ]}
         />
       </Card>
+
+      <Modal
+        title={approvalAction === "approve" ? "Approve Session" : "Reject Session"}
+        open={approvalOpen}
+        onCancel={() => setApprovalOpen(false)}
+        onOk={() => void submitApproval(approvalAction)}
+        okText={approvalAction === "approve" ? "Approve" : "Reject"}
+        okButtonProps={{ danger: approvalAction === "reject", loading: approving }}
+      >
+        <div className="text-sm text-gray-500 mb-2">Remarks (optional)</div>
+        <Input.TextArea rows={4} value={approvalRemarks} onChange={(e) => setApprovalRemarks(e.target.value)} />
+      </Modal>
     </div>
   );
 }

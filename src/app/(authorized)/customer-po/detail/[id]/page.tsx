@@ -6,6 +6,10 @@ import type { ColumnsType } from "antd/es/table";
 import { useRouter, useParams } from "next/navigation";
 import { ArrowLeftOutlined } from "@ant-design/icons";
 
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetCustomerOrderByIdQuery } from "@/lib/api/customer-orders/api";
+
 type DetailRow = {
   key: string;
   deliveryDate: string;
@@ -40,7 +44,35 @@ export default function CustomerPoDetailPage() {
 
   const id = useMemo(() => decodeURIComponent(params?.id ?? ""), [params?.id]);
 
+  const apiEnabled = Boolean(apiBaseUrl);
+  const detailQuery = useGetCustomerOrderByIdQuery(id, { skip: !apiEnabled || !id });
+
   const detail = useMemo<CustomerPoDetail>(() => {
+    if (apiEnabled && detailQuery.data) {
+      const order = detailQuery.data;
+      return {
+        poCreatedDate: order.document_date || "-",
+        poNumber: order.document_number || order.id,
+        customer: order.customer_name || (order.customer_id ? `Customer #${order.customer_id}` : "-"),
+        contactPerson: order.contact_person || "-",
+        deliveryAddress: order.delivery_address || "-",
+        totalQuantity: Number(order.total_quantity ?? 0),
+        uom: "Pcs",
+        deliveryCycle: "Monthly",
+        totalUniq: Number(order.total_uniq ?? 0),
+        specialInstructions: order.notes || "-",
+        rows: (order.items ?? []).map((it) => ({
+          key: it.id || `${it.line_no}-${it.item_uniq_code}`,
+          deliveryDate: it.delivery_date ?? "-",
+          uniq: it.item_uniq_code,
+          partNumber: it.part_number,
+          partName: it.part_name,
+          model: it.model ?? "-",
+          totalQty: Number(it.quantity ?? 0),
+        })),
+      };
+    }
+
     // Mock details; expand as you add more clickable IDs.
     const base: CustomerPoDetail = {
       poCreatedDate: "10/01/2025",
@@ -108,7 +140,7 @@ export default function CustomerPoDetailPage() {
     }
 
     return base;
-  }, [id]);
+  }, [apiEnabled, detailQuery.data, id]);
 
   const columns = useMemo<ColumnsType<DetailRow>>(
     () => [
@@ -158,6 +190,12 @@ export default function CustomerPoDetailPage() {
         </Button>
         <div className="text-xl font-bold text-gray-900">Customer Purchase Order Details</div>
       </div>
+
+      {apiEnabled && detailQuery.error ? (
+        <div className="mb-4 text-sm text-red-600">
+          {getApiErrorMessage(detailQuery.error, "Failed to load order detail")}
+        </div>
+      ) : null}
 
       <Card
         className="!rounded-xl !border-gray-100 !shadow-sm"

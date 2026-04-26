@@ -7,6 +7,7 @@ import {
   Card,
   DatePicker,
   Form,
+  Input,
   InputNumber,
   Radio,
   Select,
@@ -31,28 +32,29 @@ import {
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
   type StockInventoryType,
-  useCreateStockOpnameMutation,
-  useGetStockOpnameUomListQuery,
-  useLazySearchStockOpnameUniqQuery,
+  useCreateStockOpnameSessionMutation,
+  useLazyGetStockOpnameUniqOptionsQuery,
 } from "@/lib/api/stock-opname/api";
 
 type Method = "manual" | "bulk";
 
 type Entry = {
   id: string;
-  inventoryId?: string | null;
   uniq?: string;
+  partNumber?: string;
+  partName?: string;
   systemStock: number;
   countedQty?: number;
   userCounter?: string;
   uom?: string;
+  weightKg?: number | null;
 };
 
 const TAB_TO_INVENTORY_TYPE: Record<string, StockInventoryType> = {
-  finished: "finished_good",
-  raw: "raw_material",
-  indirect: "indirect",
-  wip: "wip",
+  finished: "FG",
+  raw: "RM",
+  indirect: "IDR",
+  wip: "WIP",
 };
 
 type BulkRow = {
@@ -89,7 +91,7 @@ function StockOpnameStartCountPageContent() {
   const apiEnabled = Boolean(apiBaseUrl);
 
   const tab = (searchParams.get("tab") ?? "finished").toLowerCase();
-  const inventoryType = TAB_TO_INVENTORY_TYPE[tab] ?? "finished_good";
+  const inventoryType = TAB_TO_INVENTORY_TYPE[tab] ?? "FG";
   const backLabel = useMemo(() => {
     if (tab === "raw") return "Back to Raw Materials";
     if (tab === "indirect") return "Back to Indirect Stock";
@@ -100,16 +102,15 @@ function StockOpnameStartCountPageContent() {
   const [form] = Form.useForm();
   const [method, setMethod] = useState<Method>("manual");
   const [period, setPeriod] = useState<Dayjs>(dayjs("2024-01-01"));
+  const [scheduleDate, setScheduleDate] = useState<Dayjs>(dayjs());
+  const [countedDate, setCountedDate] = useState<Dayjs>(dayjs());
 
   const [bulkFileName, setBulkFileName] = useState<string | null>(null);
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
 
-  const [searchStockOpnameUniq, { data: uniqSearchResults = [], isFetching: uniqLoading }] =
-    useLazySearchStockOpnameUniqQuery();
-  const { data: apiUomList = [] } = useGetStockOpnameUomListQuery(undefined, {
-    skip: !apiEnabled,
-  });
-  const [createStockOpname, { isLoading: saving }] = useCreateStockOpnameMutation();
+  const [getUniqOptions, { data: uniqSearchResults = [], isFetching: uniqLoading }] =
+    useLazyGetStockOpnameUniqOptionsQuery();
+  const [createStockOpnameSession, { isLoading: saving }] = useCreateStockOpnameSessionMutation();
 
   const fallbackUniqOptions = useMemo(
     () => [
@@ -142,41 +143,20 @@ function StockOpnameStartCountPageContent() {
     []
   );
 
-  const fallbackUomOptions = useMemo(
-    () => [
-      { label: "Pcs", value: "Pcs" },
-      { label: "Kg", value: "Kg" },
-      { label: "Box", value: "Box" },
-      { label: "Set", value: "Set" },
-    ],
-    []
-  );
-
   const uniqOptions = useMemo(
     () =>
       apiEnabled
         ? uniqSearchResults.map((item) => ({
-            label: item.uniq,
-            value: item.uniq,
+            label: `${item.uniq_code} — ${item.part_name} (${item.system_qty} ${item.uom})`,
+            value: item.uniq_code,
           }))
         : fallbackUniqOptions,
     [apiEnabled, fallbackUniqOptions, uniqSearchResults]
   );
 
   const uniqLookup = useMemo(
-    () =>
-      new Map(
-        uniqSearchResults.map((item) => [item.uniq, item])
-      ),
+    () => new Map(uniqSearchResults.map((item) => [item.uniq_code, item])),
     [uniqSearchResults]
-  );
-
-  const uomOptions = useMemo(
-    () =>
-      apiEnabled
-        ? apiUomList.map((item) => ({ label: item, value: item }))
-        : fallbackUomOptions,
-    [apiEnabled, apiUomList, fallbackUomOptions]
   );
 
   const [entries, setEntries] = useState<Entry[]>(() =>
@@ -187,8 +167,8 @@ function StockOpnameStartCountPageContent() {
 
   useEffect(() => {
     if (!apiEnabled) return;
-    void searchStockOpnameUniq({ inventory_type: inventoryType, q: "", limit: 50 });
-  }, [apiEnabled, inventoryType, searchStockOpnameUniq]);
+    void getUniqOptions({ type: inventoryType, q: "", limit: 10 });
+  }, [apiEnabled, getUniqOptions, inventoryType]);
 
   const entryCountLabel = useMemo(() => {
     if (method === "bulk") return `${bulkRows.length || 0} entry`;
@@ -262,7 +242,6 @@ function StockOpnameStartCountPageContent() {
       if (!e.uniq) return "Uniq is required";
       if (typeof e.countedQty !== "number") return "Counted Quantity is required";
       if (!e.userCounter) return "User Counter is required";
-      if (!e.uom) return "Unit of Measurement is required";
     }
     return null;
   }
@@ -270,6 +249,14 @@ function StockOpnameStartCountPageContent() {
   async function onSave() {
     if (!period) {
       message.warning("Period is required");
+      return;
+    }
+    if (!scheduleDate) {
+      message.warning("Schedule Date is required");
+      return;
+    }
+    if (!countedDate) {
+      message.warning("Counted Date is required");
       return;
     }
 
@@ -294,7 +281,7 @@ function StockOpnameStartCountPageContent() {
 
     if (!apiEnabled) {
       message.success("Stock Opname saved (mock)");
-      router.push("/stock-opname");
+      router.push(`/stock-opname?tab=${tab}`);
       return;
     }
 
@@ -302,29 +289,31 @@ function StockOpnameStartCountPageContent() {
       const items =
         method === "manual"
           ? entries.map((entry) => ({
-              inventory_id: entry.inventoryId ?? uniqLookup.get(entry.uniq ?? "")?.inventory_id ?? null,
-              counted_quantity: entry.countedQty ?? 0,
-              user_counter: entry.userCounter ?? null,
-              unit_measurement: entry.uom ?? null,
+              uniq_code: entry.uniq ?? "",
+              counted_qty: entry.countedQty ?? 0,
+              user_counter: entry.userCounter ?? "",
+              weight_kg: entry.weightKg ?? uniqLookup.get(entry.uniq ?? "")?.weight_kg ?? null,
             }))
           : bulkRows.map((row) => ({
-              inventory_id: uniqLookup.get(row.uniq)?.inventory_id ?? null,
-              counted_quantity: row.countedQty,
-              user_counter: row.userCounted || null,
-              unit_measurement: null,
+              uniq_code: row.uniq,
+              counted_qty: row.countedQty,
+              user_counter: row.userCounted || "",
+              weight_kg: null,
             }));
 
-      await createStockOpname({
+      await createStockOpnameSession({
         inventory_type: inventoryType,
-        period: period.format("MM/YYYY"),
         method,
-        location: null,
-        remarks: null,
+        period_month: period.month() + 1,
+        period_year: period.year(),
+        schedule_date: scheduleDate.format("YYYY-MM-DD"),
+        counted_date: countedDate.format("YYYY-MM-DD"),
+        remarks: "",
         items,
       }).unwrap();
 
       message.success("Stock Opname saved successfully");
-      router.push("/stock-opname");
+      router.push(`/stock-opname?tab=${tab}`);
     } catch {
       message.error("Failed to save stock opname");
     }
@@ -337,14 +326,14 @@ function StockOpnameStartCountPageContent() {
         <button
           type="button"
           className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
-          onClick={() => router.push("/stock-opname")}
+          onClick={() => router.push(`/stock-opname?tab=${tab}`)}
         >
           <ArrowLeftOutlined />
           {backLabel}
         </button>
 
         <div className="flex items-center gap-2">
-          <Button className="!rounded-lg" onClick={() => router.push("/stock-opname")}>
+          <Button className="!rounded-lg" onClick={() => router.push(`/stock-opname?tab=${tab}`)}>
             Cancel
           </Button>
           <Button type="primary" className="!rounded-lg" icon={<SaveOutlined />} loading={saving} onClick={onSave}>
@@ -389,15 +378,35 @@ function StockOpnameStartCountPageContent() {
               <Radio value="bulk">Bulk Upload</Radio>
             </Radio.Group>
 
-            <div className="flex items-center gap-2">
-              <div className="text-xs text-gray-500">Period:</div>
-              <DatePicker
-                picker="month"
-                format="MM/YYYY"
-                value={period}
-                onChange={(v) => setPeriod(v ?? dayjs())}
-                className="min-w-[160px]"
-              />
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <div className="text-xs text-gray-500">Period:</div>
+                <DatePicker
+                  picker="month"
+                  format="MM/YYYY"
+                  value={period}
+                  onChange={(v) => setPeriod(v ?? dayjs())}
+                  className="min-w-[160px]"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="text-xs text-gray-500">Schedule:</div>
+                <DatePicker
+                  format="YYYY-MM-DD"
+                  value={scheduleDate}
+                  onChange={(v) => setScheduleDate(v ?? dayjs())}
+                  className="min-w-[160px]"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="text-xs text-gray-500">Counted:</div>
+                <DatePicker
+                  format="YYYY-MM-DD"
+                  value={countedDate}
+                  onChange={(v) => setCountedDate(v ?? dayjs())}
+                  className="min-w-[160px]"
+                />
+              </div>
             </div>
           </div>
 
@@ -483,16 +492,18 @@ function StockOpnameStartCountPageContent() {
                           loading={uniqLoading}
                           onSearch={(value) => {
                             if (!apiEnabled) return;
-                            void searchStockOpnameUniq({ inventory_type: inventoryType, q: value, limit: 50 });
+                            void getUniqOptions({ type: inventoryType, q: value, limit: 10 });
                           }}
                           onChange={(v) => {
                             if (apiEnabled) {
                               const selected = uniqLookup.get(v);
                               setEntry(e.id, {
                                 uniq: v,
-                                inventoryId: selected?.inventory_id ?? null,
-                                systemStock: selected?.system_quantity ?? 0,
-                                uom: selected?.unit_measurement ?? undefined,
+                                partNumber: selected?.part_number ?? undefined,
+                                partName: selected?.part_name ?? undefined,
+                                systemStock: selected?.system_qty ?? 0,
+                                uom: selected?.uom ?? undefined,
+                                weightKg: selected?.weight_kg ?? null,
                               });
                               return;
                             }
@@ -538,12 +549,7 @@ function StockOpnameStartCountPageContent() {
 
                       <div>
                         <div className="text-xs text-gray-500 mb-1">Unit of Measurement</div>
-                        <Select
-                          placeholder="Select UoM"
-                          value={e.uom}
-                          options={uomOptions}
-                          onChange={(v) => setEntry(e.id, { uom: v })}
-                        />
+                        <Input placeholder="-" value={e.uom} readOnly />
                       </div>
                     </div>
 

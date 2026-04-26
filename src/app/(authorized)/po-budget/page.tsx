@@ -1564,35 +1564,35 @@ export default function PoBudgetPage() {
           </Tag>
         ),
       },
-      {
-        title: "Approval Actions",
-        key: "approvalActions",
-        render: (_, r) =>
-          r.status === "approved" ? (
-            <span className="text-xs text-gray-400">Approved</span>
-          ) : (
-            <div className="flex items-center gap-2">
-              <Button
-                size="small"
-                type="primary"
-                icon={<CheckOutlined />}
-                className="!rounded-lg !bg-green-600"
-                onClick={() => message.success(`Approved ${r.uniq}`)}
-              >
-                Approve
-              </Button>
-              <Button
-                size="small"
-                danger
-                icon={<CloseOutlined />}
-                className="!rounded-lg"
-                onClick={() => message.error(`Rejected ${r.uniq}`)}
-              >
-                Reject
-              </Button>
-            </div>
-          ),
-      },
+      // {
+      //   title: "Approval Actions",
+      //   key: "approvalActions",
+      //   render: (_, r) =>
+      //     r.status === "approved" ? (
+      //       <span className="text-xs text-gray-400">Approved</span>
+      //     ) : (
+      //       <div className="flex items-center gap-2">
+      //         <Button
+      //           size="small"
+      //           type="primary"
+      //           icon={<CheckOutlined />}
+      //           className="!rounded-lg !bg-green-600"
+      //           onClick={() => message.success(`Approved ${r.uniq}`)}
+      //         >
+      //           Approve
+      //         </Button>
+      //         <Button
+      //           size="small"
+      //           danger
+      //           icon={<CloseOutlined />}
+      //           className="!rounded-lg"
+      //           onClick={() => message.error(`Rejected ${r.uniq}`)}
+      //         >
+      //           Reject
+      //         </Button>
+      //       </div>
+      //     ),
+      // },
       {
         title: "Actions",
         key: "actions",

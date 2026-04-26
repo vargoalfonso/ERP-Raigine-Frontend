@@ -127,10 +127,23 @@ const menuItems: MenuItem[] = [
         href: "/master-warehouse",
       },
       {
-        id: "master-supplier",
+        id: "master-supplier-group",
         label: "Master Supplier",
         icon: MdGroup,
-        href: "/master-supplier",
+        children: [
+          {
+            id: "master-supplier",
+            label: "Master Supplier",
+            icon: MdGroup,
+            href: "/master-supplier",
+          },
+          {
+            id: "supplier-performance-management",
+            label: "Performance Management",
+            icon: MdTrendingUp,
+            href: "/master-supplier/performance-management",
+          },
+        ],
       },
       {
         id: "master-supplier-only",
@@ -352,19 +365,42 @@ function SidebarContent() {
     const Icon = item.icon;
 
     if (isSection) {
+      // Top-level sections (e.g., MASTER DATA) keep the existing header style.
+      if (level === 0) {
+        return (
+          <div key={item.id} className="mb-2">
+            {/* Section Header - hanya label tanpa icon */}
+            {isExpanded && (
+              <div className="px-3 py-2">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  {item.label}
+                </span>
+              </div>
+            )}
+
+            {/* Section Children - selalu tampil */}
+            <div className="ml-0">
+              {item.children?.map((child) => renderMenuItem(child, level + 1))}
+            </div>
+          </div>
+        );
+      }
+
+      // Nested groups (e.g., Master Supplier -> Performance Management)
       return (
         <div key={item.id} className="mb-2">
-          {/* Section Header - hanya label tanpa icon */}
-          {isExpanded && (
-            <div className="px-3 py-2">
-              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                {item.label}
-              </span>
-            </div>
-          )}
-
-          {/* Section Children - selalu tampil */}
-          <div className="ml-0">
+          <div
+            className={`flex items-center ${
+              isExpanded ? "justify-start space-x-4" : "justify-center"
+            } px-3 py-2 mb-1 text-gray-800`}
+          >
+            <Icon className="w-5 h-5 flex-shrink-0 text-gray-700" />
+            {isExpanded && (
+              <span className="text-sm font-medium text-gray-800 flex-1">{item.label}</span>
+            )}
+            {isExpanded && <MdChevronRight className="w-4 h-4 text-gray-400" />}
+          </div>
+          <div className={isExpanded ? "ml-6" : "ml-0"}>
             {item.children?.map((child) => renderMenuItem(child, level + 1))}
           </div>
         </div>

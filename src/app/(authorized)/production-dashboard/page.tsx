@@ -509,10 +509,10 @@ export default function ProductionDashboardPage() {
   const outputMachineDashboardQuery = useGetOutputMachineDashboardQuery(undefined, { skip: !apiEnabled });
   const summaryStrokeDashboardQuery = useGetSummaryStrokeDashboardQuery(undefined, { skip: !apiEnabled });
   const runtimeDashboardQuery = useGetRuntimeDashboardQuery(undefined, { skip: !apiEnabled });
-  const workOrdersQuery = useGetWorkOrdersQuery(undefined, { skip: !apiEnabled });
+  const workOrdersQuery = useGetWorkOrdersQuery({ page: 1, limit: 200 }, { skip: !apiEnabled });
   const machinesQuery = useGetMachinesQuery(undefined, { skip: !apiEnabled });
 
-  const workOrders = workOrdersQuery.data ?? [];
+  const workOrders = workOrdersQuery.data?.items ?? [];
   const machines = machinesQuery.data ?? [];
 
   const machinesById = useMemo(() => new Map(machines.map((machine) => [machine.id, machine])), [machines]);

@@ -57,9 +57,8 @@ const buildForwardHeaders = (req: NextRequest) => {
     headers.set(key, value);
   });
 
-  // Ensure we don't confuse backend about origin.
-  headers.delete("origin");
-  headers.delete("referer");
+  // Note: Do not strip Origin/Referer.
+  // Some backends use these headers for CSRF or allowlist checks and will return 403 if absent.
 
   return headers;
 };
@@ -103,6 +102,8 @@ async function handler(req: NextRequest, ctx: { params: Promise<{ path: string[]
   if (process.env.NODE_ENV !== "production") {
     resHeaders.set("x-proxy-target", targetUrl);
     resHeaders.set("x-proxy-upstream-status", String(upstream.status));
+    resHeaders.set("x-proxy-has-authorization", req.headers.has("authorization") ? "1" : "0");
+    resHeaders.set("x-proxy-has-cookie", req.headers.has("cookie") ? "1" : "0");
   }
 
   return new Response(upstream.body, {

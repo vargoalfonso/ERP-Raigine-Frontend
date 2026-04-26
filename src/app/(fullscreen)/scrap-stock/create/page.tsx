@@ -6,91 +6,111 @@ import {
   Card,
   DatePicker,
   Form,
+  Input,
   InputNumber,
   Select,
   Typography,
   message,
 } from "antd";
-import { ArrowLeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
-import type { Dayjs } from "dayjs";
+import { ArrowLeftOutlined, SaveOutlined } from "@ant-design/icons";
+import dayjs, { type Dayjs } from "dayjs";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { useCreateScrapStockMutation } from "@/lib/api/scrap-stock/api";
 
 const { Title } = Typography;
 
-type ScrapEntry = {
-  uniq?: string;
-  packingNumber?: string;
-  dateReceived?: Dayjs;
-  scrapType?: string;
-  scrapReason?: string;
-  quantity?: number;
-  weight?: number;
-  uom?: string;
-};
-
 type ScrapStockCreateForm = {
-  entries: ScrapEntry[];
+  uniq: string;
+  part_number: string;
+  part_name: string;
+  model: string;
+  packing_number: string;
+  wo_number?: string | null;
+  scrap_type: string;
+  disposal_reason: string;
+  quantity: number;
+  uom: string;
+  weight_kg: number;
+  date_received: Dayjs;
+  remarks?: string | null;
 };
-
-const uniqOptions = [
-  { label: "LV-001", value: "LV-001" },
-  { label: "LV-002", value: "LV-002" },
-  { label: "LV-003", value: "LV-003" },
-];
-
-const packingOptions = [
-  { label: "WH-FG-029", value: "WH-FG-029" },
-  { label: "WH-FG-030", value: "WH-FG-030" },
-  { label: "WH-FG-031", value: "WH-FG-031" },
-];
 
 const scrapTypeOptions = [
-  { label: "Setting Machine Scrap", value: "Setting Machine Scrap" },
-  { label: "Process Scrap", value: "Process Scrap" },
-  { label: "Product Return Scrap", value: "Product Return Scrap" },
+  { label: "Setting Machine Scrap", value: "setting_machine_scrap" },
+  { label: "Process Scrap", value: "process_scrap" },
+  { label: "Product Return Scrap", value: "product_return_scrap" },
 ];
 
-const scrapReasonOptions = [
-  { label: "Dump", value: "Dump" },
-  { label: "Inventory", value: "Inventory" },
-  { label: "Sell", value: "Sell" },
+const disposalReasonOptions = [
+  { label: "Dump", value: "dump" },
+  { label: "Sell", value: "sell" },
+  { label: "Inventory", value: "inventory" },
 ];
-
-const uomOptions = [
-  { label: "pcs", value: "pcs" },
-  { label: "kg", value: "kg" },
-  { label: "box", value: "box" },
-];
-
-function isEntryComplete(entry: ScrapEntry) {
-  return Boolean(
-    entry.uniq &&
-      entry.packingNumber &&
-      entry.dateReceived &&
-      entry.scrapType &&
-      entry.scrapReason &&
-      typeof entry.quantity === "number" &&
-      typeof entry.weight === "number" &&
-      entry.uom
-  );
-}
 
 export default function CreateScrapStockPage() {
   const router = useRouter();
   const [messageApi, contextHolder] = message.useMessage();
   const [form] = Form.useForm<ScrapStockCreateForm>();
+  const apiEnabled = Boolean(apiBaseUrl);
 
-  const watchedEntries = Form.useWatch("entries", form);
-  const entries = watchedEntries ?? [];
-  const entryCount = Math.max(entries.length, 1);
-  const completeCount = entries.filter(isEntryComplete).length;
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const bomIndex = buildBomUniqIndex(bomTreeRes?.data ?? []);
+  const uniqOptions = bomIndex.uniqs.map((uniq) => {
+    const partName = bomIndex.partNameByUniq[uniq];
+    return {
+      label: partName ? `${uniq} - ${partName}` : uniq,
+      value: uniq,
+    };
+  });
+
+  const [createScrapStock, createState] = useCreateScrapStockMutation();
+
+  const onSelectUniq = (uniq: string) => {
+    form.setFieldsValue({
+      uniq,
+      part_name: bomIndex.partNameByUniq[uniq] ?? "",
+      part_number: bomIndex.partNumberByUniq[uniq] ?? "",
+      model: bomIndex.modelByUniq[uniq] ?? "",
+      uom: bomIndex.uomByUniq[uniq] ?? form.getFieldValue("uom"),
+      weight_kg: bomIndex.weightKgByUniq[uniq] ?? form.getFieldValue("weight_kg") ?? 0,
+    });
+  };
 
   const handleSave = async () => {
     try {
       await form.validateFields();
-      messageApi.success("Scrap Stock Database saved");
+      const values = form.getFieldsValue(true);
+
+      if (!apiEnabled) {
+        messageApi.success("Scrap Stock created locally");
+        router.push("/scrap-stock");
+        return;
+      }
+
+      await createScrapStock({
+        uniq: values.uniq,
+        part_number: values.part_number,
+        part_name: values.part_name,
+        model: values.model,
+        packing_number: values.packing_number,
+        wo_number: values.wo_number ? String(values.wo_number) : null,
+        scrap_type: values.scrap_type,
+        disposal_reason: values.disposal_reason,
+        quantity: Number(values.quantity),
+        uom: values.uom,
+        weight_kg: Number(values.weight_kg ?? 0),
+        date_received: dayjs(values.date_received).format("YYYY-MM-DD"),
+        remarks: values.remarks ? String(values.remarks) : null,
+      }).unwrap();
+
+      messageApi.success("Scrap Stock created");
       router.push("/scrap-stock");
-    } catch {
-      // validation errors shown by antd
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      messageApi.error(getApiErrorMessage(err, "Failed to create scrap stock"));
     }
   };
 
@@ -114,13 +134,13 @@ export default function CreateScrapStockPage() {
               Scrap Stock Database
             </Title>
             <div className="text-sm text-gray-500">
-              Create Scrap Stock Database <span className="px-2">•</span> {entryCount} entry
+              Create Scrap Stock <span className="px-2">•</span> 1 entry
             </div>
           </div>
 
           <div className="flex items-center gap-3">
             <Button onClick={() => router.push("/scrap-stock")}>Cancel</Button>
-            <Button type="primary" icon={<SaveOutlined />} onClick={handleSave}>
+            <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={createState.isLoading}>
               Save Scrap Stock Database
             </Button>
           </div>
@@ -132,127 +152,74 @@ export default function CreateScrapStockPage() {
           form={form}
           layout="vertical"
           requiredMark={false}
-          initialValues={{ entries: [{}] }}
+          initialValues={{
+            weight_kg: 0,
+            uom: "pcs",
+            date_received: dayjs(),
+          }}
         >
-          <Form.List name="entries">
-            {(fields, { add }) => (
-              <>
-                {fields.map((field, idx) => (
-                  <Card key={field.key} className="!rounded-xl" styles={{ body: { padding: 20 } }}>
-                    <div className="flex items-start justify-between mb-6">
-                      <div>
-                        <div className="text-lg font-semibold text-gray-900">
-                          Add Scrap Stock #{idx + 1}
-                        </div>
-                        <div className="text-sm text-gray-500">Add Scrap Stock entry.</div>
-                      </div>
-                      <span className="inline-flex items-center rounded-md border border-gray-200 bg-white px-3 py-1 text-sm text-gray-700">
-                        Entry {idx + 1}
-                      </span>
-                    </div>
+          <Card className="!rounded-xl" styles={{ body: { padding: 20 } }}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Form.Item name="uniq" label="UNIQ" rules={[{ required: true, message: "Select UNIQ" }]}>
+                <Select
+                  placeholder="Select UNIQ from BOM"
+                  options={uniqOptions}
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={onSelectUniq}
+                />
+              </Form.Item>
 
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                      <Form.Item
-                        name={[field.name, "uniq"]}
-                        label={
-                          <span className="inline-flex items-center gap-1">
-                            Uniq <span className="text-blue-600 text-xs">ⓘ</span>
-                          </span>
-                        }
-                        rules={[{ required: true, message: "Select uniq" }]}
-                      >
-                        <Select placeholder="Select Uniq" options={uniqOptions} />
-                      </Form.Item>
+              <Form.Item name="packing_number" label="Packing Number" rules={[{ required: true, message: "Enter packing number" }]}>
+                <Input placeholder="KBN-2026-0001-..." />
+              </Form.Item>
 
-                      <Form.Item
-                        name={[field.name, "packingNumber"]}
-                        label="Packing Number"
-                        rules={[{ required: true, message: "Select packing number" }]}
-                      >
-                        <Select placeholder="Select Packing Number" options={packingOptions} />
-                      </Form.Item>
+              <Form.Item name="date_received" label="Date Received" rules={[{ required: true, message: "Select date received" }]}>
+                <DatePicker className="w-full" placeholder="dd/mm/yyyy" format="DD/MM/YYYY" />
+              </Form.Item>
 
-                      <Form.Item
-                        name={[field.name, "dateReceived"]}
-                        label="Date Received"
-                        rules={[{ required: true, message: "Select date received" }]}
-                      >
-                        <DatePicker className="w-full" placeholder="dd/mm/yyyy" format="DD/MM/YYYY" />
-                      </Form.Item>
+              <Form.Item name="part_name" label="Part Name" rules={[{ required: true }]}>
+                <Input disabled placeholder="Auto-filled" />
+              </Form.Item>
 
-                      <Form.Item
-                        name={[field.name, "scrapType"]}
-                        label="Scrap Type"
-                        rules={[{ required: true, message: "Select scrap type" }]}
-                      >
-                        <Select placeholder="Select Scrap Type" options={scrapTypeOptions} />
-                      </Form.Item>
-                    </div>
+              <Form.Item name="part_number" label="Part Number" rules={[{ required: true }]}>
+                <Input disabled placeholder="Auto-filled" />
+              </Form.Item>
 
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                      <Form.Item
-                        name={[field.name, "scrapReason"]}
-                        label="Scrap Reason"
-                        rules={[{ required: true, message: "Select reason" }]}
-                      >
-                        <Select placeholder="Select Reason" options={scrapReasonOptions} />
-                      </Form.Item>
+              <Form.Item name="model" label="Model" rules={[{ required: true }]}>
+                <Input disabled placeholder="Auto-filled" />
+              </Form.Item>
 
-                      <Form.Item
-                        name={[field.name, "quantity"]}
-                        label="Quantity"
-                        rules={[{ required: true, message: "Enter quantity" }]}
-                      >
-                        <InputNumber min={0} className="w-full" placeholder="300" />
-                      </Form.Item>
+              <Form.Item name="wo_number" label="WO Number (optional)">
+                <Input placeholder="WO-2026-000001" />
+              </Form.Item>
 
-                      <Form.Item
-                        name={[field.name, "weight"]}
-                        label="Weight"
-                        rules={[{ required: true, message: "Enter weight" }]}
-                      >
-                        <InputNumber min={0} className="w-full" placeholder="10" />
-                      </Form.Item>
+              <Form.Item name="scrap_type" label="Scrap Type" rules={[{ required: true, message: "Select scrap type" }]}>
+                <Select placeholder="Select scrap type" options={scrapTypeOptions} />
+              </Form.Item>
 
-                      <Form.Item
-                        name={[field.name, "uom"]}
-                        label="Unit of Measurement"
-                        rules={[{ required: true, message: "Select unit" }]}
-                      >
-                        <Select placeholder="Select Unit" options={uomOptions} />
-                      </Form.Item>
-                    </div>
-                  </Card>
-                ))}
+              <Form.Item name="disposal_reason" label="Disposal Reason" rules={[{ required: true, message: "Select disposal reason" }]}>
+                <Select placeholder="Select reason" options={disposalReasonOptions} />
+              </Form.Item>
 
-                <div className="flex justify-center">
-                  <Button icon={<PlusOutlined />} onClick={() => add({})}>
-                    Add Another Scrap Stock
-                  </Button>
-                </div>
-              </>
-            )}
-          </Form.List>
+              <Form.Item name="quantity" label="Quantity" rules={[{ required: true, message: "Enter quantity" }]}>
+                <InputNumber min={0} className="w-full" placeholder="2" />
+              </Form.Item>
+
+              <Form.Item name="uom" label="UoM" rules={[{ required: true, message: "Enter uom" }]}>
+                <Input placeholder="pcs" />
+              </Form.Item>
+
+              <Form.Item name="weight_kg" label="Weight (kg)" rules={[{ required: true, message: "Enter weight" }]}>
+                <InputNumber min={0} className="w-full" placeholder="0" />
+              </Form.Item>
+
+              <Form.Item name="remarks" label="Remarks">
+                <Input placeholder="manual add" />
+              </Form.Item>
+            </div>
+          </Card>
         </Form>
-
-        <Card className="!rounded-xl" styles={{ body: { padding: 18 } }}>
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-semibold text-gray-900">Summary</div>
-              <div className="text-sm text-gray-500">{entryCount} Scrap Stock Entry ready to be saved</div>
-            </div>
-            <div className="flex items-center gap-10">
-              <div className="text-center">
-                <div className="text-lg font-bold text-gray-900">{entryCount}</div>
-                <div className="text-xs text-gray-500">Entries</div>
-              </div>
-              <div className="text-center">
-                <div className="text-lg font-bold text-gray-900">{completeCount}</div>
-                <div className="text-xs text-gray-500">Complete</div>
-              </div>
-            </div>
-          </div>
-        </Card>
       </div>
     </div>
   );

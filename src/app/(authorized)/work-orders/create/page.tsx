@@ -23,7 +23,10 @@ import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import { useGetProcessesQuery } from "@/lib/api/system-settings/api";
-import { useCreateWorkOrderMutation } from "@/lib/api/work-orders/api";
+import {
+  useCreateWorkOrderMutation,
+  useGetWorkOrderUniqOptionsQuery,
+} from "@/lib/api/work-orders/api";
 
 type WorkOrderType = "New" | "Additional" | "Rework" | "Assembly";
 
@@ -63,8 +66,14 @@ const nextKanbanNumber = (index: number) => `KBN-AUTO-${String(index + 1).padSta
 export default function CreateWorkOrderPage() {
   const router = useRouter();
   const [form] = Form.useForm();
+  const { TextArea } = Input;
   const apiEnabled = Boolean(apiBaseUrl);
   const [createWorkOrder, createWorkOrderState] = useCreateWorkOrderMutation();
+
+  const uniqOptionsQuery = useGetWorkOrderUniqOptionsQuery(
+    { limit: 200, sources: ["raw_material", "indirect", "subcon"] },
+    { skip: !apiEnabled }
+  );
 
   const [woNumber] = useState(() => nextWoNumber());
   const [lines, setLines] = useState<UniqLine[]>([{ id: "l-1", kanbanNumber: nextKanbanNumber(0) }]);
@@ -94,6 +103,17 @@ export default function CreateWorkOrderPage() {
   }, [processRecords]);
 
   const uniqOptions = useMemo<UniqOption[]>(() => {
+    if (apiEnabled && uniqOptionsQuery.data?.length) {
+      return uniqOptionsQuery.data.map((o) => ({
+        uniq: o.uniq_code,
+        partName: o.part_name ?? bomIndex.partNameByUniq[o.uniq_code] ?? "",
+        partNumber: o.part_number ?? bomIndex.partNumberByUniq[o.uniq_code] ?? "",
+        model: o.model ?? bomIndex.assemblyCodeByUniq[o.uniq_code] ?? "",
+        uom: o.uom ?? "pcs",
+        processes: processNameOptions,
+      }));
+    }
+
     if (!bomIndex.options.length) return fallbackUniqOptions;
     return bomIndex.options.map((option) => ({
       uniq: option.value,
@@ -103,7 +123,7 @@ export default function CreateWorkOrderPage() {
       uom: "pcs",
       processes: processNameOptions,
     }));
-  }, [bomIndex, processNameOptions]);
+  }, [apiEnabled, bomIndex, processNameOptions, uniqOptionsQuery.data]);
 
   const uniqSelectOptions = useMemo(
     () => uniqOptions.map((u) => ({ label: u.uniq, value: u.uniq })),
@@ -171,8 +191,11 @@ export default function CreateWorkOrderPage() {
       }
 
       const targetDate = values.woTargetDate as Dayjs;
+      const createdDate = values.woCreatedDate as Dayjs;
       const created = await createWorkOrder({
         wo_type: String(values.woType),
+        reference_wo: values.woReference ? String(values.woReference) : null,
+        created_date: dayjs(createdDate).format("YYYY-MM-DD"),
         target_date: dayjs(targetDate).format("YYYY-MM-DD"),
         items: lines.map((line) => ({
           item_uniq_code: String(line.uniq ?? "").trim(),
@@ -180,6 +203,7 @@ export default function CreateWorkOrderPage() {
           uom: String(line.uom ?? "pcs"),
           process_name: String(line.process ?? ""),
         })),
+        notes: values.woNotes ? String(values.woNotes) : null,
       }).unwrap();
 
       message.success("Work order created successfully");
@@ -253,6 +277,15 @@ export default function CreateWorkOrderPage() {
                 <div className="-mt-3 text-xs text-gray-400">Auto-generated on save</div>
               </div>
 
+              <Form.Item
+                name="woCreatedDate"
+                label="Created Date"
+                rules={[{ required: true, message: "Select created date" }]}
+                initialValue={dayjs()}
+              >
+                <DatePicker className="!rounded-lg w-full" placeholder="dd/mm/yyyy" format="DD/MM/YYYY" />
+              </Form.Item>
+
               <Form.Item name="woType" label="Work Order Type" rules={[{ required: true, message: "Select type" }]}>
                 <Select
                   className="!rounded-lg"
@@ -280,6 +313,12 @@ export default function CreateWorkOrderPage() {
                   />
                 </Form.Item>
                 <div className="-mt-3 text-xs text-gray-400">Only applicable when WO Type = Additional</div>
+              </div>
+
+              <div className="md:col-span-2">
+                <Form.Item name="woNotes" label="Notes">
+                  <TextArea className="!rounded-lg" rows={3} placeholder="WO harian shift 1" />
+                </Form.Item>
               </div>
             </div>
           </div>

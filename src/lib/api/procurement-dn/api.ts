@@ -337,10 +337,14 @@ export const procurementDnApiSlice = apiSlice
       transformResponse: (response: unknown) => ok(toPreview(response), "success"),
     }),
 
-    scanProcurementDnPacking: builder.query<ApiResponse<ProcurementDnScanResult>, { packing: string }>({
-      query: ({ packing }) => ({
-        url: `/delivery-notes/scan?packing=${encodeURIComponent(packing)}`,
-        method: "GET",
+    scanProcurementDnPacking: builder.query<
+      ApiResponse<ProcurementDnScanResult>,
+      { packing: string; qty?: number }
+    >({
+      query: ({ packing, qty }) => ({
+        url: "/delivery-notes/scan",
+        method: "POST",
+        body: { packing, qty: typeof qty === "number" && Number.isFinite(qty) ? qty : 1 },
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) => ok(toScanResult(response)),

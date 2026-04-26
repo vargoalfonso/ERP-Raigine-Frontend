@@ -1,34 +1,44 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Button, Card, Segmented, Table, Tag } from "antd";
+import { Alert, Button, Card, Input, Modal, Segmented, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
-  ClockCircleOutlined,
   EyeOutlined,
 } from "@ant-design/icons";
 
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import {
+  type ApprovalManagerItem,
+  type ApprovalManagerType,
+  useGetApprovalManagerItemsQuery,
+  useGetApprovalManagerSummaryQuery,
+  useLazyGetApprovalManagerDetailByUrlQuery,
+  useSubmitApprovalManagerDecisionMutation,
+} from "@/lib/api/approval-manager/api";
+
 type ApprovalTab = "All Items" | "BOM" | "PRL" | "PO Budget" | "Stock Opname";
 type ApprovalStatus = "Pending" | "Approved" | "Rejected";
-type ApprovalModule = "Bill of Material" | "PRL Management" | "PO Budget" | "Stock Opname";
 
 type ApprovalRow = {
   key: string;
   id: string;
   tab: ApprovalTab;
-  module: ApprovalModule;
+  module: string;
   itemName: string;
   itemCode: string;
   submittedBy: string;
   submittedDate: string;
   approvalStatus: ApprovalStatus;
+  backend?: ApprovalManagerItem;
 };
 
 const TAB_OPTIONS: ApprovalTab[] = ["All Items", "BOM", "PRL", "PO Budget", "Stock Opname"];
 
-const approvalRows: ApprovalRow[] = [
+const MOCK_ROWS: ApprovalRow[] = [
   {
     key: "BOM-001",
     id: "BOM-001",
@@ -152,11 +162,12 @@ const approvalRows: ApprovalRow[] = [
   },
 ];
 
-const moduleTagClass: Record<ApprovalModule, string> = {
+const moduleTagClass: Record<string, string> = {
   "Bill of Material": "bg-blue-50 text-blue-600 border-blue-100",
   "PRL Management": "bg-green-50 text-green-600 border-green-100",
   "PO Budget": "bg-purple-50 text-purple-600 border-purple-100",
   "Stock Opname": "bg-orange-50 text-orange-600 border-orange-100",
+  "Delivery Note": "bg-slate-50 text-slate-600 border-slate-200",
 };
 
 const statusTagClass: Record<ApprovalStatus, string> = {
@@ -166,22 +177,498 @@ const statusTagClass: Record<ApprovalStatus, string> = {
 };
 
 export default function ApprovalManagerPage() {
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [messageApi, contextHolder] = message.useMessage();
   const [activeTab, setActiveTab] = useState<ApprovalTab>("All Items");
 
-  const filteredRows = useMemo(() => {
-    if (activeTab === "All Items") return approvalRows;
-    return approvalRows.filter((row) => row.tab === activeTab);
+  const [selectedItem, setSelectedItem] = useState<ApprovalManagerItem | null>(null);
+  const [remarks, setRemarks] = useState<string>("");
+
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailTitle, setDetailTitle] = useState<string>("Detail");
+  const [detailPayload, setDetailPayload] = useState<unknown>(null);
+
+  const [fetchDetail, fetchDetailState] = useLazyGetApprovalManagerDetailByUrlQuery();
+  const [submitDecision, submitDecisionState] = useSubmitApprovalManagerDecisionMutation();
+
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+
+  const type: ApprovalManagerType = useMemo(() => {
+    switch (activeTab) {
+      case "BOM":
+        return "bom";
+      case "PRL":
+        return "prl";
+      case "PO Budget":
+        return "po_budget";
+      case "Stock Opname":
+        return "stock_opname";
+      case "All Items":
+      default:
+        return "all";
+    }
   }, [activeTab]);
 
+  const listQuery = useGetApprovalManagerItemsQuery(
+    { type, page, limit },
+    { skip: !apiEnabled }
+  );
+
+  const summaryQuery = useGetApprovalManagerSummaryQuery({ type }, { skip: !apiEnabled });
+
+  const toDateOnly = (value?: string): string => {
+    const v = String(value ?? "").trim();
+    if (!v) return "-";
+    // "2026-04-25 04:54:19.761778+00" or ISO -> date part.
+    if (v.length >= 10 && v[4] === "-" && v[7] === "-") return v.slice(0, 10);
+    return v;
+  };
+
+  type ModuleKind = "stock_opname" | "bom" | "prl" | "po_budget" | "unknown";
+  const getModuleKind = (item: ApprovalManagerItem | undefined): ModuleKind => {
+    const label = String(item?.module_label ?? item?.module ?? "").toLowerCase();
+    if (label.includes("opname")) return "stock_opname";
+    if (label.includes("material") || label.includes("bom")) return "bom";
+    if (label.includes("prl")) return "prl";
+    if (label.includes("po budget") || label.includes("budget")) return "po_budget";
+    return "unknown";
+  };
+
+  type UnknownRecord = Record<string, unknown>;
+  const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+  const toText = (value: unknown): string => {
+    if (typeof value === "string") return value;
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    if (typeof value === "boolean") return value ? "Yes" : "No";
+    return "-";
+  };
+  const toNumber = (value: unknown): number | null => {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  };
+  const kv = (label: string, value: React.ReactNode) => (
+    <div className="rounded-lg border border-gray-100 bg-white px-3 py-2">
+      <div className="text-[11px] uppercase tracking-wide text-gray-400">{label}</div>
+      <div className="text-sm font-medium text-gray-900 break-words">{value}</div>
+    </div>
+  );
+
+  const rows = useMemo<ApprovalRow[]>(() => {
+    if (!apiEnabled) return MOCK_ROWS;
+
+    const normalizeStatus = (value: string): ApprovalStatus => {
+      const v = (value || "").trim().toLowerCase();
+      if (v.includes("approve")) return "Approved";
+      if (v.includes("reject")) return "Rejected";
+      return "Pending";
+    };
+
+    const normalizeTab = (moduleLabel: string): ApprovalTab => {
+      const v = (moduleLabel || "").toLowerCase();
+      if (v.includes("material") || v.includes("bom")) return "BOM";
+      if (v.includes("prl")) return "PRL";
+      if (v.includes("budget")) return "PO Budget";
+      if (v.includes("opname")) return "Stock Opname";
+      return "All Items";
+    };
+
+    const items = (listQuery.data?.data ?? []).filter((it) => it.can_view === true);
+    return items.map((it) => {
+      const id = String(it.document_id ?? it.item_code ?? it.reference_id ?? it.instance_id);
+      const moduleLabel = String(it.module_label ?? it.module ?? "-");
+      return {
+        key: String(it.instance_id ?? id),
+        id,
+        tab: normalizeTab(moduleLabel),
+        module: moduleLabel,
+        itemName: String(it.item_name ?? "-") || "-",
+        itemCode: String(it.item_code ?? it.document_id ?? "-") || "-",
+        submittedBy: String(it.submitted_by_name ?? it.submitted_by ?? "-") || "-",
+        submittedDate: toDateOnly(it.submitted_at),
+        approvalStatus: normalizeStatus(String(it.status ?? "pending")),
+        backend: it,
+      };
+    });
+  }, [apiEnabled, listQuery.data?.data]);
+
+  const filteredRows = useMemo(() => {
+    if (activeTab === "All Items") return rows;
+    return rows.filter((row) => row.tab === activeTab);
+  }, [activeTab, rows]);
+
   const summary = useMemo(() => {
-    return approvalRows.reduce(
-      (acc, row) => {
-        acc[row.approvalStatus] += 1;
-        return acc;
-      },
-      { Pending: 0, Approved: 0, Rejected: 0 } as Record<ApprovalStatus, number>
+    if (!apiEnabled) {
+      return MOCK_ROWS.reduce(
+        (acc, row) => {
+          acc[row.approvalStatus] += 1;
+          return acc;
+        },
+        { Pending: 0, Approved: 0, Rejected: 0 } as Record<ApprovalStatus, number>
+      );
+    }
+
+    const s = summaryQuery.data?.data;
+    return {
+      Pending: s?.pending ?? 0,
+      Approved: s?.approved ?? 0,
+      Rejected: s?.rejected ?? 0,
+    } as Record<ApprovalStatus, number>;
+  }, [apiEnabled, summaryQuery.data?.data]);
+
+  const onView = async (item: ApprovalManagerItem | undefined) => {
+    if (!item) return;
+    if (item.can_view !== true) return;
+
+    const title = String(item.item_name ?? item.item_code ?? item.document_id ?? "Detail").trim() || "Detail";
+    setSelectedItem(item);
+    setRemarks("");
+    setDetailTitle(title);
+    setDetailPayload(null);
+    setDetailOpen(true);
+
+    const detailUrl = String(item.detail_url ?? "").trim();
+    if (!apiEnabled || !detailUrl) return;
+
+    try {
+      const payload = await fetchDetail({ detail_url: detailUrl }).unwrap();
+      setDetailPayload(payload);
+    } catch (error) {
+      messageApi.error(getApiErrorMessage(error, "Failed to load detail"));
+    }
+  };
+
+  const canActionable = (item: ApprovalManagerItem | undefined): boolean => {
+    if (!apiEnabled || !item) return false;
+    if ((item.status ?? "").toLowerCase() !== "pending") return false;
+    if (item.is_my_turn !== true) return false;
+    if ((item.view_mode ?? "").toLowerCase() !== "actionable") return false;
+    return true;
+  };
+
+  const buildStockOpnameDecisionUrl = (
+    item: ApprovalManagerItem,
+    action: "approve" | "reject"
+  ): string | null => {
+    const id =
+      (typeof item.instance_id === "number" && item.instance_id > 0
+        ? item.instance_id
+        : undefined) ??
+      (typeof item.reference_id === "number" && item.reference_id > 0
+        ? item.reference_id
+        : undefined);
+
+    if (!id) return null;
+    return `/stock-opname-sessions/${encodeURIComponent(String(id))}/${action}`;
+  };
+
+  const onApprove = async (
+    item: ApprovalManagerItem | undefined,
+    action: "approve" | "reject",
+    nextRemarks?: string
+  ) => {
+    if (!item) return;
+    if (!canActionable(item)) return;
+
+    if (action === "approve" && item.can_approve !== true) return;
+    if (action === "reject" && item.can_reject !== true) return;
+
+    const approvalUrl = (() => {
+      if (getModuleKind(item) === "stock_opname") {
+        const built = buildStockOpnameDecisionUrl(item, action);
+        if (built) return built;
+      }
+      return String(item.approval_url ?? "").trim();
+    })();
+    if (!approvalUrl) {
+      messageApi.error(
+        getModuleKind(item) === "stock_opname"
+          ? "Missing stock opname session id (instance_id/reference_id)"
+          : "Missing approval_url from backend"
+      );
+      return;
+    }
+
+    try {
+      await submitDecision({
+        approval_url: approvalUrl,
+        action,
+        remarks: nextRemarks,
+        module_kind: getModuleKind(item),
+      }).unwrap();
+      messageApi.success(action === "approve" ? "Approved" : "Rejected");
+      await Promise.all([listQuery.refetch(), summaryQuery.refetch()]);
+    } catch (error) {
+      messageApi.error(getApiErrorMessage(error, action === "approve" ? "Failed to approve" : "Failed to reject"));
+    }
+  };
+
+  const statusColor = (value: ApprovalStatus) => {
+    if (value === "Approved") return "green";
+    if (value === "Rejected") return "red";
+    return "gold";
+  };
+
+  const renderDetailBody = () => {
+    const item = selectedItem;
+    const kind = getModuleKind(item ?? undefined);
+
+    const moduleLabel = String(item?.module_label ?? item?.module ?? "-") || "-";
+    const itemId = String(item?.document_id ?? item?.item_code ?? item?.reference_id ?? item?.instance_id ?? "-");
+    const itemName = String(item?.item_name ?? "-") || "-";
+    const itemCode = String(item?.item_code ?? item?.document_id ?? "-") || "-";
+    const submittedBy = String(item?.submitted_by_name ?? item?.submitted_by ?? "-") || "-";
+    const submittedDate = toDateOnly(item?.submitted_at);
+    const status = ((item?.status ?? "pending") as string).toLowerCase().includes("approve")
+      ? ("Approved" as const)
+      : ((item?.status ?? "pending") as string).toLowerCase().includes("reject")
+        ? ("Rejected" as const)
+        : ("Pending" as const);
+
+    const payload = detailPayload;
+
+    const header = (
+      <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+        <div className="text-sm text-gray-500">Review and approve or reject this item</div>
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+          {kv("Item ID", itemId)}
+          {kv("Module", moduleLabel)}
+          {kv("Item Name", itemName)}
+          {kv("Item Code", itemCode)}
+          {kv("Submitted By", submittedBy)}
+          {kv("Submitted Date", submittedDate)}
+        </div>
+      </div>
     );
-  }, []);
+
+    const approvalStatus = (
+      <div className="mt-4">
+        <div className="text-sm font-semibold text-gray-900">Current Approval Status</div>
+        <div className="mt-2">
+          <Tag color={statusColor(status)} className="!rounded-full">{status}</Tag>
+        </div>
+      </div>
+    );
+
+    const comments = (
+      <div className="mt-4">
+        <div className="text-sm font-semibold text-gray-900">Manager Comments</div>
+        <div className="mt-2">
+          <Input.TextArea
+            rows={3}
+            placeholder="Add comments or notes for approval/rejection..."
+            value={remarks}
+            onChange={(e) => setRemarks(e.target.value)}
+          />
+        </div>
+      </div>
+    );
+
+    const missing = (
+      <div className="mt-4 text-sm text-gray-500">No detail payload.</div>
+    );
+
+    const renderStockOpname = () => {
+      if (!isRecord(payload)) return missing;
+      const session = isRecord(payload.session) ? (payload.session as UnknownRecord) : null;
+      const entries = Array.isArray(payload.entries) ? (payload.entries as unknown[]) : [];
+
+      const detailsGrid = session ? (
+        <div className="mt-4">
+          <div className="text-sm font-semibold text-gray-900">Details</div>
+          <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+            {kv("Session Number", toText(session.session_number))}
+            {kv("Inventory Type", toText(session.inventory_type))}
+            {kv("Method", toText(session.method))}
+            {kv("Period", toText(session.period_label))}
+            {kv("Schedule Date", toDateOnly(toText(session.schedule_date)))}
+            {kv("Counted Date", toDateOnly(toText(session.counted_date)))}
+            {kv("Total Entries", toText(session.total_entries))}
+            {kv("Cost Impact", toText(session.cost_impact))}
+            {kv("Status", toText(session.status_label ?? session.status))}
+            {kv("Impact", toText(session.impact_label))}
+          </div>
+        </div>
+      ) : null;
+
+      const entryRows = entries
+        .map((e) => (isRecord(e) ? (e as UnknownRecord) : {}))
+        .map((e) => ({
+          key: String(toText(e.uuid ?? e.id ?? "")),
+          uniq_code: toText(e.uniq_code),
+          part_name: toText(e.part_name),
+          part_number: toText(e.part_number),
+          uom: toText(e.uom),
+          system_qty_snapshot: toNumber(e.system_qty_snapshot) ?? 0,
+          counted_qty: toNumber(e.counted_qty) ?? 0,
+          variance_qty: toNumber(e.variance_qty) ?? 0,
+          user_counter: toText(e.user_counter),
+          status: toText(e.status),
+        }));
+
+      const entryColumns: ColumnsType<(typeof entryRows)[number]> = [
+        { title: "UNIQ", dataIndex: "uniq_code", key: "uniq_code", width: 160 },
+        { title: "Part Name", dataIndex: "part_name", key: "part_name", width: 220 },
+        { title: "Part Number", dataIndex: "part_number", key: "part_number", width: 150 },
+        { title: "UoM", dataIndex: "uom", key: "uom", width: 80 },
+        { title: "System Qty", dataIndex: "system_qty_snapshot", key: "system_qty_snapshot", width: 110 },
+        { title: "Counted Qty", dataIndex: "counted_qty", key: "counted_qty", width: 110 },
+        { title: "Variance", dataIndex: "variance_qty", key: "variance_qty", width: 90 },
+        { title: "Counter", dataIndex: "user_counter", key: "user_counter", width: 140 },
+        {
+          title: "Status",
+          dataIndex: "status",
+          key: "status",
+          width: 110,
+          render: (v: unknown) => <Tag className="!rounded-full">{toText(v)}</Tag>,
+        },
+      ];
+
+      return (
+        <>
+          {detailsGrid}
+          <div className="mt-4">
+            <div className="text-sm font-semibold text-gray-900">Entries</div>
+            <div className="mt-2">
+              <Table
+                size="small"
+                columns={entryColumns}
+                dataSource={entryRows}
+                pagination={false}
+                scroll={{ x: 1200 }}
+              />
+            </div>
+          </div>
+        </>
+      );
+    };
+
+    const renderBom = () => {
+      const obj = isRecord(payload) ? (payload as UnknownRecord) : null;
+      if (!obj) return missing;
+
+      const processRoutes = Array.isArray(obj.process_routes) ? (obj.process_routes as unknown[]) : [];
+      const processRows = processRoutes
+        .map((r) => (isRecord(r) ? (r as UnknownRecord) : {}))
+        .map((r) => ({
+          key: String(toText(r.route_id ?? r.op_seq ?? "")),
+          op_seq: toNumber(r.op_seq) ?? 0,
+          process_name: toText(r.process_name),
+          machine_name: toText(r.machine_name),
+          cycle_time_sec: toNumber(r.cycle_time_sec) ?? null,
+          setup_time_min: toNumber(r.setup_time_min) ?? null,
+        }));
+
+      const processColumns: ColumnsType<(typeof processRows)[number]> = [
+        { title: "Op Seq", dataIndex: "op_seq", key: "op_seq", width: 90 },
+        { title: "Process", dataIndex: "process_name", key: "process_name", width: 180 },
+        { title: "Machine", dataIndex: "machine_name", key: "machine_name", width: 180 },
+        { title: "Cycle (sec)", dataIndex: "cycle_time_sec", key: "cycle_time_sec", width: 110 },
+        { title: "Setup (min)", dataIndex: "setup_time_min", key: "setup_time_min", width: 110 },
+      ];
+
+      const material = isRecord(obj.material_spec) ? (obj.material_spec as UnknownRecord) : null;
+
+      return (
+        <>
+          <div className="mt-4">
+            <div className="text-sm font-semibold text-gray-900">Details</div>
+            <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+              {kv("UNIQ", toText(obj.uniq_code))}
+              {kv("Part Name", toText(obj.part_name))}
+              {kv("Part Number", toText(obj.part_number))}
+              {kv("BOM Status", toText(obj.bom_status))}
+              {kv("BOM Version", toText(obj.bom_version))}
+              {kv("Read Only", toText(obj.read_only))}
+              {kv("Change Note", toText(obj.change_note))}
+              {kv("Description", toText(obj.description))}
+            </div>
+          </div>
+
+          {material ? (
+            <div className="mt-4">
+              <div className="text-sm font-semibold text-gray-900">Material Spec</div>
+              <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+                {kv("Grade", toText(material.material_grade))}
+                {kv("Form", toText(material.form))}
+                {kv("Width (mm)", toText(material.width_mm))}
+                {kv("Thickness (mm)", toText(material.thickness_mm))}
+                {kv("Length (mm)", toText(material.length_mm))}
+                {kv("Weight (kg)", toText(material.weight_kg))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-4">
+            <div className="text-sm font-semibold text-gray-900">Process Routes</div>
+            <div className="mt-2">
+              <Table
+                size="small"
+                columns={processColumns}
+                dataSource={processRows}
+                pagination={false}
+                scroll={{ x: 800 }}
+              />
+            </div>
+          </div>
+        </>
+      );
+    };
+
+    const renderPrl = () => {
+      if (!isRecord(payload)) return missing;
+      const prlObj = isRecord(payload.prl) ? (payload.prl as UnknownRecord) : null;
+      const data = prlObj ?? (payload as UnknownRecord);
+
+      return (
+        <div className="mt-4">
+          <div className="text-sm font-semibold text-gray-900">Details</div>
+          <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+            {kv("PRL ID", toText(data.prl_id))}
+            {kv("Customer", toText(data.customer_name))}
+            {kv("UNIQ", toText(data.uniq_code))}
+            {kv("Part Name", toText(data.part_name))}
+            {kv("Part Number", toText(data.part_number))}
+            {kv("Forecast Period", toText(data.forecast_period))}
+            {kv("Quantity", toText(data.quantity))}
+            {kv("Status", toText(data.status))}
+            {kv("Approved At", toText(data.approved_at))}
+            {kv("Created At", toText(data.created_at))}
+          </div>
+        </div>
+      );
+    };
+
+    const details = (() => {
+      if (!payload) return missing;
+      if (kind === "stock_opname") return renderStockOpname();
+      if (kind === "bom") return renderBom();
+      if (kind === "prl") return renderPrl();
+      return (
+        <div className="mt-4">
+          <div className="text-sm text-gray-500">
+            Detail mapping not available for this module yet.
+          </div>
+          <pre className="mt-2 max-h-[50vh] overflow-auto rounded-lg bg-gray-50 p-3 text-xs text-gray-800">
+            {JSON.stringify(payload, null, 2)}
+          </pre>
+        </div>
+      );
+    })();
+
+    return (
+      <div>
+        {header}
+        {details}
+        {approvalStatus}
+        {comments}
+      </div>
+    );
+  };
 
   const columns: ColumnsType<ApprovalRow> = [
     {
@@ -200,11 +687,12 @@ export default function ApprovalManagerPage() {
       dataIndex: "module",
       key: "module",
       width: 170,
-      render: (value: ApprovalModule) => (
-        <Tag className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${moduleTagClass[value]}`}>
-          {value}
-        </Tag>
-      ),
+      render: (value: string) => {
+        const klass = moduleTagClass[value] ?? "bg-gray-50 text-gray-700 border-gray-200";
+        return (
+          <Tag className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${klass}`}>{value}</Tag>
+        );
+      },
     },
     {
       title: "Item Name",
@@ -250,11 +738,37 @@ export default function ApprovalManagerPage() {
       fixed: "right",
       render: (_value, row) => (
         <div className="flex items-center gap-3 text-base">
-          <Button type="text" size="small" icon={<EyeOutlined />} className="text-gray-600" />
+          {row.backend?.can_view === true ? (
+            <Button
+              type="text"
+              size="small"
+              icon={<EyeOutlined />}
+              className="text-gray-600"
+              onClick={() => onView(row.backend)}
+            />
+          ) : null}
           {row.approvalStatus === "Pending" ? (
             <>
-              <Button type="text" size="small" icon={<CheckCircleOutlined />} className="text-green-500" />
-              <Button type="text" size="small" icon={<CloseCircleOutlined />} className="text-red-500" />
+              {row.backend?.can_approve === true ? (
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CheckCircleOutlined />}
+                  className="text-green-500"
+                  disabled={!canActionable(row.backend) || submitDecisionState.isLoading}
+                  onClick={() => onApprove(row.backend, "approve")}
+                />
+              ) : null}
+              {row.backend?.can_reject === true ? (
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CloseCircleOutlined />}
+                  className="text-red-500"
+                  disabled={!canActionable(row.backend) || submitDecisionState.isLoading}
+                  onClick={() => onApprove(row.backend, "reject")}
+                />
+              ) : null}
             </>
           ) : null}
         </div>
@@ -264,6 +778,7 @@ export default function ApprovalManagerPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-6 space-y-6">
+      {contextHolder}
       <Card className="rounded-2xl border border-gray-100 shadow-sm" bodyStyle={{ padding: 24 }}>
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
@@ -289,21 +804,115 @@ export default function ApprovalManagerPage() {
       </Card>
 
       <Card className="rounded-2xl border border-gray-100 shadow-sm" bodyStyle={{ padding: 24 }}>
+        {apiEnabled && listQuery.error ? (
+          <Alert
+            className="mb-4"
+            type="error"
+            showIcon
+            message="Failed to load approval items"
+            description={getApiErrorMessage(listQuery.error, "Failed to load approval items")}
+          />
+        ) : null}
+
+        {apiEnabled && summaryQuery.error ? (
+          <Alert
+            className="mb-4"
+            type="error"
+            showIcon
+            message="Failed to load approval summary"
+            description={getApiErrorMessage(summaryQuery.error, "Failed to load approval summary")}
+          />
+        ) : null}
+
         <div className="rounded-2xl bg-gray-100 p-1">
           <Segmented
             block
             options={TAB_OPTIONS}
             value={activeTab}
-            onChange={(value) => setActiveTab(value as ApprovalTab)}
+            onChange={(value) => {
+              setActiveTab(value as ApprovalTab);
+              setPage(1);
+            }}
             className="approval-manager-segmented"
           />
         </div>
 
         <div className="mt-6">
+          <Modal
+            title={detailTitle}
+            open={detailOpen}
+            onCancel={() => setDetailOpen(false)}
+            footer={(() => {
+              const item = selectedItem;
+              const showApprove = item?.can_approve === true;
+              const showReject = item?.can_reject === true;
+              const disabled = !canActionable(item ?? undefined) || submitDecisionState.isLoading;
+
+              return (
+                <div className="flex items-center justify-end gap-2">
+                  <Button onClick={() => setDetailOpen(false)}>Close</Button>
+                  {showReject ? (
+                    <Button
+                      danger
+                      onClick={() => onApprove(item ?? undefined, "reject", remarks)}
+                      disabled={disabled}
+                      loading={submitDecisionState.isLoading}
+                    >
+                      Reject
+                    </Button>
+                  ) : null}
+                  {showApprove ? (
+                    <Button
+                      type="primary"
+                      onClick={() => onApprove(item ?? undefined, "approve", remarks)}
+                      disabled={disabled}
+                      loading={submitDecisionState.isLoading}
+                    >
+                      Approve
+                    </Button>
+                  ) : null}
+                </div>
+              );
+            })()}
+            width={820}
+          >
+            {!apiEnabled ? (
+              <div className="text-sm text-gray-500">API base url not configured.</div>
+            ) : fetchDetailState.isFetching ? (
+              <div className="text-sm text-gray-500">Loading detail…</div>
+            ) : fetchDetailState.error ? (
+              <Alert
+                type="error"
+                showIcon
+                message="Failed to load detail"
+                description={getApiErrorMessage(fetchDetailState.error, "Failed to load detail")}
+              />
+            ) : (
+              renderDetailBody()
+            )}
+          </Modal>
+
           <Table<ApprovalRow>
             columns={columns}
             dataSource={filteredRows}
-            pagination={{ pageSize: 10 }}
+            loading={apiEnabled && (listQuery.isFetching || summaryQuery.isFetching)}
+            pagination={{
+              current: page,
+              pageSize: limit,
+              total:
+                apiEnabled
+                  ? listQuery.data?.pagination?.total ?? filteredRows.length
+                  : filteredRows.length,
+              showSizeChanger: true,
+              pageSizeOptions: ["10", "20", "50", "100"],
+              onChange: (nextPage, nextPageSize) => {
+                setPage(nextPage);
+                if (typeof nextPageSize === "number" && nextPageSize !== limit) {
+                  setLimit(nextPageSize);
+                  setPage(1);
+                }
+              },
+            }}
             rowKey="key"
             scroll={{ x: 1280 }}
           />

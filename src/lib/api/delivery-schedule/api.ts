@@ -50,6 +50,26 @@ const normalizeListResponse = (response: unknown): unknown[] => {
   return [];
 };
 
+const normalizePaginatedItems = (response: unknown): unknown[] => {
+  if (!isRecord(response)) return [];
+  const data = response.data;
+  if (!isRecord(data)) return [];
+  const items = (data as UnknownRecord).items;
+  if (Array.isArray(items)) return items;
+  if (isRecord((data as UnknownRecord).data) && Array.isArray(((data as UnknownRecord).data as UnknownRecord).items)) {
+    return (((data as UnknownRecord).data as UnknownRecord).items as unknown[]) ?? [];
+  }
+  return [];
+};
+
+const normalizeInnerData = (response: unknown): unknown => {
+  if (!isRecord(response)) return response;
+  const data = response.data;
+  if (!isRecord(data)) return response;
+  if (isRecord((data as UnknownRecord).data)) return (data as UnknownRecord).data;
+  return data;
+};
+
 const normalizeObjectResponse = (response: unknown): unknown => {
   if (!isRecord(response)) return response;
 
@@ -62,38 +82,59 @@ const normalizeObjectResponse = (response: unknown): unknown => {
 };
 
 export interface DeliveryScheduleItemPayload {
-  uniq: string;
-  model: string;
+  customer_order_document_item_uuid: string;
+  item_uniq_code: string;
   part_no: string;
   part_name: string;
-  quantity: number;
+  model: string;
+  total_order: number;
+  total_delivery: number;
   uom: string;
 }
 
 export interface CreateDeliveryScheduleRequest {
-  delivery_date: string;
+  customer_order_document_uuid: string;
+  customer_order_reference: string;
   customer_id: number;
-  po_dn_name: string;
+  customer_name: string;
+  delivery_date: string;
   cycle: string;
+  priority: string;
+  transport_company: string;
+  vehicle_number: string;
+  driver_name: string;
+  driver_contact: string;
+  departure_at: string;
+  arrival_at: string;
+  delivery_instructions: string;
   items: DeliveryScheduleItemPayload[];
 }
 
 export interface UpdateDeliveryScheduleRequest {
   delivery_date?: string;
-  customer_id?: number;
-  po_dn_name?: string;
   cycle?: string;
+  priority?: string;
+  transport_company?: string;
+  vehicle_number?: string;
+  driver_name?: string;
+  driver_contact?: string;
+  departure_at?: string;
+  arrival_at?: string;
+  delivery_instructions?: string;
   items?: DeliveryScheduleItemPayload[];
 }
 
 export interface ApproveDeliveryScheduleRequest {
   schedule_id: string;
-  admin_name: string;
+  notes: string;
+  force_partial: boolean;
 }
 
 export interface ApproveBulkDeliveryScheduleRequest {
+  delivery_date: string;
   schedule_ids: string[];
-  admin_name: string;
+  notes: string;
+  force_partial: boolean;
 }
 
 export interface ScanDnRobotRequest {
@@ -105,7 +146,8 @@ export interface DeliveryScheduleItemRecord {
   model: string;
   partNo: string;
   partName: string;
-  quantity: number;
+  totalOrder: number;
+  totalDelivery: number;
   uom: string;
 }
 
@@ -116,6 +158,7 @@ export interface DeliveryScheduleRecord {
   customerName: string;
   poDnName: string;
   cycle: string;
+  priority?: string;
   status: string;
   approvedBy: string;
   approvedAt: string;
@@ -123,6 +166,13 @@ export interface DeliveryScheduleRecord {
   updatedAt: string;
   items: DeliveryScheduleItemRecord[];
 }
+
+export type DeliveryScheduleSummary = {
+  total_deliveries: number;
+  in_transit: number;
+  pending_approval: number;
+  dn_created: number;
+};
 
 export interface DeliveryScheduleDnCreationRecord {
   id: string;
@@ -159,12 +209,13 @@ const toItem = (raw: unknown): DeliveryScheduleItemRecord => {
   const record = isRecord(raw) ? raw : {};
 
   return {
-    uniq: getString(record, ["uniq", "item_uniq_code"]) ?? "-",
-    model: getString(record, ["model", "product_model"]) ?? "",
-    partNo: getString(record, ["part_no", "partNo"]) ?? "",
+    uniq: getString(record, ["item_uniq_code", "uniq", "itemUniqCode"]) ?? "-",
+    model: getString(record, ["model", "product_model", "productModel"]) ?? "",
+    partNo: getString(record, ["part_no", "partNo", "part_number", "partNumber"]) ?? "",
     partName: getString(record, ["part_name", "partName"]) ?? "",
-    quantity: getNumber(record, ["quantity", "qty"]) ?? 0,
-    uom: getString(record, ["uom"]) ?? "",
+    totalOrder: getNumber(record, ["total_order", "totalOrder", "quantity", "qty"]) ?? 0,
+    totalDelivery: getNumber(record, ["total_delivery", "totalDelivery"]) ?? 0,
+    uom: getString(record, ["uom", "unit"]) ?? "",
   };
 };
 
@@ -177,8 +228,9 @@ const toRecord = (raw: unknown): DeliveryScheduleRecord => {
     deliveryDate: getString(record, ["delivery_date", "deliveryDate"]) ?? "",
     customerId: getNumber(record, ["customer_id", "customerId"]),
     customerName: getString(record, ["customer_name", "customerName", "customer"]) ?? "",
-    poDnName: getString(record, ["po_dn_name", "poDnName"]) ?? "",
+    poDnName: getString(record, ["customer_order_reference", "po_dn_name", "poDnName", "po_number", "poNumber"]) ?? "",
     cycle: getString(record, ["cycle"]) ?? "",
+    priority: getString(record, ["priority"]) ?? undefined,
     status: getString(record, ["status", "approval_status", "approvalStatus"]) ?? "pending",
     approvedBy: getString(record, ["approved_by", "approvedBy", "admin_name"]) ?? "",
     approvedAt: getString(record, ["approved_at", "approvedAt"]) ?? "",
@@ -192,24 +244,24 @@ const toDnCreationRecord = (raw: unknown): DeliveryScheduleDnCreationRecord => {
   const record = isRecord(raw) ? raw : {};
 
   return {
-    id: getString(record, ["id", "dn_id", "uuid", "dn_number"]) ?? "",
+    id: getString(record, ["dn_id", "id", "uuid"]) ?? "",
     dnNumber: getString(record, ["dn_number", "dnNumber"]) ?? "",
-    dnDate: getString(record, ["dn_date", "dnDate", "delivery_date", "deliveryDate"]) ?? "",
-    customerName: getString(record, ["customer_name", "customerName", "customer"]) ?? "",
-    customerPo: getString(record, ["customer_po", "customerPo", "po_number", "poNumber"]) ?? "",
+    dnDate: getString(record, ["delivery_date", "dn_date", "dnDate", "deliveryDate"]) ?? "",
+    customerName: getString(record, ["customer_name", "customerName"]) ?? "",
+    customerPo: getString(record, ["po_number", "poNumber"]) ?? "",
     poDnName: getString(record, ["po_dn_name", "poDnName"]) ?? "",
-    partTitle: getString(record, ["part_title", "partTitle", "part_name", "partName"]) ?? "",
-    uniq: getString(record, ["uniq", "item_uniq_code"]) ?? "",
-    model: getString(record, ["model", "product_model"]) ?? "",
-    partNo: getString(record, ["part_no", "partNo"]) ?? "",
+    partTitle: getString(record, ["part_name", "partTitle", "part_name"]) ?? "",
+    uniq: getString(record, ["item_uniq_code", "uniq"]) ?? "",
+    model: getString(record, ["model"]) ?? "",
+    partNo: getString(record, ["part_number", "part_no", "partNo"]) ?? "",
     partName: getString(record, ["part_name", "partName"]) ?? "",
     quantity: getNumber(record, ["quantity", "qty"]) ?? 0,
-    uom: getString(record, ["uom"]) ?? "",
-    fgLocation: getString(record, ["fg_location", "fgLocation", "location"]) ?? "",
+    uom: getString(record, ["uom", "unit"]) ?? "",
+    fgLocation: getString(record, ["fg_location", "fgLocation"]) ?? "",
     qrCode: getString(record, ["qr_code", "qrCode"]) ?? "",
-    packingList: getString(record, ["packing_list", "packingList"]) ?? "",
-    status: getString(record, ["status", "scan_status", "scanStatus"]) ?? "",
-    statusHint: getString(record, ["status_hint", "statusHint", "remark", "notes"]) ?? "",
+    packingList: getString(record, ["packing_list_number", "packing_list", "packingList"]) ?? "",
+    status: getString(record, ["status"]) ?? "",
+    statusHint: getString(record, ["approval_status", "notes"]) ?? "",
     createdAt: getString(record, ["created_at", "createdAt"]) ?? "",
     updatedAt: getString(record, ["updated_at", "updatedAt"]) ?? "",
   };
@@ -233,14 +285,24 @@ export const deliveryScheduleSlice = apiSlice
   })
   .injectEndpoints({
     endpoints: (builder) => ({
-      getDeliverySchedules: builder.query<ApiResponse<DeliveryScheduleRecord[]>, void>({
-        query: () => ({
-          url: "/api/delivery-schedule/schedules",
+      getDeliverySchedules: builder.query<
+        ApiResponse<DeliveryScheduleRecord[]>,
+        { status?: string; page?: number; limit?: number } | void
+      >({
+        query: (arg) => ({
+          url: "/delivery-schedules",
           method: "GET",
+          params: isRecord(arg)
+            ? {
+                status: getString(arg, ["status"]) ?? undefined,
+                page: getNumber(arg, ["page"]) ?? 1,
+                limit: getNumber(arg, ["limit"]) ?? 20,
+              }
+            : { status: "scheduled", page: 1, limit: 20 },
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) =>
-          ok(normalizeListResponse(response).map((item) => toRecord(item))),
+          ok(normalizePaginatedItems(response).map((item) => toRecord(item))),
         providesTags: (result) => [
           { type: TAG, id: "LIST" },
           ...(result?.data ?? [])
@@ -249,17 +311,42 @@ export const deliveryScheduleSlice = apiSlice
         ],
       }),
 
-      getDeliveryScheduleDnCreationList: builder.query<
-        ApiResponse<DeliveryScheduleDnCreationRecord[]>,
-        void
-      >({
+      getDeliverySchedulesSummary: builder.query<ApiResponse<DeliveryScheduleSummary>, void>({
         query: () => ({
-          url: "/api/delivery-schedule/dn-creation",
+          url: "/delivery-schedules/summary",
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
+        transformResponse: (response: unknown) => {
+          const data = normalizeInnerData(response);
+          const r = isRecord(data) ? (data as UnknownRecord) : {};
+          return ok({
+            total_deliveries: getNumber(r, ["total_deliveries", "totalDeliveries"]) ?? 0,
+            in_transit: getNumber(r, ["in_transit", "inTransit"]) ?? 0,
+            pending_approval: getNumber(r, ["pending_approval", "pendingApproval"]) ?? 0,
+            dn_created: getNumber(r, ["dn_created", "dnCreated"]) ?? 0,
+          });
+        },
+        providesTags: [{ type: TAG, id: "SUMMARY" }],
+      }),
+
+      getDeliveryScheduleDnCreationList: builder.query<
+        ApiResponse<DeliveryScheduleDnCreationRecord[]>,
+        { page?: number; limit?: number } | void
+      >({
+        query: (arg) => ({
+          url: "/customer-delivery-notes",
+          method: "GET",
+          params: isRecord(arg)
+            ? {
+                page: getNumber(arg, ["page"]) ?? 1,
+                limit: getNumber(arg, ["limit"]) ?? 20,
+              }
+            : { page: 1, limit: 20 },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
         transformResponse: (response: unknown) =>
-          ok(normalizeListResponse(response).map((item) => toDnCreationRecord(item))),
+          ok(normalizePaginatedItems(response).map((item) => toDnCreationRecord(item))),
         providesTags: (result) => [
           { type: TAG, id: "DN-CREATION-LIST" },
           ...(result?.data ?? [])
@@ -273,7 +360,7 @@ export const deliveryScheduleSlice = apiSlice
         CreateDeliveryScheduleRequest
       >({
         query: (body) => ({
-          url: "/api/delivery-schedule/schedules",
+          url: "/delivery-schedules",
           method: "POST",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
@@ -287,7 +374,7 @@ export const deliveryScheduleSlice = apiSlice
         { id: string; body: UpdateDeliveryScheduleRequest }
       >({
         query: ({ id, body }) => ({
-          url: `/api/delivery-schedule/schedules/${encodeURIComponent(id)}`,
+          url: `/delivery-schedules/${encodeURIComponent(id)}`,
           method: "PUT",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
@@ -303,8 +390,8 @@ export const deliveryScheduleSlice = apiSlice
         ApiResponse<DeliveryScheduleRecord>,
         ApproveDeliveryScheduleRequest
       >({
-        query: (body) => ({
-          url: "/api/delivery-schedule/schedules/approve",
+        query: ({ schedule_id, ...body }) => ({
+          url: `/delivery-schedules/${encodeURIComponent(schedule_id)}/approve`,
           method: "POST",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
@@ -321,13 +408,13 @@ export const deliveryScheduleSlice = apiSlice
         ApproveBulkDeliveryScheduleRequest
       >({
         query: (body) => ({
-          url: "/api/delivery-schedule/schedules/approve-bulk",
+          url: "/delivery-schedules/approve-partial",
           method: "POST",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) =>
-          ok(normalizeListResponse(response).map((item) => toRecord(item))),
+          ok(normalizePaginatedItems(response).map((item) => toRecord(item))),
         invalidatesTags: (_result, _error, { schedule_ids }) => [
           { type: TAG, id: "LIST" },
           ...schedule_ids.map((id) => ({ type: TAG, id })),
@@ -348,15 +435,38 @@ export const deliveryScheduleSlice = apiSlice
           ok(toScanDnRobotResponse(normalizeObjectResponse(response))),
         invalidatesTags: [{ type: TAG, id: "DN-CREATION-LIST" }],
       }),
+
+      getCustomerDeliveryNoteById: builder.query<unknown, string>({
+        query: (id) => ({
+          url: `/customer-delivery-notes/${encodeURIComponent(String(id))}`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => normalizeInnerData(response),
+        providesTags: (_res, _err, id) => [{ type: TAG, id: `DN-${id}` }],
+      }),
+
+      createCustomerDeliveryNote: builder.mutation<unknown, unknown>({
+        query: (body) => ({
+          url: "/customer-delivery-notes",
+          method: "POST",
+          body,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        invalidatesTags: [{ type: TAG, id: "DN-CREATION-LIST" }, { type: TAG, id: "SUMMARY" }],
+      }),
     }),
   });
 
 export const {
   useGetDeliverySchedulesQuery,
+  useGetDeliverySchedulesSummaryQuery,
   useGetDeliveryScheduleDnCreationListQuery,
   useCreateDeliveryScheduleMutation,
   useUpdateDeliveryScheduleMutation,
   useApproveDeliveryScheduleMutation,
   useApproveBulkDeliveryScheduleMutation,
   useScanDeliveryScheduleDnRobotMutation,
+  useGetCustomerDeliveryNoteByIdQuery,
+  useCreateCustomerDeliveryNoteMutation,
 } = deliveryScheduleSlice;

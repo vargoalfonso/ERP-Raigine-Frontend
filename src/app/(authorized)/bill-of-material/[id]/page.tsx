@@ -1,13 +1,31 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { useParams, useRouter } from "next/navigation";
-import { Button, Card, Descriptions, Divider, Spin, Table, Tag, Typography, message } from "antd";
+import {
+  Button,
+  Card,
+  Descriptions,
+  Divider,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Spin,
+  Table,
+  Tag,
+  Typography,
+  message,
+} from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { ArrowLeftOutlined, EditOutlined } from "@ant-design/icons";
 
-import { useGetBomByIdQuery } from "@/lib/api/bom/api";
+import {
+  useActivateBomMutation,
+  useGetBomByIdQuery,
+  useGetBomVersionsQuery,
+} from "@/lib/api/bom/api";
 
 const { Title, Text } = Typography;
 
@@ -62,12 +80,16 @@ export default function BomDetailPage() {
   const router = useRouter();
   const params = useParams<{ id?: string | string[] }>();
   const [messageApi, contextHolder] = message.useMessage();
+  const [activateOpen, setActivateOpen] = useState(false);
+  const [activateForm] = Form.useForm<{ change_note: string }>();
 
   const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id;
   const queryArg = apiEnabled && id ? id : skipToken;
 
   const { data, isLoading, error, refetch } = useGetBomByIdQuery(queryArg);
+  const { data: versionsRes, isLoading: isVersionsLoading } = useGetBomVersionsQuery(queryArg);
+  const [activateBom, activateState] = useActivateBomMutation();
 
   const bom = (data as any)?.data ?? data;
 
@@ -79,6 +101,59 @@ export default function BomDetailPage() {
   }, [bom, id]);
 
   const resolvedBomId = canonicalBomId ?? id ?? "";
+
+  const versionsData = (versionsRes as any)?.data ?? versionsRes;
+  const versions = Array.isArray((versionsData as any)?.versions)
+    ? ((versionsData as any).versions as Array<any>)
+    : [];
+  const currentBomIdRaw = (versionsData as any)?.current_bom_id;
+  const currentBomId =
+    typeof currentBomIdRaw === "number" && Number.isFinite(currentBomIdRaw)
+      ? String(currentBomIdRaw)
+      : typeof currentBomIdRaw === "string" && currentBomIdRaw.trim()
+        ? currentBomIdRaw.trim()
+        : "";
+
+  const selectedVersion = useMemo(() => {
+    const current = String(resolvedBomId || id || "").trim();
+    return versions.find((v) => String(v?.bom_id) === current);
+  }, [id, resolvedBomId, versions]);
+
+  const isLatest = useMemo(() => {
+    if (selectedVersion && typeof selectedVersion.is_current === "boolean") {
+      return Boolean(selectedVersion.is_current);
+    }
+    if (currentBomId) return String(resolvedBomId) === String(currentBomId);
+    return true;
+  }, [currentBomId, resolvedBomId, selectedVersion]);
+
+  const openActivate = () => {
+    activateForm.setFieldsValue({ change_note: "" });
+    setActivateOpen(true);
+  };
+
+  const submitActivate = async () => {
+    try {
+      const values = await activateForm.validateFields();
+      const change_note = String(values.change_note ?? "").trim();
+      if (!change_note) return;
+      if (!resolvedBomId) {
+        messageApi.error("Missing bom_id");
+        return;
+      }
+      const res = await activateBom({ bom_id: resolvedBomId, body: { change_note } }).unwrap();
+      const nextId =
+        (res as any)?.data?.current_bom_id ??
+        (res as any)?.data?.bom_id ??
+        currentBomId ??
+        resolvedBomId;
+      setActivateOpen(false);
+      messageApi.success("Activated");
+      router.push(`/bill-of-material/${encodeURIComponent(String(nextId))}`);
+    } catch {
+      // validation errors shown by antd
+    }
+  };
 
   useEffect(() => {
     if (canonicalBomId && id && canonicalBomId !== id) {
@@ -224,16 +299,71 @@ export default function BomDetailPage() {
           <Button icon={<ArrowLeftOutlined />} onClick={() => router.push("/bill-of-material")}>
             Back
           </Button>
+
+          <Select
+            style={{ minWidth: 190 }}
+            loading={isVersionsLoading}
+            value={resolvedBomId}
+            placeholder="Select version"
+            options={versions.map((v) => ({
+              value: String(v?.bom_id),
+              label: `${v?.label ?? `v${v?.bom_version ?? ""}`} — ${v?.bom_status ?? ""}`.trim(),
+            }))}
+            onChange={(value) => {
+              const bomId = String(value ?? "").trim();
+              if (!bomId) return;
+              router.push(`/bill-of-material/${encodeURIComponent(bomId)}`);
+            }}
+          />
+
+          {!isLatest ? <Tag color="default">Historical</Tag> : <Tag color="green">Latest</Tag>}
+
+          {!isLatest ? (
+            <Button onClick={openActivate} loading={activateState.isLoading}>
+              Activate
+            </Button>
+          ) : null}
+
           <Button
             type="primary"
             icon={<EditOutlined />}
-            onClick={() => router.push(`/bill-of-material/${encodeURIComponent(resolvedBomId)}/edit`)}
+            onClick={() => {
+              if (!isLatest) {
+                messageApi.warning(
+                  "Version ini bukan latest. Pilih latest version dulu untuk edit."
+                );
+                if (currentBomId) {
+                  router.push(`/bill-of-material/${encodeURIComponent(currentBomId)}`);
+                }
+                return;
+              }
+              router.push(`/bill-of-material/${encodeURIComponent(resolvedBomId)}/edit`);
+            }}
             disabled={!resolvedBomId}
           >
             Edit
           </Button>
         </div>
       </div>
+
+      <Modal
+        title="Activate BOM Version"
+        open={activateOpen}
+        onCancel={() => setActivateOpen(false)}
+        onOk={submitActivate}
+        okText="Activate"
+        confirmLoading={activateState.isLoading}
+      >
+        <Form form={activateForm} layout="vertical">
+          <Form.Item
+            name="change_note"
+            label="Change Note"
+            rules={[{ required: true, message: "Change note is required" }]}
+          >
+            <Input.TextArea rows={4} placeholder="Contoh: back to version 1" />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Card className="mb-6">
         {isLoading ? (

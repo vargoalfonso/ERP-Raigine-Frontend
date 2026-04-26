@@ -8,14 +8,9 @@ import { getApiErrorMessage } from "@/lib/api/error";
 
 type SubmitReturnValues = {
   uniq: string;
-  date: string;
-  partNo: string;
-  partName: string;
-  kanban: string;
+  dnNumber: string;
   scrapQty: number;
   reworkQty: number;
-  submittedBy?: string;
-  notes?: string;
   status?: string;
 };
 
@@ -28,15 +23,10 @@ export default function SubmitProductReturnPage() {
   const initialValues = useMemo(
     () => ({
       uniq: "KBN-001-2024",
-      date: "2024-12-16",
-      partNo: "PN-45678",
-      partName: "Bearing Assembly",
-      kanban: "KB-123456",
+      dnNumber: "DN-0001",
       scrapQty: 0,
       reworkQty: 0,
-      submittedBy: "Admin PPIC",
-      notes: "",
-      status: "Pending QC",
+      status: "PENDING",
     }),
     []
   );
@@ -60,15 +50,10 @@ export default function SubmitProductReturnPage() {
                 const values = await form.validateFields();
                 await createProductReturn({
                   uniq: values.uniq,
-                  kanban: values.kanban,
-                  part_no: values.partNo,
-                  part_name: values.partName,
-                  date_received: values.date,
+                  dn_number: values.dnNumber,
                   quantity_scrap: Number(values.scrapQty ?? 0),
-                  unit: "Pcs",
                   quantity_rework: Number(values.reworkQty ?? 0),
-                  submitted_by: values.submittedBy,
-                  notes: values.notes,
+                  status: values.status || "PENDING",
                 }).unwrap();
 
                 message.success("Product return submitted");
@@ -88,35 +73,21 @@ export default function SubmitProductReturnPage() {
       <Card className="!rounded-xl" bordered>
         <Form form={form} layout="vertical" initialValues={initialValues}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Form.Item label="Date" name="date" rules={[{ required: true }]}
-            >
-              <Input className="!rounded-lg" placeholder="YYYY-MM-DD" />
-            </Form.Item>
             <Form.Item label="Status" name="status">
               <Select
                 className="!rounded-lg"
                 options={[
-                  { label: "Pending QC", value: "Pending QC" },
-                  { label: "QC Approved", value: "QC Approved" },
-                  { label: "Rework Created", value: "Rework Created" },
-                  { label: "Rejected", value: "Rejected" },
+                  { label: "PENDING", value: "PENDING" },
+                  { label: "APPROVED", value: "APPROVED" },
+                  { label: "REJECTED", value: "REJECTED" },
                 ]}
               />
             </Form.Item>
             <Form.Item label="Uniq ID" name="uniq" rules={[{ required: true, message: "Uniq is required" }]}>
               <Input className="!rounded-lg" />
             </Form.Item>
-            <Form.Item label="Part No" name="partNo" rules={[{ required: true }]}>
-              <Input className="!rounded-lg" />
-            </Form.Item>
-            <Form.Item label="Part Name" name="partName" rules={[{ required: true }]}>
-              <Input className="!rounded-lg" />
-            </Form.Item>
-            <Form.Item label="Kanban" name="kanban" rules={[{ required: true }]}>
-              <Input className="!rounded-lg" />
-            </Form.Item>
-            <Form.Item label="Submitted By" name="submittedBy" rules={[{ required: true }]}>
-              <Input className="!rounded-lg" />
+            <Form.Item label="DN Number" name="dnNumber" rules={[{ required: true, message: "DN number is required" }]}>
+              <Input className="!rounded-lg" placeholder="DN-0001" />
             </Form.Item>
             <Form.Item label="Scrap Qty" name="scrapQty" rules={[{ required: true }]}>
               <InputNumber min={0} className="!w-full !rounded-lg" addonAfter="Pcs" />
@@ -125,9 +96,6 @@ export default function SubmitProductReturnPage() {
               <InputNumber min={0} className="!w-full !rounded-lg" addonAfter="Pcs" />
             </Form.Item>
           </div>
-          <Form.Item label="Notes" name="notes">
-            <Input.TextArea rows={4} className="!rounded-lg" placeholder="Add return notes / reason..." />
-          </Form.Item>
         </Form>
       </Card>
     </div>

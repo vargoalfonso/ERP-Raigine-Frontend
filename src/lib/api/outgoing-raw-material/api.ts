@@ -1,170 +1,178 @@
 import { apiSlice } from "@/lib/api/instance";
-import type { ApiResponse } from "@/types";
 
-export type BackendOutgoingRawMaterial = {
-  id: string;
-  uniq?: string;
-  item_name?: string;
-  issued_to?: string;
-  destination?: string;
-  destination_location?: string;
-  warehouse_code?: string;
-  packing_list_rm?: string;
-  reason?: string;
-  purpose?: string;
-  work_order_no?: string;
-  requested_by?: string;
-  transaction_id?: string;
-  quantity?: number;
-  unit_measurement?: string;
-  weight?: number;
-  stock_after?: number;
-  date?: string;
-  reference_no?: string;
-  notes?: string;
-  remarks?: string;
-  created_at?: string;
-  updated_at?: string;
-};
+type UnknownRecord = Record<string, unknown>;
 
-export type OutgoingRawMaterialCreateRequest = {
-  uniq?: string;
-  item_name?: string;
-  issued_to?: string;
-  destination?: string;
-  destination_location?: string;
-  warehouse_code?: string;
-  packing_list_rm?: string;
-  reason?: string;
-  purpose?: string;
-  work_order_no?: string;
-  requested_by?: string;
-  transaction_id?: string;
-  quantity: number;
-  weight?: number;
-  unit_measurement?: string;
-  stock_after?: number;
-  date?: string;
-  reference_no?: string;
-  notes?: string;
-  remarks?: string;
-};
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
 
-export type OutgoingRawMaterialUpdateRequest = Partial<OutgoingRawMaterialCreateRequest>;
-
-const isRecord = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === "object";
-
-const pickArray = <T,>(response: unknown): T[] => {
-  if (Array.isArray(response)) return response as T[];
-  if (isRecord(response) && Array.isArray((response as Record<string, unknown>).data)) {
-    return (response as { data: T[] }).data;
+const getString = (record: UnknownRecord, keys: string[]): string | undefined => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
   }
-  return [];
+  return undefined;
 };
 
-const pickIdMessage = (response: unknown): { id: string; message?: string } => {
-  if (isRecord(response)) {
-    const id = typeof response.id === "string" ? response.id : "";
-    const message = typeof response.message === "string" ? response.message : undefined;
-    if (id || message) return { id, message };
-
-    const data = (response as Record<string, unknown>).data;
-    if (isRecord(data)) {
-      return {
-        id: typeof data.id === "string" ? data.id : "",
-        message: typeof (data as Record<string, unknown>).message === "string" ? (data as Record<string, unknown>).message as string : undefined,
-      };
+const getNumber = (record: UnknownRecord, keys: string[]): number | undefined => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
     }
   }
-  return { id: "" };
+  return undefined;
 };
 
-const ok = <T,>(data: T, message = "OK"): ApiResponse<T> => ({
-  message,
-  status: "success",
-  data,
-});
+export type Pagination = {
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+};
+
+export type Paginated<T> = {
+  items: T[];
+  pagination: Pagination;
+};
+
+const normalizeObjectResponse = <T,>(response: unknown): T | null => {
+  if (!isRecord(response)) return null;
+  const data = response.data;
+  if (isRecord(data)) return data as T;
+  return null;
+};
+
+const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
+  const empty: Paginated<T> = {
+    items: [],
+    pagination: { total: 0, page: 1, limit: 20, total_pages: 1 },
+  };
+
+  if (!isRecord(response)) return empty;
+  const data = response.data;
+  if (!isRecord(data)) return empty;
+
+  const itemsRaw = (data as UnknownRecord).items;
+  const paginationRaw = (data as UnknownRecord).pagination;
+
+  const items = Array.isArray(itemsRaw) ? (itemsRaw as T[]) : [];
+  const paginationRecord = isRecord(paginationRaw) ? (paginationRaw as UnknownRecord) : {};
+
+  return {
+    items,
+    pagination: {
+      total: getNumber(paginationRecord, ["total"]) ?? empty.pagination.total,
+      page: getNumber(paginationRecord, ["page"]) ?? empty.pagination.page,
+      limit: getNumber(paginationRecord, ["limit"]) ?? empty.pagination.limit,
+      total_pages:
+        getNumber(paginationRecord, ["total_pages", "totalPages"]) ?? empty.pagination.total_pages,
+    },
+  };
+};
+
+export type OutgoingRawMaterial = {
+  id: number;
+  transaction_id: string;
+  transaction_date: string;
+  uniq: string;
+  rm_name: string;
+  packing_list_rm: string;
+  unit: string;
+  quantity_out: number;
+  stock_before: number;
+  stock_after: number;
+  reason: string;
+  purpose: string;
+  work_order_no: string;
+  destination_location: string;
+  requested_by: string;
+  remarks: string;
+  created_at: string;
+};
+
+export type GetOutgoingRawMaterialsParams = { page: number; limit: number };
+
+export type CreateOutgoingRawMaterialRequest = {
+  packing_list_rm: string;
+  uniq: string;
+  unit: string;
+  quantity_out: number;
+  reason: string;
+  purpose?: string;
+  work_order_no?: string;
+  destination_location?: string;
+  requested_by?: string;
+  remarks?: string;
+};
+
+const toOutgoingRawMaterial = (raw: unknown): OutgoingRawMaterial => {
+  const record = isRecord(raw) ? raw : {};
+  return {
+    id: getNumber(record, ["id"]) ?? 0,
+    transaction_id: getString(record, ["transaction_id", "transactionId"]) ?? "",
+    transaction_date: getString(record, ["transaction_date", "transactionDate"]) ?? "",
+    uniq: getString(record, ["uniq"]) ?? "",
+    rm_name: getString(record, ["rm_name", "item_name", "rmName"]) ?? "",
+    packing_list_rm: getString(record, ["packing_list_rm", "packingListRm"]) ?? "",
+    unit: getString(record, ["unit", "unit_measurement", "unitMeasurement"]) ?? "",
+    quantity_out: getNumber(record, ["quantity_out", "quantityOut", "quantity"]) ?? 0,
+    stock_before: getNumber(record, ["stock_before", "stockBefore"]) ?? 0,
+    stock_after: getNumber(record, ["stock_after", "stockAfter"]) ?? 0,
+    reason: getString(record, ["reason"]) ?? "",
+    purpose: getString(record, ["purpose"]) ?? "",
+    work_order_no: getString(record, ["work_order_no", "workOrderNo"]) ?? "",
+    destination_location: getString(record, ["destination_location", "destinationLocation"]) ?? "",
+    requested_by: getString(record, ["requested_by", "requestedBy"]) ?? "",
+    remarks: getString(record, ["remarks"]) ?? "",
+    created_at: getString(record, ["created_at", "createdAt"]) ?? "",
+  };
+};
 
 export const outgoingRawMaterialSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
-    getAllOutgoingRawMaterial: builder.query<
-      ApiResponse<BackendOutgoingRawMaterial[]>,
-      { currentPage: number; pageSize: number }
-    >({
-      query: ({ currentPage, pageSize }) => ({
-        url: `/api/outgoing-raw-material?page=${currentPage}&perPage=${pageSize}`,
+    getOutgoingRawMaterials: builder.query<Paginated<OutgoingRawMaterial>, GetOutgoingRawMaterialsParams>({
+      query: ({ page, limit }) => ({
+        url: "/outgoing-raw-materials",
         method: "GET",
+        params: { page, limit },
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) => {
-        const raw = pickArray<BackendOutgoingRawMaterial>(response);
-        return ok(raw);
+        const normalized = normalizePaginatedResponse<unknown>(response);
+        return {
+          items: normalized.items.map(toOutgoingRawMaterial),
+          pagination: normalized.pagination,
+        };
       },
     }),
 
-    createOutgoingRawMaterial: builder.mutation<ApiResponse<{ id: string }>, OutgoingRawMaterialCreateRequest>({
+    getOutgoingRawMaterialById: builder.query<OutgoingRawMaterial, { id: number }>({
+      query: ({ id }) => ({
+        url: `/outgoing-raw-materials/${id}`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) =>
+        toOutgoingRawMaterial(normalizeObjectResponse<unknown>(response) ?? response),
+    }),
+
+    createOutgoingRawMaterial: builder.mutation<OutgoingRawMaterial, CreateOutgoingRawMaterialRequest>({
       query: (body) => ({
-        url: "/api/outgoing-raw-material",
+        url: "/outgoing-raw-materials",
         method: "POST",
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => {
-        const r = pickIdMessage(response);
-        return ok({ id: r.id ?? "" }, r.message ?? "Created");
-      },
-    }),
-
-    deleteOutgoingRawMaterial: builder.mutation<ApiResponse<{ id: string }>, string>({
-      query: (id) => ({
-        url: `/api/outgoing-raw-material/${id}`,
-        method: "DELETE",
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => {
-        const r = pickIdMessage(response);
-        return ok({ id: r.id ?? "" }, r.message ?? "Deleted");
-      },
-    }),
-
-    updateOutgoingRawMaterial: builder.mutation<
-      ApiResponse<{ id: string }>,
-      { id: string; body: OutgoingRawMaterialUpdateRequest }
-    >({
-      query: ({ id, body }) => ({
-        url: `/api/outgoing-raw-material/${id}`,
-        method: "PUT",
-        body,
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => {
-        const r = pickIdMessage(response);
-        return ok({ id: r.id ?? "" }, r.message ?? "Updated");
-      },
-    }),
-
-    editOutgoingRawMaterial: builder.mutation<
-      ApiResponse<{ id: string }>,
-      { id: string; body: Partial<OutgoingRawMaterialCreateRequest> }
-    >({
-      query: ({ id, body }) => ({
-        url: `/api/outgoing-raw-material/${id}`,
-        method: "PATCH",
-        body,
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => {
-        const r = pickIdMessage(response);
-        return ok({ id: r.id ?? "" }, r.message ?? "Updated");
-      },
+      transformResponse: (response: unknown) =>
+        toOutgoingRawMaterial(normalizeObjectResponse<unknown>(response) ?? response),
     }),
   }),
 });
 
 export const {
-  useGetAllOutgoingRawMaterialQuery,
+  useGetOutgoingRawMaterialsQuery,
+  useGetOutgoingRawMaterialByIdQuery,
   useCreateOutgoingRawMaterialMutation,
-  useDeleteOutgoingRawMaterialMutation,
-  useUpdateOutgoingRawMaterialMutation,
-  useEditOutgoingRawMaterialMutation,
 } = outgoingRawMaterialSlice;

@@ -1,14 +1,18 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeftOutlined } from "@ant-design/icons";
-import { Button, Card, Spin, Table, Tag } from "antd";
+import { Button, Card, Input, Spin, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
-import { useGetWorkOrderByIdQuery } from "@/lib/api/work-orders/api";
+import { getApiErrorMessage } from "@/lib/api/error";
+import {
+  useApproveWorkOrderMutation,
+  useGetWorkOrderByIdQuery,
+} from "@/lib/api/work-orders/api";
 
 type DetailRow = {
   key: string;
@@ -19,6 +23,7 @@ type DetailRow = {
   quantity: string;
   processName: string;
   status: string;
+  kanbanNumber: string;
 };
 
 const formatDate = (value?: string) => {
@@ -42,6 +47,10 @@ export default function WorkOrderDetailPage() {
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id;
   const apiEnabled = Boolean(apiBaseUrl) && Boolean(id);
 
+  const { TextArea } = Input;
+  const [approvalNote, setApprovalNote] = useState("");
+  const [approveWorkOrder, approveState] = useApproveWorkOrderMutation();
+
   const { data: workOrder, isFetching } = useGetWorkOrderByIdQuery(id ?? "", {
     skip: !apiEnabled,
   });
@@ -64,6 +73,7 @@ export default function WorkOrderDetailPage() {
       quantity: `${item.quantity} ${item.uom || "pcs"}`,
       processName: item.process_name || "-",
       status: item.status || "Pending",
+      kanbanNumber: item.kanban_number ?? "-",
     }));
   }, [bomIndex, workOrder?.items]);
 
@@ -74,6 +84,7 @@ export default function WorkOrderDetailPage() {
       key: "uniq",
       render: (value: string) => <span className="font-semibold text-gray-900">{value}</span>,
     },
+    { title: "Kanban", dataIndex: "kanbanNumber", key: "kanbanNumber" },
     { title: "Part Name", dataIndex: "partName", key: "partName" },
     { title: "Part Number", dataIndex: "partNumber", key: "partNumber" },
     { title: "Model", dataIndex: "model", key: "model" },
@@ -104,9 +115,51 @@ export default function WorkOrderDetailPage() {
             <span>Back to Work Orders</span>
           </button>
 
-          <Button className="!rounded-lg" onClick={() => router.push("/work-orders")}>
-            Close
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button className="!rounded-lg" onClick={() => router.push("/work-orders")}>
+              Close
+            </Button>
+            <Button
+              danger
+              className="!rounded-lg"
+              loading={approveState.isLoading}
+              disabled={!apiEnabled}
+              onClick={async () => {
+                if (!id) return;
+                try {
+                  await approveWorkOrder({
+                    uuid: id,
+                    body: { decision: "reject", notes: approvalNote.trim() ? approvalNote.trim() : null },
+                  }).unwrap();
+                  message.success("Rejected");
+                } catch (err) {
+                  message.error(getApiErrorMessage(err, "Failed to reject"));
+                }
+              }}
+            >
+              Reject
+            </Button>
+            <Button
+              type="primary"
+              className="!rounded-lg"
+              loading={approveState.isLoading}
+              disabled={!apiEnabled}
+              onClick={async () => {
+                if (!id) return;
+                try {
+                  await approveWorkOrder({
+                    uuid: id,
+                    body: { decision: "approve", notes: approvalNote.trim() ? approvalNote.trim() : null },
+                  }).unwrap();
+                  message.success("Approved");
+                } catch (err) {
+                  message.error(getApiErrorMessage(err, "Failed to approve"));
+                }
+              }}
+            >
+              Approve
+            </Button>
+          </div>
         </div>
 
         <div className="mt-4">
@@ -130,6 +183,10 @@ export default function WorkOrderDetailPage() {
                 <div className="font-semibold text-gray-900 mt-1">{workOrder?.wo_type || "-"}</div>
               </div>
               <div>
+                <div className="text-gray-500">Reference WO</div>
+                <div className="font-semibold text-gray-900 mt-1">{workOrder?.reference_wo || "-"}</div>
+              </div>
+              <div>
                 <div className="text-gray-500">Status</div>
                 <div className="mt-1">
                   <Tag color={normalizeStatusColor(workOrder?.status)} className="!rounded-md">
@@ -147,7 +204,7 @@ export default function WorkOrderDetailPage() {
               </div>
               <div>
                 <div className="text-gray-500">Created Date</div>
-                <div className="font-semibold text-gray-900 mt-1">{formatDate(workOrder?.created_at)}</div>
+                <div className="font-semibold text-gray-900 mt-1">{formatDate(workOrder?.created_date ?? workOrder?.created_at)}</div>
               </div>
               <div>
                 <div className="text-gray-500">Target Date</div>
@@ -158,6 +215,10 @@ export default function WorkOrderDetailPage() {
                 <div className="font-semibold text-gray-900 mt-1">{workOrder?.operator_name || "Not Assigned"}</div>
               </div>
               <div>
+                <div className="text-gray-500">Created By</div>
+                <div className="font-semibold text-gray-900 mt-1">{workOrder?.created_by_name || "-"}</div>
+              </div>
+              <div>
                 <div className="text-gray-500">Total UNIQ</div>
                 <div className="font-semibold text-gray-900 mt-1">{workOrder?.uniq_total ?? detailRows.length}</div>
               </div>
@@ -166,6 +227,42 @@ export default function WorkOrderDetailPage() {
                 <div className="font-semibold text-gray-900 mt-1">
                   {workOrder?.uniq_closed ?? detailRows.filter((item) => item.status.toLowerCase().includes("close")).length}
                 </div>
+              </div>
+            </div>
+
+            {workOrder?.notes ? (
+              <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                <div className="text-xs font-semibold text-gray-600">Notes</div>
+                <div className="mt-1 whitespace-pre-wrap">{workOrder.notes}</div>
+              </div>
+            ) : null}
+
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="rounded-xl border border-gray-100 bg-white p-4">
+                <div className="text-xs font-semibold text-gray-700">Approval Note</div>
+                <TextArea
+                  className="!rounded-lg mt-2"
+                  rows={3}
+                  value={approvalNote}
+                  onChange={(e) => setApprovalNote(e.target.value)}
+                  placeholder="OK"
+                />
+                {!apiEnabled ? (
+                  <div className="mt-2 text-xs text-gray-400">Approval disabled when API URL is not set</div>
+                ) : null}
+              </div>
+
+              <div className="rounded-xl border border-gray-100 bg-white p-4">
+                <div className="text-xs font-semibold text-gray-700">WO QR</div>
+                {workOrder?.qr_data_url ? (
+                  <img
+                    src={workOrder.qr_data_url}
+                    alt="WO QR"
+                    className="mt-2 max-w-[220px] rounded-lg border border-gray-100"
+                  />
+                ) : (
+                  <div className="mt-2 text-xs text-gray-400">No QR data</div>
+                )}
               </div>
             </div>
           </Card>

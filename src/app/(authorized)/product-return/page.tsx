@@ -5,9 +5,7 @@ import React, { useMemo, useState } from "react";
 import {
   Alert,
   Button,
-  DatePicker,
   Form,
-  Input,
   InputNumber,
   Modal,
   Select,
@@ -28,9 +26,8 @@ import {
 import { useRouter } from "next/navigation";
 import {
   useCreateProductReturnMutation,
-  useDecideProductReturnMutation,
-  useGetProductReturnHistoryQuery,
-  useGetProductReturnPendingQuery,
+  useGetProductReturnListQuery,
+  useUpdateProductReturnMutation,
 } from "@/lib/api/product-return/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
@@ -43,31 +40,18 @@ type ProductReturnRow = {
   id: string;
   returnId: string;
   date: string;
-  partNo: string;
-  partName: string;
-  kanban: string;
+  uniq: string;
+  dnNumber?: string;
   scrapQty: number;
   reworkQty: number;
-  status: "Pending QC" | "QC Approved" | "Rework WO Created" | "Rejected";
-  submittedBy: string;
-  model?: string;
-  dnNumber?: string;
-  weight?: number;
-  scrapType?: string;
+  status: string;
+  statusLabel: "Pending QC" | "QC Approved" | "Rework WO Created" | "Rejected" | "Unknown";
 };
 
 type SubmitFormValues = {
-  kanban: string;
   uniqId: string;
-  partNo?: string;
-  partName?: string;
-  model?: string;
-  packingNumber?: string;
-  dnNumber?: string;
-  dateReceived?: unknown;
+  dnNumber: string;
   scrapQty: number;
-  weight?: number;
-  unit: "Pcs";
   reworkQty: number;
 };
 
@@ -95,14 +79,18 @@ export default function ProductReturnPage() {
   const router = useRouter();
   const apiEnabled = Boolean(apiBaseUrl);
   const [tab, setTab] = useState<ReturnTab>("pending");
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const [isSubmitOpen, setIsSubmitOpen] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [form] = Form.useForm<SubmitFormValues>();
   const [createProductReturn] = useCreateProductReturnMutation();
-  const [decideProductReturn, { isLoading: decisionLoading }] = useDecideProductReturnMutation();
+  const [updateProductReturn, { isLoading: decisionLoading }] = useUpdateProductReturnMutation();
 
-  const pendingQuery = useGetProductReturnPendingQuery();
-  const historyQuery = useGetProductReturnHistoryQuery();
+  const listQuery = useGetProductReturnListQuery(
+    { page, limit },
+    { skip: !apiEnabled },
+  );
   const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
     skip: !apiEnabled,
   });
@@ -113,13 +101,11 @@ export default function ProductReturnPage() {
   );
 
   const apiErrorMessage = useMemo(() => {
-    const err = pendingQuery.error ?? historyQuery.error;
+    const err = listQuery.error;
     return err ? getApiErrorMessage(err, "Failed to load product returns") : "";
-  }, [pendingQuery.error, historyQuery.error]);
+  }, [listQuery.error]);
 
-  const [historyStatusFilter, setHistoryStatusFilter] = useState<
-    "all" | ProductReturnRow["status"]
-  >("all");
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<"all" | string>("all");
 
   const tabs = useMemo(
     () => [
@@ -153,47 +139,42 @@ export default function ProductReturnPage() {
       return v;
     };
 
-    const normalizeStatus = (value: string): ProductReturnRow["status"] => {
-      const v = value.toLowerCase();
-      if (v.includes("approve")) return "QC Approved";
-      if (v.includes("reject")) return "Rejected";
-      if (v.includes("rework")) return "Rework WO Created";
-      return "Pending QC";
+    const normalizeStatus = (value: string): { raw: string; label: ProductReturnRow["statusLabel"] } => {
+      const raw = (value || "").trim();
+      const v = raw.toUpperCase();
+      if (v.includes("APPROV")) return { raw: "APPROVED", label: "QC Approved" };
+      if (v.includes("REJECT")) return { raw: "REJECTED", label: "Rejected" };
+      if (v.includes("REWORK")) return { raw: "REWORK_WO_CREATED", label: "Rework WO Created" };
+      if (v.includes("PENDING")) return { raw: "PENDING", label: "Pending QC" };
+      if (!raw) return { raw: "PENDING", label: "Pending QC" };
+      return { raw: v, label: "Unknown" };
     };
 
-    const pendingItems = pendingQuery.data?.data ?? [];
-    const historyItems = historyQuery.data?.data ?? [];
-    const items = tab === "history" ? historyItems : pendingItems;
+    const items = listQuery.data?.data.items ?? [];
 
     return items.map((it, idx) => {
       const r = it as Record<string, unknown>;
       const backendId = pickStr(r.id, r.uuid, r.return_id, r.returnId);
       const returnId = pickStr(r.return_id, r.returnId, r.id, r.uuid) || `RET-${String(idx + 1).padStart(3, "0")}`;
       const date = normalizeDate(pickStr(r.date, r.date_received, r.dateReceived, r.created_at, r.createdAt));
-      const status = normalizeStatus(pickStr(r.status, "pending"));
+      const status = normalizeStatus(pickStr(r.status, "PENDING"));
+      const uniq = pickStr(r.uniq, r.uniq_id, r.uniqId) || "-";
+      const dnNumber = pickStr(r.dn_number, r.dnNumber) || undefined;
 
       return {
         key: backendId || returnId,
         id: backendId || returnId,
         returnId,
         date,
-        partNo: pickStr(r.part_no, r.partNo, r.part_number, r.partNumber) || "-",
-        partName: pickStr(r.part_name, r.partName) || "-",
-        kanban: pickStr(r.kanban) || "-",
+        uniq,
+        dnNumber,
         scrapQty: pickNum(r.quantity_scrap, r.scrap_qty, r.scrapQty, r.scrap_quantity),
         reworkQty: pickNum(r.quantity_rework, r.rework_qty, r.reworkQty, r.rework_quantity),
-        status,
-        submittedBy: pickStr(r.submitted_by, r.submittedBy) || "-",
-        model: pickStr(r.model) || undefined,
-        dnNumber: pickStr(r.dn_number, r.dnNumber) || undefined,
-        weight: (() => {
-          const w = pickNum(r.weight);
-          return w ? w : undefined;
-        })(),
-        scrapType: pickStr(r.scrap_type, r.scrapType) || undefined,
+        status: status.raw,
+        statusLabel: status.label,
       };
     });
-  }, [pendingQuery.data, historyQuery.data, tab]);
+  }, [listQuery.data?.data.items]);
 
   const uniqCatalog = useMemo(
     () => {
@@ -233,12 +214,13 @@ export default function ProductReturnPage() {
     ],
   );
 
-  const pendingRows = useMemo(() => rows.filter((r) => r.status === "Pending QC"), [rows]);
+  const pendingRows = useMemo(() => rows.filter((r) => r.status === "PENDING"), [rows]);
   const qcRows = pendingRows;
   const historyRows = useMemo(() => {
     const base = [...rows];
     base.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-    return historyStatusFilter === "all" ? base : base.filter((r) => r.status === historyStatusFilter);
+    const historyOnly = base.filter((r) => r.status !== "PENDING");
+    return historyStatusFilter === "all" ? historyOnly : historyOnly.filter((r) => r.status === historyStatusFilter);
   }, [rows, historyStatusFilter]);
 
   const tableRows = useMemo(() => {
@@ -252,18 +234,15 @@ export default function ProductReturnPage() {
   };
 
   const kpis = useMemo(() => {
-    // If history isn't loaded yet, fall back to pending as a partial picture.
-    const base = (historyQuery.data?.data?.length ? historyQuery.data.data : pendingQuery.data?.data) ?? [];
-    const totalReturns = base.length;
-    const mapped = rows;
-    const pendingQC = mapped.filter((r) => r.status === "Pending QC").length;
-    const qcApproved = mapped.filter((r) => r.status === "QC Approved").length;
-    const reworkCreated = mapped.filter((r) => r.status === "Rework WO Created").length;
+    const totalReturns = rows.length;
+    const pendingQC = rows.filter((r) => r.status === "PENDING").length;
+    const qcApproved = rows.filter((r) => r.status === "APPROVED").length;
+    const reworkCreated = rows.filter((r) => r.status === "REWORK_WO_CREATED").length;
     return { totalReturns, pendingQC, qcApproved, reworkCreated };
-  }, [historyQuery.data, pendingQuery.data, rows]);
+  }, [rows]);
 
   const columns = useMemo<ColumnsType<ProductReturnRow>>(() => {
-    const statusTag = (v: ProductReturnRow["status"]) => (
+    const statusTag = (v: ProductReturnRow["statusLabel"]) => (
       <Tag
         color={v === "QC Approved" ? "blue" : v === "Pending QC" ? "gold" : v === "Rework WO Created" ? "purple" : "red"}
         className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
@@ -292,20 +271,16 @@ export default function ProductReturnPage() {
         width: 140,
       },
       {
-        title: "Part Info",
-        key: "part",
-        render: (_, r) => (
-          <div className="leading-5">
-            <div className="text-sm font-semibold text-slate-800">{r.partNo}</div>
-            <div className="text-xs text-slate-500">{r.partName}</div>
-          </div>
-        ),
+        title: "Uniq",
+        dataIndex: "uniq",
+        key: "uniq",
+        render: (v: string) => <Tag className="!rounded-md !px-2 !py-0.5 !text-xs">{v}</Tag>,
       },
       {
-        title: "Kanban",
-        dataIndex: "kanban",
-        key: "kanban",
-        render: (v: string) => <Tag className="!rounded-md !px-2 !py-0.5 !text-xs">{v}</Tag>,
+        title: "DN Number",
+        dataIndex: "dnNumber",
+        key: "dnNumber",
+        render: (v?: string) => (v ? <span className="text-sm text-slate-700">{v}</span> : <span className="text-sm text-slate-400">-</span>),
         width: 140,
       },
       {
@@ -322,7 +297,6 @@ export default function ProductReturnPage() {
         render: (v: number) => <span className="text-sm">{v} Pcs</span>,
         width: 120,
       },
-      { title: "Submitted By", dataIndex: "submittedBy", key: "submittedBy", width: 140 },
       {
         title: "Actions",
         key: "actions",
@@ -348,7 +322,21 @@ export default function ProductReturnPage() {
                 className="!rounded-lg !border-green-200 !text-green-700"
                 loading={decisionLoading}
                 onClick={() => {
-                  decideProductReturn({ id: r.id, decision: "approve" })
+                  if (!r.uniq || r.uniq === "-" || !r.dnNumber) {
+                    message.error("Missing uniq or DN number");
+                    return;
+                  }
+
+                  updateProductReturn({
+                    id: r.id,
+                    body: {
+                      uniq: r.uniq,
+                      dn_number: r.dnNumber,
+                      quantity_scrap: Number(r.scrapQty ?? 0),
+                      quantity_rework: Number(r.reworkQty ?? 0),
+                      status: "APPROVED",
+                    },
+                  })
                     .unwrap()
                     .then(() => message.success(`${r.returnId} approved`))
                     .catch((e) => message.error(getApiErrorMessage(e, "Failed to approve")));
@@ -362,7 +350,21 @@ export default function ProductReturnPage() {
                 className="!rounded-lg"
                 loading={decisionLoading}
                 onClick={() => {
-                  decideProductReturn({ id: r.id, decision: "reject" })
+                  if (!r.uniq || r.uniq === "-" || !r.dnNumber) {
+                    message.error("Missing uniq or DN number");
+                    return;
+                  }
+
+                  updateProductReturn({
+                    id: r.id,
+                    body: {
+                      uniq: r.uniq,
+                      dn_number: r.dnNumber,
+                      quantity_scrap: Number(r.scrapQty ?? 0),
+                      quantity_rework: Number(r.reworkQty ?? 0),
+                      status: "REJECTED",
+                    },
+                  })
                     .unwrap()
                     .then(() => message.success(`${r.returnId} rejected`))
                     .catch((e) => message.error(getApiErrorMessage(e, "Failed to reject")));
@@ -381,9 +383,9 @@ export default function ProductReturnPage() {
         ...base.slice(0, 6),
         {
           title: "Status",
-          dataIndex: "status",
+          dataIndex: "statusLabel",
           key: "status",
-          render: (v: ProductReturnRow["status"]) => statusTag(v),
+          render: (v: ProductReturnRow["statusLabel"]) => statusTag(v),
           width: 160,
         },
         ...base.slice(6),
@@ -395,14 +397,14 @@ export default function ProductReturnPage() {
       ...base.slice(0, 6),
       {
         title: "Status",
-        dataIndex: "status",
+        dataIndex: "statusLabel",
         key: "status",
-        render: (v: ProductReturnRow["status"]) => statusTag(v),
+        render: (v: ProductReturnRow["statusLabel"]) => statusTag(v),
         width: 160,
       },
       ...base.slice(6),
     ];
-  }, [tab]);
+  }, [decisionLoading, tab, updateProductReturn]);
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
@@ -439,9 +441,7 @@ export default function ProductReturnPage() {
             onClick={() => {
               setIsSubmitOpen(true);
               form.setFieldsValue({
-                kanban: "KB-123456",
                 scrapQty: 0,
-                unit: "Pcs",
                 reworkQty: 0,
               });
             }}
@@ -458,7 +458,10 @@ export default function ProductReturnPage() {
                 <button
                   key={t.id}
                   type="button"
-                  onClick={() => setTab(t.id)}
+                  onClick={() => {
+                    setTab(t.id);
+                    setPage(1);
+                  }}
                   className={
                     "flex-1 px-4 py-2 text-sm font-medium rounded-lg transition-colors " +
                     (isActive ? "bg-white shadow-sm text-gray-900" : "text-gray-600 hover:text-gray-900")
@@ -493,10 +496,9 @@ export default function ProductReturnPage() {
               className="min-w-[160px]"
               options={[
                 { label: "All Returns", value: "all" },
-                { label: "Pending QC", value: "Pending QC" },
-                { label: "QC Approved", value: "QC Approved" },
-                { label: "Rework WO Created", value: "Rework WO Created" },
-                { label: "Rejected", value: "Rejected" },
+                { label: "QC Approved", value: "APPROVED" },
+                { label: "Rework WO Created", value: "REWORK_WO_CREATED" },
+                { label: "Rejected", value: "REJECTED" },
               ]}
             />
           </div>
@@ -508,8 +510,17 @@ export default function ProductReturnPage() {
             columns={columns}
             rowKey="key"
             size="middle"
-            pagination={false}
-            loading={pendingQuery.isFetching || historyQuery.isFetching}
+            pagination={{
+              current: page,
+              pageSize: limit,
+              total: listQuery.data?.data.pagination.total ?? listQuery.data?.data.items.length ?? 0,
+              showSizeChanger: true,
+              onChange: (nextPage, nextSize) => {
+                setPage(nextPage);
+                if (typeof nextSize === "number" && nextSize > 0) setLimit(nextSize);
+              },
+            }}
+            loading={listQuery.isFetching}
             locale={{ emptyText: "No returns" }}
             onRow={(record) => ({
               onDoubleClick: () => {
@@ -526,7 +537,7 @@ export default function ProductReturnPage() {
         title={
           <div>
             <div className="text-sm font-bold text-slate-900">Submit Product Return</div>
-            <div className="text-xs text-slate-500 mt-0.5">Scan kanban or manually enter product return information</div>
+            <div className="text-xs text-slate-500 mt-0.5">Create a new product return request</div>
           </div>
         }
         width={520}
@@ -539,42 +550,18 @@ export default function ProductReturnPage() {
           try {
             setSubmitLoading(true);
             const values = await form.validateFields();
-            const dateReceived: unknown = values.dateReceived;
-            let dateStr = "2024-12-16";
-            if (dateReceived) {
-              const maybeDayjs = dateReceived as { toDate?: () => Date };
-              const dateObj =
-                dateReceived instanceof Date
-                  ? dateReceived
-                  : typeof maybeDayjs.toDate === "function"
-                    ? maybeDayjs.toDate()
-                    : null;
-              if (dateObj) {
-                dateStr = dateObj.toISOString().slice(0, 10);
-              }
-            }
-
             await createProductReturn({
-              kanban: values.kanban,
               uniq: values.uniqId,
-              part_no: values.partNo,
-              part_name: values.partName,
-              model: values.model,
-              packing_number: values.packingNumber,
               dn_number: values.dnNumber,
-              date_received: dateStr,
               quantity_scrap: Number(values.scrapQty ?? 0),
-              weight: values.weight,
-              unit: values.unit,
               quantity_rework: Number(values.reworkQty ?? 0),
-              submitted_by: "Admin PPIC",
+              status: "PENDING",
             }).unwrap();
 
             setTab("pending");
             setIsSubmitOpen(false);
             message.success("Submitted to QC");
-            pendingQuery.refetch();
-            historyQuery.refetch();
+            listQuery.refetch();
           } finally {
             setSubmitLoading(false);
           }
@@ -591,17 +578,6 @@ export default function ProductReturnPage() {
       >
         <Form form={form} layout="vertical" preserve={false}>
           <div className="grid grid-cols-2 gap-3">
-            <Form.Item label="Kanban / Packing List" name="kanban" rules={[{ required: true, message: "Select kanban" }]}>
-              <Select
-                placeholder="Select kanban"
-                options={[
-                  { label: "KB-123456", value: "KB-123456" },
-                  { label: "KB-456789", value: "KB-456789" },
-                  { label: "KB-330012", value: "KB-330012" },
-                ]}
-              />
-            </Form.Item>
-
             <Form.Item label="Uniq ID" name="uniqId" rules={[{ required: true, message: "Select uniq" }]}>
               <Select
                 placeholder="Choose uniq"
@@ -613,61 +589,17 @@ export default function ProductReturnPage() {
                     .toLowerCase()
                     .includes(input.toLowerCase())
                 }
-                onChange={(v) => {
-                  const found = uniqCatalog.find((x) => x.uniqId === v);
-                  if (!found) {
-                    form.setFieldsValue({ partNo: undefined, partName: undefined, model: undefined, packingNumber: undefined });
-                    return;
-                  }
-                  form.setFieldsValue({
-                    partNo: found.partNo,
-                    partName: found.partName,
-                    model: found.model,
-                    packingNumber: found.packingNumber,
-                  });
-                }}
               />
             </Form.Item>
 
-            <Form.Item label="Part Number" name="partNo">
-              <Input placeholder="Auto-filled by BOM" readOnly />
-            </Form.Item>
-            <Form.Item label="Part Name" name="partName">
-              <Input placeholder="Auto-filled by BOM" readOnly />
-            </Form.Item>
-            <Form.Item label="Model" name="model">
-              <Input placeholder="Auto-filled by BOM" readOnly />
-            </Form.Item>
-            <Form.Item label="Packing Number" name="packingNumber">
-              <Input placeholder="Auto-filled by BOM" readOnly />
-            </Form.Item>
-            <Form.Item label="DN Number" name="dnNumber">
+            <Form.Item label="DN Number" name="dnNumber" rules={[{ required: true, message: "Input DN number" }]}>
               <Select placeholder="Input DN number" options={[{ label: "DN-0001", value: "DN-0001" }, { label: "DN-0002", value: "DN-0002" }]} />
             </Form.Item>
           </div>
 
-          <div className="mt-2 mb-2 text-sm font-semibold text-slate-800">Return Details</div>
-
-          <Form.Item label="Date Received" name="dateReceived" rules={[{ required: true, message: "Choose date" }]}>
-            <DatePicker className="!w-full" />
-          </Form.Item>
-
-          <Form.Item label="Scrap Type">
-            <Input value="Product Return" disabled />
-          </Form.Item>
-
           <Form.Item label="Quantity of Scrap" name="scrapQty" rules={[{ required: true, message: "Enter scrap qty" }]}>
             <InputNumber min={0} className="!w-full" placeholder="Enter scrap quantity" />
           </Form.Item>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Form.Item label="Weight" name="weight">
-              <InputNumber min={0} className="!w-full" placeholder="500" />
-            </Form.Item>
-            <Form.Item label="Unit" name="unit" rules={[{ required: true }]}>
-              <Select options={[{ label: "Pcs", value: "Pcs" }]} />
-            </Form.Item>
-          </div>
 
           <Form.Item label="Quantity of Rework" name="reworkQty" rules={[{ required: true, message: "Enter rework qty" }]}>
             <InputNumber min={0} className="!w-full" placeholder="Enter items need to rework" />

@@ -5,7 +5,11 @@ import { Alert, Button, Card, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeftOutlined } from "@ant-design/icons";
-import { useDecideProductReturnMutation, useGetProductReturnByIdQuery } from "@/lib/api/product-return/api";
+import {
+  useDeleteProductReturnMutation,
+  useGetProductReturnDetailQuery,
+  useUpdateProductReturnMutation,
+} from "@/lib/api/product-return/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 
 type LineRow = {
@@ -19,8 +23,9 @@ export default function ProductReturnDetailPage() {
   const params = useParams<{ id: string }>();
   const id = decodeURIComponent(params.id);
 
-  const detailQuery = useGetProductReturnByIdQuery(id);
-  const [decideProductReturn, { isLoading: decisionLoading }] = useDecideProductReturnMutation();
+  const detailQuery = useGetProductReturnDetailQuery(id);
+  const [updateProductReturn, { isLoading: decisionLoading }] = useUpdateProductReturnMutation();
+  const [deleteProductReturn, { isLoading: deleteLoading }] = useDeleteProductReturnMutation();
 
   const record = detailQuery.data?.data;
 
@@ -40,12 +45,21 @@ export default function ProductReturnDetailPage() {
 
   const status = useMemo(() => {
     const raw = pickStr(record?.status);
-    const v = raw.toLowerCase();
-    if (v.includes("approve")) return "QC Approved";
-    if (v.includes("reject")) return "Rejected";
-    if (v.includes("rework")) return "Rework Created";
-    return "Pending QC";
+    const v = raw.toUpperCase();
+    if (v.includes("APPROV")) return "APPROVED";
+    if (v.includes("REJECT")) return "REJECTED";
+    if (v.includes("REWORK")) return "REWORK_WO_CREATED";
+    if (v.includes("PENDING")) return "PENDING";
+    return v || "PENDING";
   }, [record?.status]);
+
+  const statusLabel = useMemo(() => {
+    if (status === "APPROVED") return "QC Approved";
+    if (status === "REJECTED") return "Rejected";
+    if (status === "REWORK_WO_CREATED") return "Rework Created";
+    if (status === "PENDING") return "Pending QC";
+    return status;
+  }, [status]);
 
   const summary = useMemo(
     () => ({
@@ -54,26 +68,24 @@ export default function ProductReturnDetailPage() {
         const d = pickStr(record?.date, record?.date_received, record?.dateReceived, record?.created_at, record?.createdAt);
         return d && d.length >= 10 ? d.slice(0, 10) : d || "-";
       })(),
-      partNo: pickStr(record?.part_no, record?.partNo, record?.part_number, record?.partNumber) || "-",
-      partName: pickStr(record?.part_name, record?.partName) || "-",
-      kanban: pickStr(record?.kanban) || "-",
+      uniq: pickStr(record?.uniq, record?.uniq_id, record?.uniqId) || "-",
+      dnNumber: pickStr(record?.dn_number, record?.dnNumber) || "-",
       scrapQty: `${pickNum(record?.quantity_scrap, record?.scrap_qty, record?.scrapQty, record?.scrap_quantity)} Pcs`,
       reworkQty: `${pickNum(record?.quantity_rework, record?.rework_qty, record?.reworkQty, record?.rework_quantity)} Pcs`,
-      submittedBy: pickStr(record?.submitted_by, record?.submittedBy) || "-",
+      status: statusLabel,
     }),
-    [id, record]
+    [id, record, statusLabel]
   );
 
   const rows = useMemo<LineRow[]>(
     () => [
       { key: "1", field: "Return ID", value: summary.returnId },
       { key: "2", field: "Date", value: summary.date },
-      { key: "3", field: "Part No", value: summary.partNo },
-      { key: "4", field: "Part Name", value: summary.partName },
-      { key: "5", field: "Kanban", value: summary.kanban },
-      { key: "6", field: "Scrap Qty", value: summary.scrapQty },
-      { key: "7", field: "Rework Qty", value: summary.reworkQty },
-      { key: "8", field: "Submitted By", value: summary.submittedBy },
+      { key: "3", field: "Uniq", value: summary.uniq },
+      { key: "4", field: "DN Number", value: summary.dnNumber },
+      { key: "5", field: "Scrap Qty", value: summary.scrapQty },
+      { key: "6", field: "Rework Qty", value: summary.reworkQty },
+      { key: "7", field: "Status", value: summary.status },
     ],
     [summary]
   );
@@ -101,13 +113,29 @@ export default function ProductReturnDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {status === "Pending QC" ? (
+          {status === "PENDING" ? (
             <>
               <Button
                 className="!rounded-lg !border-green-200 !text-green-700"
                 loading={decisionLoading}
                 onClick={() => {
-                  decideProductReturn({ id, decision: "approve" })
+                  const uniq = pickStr(record?.uniq, record?.uniq_id, record?.uniqId);
+                  const dnNumber = pickStr(record?.dn_number, record?.dnNumber);
+                  if (!uniq || !dnNumber) {
+                    message.error("Missing uniq or DN number");
+                    return;
+                  }
+
+                  updateProductReturn({
+                    id,
+                    body: {
+                      uniq,
+                      dn_number: dnNumber,
+                      quantity_scrap: pickNum(record?.quantity_scrap, record?.scrap_qty, record?.scrapQty, record?.scrap_quantity),
+                      quantity_rework: pickNum(record?.quantity_rework, record?.rework_qty, record?.reworkQty, record?.rework_quantity),
+                      status: "APPROVED",
+                    },
+                  })
                     .unwrap()
                     .then(() => {
                       message.success("Approved");
@@ -123,7 +151,23 @@ export default function ProductReturnDetailPage() {
                 className="!rounded-lg"
                 loading={decisionLoading}
                 onClick={() => {
-                  decideProductReturn({ id, decision: "reject" })
+                  const uniq = pickStr(record?.uniq, record?.uniq_id, record?.uniqId);
+                  const dnNumber = pickStr(record?.dn_number, record?.dnNumber);
+                  if (!uniq || !dnNumber) {
+                    message.error("Missing uniq or DN number");
+                    return;
+                  }
+
+                  updateProductReturn({
+                    id,
+                    body: {
+                      uniq,
+                      dn_number: dnNumber,
+                      quantity_scrap: pickNum(record?.quantity_scrap, record?.scrap_qty, record?.scrapQty, record?.scrap_quantity),
+                      quantity_rework: pickNum(record?.quantity_rework, record?.rework_qty, record?.reworkQty, record?.rework_quantity),
+                      status: "REJECTED",
+                    },
+                  })
                     .unwrap()
                     .then(() => {
                       message.success("Rejected");
@@ -137,11 +181,28 @@ export default function ProductReturnDetailPage() {
             </>
           ) : null}
 
+          <Button
+            danger
+            className="!rounded-lg"
+            loading={deleteLoading}
+            onClick={() => {
+              deleteProductReturn(id)
+                .unwrap()
+                .then(() => {
+                  message.success("Deleted");
+                  router.push("/product-return");
+                })
+                .catch((e) => message.error(getApiErrorMessage(e, "Failed to delete")));
+            }}
+          >
+            Delete
+          </Button>
+
           <Tag
-            color={status === "QC Approved" ? "green" : status === "Pending QC" ? "gold" : status === "Rework Created" ? "blue" : "red"}
+            color={statusLabel === "QC Approved" ? "green" : statusLabel === "Pending QC" ? "gold" : statusLabel === "Rework Created" ? "blue" : "red"}
             className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
           >
-            {status}
+            {statusLabel}
           </Tag>
         </div>
       </div>

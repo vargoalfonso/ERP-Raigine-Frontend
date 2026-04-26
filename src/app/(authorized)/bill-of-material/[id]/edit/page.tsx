@@ -4,6 +4,7 @@ import { useEffect, useMemo } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { useParams, useRouter } from "next/navigation";
 import {
+  Alert,
   Button,
   Card,
   Collapse,
@@ -17,7 +18,7 @@ import {
 } from "antd";
 import { ArrowLeftOutlined, PlusOutlined, SaveOutlined, DeleteOutlined } from "@ant-design/icons";
 
-import { useGetBomByIdQuery, useUpdateBomMutation } from "@/lib/api/bom/api";
+import { useGetBomByIdQuery, useGetBomVersionsQuery, useUpdateBomMutation } from "@/lib/api/bom/api";
 import { useGetProcessesQuery } from "@/lib/api/system-settings/api";
 import { useGetMachinesQuery } from "@/lib/api/machines/api";
 
@@ -80,6 +81,7 @@ export default function BomEditPage() {
   const queryArg = apiEnabled && id ? id : skipToken;
 
   const { data, isLoading, error } = useGetBomByIdQuery(queryArg);
+  const { data: versionsRes } = useGetBomVersionsQuery(queryArg);
   const [updateBom, updateState] = useUpdateBomMutation();
 
   const bom = (data as any)?.data ?? data;
@@ -92,6 +94,20 @@ export default function BomEditPage() {
   }, [bom, id]);
 
   const resolvedBomId = canonicalBomId ?? id ?? "";
+
+  const versionsData = (versionsRes as any)?.data ?? versionsRes;
+  const currentBomIdRaw = (versionsData as any)?.current_bom_id;
+  const currentBomId =
+    typeof currentBomIdRaw === "number" && Number.isFinite(currentBomIdRaw)
+      ? String(currentBomIdRaw)
+      : typeof currentBomIdRaw === "string" && currentBomIdRaw.trim()
+        ? currentBomIdRaw.trim()
+        : "";
+
+  const isLatest = useMemo(() => {
+    if (!currentBomId) return true;
+    return String(resolvedBomId) === String(currentBomId);
+  }, [currentBomId, resolvedBomId]);
 
   useEffect(() => {
     if (canonicalBomId && id && canonicalBomId !== id) {
@@ -196,6 +212,13 @@ export default function BomEditPage() {
 
   const onSave = async () => {
     try {
+      if (!isLatest) {
+        messageApi.error(
+          "Tidak bisa edit historical version. Pilih latest version dulu, lalu edit."
+        );
+        return;
+      }
+
       const values = (await form.validateFields()) as EditValues;
 
       const routes = (values.process_routes ?? [])
@@ -303,7 +326,33 @@ export default function BomEditPage() {
         ) : error ? (
           <Text type="danger">Failed to load BOM.</Text>
         ) : (
-          <Form layout="vertical" form={form}>
+          <>
+            {!isLatest && currentBomId ? (
+              <Alert
+                type="warning"
+                showIcon
+                className="mb-4"
+                message="Historical version (read-only)"
+                description={
+                  <div>
+                    Edit hanya boleh di latest version untuk menghindari error (misal v1 sudah ada v2).
+                    <div className="mt-2">
+                      <Button
+                        size="small"
+                        type="primary"
+                        onClick={() =>
+                          router.push(`/bill-of-material/${encodeURIComponent(currentBomId)}/edit`)
+                        }
+                      >
+                        Go to Latest
+                      </Button>
+                    </div>
+                  </div>
+                }
+              />
+            ) : null}
+
+            <Form layout="vertical" form={form} disabled={!isLatest}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Form.Item name="part_name" label="Part Name" rules={[{ required: true, message: "Part name is required" }]}>
                 <Input size="large" />
@@ -446,7 +495,8 @@ export default function BomEditPage() {
                 <InputNumber min={0} style={{ width: "100%" }} />
               </Form.Item>
             </div>
-          </Form>
+            </Form>
+          </>
         )}
       </Card>
     </div>

@@ -18,8 +18,12 @@ import {
   DeleteOutlined,
   SaveOutlined,
 } from "@ant-design/icons";
-type WipType = "Child Part" | "Warehouse FG";
-type Process = "Welding" | "CNC Machine" | "Quality Check";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useCreateWipMutation } from "@/lib/api/wip/api";
+
+type WipType = "draft" | "in_progress" | "completed";
+type Process = string;
 
 type WipEntry = {
   id: string;
@@ -46,13 +50,16 @@ type WipFormValues = {
 export default function CreateWorkInProgressPage() {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [createWip] = useCreateWipMutation();
+  const [woId, setWoId] = useState<number | null>(null);
   const [entries, setEntries] = useState<WipEntry[]>([
     {
       id: "1",
       uniq: "LV-001",
       woNumber: "WO-2024-0239",
       packingNumber: "KBN-004-2024",
-      wipType: "Child Part",
+      wipType: "draft",
       process: "Welding",
       stock: 100,
       stockToCompleteKanban: 100,
@@ -63,7 +70,7 @@ export default function CreateWorkInProgressPage() {
       uniq: "LV-001",
       woNumber: "WO-2024-0239",
       packingNumber: "KBN-004-2024",
-      wipType: "Warehouse FG",
+      wipType: "draft",
       process: "CNC Machine",
       stock: 100,
       stockToCompleteKanban: 100,
@@ -74,7 +81,7 @@ export default function CreateWorkInProgressPage() {
       uniq: "LV-001",
       woNumber: "WO-2024-0239",
       packingNumber: "KBN-004-2024",
-      wipType: "Child Part",
+      wipType: "draft",
       process: "Quality Check",
       stock: 100,
       stockToCompleteKanban: 100,
@@ -109,7 +116,7 @@ export default function CreateWorkInProgressPage() {
         uniq: values.uniq ?? "-",
         woNumber: values.woNumber ?? "-",
         packingNumber: values.packingNumber ?? "-",
-        wipType: (values.wipType ?? "Child Part") as WipType,
+        wipType: (values.wipType ?? "draft") as WipType,
         process: (values.process ?? "Welding") as Process,
         stock: Number(values.stock ?? 0),
         stockToCompleteKanban: Number(values.stockToCompleteKanban ?? 0),
@@ -167,11 +174,60 @@ export default function CreateWorkInProgressPage() {
       message.warning("No entries to save");
       return;
     }
+    if (!woId || !Number.isFinite(woId)) {
+      message.error("WO ID is required");
+      return;
+    }
     try {
       setIsSubmitting(true);
-      console.log("Save WIP Entries:", entries);
+      const woNumber = entries[0]?.woNumber;
+      if (!woNumber) {
+        message.error("WO Number is required");
+        return;
+      }
+
+      const grouped = new Map<string, WipEntry[]>();
+      for (const entry of entries) {
+        const key = `${entry.woNumber}__${entry.uniq}__${entry.packingNumber}__${entry.wipType}`;
+        grouped.set(key, [...(grouped.get(key) ?? []), entry]);
+      }
+
+      const items = Array.from(grouped.values()).map((groupEntries) => {
+        const first = groupEntries[0];
+        const process_flow = groupEntries
+          .slice()
+          .sort((a, b) => a.process.localeCompare(b.process))
+          .map((e, index) => ({
+            op_seq: (index + 1) * 10,
+            machine_name: `${e.process} Station`,
+            process_name: e.process,
+          }));
+
+        return {
+          uniq: first.uniq,
+          kanban_number: first.packingNumber,
+          wip_type: first.wipType,
+          uom: "Piece",
+          stock: Number(first.stock ?? 0),
+          stock_kanban: Number(first.pcsPerKanban ?? 0),
+          process_flow,
+        };
+      });
+
+      if (apiEnabled) {
+        await createWip({
+          wo_id: woId,
+          wo_number: woNumber,
+          items,
+        }).unwrap();
+      } else {
+        console.log("WIP payload:", { wo_id: woId, wo_number: woNumber, items });
+      }
+
       message.success("Saved");
       router.push("/work-in-progress");
+    } catch (error) {
+      message.error(getApiErrorMessage(error, "Failed to save WIP"));
     } finally {
       setIsSubmitting(false);
     }
@@ -319,8 +375,9 @@ export default function CreateWorkInProgressPage() {
                   <Select
                     placeholder="Select Type"
                     options={[
-                      { label: "Child Part", value: "Child Part" },
-                      { label: "Warehouse FG", value: "Warehouse FG" },
+                      { label: "Draft", value: "draft" },
+                      { label: "In Progress", value: "in_progress" },
+                      { label: "Completed", value: "completed" },
                     ]}
                   />
                 </Form.Item>

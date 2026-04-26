@@ -25,11 +25,15 @@ import {
 } from "@ant-design/icons";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
+import { useListCustomersQuery } from "@/lib/api/customers/api";
 import {
   useCreateCustomerPoMutation,
   useCreateDeliveryNoteMutation,
   useCreateSpecialOrderMutation,
 } from "@/lib/api/customer-orders/api";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { useGetUomsQuery } from "@/lib/api/system-settings/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 
 type OrderType = "dn" | "po" | "so";
 
@@ -40,7 +44,17 @@ type EntryRow = {
   partName: string;
   model: string;
   qty: number;
+  uom: string;
 };
+
+function toPositiveIntString(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return String(Math.trunc(value));
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return String(Math.trunc(parsed));
+  }
+  return null;
+}
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
@@ -76,57 +90,85 @@ export default function CreateCustomerOrderPage() {
 
   const [entryUniq, setEntryUniq] = useState<string | undefined>(undefined);
   const [entryQty, setEntryQty] = useState<number | null>(null);
+  const [entryUom, setEntryUom] = useState<string | undefined>(undefined);
 
-  const [rows, setRows] = useState<EntryRow[]>([
-    {
-      key: "row-1",
-      uniq: "LV-001",
-      partNumber: "SP-001-A",
-      partName: "Steel Plate",
-      model: "Camry 2024",
-      qty: 120,
-    },
-    {
-      key: "row-2",
-      uniq: "LV-001",
-      partNumber: "SP-001-B",
-      partName: "Steel Plate X",
-      model: "Camry 2024",
-      qty: 120,
-    },
-    {
-      key: "row-3",
-      uniq: "LV-001",
-      partNumber: "SP-001-C",
-      partName: "Steel Plate Y",
-      model: "Camry 2024",
-      qty: 120,
-    },
-  ]);
+  const [rows, setRows] = useState<EntryRow[]>([]);
 
-  const uniqOptions = useMemo(
-    () => [
-      { label: "LV-001", value: "LV-001" },
-      { label: "LV-002", value: "LV-002" },
-      { label: "LV-003", value: "LV-003" },
-      { label: "LV-004", value: "LV-004" },
-    ],
-    []
+  const customersQuery = useListCustomersQuery(undefined, { skip: !apiEnabled });
+  const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const uomsQuery = useGetUomsQuery(undefined, { skip: !apiEnabled });
+
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex((bomTreeQuery.data?.data ?? []) as unknown),
+    [bomTreeQuery.data]
   );
 
-  const partCatalog = useMemo(
-    () => [
-      { partNumber: "SP-001-A", partName: "Steel Plate", model: "Camry 2024" },
-      { partNumber: "SP-001-B", partName: "Steel Plate X", model: "Camry 2024" },
-      { partNumber: "SP-001-C", partName: "Steel Plate Y", model: "Camry 2024" },
-      { partNumber: "AL-210-A", partName: "Aluminum Bracket", model: "Civic 2024" },
-      { partNumber: "RB-110-Q", partName: "Rubber Bushing", model: "X-Trail 2024" },
-    ],
-    []
-  );
+  const uniqOptions = useMemo(() => {
+    if (!apiEnabled) {
+      return [
+        { label: "LV-001", value: "LV-001" },
+        { label: "LV-002", value: "LV-002" },
+        { label: "LV-003", value: "LV-003" },
+        { label: "LV-004", value: "LV-004" },
+      ];
+    }
+
+    return (bomIndex.uniqs ?? []).map((uniq) => {
+      const partName = bomIndex.partNameByUniq[uniq];
+      return {
+        value: uniq,
+        label: partName ? `${uniq} — ${partName}` : uniq,
+      };
+    });
+  }, [apiEnabled, bomIndex.partNameByUniq, bomIndex.uniqs]);
+
+  const customerOptions = useMemo(() => {
+    if (!apiEnabled) {
+      return [
+        { value: "1", label: "Toyota Motor" },
+        { value: "2", label: "Honda Motor" },
+        { value: "3", label: "Nissan Group" },
+      ].map((o) => ({ ...o, customer: { customer_name: o.label, shipping_address: "" } }));
+    }
+    const customers = customersQuery.data ?? [];
+    return customers
+      .map((c) => {
+        const idStr =
+          toPositiveIntString(c.id) ??
+          toPositiveIntString(c.row_id) ??
+          toPositiveIntString(c.customer_id) ??
+          toPositiveIntString(c.customer_code);
+        const name = String(c.customer_name ?? "").trim();
+        if (!idStr || !name) return null;
+        return {
+          value: idStr,
+          label: name,
+          customer: c,
+        } as const;
+      })
+      .filter((x): x is NonNullable<typeof x> => Boolean(x));
+  }, [apiEnabled, customersQuery.data]);
+
+  const uomOptions = useMemo(() => {
+    if (!apiEnabled) {
+      return [
+        { label: "Pcs", value: "Pcs" },
+        { label: "Kg", value: "Kg" },
+        { label: "Set", value: "Set" },
+      ];
+    }
+
+    const list = uomsQuery.data ?? [];
+    return list
+      .map((u) => {
+        const name = String(u.name ?? u.unit_name ?? u.code ?? u.unit_code ?? "").trim();
+        if (!name) return null;
+        return { label: name, value: name };
+      })
+      .filter((x): x is NonNullable<typeof x> => Boolean(x));
+  }, [apiEnabled, uomsQuery.data]);
 
   const customerName = Form.useWatch("customerName", form) as string | undefined;
-  const customerIdRaw = Form.useWatch("customerId", form) as string | undefined;
 
   const orderNumber = useMemo(() => {
     const code = customerCode(customerName ?? "");
@@ -200,23 +242,31 @@ export default function CreateCustomerOrderPage() {
       message.warning("Select Uniq first");
       return;
     }
+    if (!entryUom) {
+      message.warning("Select UOM first");
+      return;
+    }
     if (!entryQty || entryQty <= 0) {
       message.warning("Input Quantity first");
       return;
     }
 
-    const pick = partCatalog[Math.floor(Math.random() * partCatalog.length)];
+    const partNumber = bomIndex.partNumberByUniq[entryUniq] ?? "";
+    const partName = bomIndex.partNameByUniq[entryUniq] ?? "";
+    const model = bomIndex.modelByUniq[entryUniq] ?? "";
     const newRow: EntryRow = {
       key: `row-${Date.now()}`,
       uniq: entryUniq,
-      partNumber: pick.partNumber,
-      partName: pick.partName,
-      model: pick.model,
+      partNumber,
+      partName,
+      model,
       qty: Math.min(999999, Math.round(entryQty)),
+      uom: entryUom,
     };
 
     setRows((prev) => [newRow, ...prev]);
     setEntryUniq(undefined);
+    setEntryUom(undefined);
     setEntryQty(null);
   }
 
@@ -256,7 +306,7 @@ export default function CreateCustomerOrderPage() {
           items: rows.map((r) => ({
             item_uniq_code: r.uniq,
             quantity: r.qty,
-            uom: "Pcs",
+            uom: r.uom || "Pcs",
             delivery_date: dateStr,
           })),
         }).unwrap();
@@ -265,10 +315,13 @@ export default function CreateCustomerOrderPage() {
           dn_number: orderNumber,
           customer_id: customerId,
           delivery_date: dateStr,
+          contact_person: values.contactPerson,
+          delivery_address: values.deliveryAddress,
+          notes: values.specialInstructions,
           items: rows.map((r) => ({
             item_uniq_code: r.uniq,
             quantity: r.qty,
-            uom: "Pcs",
+            uom: r.uom || "Pcs",
           })),
         }).unwrap();
       } else {
@@ -277,10 +330,12 @@ export default function CreateCustomerOrderPage() {
           customer_id: customerId,
           order_date: dateStr,
           special_instructions: values.specialInstructions,
+          contact_person: values.contactPerson,
+          delivery_address: values.deliveryAddress,
           items: rows.map((r) => ({
             item_uniq_code: r.uniq,
             quantity: r.qty,
-            uom: "Pcs",
+            uom: r.uom || "Pcs",
             target_date: dateStr,
           })),
         }).unwrap();
@@ -374,24 +429,47 @@ export default function CreateCustomerOrderPage() {
         >
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Form.Item
-              label="Customer ID"
+              label="Customer Name"
               name="customerId"
-              rules={[{ required: true, message: "Input Customer ID" }]}
+              rules={[{ required: true, message: "Select Customer Name" }]}
             >
-              <Input
-                placeholder="Input Customer ID (number)"
-                inputMode="numeric"
-                onChange={(e) => {
-                  const next = e.target.value.replace(/[^0-9]/g, "");
-                  form.setFieldValue("customerId", next);
-                }}
-                value={customerIdRaw ?? ""}
+              <Select
+                placeholder="Select customer from master"
+                showSearch
                 allowClear
+                loading={customersQuery.isLoading}
+                options={customerOptions as any}
+                filterOption={(input, option) =>
+                  String((option as any)?.label ?? "")
+                    .toLowerCase()
+                    .includes(input.trim().toLowerCase())
+                }
+                onChange={(value, option) => {
+                  const nextCustomerId = toPositiveIntString(value);
+                  if (!nextCustomerId) {
+                    form.setFieldValue("customerName", undefined);
+                    return;
+                  }
+
+                  const customer = (option as any)?.customer as
+                    | { customer_name?: unknown; shipping_address?: unknown }
+                    | undefined;
+
+                  const nextName =
+                    typeof customer?.customer_name === "string" ? customer.customer_name : (option as any)?.label;
+                  if (typeof nextName === "string") form.setFieldValue("customerName", nextName);
+
+                  const deliveryAddress = form.getFieldValue("deliveryAddress") as string | undefined;
+                  const shippingAddr = typeof customer?.shipping_address === "string" ? customer.shipping_address : "";
+                  if (!String(deliveryAddress ?? "").trim() && shippingAddr.trim()) {
+                    form.setFieldValue("deliveryAddress", shippingAddr.trim());
+                  }
+                }}
               />
             </Form.Item>
 
-            <Form.Item label="Customer Name" name="customerName" rules={[{ required: true, message: "Input Customer Name" }]}>
-              <Input placeholder="Input Customer Name" allowClear />
+            <Form.Item name="customerName" rules={[{ required: true, message: "Select Customer" }]} hidden>
+              <Input />
             </Form.Item>
 
             <Form.Item label="Contact Person" name="contactPerson" rules={[{ required: true, message: "Input Contact Person" }]}
@@ -444,8 +522,39 @@ export default function CreateCustomerOrderPage() {
               <Select
                 placeholder="Select Uniq"
                 value={entryUniq}
-                onChange={(v) => setEntryUniq(v)}
+                onChange={(v) => {
+                  setEntryUniq(v);
+                  const bomUom = bomIndex.uomByUniq[v];
+                  if (!entryUom && typeof bomUom === "string" && bomUom.trim()) {
+                    const hasUom = uomOptions.some((o) => o.value === bomUom.trim());
+                    if (hasUom) setEntryUom(bomUom.trim());
+                  }
+                }}
                 options={uniqOptions}
+                loading={bomTreeQuery.isLoading}
+                showSearch
+                filterOption={(input, option) =>
+                  String(option?.label ?? "")
+                    .toLowerCase()
+                    .includes(input.trim().toLowerCase())
+                }
+              />
+            </div>
+
+            <div className="w-full xl:w-[260px]">
+              <div className="text-xs text-gray-500 mb-1">UOM</div>
+              <Select
+                placeholder="Select UOM"
+                value={entryUom}
+                onChange={(v) => setEntryUom(v)}
+                options={uomOptions}
+                loading={uomsQuery.isLoading}
+                showSearch
+                filterOption={(input, option) =>
+                  String(option?.label ?? "")
+                    .toLowerCase()
+                    .includes(input.trim().toLowerCase())
+                }
               />
             </div>
 

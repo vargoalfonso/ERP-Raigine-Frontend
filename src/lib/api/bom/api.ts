@@ -80,6 +80,30 @@ export type BomUniqDetail = {
   updated_at?: string;
 };
 
+export type BomVersionMeta = {
+  bom_id: string;
+  bom_version: number;
+  label?: string;
+  bom_status?: string;
+  is_current?: boolean;
+  read_only?: boolean;
+  change_note?: string;
+  created_at?: string;
+};
+
+export type BomVersionsResponse = {
+  root_item_id?: number;
+  root_item_code?: string;
+  root_item_name?: string;
+  current_bom_id?: string;
+  current_version?: number;
+  versions: BomVersionMeta[];
+};
+
+export type ActivateBomRequest = {
+  change_note: string;
+};
+
 const ok = <T,>(data: T, message = "OK"): ApiResponse<T> => ({
   message,
   status: "success",
@@ -333,6 +357,58 @@ const pickId = (...values: unknown[]): string => {
   return "";
 };
 
+const parseBomVersions = (response: unknown): BomVersionsResponse => {
+  const base: BomVersionsResponse = { versions: [] };
+  if (!isRecord(response)) return base;
+  const data = isRecord(response.data) ? response.data : response;
+
+  const versionsRaw = (data as any).versions;
+  const versions: BomVersionMeta[] = Array.isArray(versionsRaw)
+    ? versionsRaw.flatMap((v: any) => {
+        const bom_id = pickId(v?.bom_id, v?.bomId, v?.id);
+        const bom_version =
+          typeof v?.bom_version === "number" ? v.bom_version : Number(v?.bom_version);
+        if (!bom_id || !Number.isFinite(bom_version)) return [];
+        const item: BomVersionMeta = {
+          bom_id: String(bom_id),
+          bom_version,
+          label: typeof v?.label === "string" ? v.label : undefined,
+          bom_status: typeof v?.bom_status === "string" ? v.bom_status : undefined,
+          is_current: Boolean(v?.is_current),
+          read_only: typeof v?.read_only === "boolean" ? v.read_only : undefined,
+          change_note: typeof v?.change_note === "string" ? v.change_note : undefined,
+          created_at: typeof v?.created_at === "string" ? v.created_at : undefined,
+        };
+        return [item];
+      })
+    : [];
+
+  const current_bom_id = pickId((data as any).current_bom_id, (data as any).currentBomId);
+  const current_version_raw = (data as any).current_version;
+  const current_version =
+    typeof current_version_raw === "number"
+      ? current_version_raw
+      : Number.isFinite(Number(current_version_raw))
+        ? Number(current_version_raw)
+        : undefined;
+
+  return {
+    root_item_id: typeof (data as any).root_item_id === "number" ? (data as any).root_item_id : undefined,
+    root_item_code: typeof (data as any).root_item_code === "string" ? (data as any).root_item_code : undefined,
+    root_item_name: typeof (data as any).root_item_name === "string" ? (data as any).root_item_name : undefined,
+    current_bom_id: current_bom_id || undefined,
+    current_version,
+    versions,
+  };
+};
+
+const parseActivateResponse = (response: unknown): { current_bom_id?: string } => {
+  if (!isRecord(response)) return {};
+  const data = isRecord(response.data) ? response.data : response;
+  const current = pickId((data as any).current_bom_id, (data as any).currentBomId, (data as any).bom_id);
+  return current ? { current_bom_id: current } : {};
+};
+
 const parseCreateIds = (response: unknown): { id: string; bom_id: string } => {
   const empty = { id: "", bom_id: "" };
   if (!isRecord(response)) return empty;
@@ -378,6 +454,29 @@ export const bomSlice = apiSlice.injectEndpoints({
         }
         return ok(mapNewNodeToLegacy(response));
       },
+    }),
+
+    getBomVersions: builder.query<ApiResponse<BomVersionsResponse>, string>({
+      query: (bomId) => ({
+        url: `/products/bom/${encodeURIComponent(bomId)}/versions`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => ok(parseBomVersions(response)),
+    }),
+
+    activateBom: builder.mutation<
+      ApiResponse<{ current_bom_id?: string }>,
+      { bom_id: string; body: ActivateBomRequest }
+    >({
+      query: ({ bom_id, body }) => ({
+        url: `/products/bom/${encodeURIComponent(bom_id)}/activate`,
+        method: "POST",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => ok(parseActivateResponse(response), "OK"),
+      invalidatesTags: [BOM_TAG],
     }),
 
     createBom: builder.mutation<ApiResponse<{ id: string; bom_id: string }>, BomCreateRequest>({
@@ -466,6 +565,8 @@ export const bomSlice = apiSlice.injectEndpoints({
 export const {
   useGetBomTreeQuery,
   useGetBomByIdQuery,
+  useGetBomVersionsQuery,
+  useActivateBomMutation,
   useCreateBomMutation,
   useUpdateBomMutation,
   useDeleteBomParentMutation,

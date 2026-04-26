@@ -20,6 +20,7 @@ import {
   DeleteOutlined,
 } from "@ant-design/icons";
 import type { FormInstance } from "antd";
+import { useCreateInventoryMutation } from "@/lib/api/inventory/api";
 
 const { Title, Text } = Typography;
 
@@ -195,6 +196,7 @@ export default function CreateSubConStockReceivedPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [entries, setEntries] = useState<FormEntry[]>([]);
+  const [createInventory] = useCreateInventoryMutation();
 
   useEffect(() => {
     if (entries.length === 0) {
@@ -242,12 +244,28 @@ export default function CreateSubConStockReceivedPage() {
         const form = entry.formRef.current;
         if (!form) continue;
         await form.validateFields();
+
+        const values = form.getFieldsValue() as SubConStockReceivedFormData;
+        await createInventory({
+          type: "subcon-materials",
+          body: {
+            uniq_code: String(values.uniq ?? ""),
+            raw_material_type: "Subcon",
+            rm_source: values.deliveryNotesNumber ?? values.invoiceNumber,
+            part_name: values.partName,
+            part_number: values.partNumber,
+            stock_qty: Number(values.addStock ?? values.quantityReceived ?? 0),
+          },
+        }).unwrap();
       }
 
       message.success("Stock received saved");
       router.push("/sub-con-materials");
-    } catch {
-      message.error("Please complete all required fields");
+    } catch (error) {
+      message.error(
+        (error as { data?: { message?: string } })?.data?.message ||
+          "Please complete all required fields"
+      );
     } finally {
       setLoading(false);
     }

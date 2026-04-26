@@ -1,9 +1,16 @@
 "use client";
 
-import React, { Suspense, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeftOutlined, EyeOutlined } from "@ant-design/icons";
-import { Button, Card, Table, Tabs, Tag } from "antd";
+import { ArrowLeftOutlined } from "@ant-design/icons";
+import { Button, Card, Table, Tabs, Tag, message } from "antd";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import {
+  useGetInventoryDetailQuery,
+  useGetInventoryIncomingQuery,
+  useGetInventoryKanbanSummaryQuery,
+} from "@/lib/api/inventory/api";
 
 type DeliveryNoteLogRow = {
   key: string;
@@ -15,61 +22,72 @@ type DeliveryNoteLogRow = {
   receivedBy: string;
 };
 
+type UnknownRecord = Record<string, unknown>;
+const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+const isMissingRouteError = (error: unknown): boolean => isRecord(error) && error.status === 404;
+
+const formatNumber = (value: number | undefined) => new Intl.NumberFormat("en-US").format(Number(value ?? 0));
+
 function SubConMaterialsDetailPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const uniq = searchParams.get("uniq") ?? "SUB-001";
+  const id = searchParams.get("id") ?? "";
+  const apiEnabled = Boolean(apiBaseUrl);
 
   const [activeTab, setActiveTab] = useState("details");
 
+  const detailQuery = useGetInventoryDetailQuery({ type: "subcon-materials", id }, { skip: !apiEnabled || !id });
+  const incomingQuery = useGetInventoryIncomingQuery({ type: "subcon-materials", page: 1, limit: 20 }, { skip: !apiEnabled });
+  const summaryQuery = useGetInventoryKanbanSummaryQuery({ uniq_code: uniq }, { skip: !apiEnabled || !uniq });
+
+  useEffect(() => {
+    const error = detailQuery.error ?? incomingQuery.error ?? summaryQuery.error;
+    if (!apiEnabled || !error) return;
+    if (isMissingRouteError(error)) {
+      message.warning("Inventory subcon-materials API route is not available yet; showing placeholder data.");
+      return;
+    }
+    message.error(getApiErrorMessage(error, "Failed to load subcon material detail"));
+  }, [apiEnabled, detailQuery.error, incomingQuery.error, summaryQuery.error]);
+
+  const useMock = !apiEnabled || isMissingRouteError(detailQuery.error);
+  const detail = useMock ? null : detailQuery.data?.data;
+  const summary = useMock ? null : summaryQuery.data?.data;
+
   const detailInfo = useMemo(
     () => ({
-      uniq,
-      partNumber: "SUB-PLT-001",
-      partName: "Plating Process - Bracket",
-      subconVendor: "PT Subcon Plating",
-      period: "2025-Q1",
-      dateDelivery: "2025-09-25",
-      stockDate: 500,
-      totalStock: 2500,
-      totalPO: 5000,
-      deltaPoStock: 2500,
-      status: "NORMAL" as const,
-      lastUpdate: "Oct 15, 2025 10:21",
-      dnId: "DN-RM-2025-001",
+      uniq: detail?.uniq_code ?? uniq,
+      partNumber: detail?.part_number ?? "-",
+      partName: detail?.part_name ?? detail?.item_name ?? detail?.uniq_code ?? "-",
+      warehouse: detail?.warehouse_location ?? "-",
+      source: detail?.rm_source ?? "-",
+      quantity: Number(detail?.stock_qty ?? 0),
+      uom: detail?.uom ?? "-",
+      weight: Number(detail?.stock_weight_kg ?? 0),
+      status: Number(detail?.stock_qty ?? 0) > 20 ? ("NORMAL" as const) : ("LOW STOCK" as const),
+      lastUpdate: detail?.updated_at ?? detail?.created_at ?? "-",
+      kanbanCount: Number(summary?.kanban_count ?? 0),
+      stockDays: Number(summary?.stock_days ?? 0),
+      safetyStockDays: Number(summary?.safety_stock_days ?? 0),
     }),
-    [uniq]
+    [detail, summary, uniq]
   );
 
-  const logs: DeliveryNoteLogRow[] = [
-    {
-      key: "1",
-      dnNumber: "DN-SUB-2025-001",
-      receivedDate: "12-09-25 08:41",
-      quantity: 200,
-      kanban: 1,
-      vendorName: "PT Subcon Plating",
-      receivedBy: "PPIC",
-    },
-    {
-      key: "2",
-      dnNumber: "DN-SUB-2025-002",
-      receivedDate: "12-09-25 09:05",
-      quantity: 250,
-      kanban: 1,
-      vendorName: "PT Subcon Plating",
-      receivedBy: "PPIC",
-    },
-    {
-      key: "3",
-      dnNumber: "DN-SUB-2025-003",
-      receivedDate: "12-09-25 10:10",
-      quantity: 300,
-      kanban: 1,
-      vendorName: "PT Subcon Plating",
-      receivedBy: "PPIC",
-    },
-  ];
+  const logs = useMemo<DeliveryNoteLogRow[]>(() => {
+    if (useMock) return [];
+    return (incomingQuery.data?.data ?? [])
+      .filter((item) => !item.uniq_code || item.uniq_code === detailInfo.uniq)
+      .map((item, index) => ({
+        key: item.id || `${index}`,
+        dnNumber: item.reference_number ?? item.packing_number ?? item.id,
+        receivedDate: item.date_incoming ?? item.created_at ?? "-",
+        quantity: Number(item.quantity ?? item.stock_qty ?? 0),
+        kanban: Number(summary?.kanban_count ?? 0),
+        vendorName: item.supplier_name ?? "-",
+        receivedBy: item.warehouse_location ?? "-",
+      }));
+  }, [detailInfo.uniq, incomingQuery.data, summary?.kanban_count, useMock]);
 
   const totalDeliveryNotes = logs.length;
   const totalQuantity = logs.reduce((sum, r) => sum + r.quantity, 0);
@@ -82,33 +100,17 @@ function SubConMaterialsDetailPageContent() {
       dataIndex: "quantity",
       key: "quantity",
       align: "right" as const,
-      render: (v: number) => v.toLocaleString("en-US"),
+      render: (v: number) => formatNumber(v),
     },
     {
       title: "Kanban",
       dataIndex: "kanban",
       key: "kanban",
       align: "right" as const,
+      render: (v: number) => formatNumber(v),
     },
     { title: "Vendor Name", dataIndex: "vendorName", key: "vendorName" },
     { title: "Received By", dataIndex: "receivedBy", key: "receivedBy" },
-    {
-      title: "Action",
-      key: "action",
-      width: 80,
-      render: (_: unknown, record: DeliveryNoteLogRow) => (
-        <Button
-          type="text"
-          icon={<EyeOutlined />}
-          className="text-blue-600 hover:text-blue-800"
-          onClick={() =>
-            router.push(
-              `/sub-con-materials/detail?uniq=${encodeURIComponent(detailInfo.uniq)}`
-            )
-          }
-        />
-      ),
-    },
   ];
 
   return (
@@ -125,7 +127,7 @@ function SubConMaterialsDetailPageContent() {
       </div>
 
       <div className="p-8">
-        <Card className="rounded-2xl shadow">
+        <Card className="rounded-2xl shadow" loading={apiEnabled ? detailQuery.isFetching || summaryQuery.isFetching : false}>
           <h2 className="text-xl font-bold">Details & Delivery Note Logs</h2>
           <p className="text-gray-400">Complete SubCon detail for {detailInfo.uniq}</p>
 
@@ -155,43 +157,42 @@ function SubConMaterialsDetailPageContent() {
                       </div>
 
                       <div>
-                        <p className="text-gray-400">Subcon Vendor</p>
-                        <p className="font-semibold">{detailInfo.subconVendor}</p>
+                        <p className="text-gray-400">Warehouse</p>
+                        <p className="font-semibold">{detailInfo.warehouse}</p>
                       </div>
 
                       <div>
-                        <p className="text-gray-400">Period</p>
-                        <p className="font-semibold">{detailInfo.period}</p>
+                        <p className="text-gray-400">Source</p>
+                        <p className="font-semibold">{detailInfo.source}</p>
                       </div>
 
                       <div>
-                        <p className="text-gray-400">Date Delivery</p>
-                        <p className="font-semibold">{detailInfo.dateDelivery}</p>
+                        <p className="text-gray-400">Quantity</p>
+                        <Tag className="bg-blue-100 text-blue-600">{formatNumber(detailInfo.quantity)} {detailInfo.uom}</Tag>
                       </div>
 
                       <div>
-                        <p className="text-gray-400">Stock/Date</p>
-                        <Tag className="bg-blue-100 text-blue-600">{detailInfo.stockDate.toLocaleString("en-US")}</Tag>
+                        <p className="text-gray-400">Weight</p>
+                        <p className="font-semibold">{formatNumber(detailInfo.weight)} kg</p>
                       </div>
 
                       <div>
-                        <p className="text-gray-400">Total Stock</p>
-                        <Tag className="bg-blue-100 text-blue-600">{detailInfo.totalStock.toLocaleString("en-US")}</Tag>
+                        <p className="text-gray-400">Kanban Count</p>
+                        <p className="font-semibold">{formatNumber(detailInfo.kanbanCount)}</p>
                       </div>
 
                       <div>
-                        <p className="text-gray-400">Total PO</p>
-                        <Tag className="bg-blue-100 text-blue-600">{detailInfo.totalPO.toLocaleString("en-US")}</Tag>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">ΔPO-Stock</p>
-                        <Tag className="bg-blue-100 text-blue-600">{detailInfo.deltaPoStock.toLocaleString("en-US")}</Tag>
+                        <p className="text-gray-400">Stock / Safety Days</p>
+                        <p className="font-semibold">{formatNumber(detailInfo.stockDays)} / {formatNumber(detailInfo.safetyStockDays)}</p>
                       </div>
 
                       <div>
                         <p className="text-gray-400">Status</p>
-                        <Tag className="bg-green-100 text-green-600">{detailInfo.status}</Tag>
+                        {detailInfo.status === "LOW STOCK" ? (
+                          <Tag className="bg-red-100 text-red-600">LOW STOCK</Tag>
+                        ) : (
+                          <Tag className="bg-green-100 text-green-600">NORMAL</Tag>
+                        )}
                       </div>
 
                       <div>
@@ -215,17 +216,15 @@ function SubConMaterialsDetailPageContent() {
                         </Card>
                         <Card className="rounded-xl" styles={{ body: { padding: 16 } }}>
                           <div className="text-gray-500 text-sm">Total Quantity</div>
-                          <div className="text-2xl font-bold">{totalQuantity.toLocaleString("en-US")}</div>
+                          <div className="text-2xl font-bold">{formatNumber(totalQuantity)}</div>
                         </Card>
                       </div>
 
                       <div className="flex items-center gap-2">
                         <div className="bg-white border border-gray-200 rounded-xl px-4 py-2">
-                          <div className="text-xs text-gray-500">DN ID</div>
-                          <div className="font-semibold">{detailInfo.dnId}</div>
+                          <div className="text-xs text-gray-500">UNIQ</div>
+                          <div className="font-semibold">{detailInfo.uniq}</div>
                         </div>
-                        <Button>Export DN Log</Button>
-                        <Button type="primary">Create DN</Button>
                       </div>
                     </div>
 
@@ -233,6 +232,7 @@ function SubConMaterialsDetailPageContent() {
                       <Table<DeliveryNoteLogRow>
                         columns={logColumns}
                         dataSource={logs}
+                        loading={apiEnabled ? incomingQuery.isFetching : false}
                         pagination={false}
                         rowKey="key"
                       />

@@ -346,12 +346,16 @@ export default function MachineMasterDataPage() {
 
       if (apiEnabled && mode === "add") {
         try {
+          const processIdText = String(values.processId ?? "").trim();
+          const processIdParsed = Number(processIdText);
+
           await createMachine({
             machine_name: values.machineName,
             machine_number: values.machineNumber,
             production_line: values.productionLine,
-            process_id: values.processId,
-            machine_capacity: values.capacity,
+            process_id: Number.isFinite(processIdParsed) ? processIdParsed : processIdText,
+            machine_capacity: typeof values.capacity === "number" ? values.capacity : null,
+            status: "Active",
           }).unwrap();
 
           setAddOpen(false);

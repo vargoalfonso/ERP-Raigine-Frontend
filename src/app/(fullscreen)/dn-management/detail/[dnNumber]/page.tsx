@@ -434,7 +434,7 @@ function DnRawMaterialDetailPageContent() {
                         onPressEnter={() => {
                           const packing = scanPacking.trim();
                           if (!packing) return;
-                          void runScan({ packing });
+                          void runScan({ packing, qty: 1 });
                         }}
                       />
                       <Button
@@ -445,7 +445,7 @@ function DnRawMaterialDetailPageContent() {
                             message.warning("Packing number is required");
                             return;
                           }
-                          void runScan({ packing });
+                          void runScan({ packing, qty: 1 });
                         }}
                         loading={scanState.isFetching}
                       >

@@ -1,134 +1,32 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Button, Card, Form, Input, InputNumber, Modal, Select, Table, Tag, message } from "antd";
+import { Button, Descriptions, Form, Input, InputNumber, Modal, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { EyeOutlined, PlusOutlined } from "@ant-design/icons";
 
-type ReasonOption =
-  | "Production Use"
-  | "Quality Testing"
-  | "Sample Request"
-  | "Rework"
-  | "Maintenance"
-  | "Others";
+import { apiBaseUrl } from "@/lib/api/instance";
+import {
+  type OutgoingRawMaterial,
+  useCreateOutgoingRawMaterialMutation,
+  useGetOutgoingRawMaterialByIdQuery,
+  useGetOutgoingRawMaterialsQuery,
+} from "@/lib/api/outgoing-raw-material/api";
 
-type Unit = "Kg" | "Pcs" | "Box" | "Pallet" | "Roll" | "Meter";
-
-type OutgoingRow = {
-  id: string;
-  transactionId: string;
-  date: string;
-  rmCode: string;
-  rmName: string;
-  packingList: string;
-  qtyOutKg: number;
-  stockBeforeKg: number;
-  stockAfterKg: number;
-  unit: Unit;
-  reason: ReasonOption;
-  requestedBy: string;
-  approvedBy: string;
-  destination: string;
-  purpose: string;
-  workOrder: string;
+type OutgoingFormValues = {
+  packing_list_rm: string;
+  uniq: string;
+  unit: string;
+  quantity_out: number;
+  reason: string;
+  purpose?: string;
+  work_order_no?: string;
+  destination_location?: string;
+  requested_by?: string;
   remarks?: string;
 };
 
-const initialRows: OutgoingRow[] = [
-  {
-    id: "1",
-    transactionId: "OUT-RM-001",
-    date: "2024-12-16",
-    rmCode: "RM-PL-98795",
-    rmName: "Steel Wire - Grade A",
-    packingList: "PL-345678",
-    qtyOutKg: 150,
-    stockBeforeKg: 500,
-    stockAfterKg: 350,
-    unit: "Kg",
-    reason: "Production Use",
-    requestedBy: "John Doe",
-    approvedBy: "Manager A",
-    destination: "Production Line A",
-    purpose: "Work Order WO-2024-045",
-    workOrder: "WO-2024-045",
-  },
-  {
-    id: "2",
-    transactionId: "OUT-RM-002",
-    date: "2024-12-15",
-    rmCode: "RM-PL-28690",
-    rmName: "Aluminum Sheet - 2mm",
-    packingList: "PL-112233",
-    qtyOutKg: 75,
-    stockBeforeKg: 300,
-    stockAfterKg: 225,
-    unit: "Kg",
-    reason: "Quality Testing",
-    requestedBy: "Jane Smith",
-    approvedBy: "Manager A",
-    destination: "QC Lab",
-    purpose: "Quality Testing",
-    workOrder: "WO-2024-046",
-  },
-  {
-    id: "3",
-    transactionId: "OUT-RM-003",
-    date: "2024-12-14",
-    rmCode: "RM-PL-398456",
-    rmName: "Copper Wire - 1.5mm",
-    packingList: "PL-998877",
-    qtyOutKg: 200,
-    stockBeforeKg: 800,
-    stockAfterKg: 600,
-    unit: "Kg",
-    reason: "Production Use",
-    requestedBy: "Mike Johnson",
-    approvedBy: "Manager A",
-    destination: "Production Line B",
-    purpose: "Work Order WO-2024-047",
-    workOrder: "WO-2024-047",
-  },
-  {
-    id: "4",
-    transactionId: "OUT-RM-004",
-    date: "2024-12-14",
-    rmCode: "RM-PL-512389",
-    rmName: "Plastic Resin - ABS",
-    packingList: "PL-556677",
-    qtyOutKg: 50,
-    stockBeforeKg: 250,
-    stockAfterKg: 200,
-    unit: "Kg",
-    reason: "Sample Request",
-    requestedBy: "Sarah Lee",
-    approvedBy: "Manager A",
-    destination: "R&D",
-    purpose: "Sample Request",
-    workOrder: "WO-2024-048",
-  },
-  {
-    id: "5",
-    transactionId: "OUT-RM-005",
-    date: "2024-12-14",
-    rmCode: "RM-PL-98795",
-    rmName: "Steel Wire - Grade A",
-    packingList: "PL-223344",
-    qtyOutKg: 100,
-    stockBeforeKg: 650,
-    stockAfterKg: 550,
-    unit: "Kg",
-    reason: "Rework",
-    requestedBy: "Tom Wilson",
-    approvedBy: "Manager A",
-    destination: "Rework Area",
-    purpose: "Rework",
-    workOrder: "WO-2024-049",
-  },
-];
-
-const reasonOptions: ReasonOption[] = [
+const reasonOptions = [
   "Production Use",
   "Quality Testing",
   "Sample Request",
@@ -137,42 +35,44 @@ const reasonOptions: ReasonOption[] = [
   "Others",
 ];
 
-const unitOptions: Unit[] = ["Kg", "Pcs", "Box", "Pallet", "Roll", "Meter"];
-
-type OutgoingFormValues = {
-  packingList: string;
-  rmCode: string;
-  rmName: string;
-  currentStock: number;
-  unit: Unit;
-  qtyOut: number;
-  reason: string;
-  purpose?: string;
-  workOrder?: string;
-  destination?: string;
-  remarks?: string;
-};
-
 export default function OutgoingRawMaterialPage() {
-  const [rows, setRows] = useState<OutgoingRow[]>(initialRows);
-  const [reasonFilter, setReasonFilter] = useState<ReasonOption | "ALL">("ALL");
+  const apiEnabled = Boolean(apiBaseUrl);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  const [reasonFilter, setReasonFilter] = useState<string>("ALL");
   const [trxOpen, setTrxOpen] = useState(false);
   const [form] = Form.useForm<OutgoingFormValues>();
 
+  const listQuery = useGetOutgoingRawMaterialsQuery(
+    { page: currentPage, limit: pageSize },
+    { skip: !apiEnabled }
+  );
+  const [createOutgoingRawMaterial, createState] = useCreateOutgoingRawMaterialMutation();
+
   const [detailOpen, setDetailOpen] = useState(false);
-  const [detailRow, setDetailRow] = useState<OutgoingRow | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
+
+  const detailQuery = useGetOutgoingRawMaterialByIdQuery(
+    { id: detailId ?? 0 },
+    { skip: !apiEnabled || !detailOpen || !detailId }
+  );
+
+  const rows = listQuery.data?.items ?? [];
+  const total = listQuery.data?.pagination.total ?? rows.length;
 
   const data = useMemo(() => {
     if (reasonFilter === "ALL") return rows;
-    return rows.filter((r) => r.reason === reasonFilter);
+    return rows.filter((r) => (r.reason || "").toLowerCase() === reasonFilter.toLowerCase());
   }, [reasonFilter, rows]);
 
   const openTrx = () => {
     setTrxOpen(true);
     form.setFieldsValue({
-      unit: "Kg",
-      currentStock: 0,
-      qtyOut: 0,
+      unit: "g",
+      quantity_out: 0,
+      reason: "Production Use",
     });
   };
 
@@ -184,353 +84,258 @@ export default function OutgoingRawMaterialPage() {
   const handleProcess = async () => {
     const values = await form.validateFields();
 
-    const now = new Date();
-    const date = now.toISOString().slice(0, 10);
+    if (!apiEnabled) {
+      message.info("NEXT_PUBLIC_API_URL is not configured");
+      return;
+    }
 
-    const nextId = String(rows.length + 1);
-    const txNumber = `OUT-RM-${String(rows.length + 1).padStart(3, "0")}`;
-
-    const stockBefore = Number(values.currentStock ?? 0);
-    const qtyOut = Number(values.qtyOut ?? 0);
-    const stockAfter = Math.max(0, stockBefore - qtyOut);
-
-    const nextRow: OutgoingRow = {
-      id: nextId,
-      transactionId: txNumber,
-      date,
-      rmCode: values.rmCode,
-      rmName: values.rmName,
-      packingList: values.packingList,
-      qtyOutKg: qtyOut,
-      stockBeforeKg: stockBefore,
-      stockAfterKg: stockAfter,
+    await createOutgoingRawMaterial({
+      packing_list_rm: values.packing_list_rm,
+      uniq: values.uniq,
       unit: values.unit,
-      reason: (values.reason as ReasonOption) ?? "Production Use",
-      requestedBy: "Admin PPIC",
-      approvedBy: "Manager A",
-      destination: values.destination || "-",
-      purpose: values.purpose || "-",
-      workOrder: values.workOrder || "-",
+      quantity_out: Number(values.quantity_out ?? 0),
+      reason: values.reason,
+      purpose: values.purpose,
+      work_order_no: values.work_order_no,
+      destination_location: values.destination_location,
+      requested_by: values.requested_by,
       remarks: values.remarks,
-    };
+    }).unwrap();
 
-    setRows((prev) => [nextRow, ...prev]);
     message.success("Outgoing transaction created");
+    listQuery.refetch();
     closeTrx();
   };
 
-  const openDetail = (row: OutgoingRow) => {
-    setDetailRow(row);
+  const openDetail = (row: OutgoingRawMaterial) => {
+    setDetailId(row.id);
     setDetailOpen(true);
   };
 
   const closeDetail = () => {
     setDetailOpen(false);
-    setDetailRow(null);
+    setDetailId(null);
   };
 
-  const columns: ColumnsType<OutgoingRow> = [
+  const columns: ColumnsType<OutgoingRawMaterial> = [
     {
       title: "Transaction ID",
-      dataIndex: "transactionId",
-      key: "transactionId",
-      width: 140,
-      render: (v: string) => <span className="font-medium text-gray-900">{v}</span>,
+      dataIndex: "transaction_id",
+      key: "transaction_id",
+      width: 150,
+      render: (v: string) => <span className="font-medium text-gray-900">{v || "-"}</span>,
     },
-    { title: "Date", dataIndex: "date", key: "date", width: 120 },
     {
-      title: "RM Info",
-      dataIndex: "rmName",
-      key: "rmInfo",
-      width: 260,
-      render: (_: unknown, r: OutgoingRow) => (
-        <div className="text-gray-800">
-          <div className="font-medium">{r.rmCode}</div>
-          <div className="text-gray-500">{r.rmName}</div>
-        </div>
+      title: "Transaction Date",
+      dataIndex: "transaction_date",
+      key: "transaction_date",
+      width: 160,
+      render: (v: string) => (v ? new Date(v).toLocaleDateString() : "-"),
+    },
+    { title: "UNIQ", dataIndex: "uniq", key: "uniq", width: 120 },
+    { title: "RM Name", dataIndex: "rm_name", key: "rm_name", width: 240 },
+    { title: "Packing List RM", dataIndex: "packing_list_rm", key: "packing_list_rm", width: 160 },
+    { title: "Unit", dataIndex: "unit", key: "unit", width: 80 },
+    {
+      title: "Quantity Out",
+      dataIndex: "quantity_out",
+      key: "quantity_out",
+      width: 130,
+      align: "right",
+      render: (_: number, r) => (
+        <span className="text-red-600 font-medium">- {r.quantity_out} {r.unit}</span>
       ),
     },
-    {
-      title: "Qty Out",
-      dataIndex: "qtyOutKg",
-      key: "qtyOutKg",
-      width: 110,
-      align: "right",
-      render: (_: number, r: OutgoingRow) => (
-        <span className="text-red-600 font-medium">- {r.qtyOutKg} {r.unit}</span>
-      ),
-    },
-    {
-      title: "Stock Before",
-      dataIndex: "stockBeforeKg",
-      key: "stockBeforeKg",
-      width: 120,
-      align: "right",
-      render: (_: number, r: OutgoingRow) => `${r.stockBeforeKg} ${r.unit}`,
-    },
-    {
-      title: "Stock After",
-      dataIndex: "stockAfterKg",
-      key: "stockAfterKg",
-      width: 110,
-      align: "right",
-      render: (_: number, r: OutgoingRow) => `${r.stockAfterKg} ${r.unit}`,
-    },
+    { title: "Stock Before", dataIndex: "stock_before", key: "stock_before", width: 120, align: "right" },
+    { title: "Stock After", dataIndex: "stock_after", key: "stock_after", width: 120, align: "right" },
     {
       title: "Reason",
       dataIndex: "reason",
       key: "reason",
-      width: 140,
-      render: (v: ReasonOption) => (
-        <Tag className="bg-blue-50 text-blue-700 border-blue-100">{v}</Tag>
-      ),
+      width: 160,
+      render: (v: string) => <Tag className="bg-blue-50 text-blue-700 border-blue-100">{v || "-"}</Tag>,
     },
-    { title: "Requested By", dataIndex: "requestedBy", key: "requestedBy", width: 140 },
+    { title: "Purpose", dataIndex: "purpose", key: "purpose", width: 220 },
+    { title: "WO", dataIndex: "work_order_no", key: "work_order_no", width: 140 },
+    { title: "Destination", dataIndex: "destination_location", key: "destination_location", width: 180 },
+    { title: "Requested By", dataIndex: "requested_by", key: "requested_by", width: 140 },
+    {
+      title: "Created At",
+      dataIndex: "created_at",
+      key: "created_at",
+      width: 180,
+      render: (v: string) => (v ? new Date(v).toLocaleString() : "-"),
+    },
     {
       title: "Actions",
       key: "actions",
       width: 80,
       fixed: "right",
-      render: (_: unknown, r: OutgoingRow) => (
-        <Button
-          type="text"
-          icon={<EyeOutlined />}
-          className="text-gray-500"
-          onClick={() => openDetail(r)}
-        />
+      render: (_: unknown, r) => (
+        <Button type="text" icon={<EyeOutlined />} className="text-gray-500" onClick={() => openDetail(r)} />
       ),
     },
   ];
 
+  const detailItems = detailQuery.data ? buildDetailItems(detailQuery.data) : [];
+
   return (
     <div className="p-6 space-y-4">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Outgoing - Raw Material</h1>
+          <p className="text-gray-600">Track outgoing raw material transactions</p>
+        </div>
+        <Button type="primary" icon={<PlusOutlined />} onClick={openTrx}>
+          New Outgoing
+        </Button>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-gray-600">Filter by Reason:</span>
+        <Select
+          value={reasonFilter}
+          onChange={(v) => setReasonFilter(v)}
+          style={{ width: 240 }}
+          options={[
+            { label: "All Transactions", value: "ALL" },
+            ...reasonOptions.map((r) => ({ label: r, value: r })),
+          ]}
+        />
+      </div>
+
+      <Table<OutgoingRawMaterial>
+        rowKey={(r) => String(r.id)}
+        columns={columns}
+        dataSource={data}
+        loading={apiEnabled ? listQuery.isFetching : false}
+        scroll={{ x: 1900 }}
+        pagination={{
+          current: currentPage,
+          pageSize,
+          total,
+          showSizeChanger: true,
+          onChange: (page, size) => {
+            setCurrentPage(page);
+            if (typeof size === "number") setPageSize(size);
+          },
+        }}
+      />
+
       <Modal
-        title={
-          <div>
-            <div className="font-semibold">
-              Outgoing RM Transaction - {detailRow?.transactionId}
-            </div>
-            <div className="text-xs text-gray-500">Complete information about this outgoing transaction</div>
-          </div>
-        }
+        title="Outgoing Raw Material Detail"
         open={detailOpen}
         onCancel={closeDetail}
         footer={null}
-        width={560}
+        width={860}
         destroyOnClose
       >
-        {detailRow && (
-          <div className="space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-xs text-gray-500">Transaction Date</div>
-                <div className="text-sm font-medium text-gray-900">{detailRow.date}</div>
-              </div>
-              <div className="text-right">
-                <div className="text-xs text-gray-500">Reason</div>
-                <Tag className="bg-blue-50 text-blue-700 border-blue-100">{detailRow.reason}</Tag>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-gray-900 font-semibold mb-2">Raw Material Information</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <div className="text-xs text-gray-500">RM Code</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.rmCode}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">RM Name</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.rmName}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Packing List</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.packingList}</div>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-gray-900 font-semibold mb-2">Transaction Details</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <div className="text-xs text-gray-500">Quantity Out</div>
-                  <div className="text-sm font-semibold text-red-600">- {detailRow.qtyOutKg} {detailRow.unit}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Purpose</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.purpose}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Stock Before</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.stockBeforeKg} {detailRow.unit}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Stock After</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.stockAfterKg} {detailRow.unit}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Destination</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.destination}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Work Order</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.workOrder}</div>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <div className="text-gray-900 font-semibold mb-2">Approval Information</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <div className="text-xs text-gray-500">Requested By</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.requestedBy}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-500">Approved By</div>
-                  <div className="text-sm font-medium text-gray-900">{detailRow.approvedBy}</div>
-                </div>
-              </div>
-            </div>
-          </div>
+        {detailQuery.isFetching ? (
+          <div className="text-gray-600">Loading…</div>
+        ) : detailQuery.isError ? (
+          <div className="text-red-600">Failed to load detail.</div>
+        ) : !detailQuery.data ? (
+          <div className="text-gray-500">No detail selected</div>
+        ) : (
+          <Descriptions bordered size="small" column={2} items={detailItems} />
         )}
       </Modal>
 
       <Modal
-        title="Process Outgoing Raw Material"
+        title="Create Outgoing Raw Material"
         open={trxOpen}
         onCancel={closeTrx}
-        footer={
-          <div className="flex items-center justify-end gap-2">
-            <Button onClick={closeTrx}>Cancel</Button>
-            <Button type="primary" onClick={handleProcess}>
-              Process Outgoing RM
-            </Button>
-          </div>
-        }
-        width={560}
+        onOk={handleProcess}
+        okText="Create"
+        confirmLoading={createState.isLoading}
+        width={680}
         destroyOnClose
       >
-        <div className="text-gray-500 text-sm mb-3">
-          Scan packing list or manually enter raw material outgoing information
-        </div>
-
-        <Form form={form} layout="vertical">
-          <Form.Item label="Packing List RM" name="packingList" rules={[{ required: true }]}>
-            <Input placeholder="Scan or enter packing list" />
-          </Form.Item>
-
-          <div className="text-gray-900 font-semibold mb-2">Raw Material Information</div>
-
+        <Form form={form} layout="vertical" requiredMark={false}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Form.Item label="RM Code" name="rmCode" rules={[{ required: true }]}>
-              <Input placeholder="Auto-filled or input manual" />
+            <Form.Item
+              label="Packing List RM"
+              name="packing_list_rm"
+              rules={[{ required: true, message: "packing_list_rm wajib" }]}
+            >
+              <Input placeholder="PL-EMA-LV3-001" />
             </Form.Item>
 
-            <Form.Item label="RM Name" name="rmName" rules={[{ required: true }]}>
-              <Input placeholder="Auto-filled or input manual" />
-            </Form.Item>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Form.Item label="Current Stock" name="currentStock" rules={[{ required: true }]}>
-              <InputNumber className="w-full" min={0} placeholder="Auto-filled" />
+            <Form.Item label="UNIQ" name="uniq" rules={[{ required: true, message: "uniq wajib" }]}>
+              <Input placeholder="LV3-001" />
             </Form.Item>
 
-            <Form.Item label="Unit" name="unit" rules={[{ required: true }]}>
-              <Select
-                placeholder="Select Unit"
-                options={unitOptions.map((u) => ({ label: u, value: u }))}
-              />
-            </Form.Item>
-          </div>
-
-          <div className="text-gray-900 font-semibold mb-2">Outgoing Transaction Details</div>
-
-          <Form.Item label="Quantity Out" name="qtyOut" rules={[{ required: true }]}>
-            <InputNumber className="w-full" min={0} placeholder="Enter quantity to decrease" />
-          </Form.Item>
-
-          <Form.Item label="Reason" name="reason" rules={[{ required: true }]}>
-            <Select
-              placeholder="Select reason"
-              options={reasonOptions.map((r) => ({ label: r, value: r }))}
-            />
-          </Form.Item>
-
-          <Form.Item label="Purpose" name="purpose">
-            <Input placeholder="Describe the purpose (e.g., Work Order WO-2024-045)" />
-          </Form.Item>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Form.Item label="Work Order Number" name="workOrder">
-              <Input placeholder="Optional - if related to WO" />
+            <Form.Item label="Unit" name="unit" rules={[{ required: true, message: "unit wajib" }]}>
+              <Input placeholder="g" />
             </Form.Item>
 
-            <Form.Item label="Destination Location" name="destination">
-              <Input placeholder="e.g., Production Line A, QC Lab" />
+            <Form.Item
+              label="Quantity Out"
+              name="quantity_out"
+              rules={[{ required: true, message: "quantity_out wajib" }]}
+            >
+              <InputNumber className="w-full" min={0} />
+            </Form.Item>
+
+            <Form.Item label="Reason" name="reason" rules={[{ required: true, message: "reason wajib" }]}>
+              <Select options={reasonOptions.map((r) => ({ label: r, value: r }))} />
+            </Form.Item>
+
+            <Form.Item label="Work Order No" name="work_order_no">
+              <Input placeholder="WO-2024-045" />
+            </Form.Item>
+
+            <Form.Item label="Purpose" name="purpose">
+              <Input placeholder="Work Order WO-2024-045" />
+            </Form.Item>
+
+            <Form.Item label="Destination Location" name="destination_location">
+              <Input placeholder="Production Line A" />
+            </Form.Item>
+
+            <Form.Item label="Requested By" name="requested_by">
+              <Input placeholder="John Doe" />
             </Form.Item>
           </div>
 
           <Form.Item label="Remarks" name="remarks">
-            <Input.TextArea rows={3} placeholder="Additional notes or comments" />
+            <Input.TextArea rows={3} placeholder="Optional" />
           </Form.Item>
-
-          <div className="border border-red-200 bg-red-50 rounded-lg p-3 text-sm">
-            <div className="text-red-700 font-medium mb-1">Important:</div>
-            <div className="text-red-700">
-              This transaction will immediately decrease the raw material stock quantity.
-              The database will be updated and logged for tracking purposes.
-            </div>
-          </div>
         </Form>
       </Modal>
-
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Outgoing - Raw Material</h1>
-          <p className="text-gray-600">
-            Track and manage raw material quantity decrements with detailed history logs
-          </p>
-        </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openTrx}>
-          New Outgoing Transaction
-        </Button>
-      </div>
-
-      <Card className="rounded-lg shadow-sm" styles={{ body: { padding: 16 } }}>
-        <div className="flex items-center gap-2 text-sm text-gray-700 mb-4">
-          <span className="font-medium">Outgoing Raw Material Management</span>
-          <span className="text-gray-400">—</span>
-          <span className="text-gray-500">Process outgoing raw materials and track all quantity decrements</span>
-        </div>
-
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
-            <span className="text-gray-600">Filter by Reason:</span>
-            <Select
-              value={reasonFilter}
-              onChange={(v) => setReasonFilter(v as ReasonOption | "ALL")}
-              style={{ width: 200 }}
-              options={[
-                { label: "All Transactions", value: "ALL" },
-                ...reasonOptions.map((r) => ({ label: r, value: r })),
-              ]}
-            />
-          </div>
-        </div>
-
-        <div className="mt-4" style={{ overflowX: "auto" }}>
-          <Table<OutgoingRow>
-            columns={columns}
-            dataSource={data}
-            rowKey="id"
-            pagination={false}
-            scroll={{ x: "max-content" }}
-          />
-        </div>
-      </Card>
     </div>
   );
+}
+
+function buildDetailItems(row: OutgoingRawMaterial) {
+  return [
+    { key: "transaction_id", label: "Transaction ID", children: row.transaction_id || "-" },
+    {
+      key: "transaction_date",
+      label: "Transaction Date",
+      children: row.transaction_date ? new Date(row.transaction_date).toLocaleString() : "-",
+    },
+    { key: "uniq", label: "UNIQ", children: row.uniq || "-" },
+    { key: "rm_name", label: "RM Name", children: row.rm_name || "-" },
+    { key: "packing_list_rm", label: "Packing List RM", children: row.packing_list_rm || "-" },
+    { key: "unit", label: "Unit", children: row.unit || "-" },
+    { key: "quantity_out", label: "Quantity Out", children: row.quantity_out },
+    { key: "stock_before", label: "Stock Before", children: row.stock_before },
+    { key: "stock_after", label: "Stock After", children: row.stock_after },
+    { key: "reason", label: "Reason", children: row.reason || "-" },
+    { key: "purpose", label: "Purpose", children: row.purpose || "-" },
+    { key: "work_order_no", label: "Work Order No", children: row.work_order_no || "-" },
+    {
+      key: "destination_location",
+      label: "Destination Location",
+      children: row.destination_location || "-",
+    },
+    { key: "requested_by", label: "Requested By", children: row.requested_by || "-" },
+    { key: "remarks", label: "Remarks", children: row.remarks || "-" },
+    {
+      key: "created_at",
+      label: "Created At",
+      children: row.created_at ? new Date(row.created_at).toLocaleString() : "-",
+    },
+  ];
 }

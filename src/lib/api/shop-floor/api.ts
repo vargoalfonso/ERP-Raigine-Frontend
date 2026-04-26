@@ -26,8 +26,152 @@ const parseObjectResponse = <T,>(response: unknown): T | null => {
   if (!isRecord(response)) return null;
 
   const data = response.data;
-  if (isRecord(data)) return data as T;
+  if (isRecord(data)) {
+    const nested = data.data;
+    if (isRecord(nested)) return nested as T;
+    return data as T;
+  }
   return response as T;
+};
+
+export type ShopFloorLiveProductionSummaryParams = {
+  limit?: number;
+  stale_minutes?: number;
+};
+
+export type ShopFloorDeliveryReadinessSummaryParams = {
+  limit?: number;
+};
+
+export type ShopFloorProductionIssuesSummaryParams = {
+  limit?: number;
+};
+
+export type ShopFloorScanEventsSummaryParams = {
+  limit?: number;
+  window_hours?: number;
+};
+
+export type ShopFloorLiveProductionSummaryItem = {
+  machine?: {
+    id?: string;
+    name?: string;
+    code?: string;
+    status?: string;
+  };
+  production?: {
+    uniq_code?: string;
+    work_order?: string;
+    part_name?: string;
+    operator_name?: string;
+    last_scan_at?: string | null;
+  };
+  progress?: {
+    percent?: number;
+    label?: string;
+    status?: string;
+    target_qty?: number;
+    done_qty?: number;
+  };
+};
+
+export type ShopFloorLiveProductionSummary = {
+  as_of?: string;
+  stale_window_minutes?: number;
+  throughput_today?: number;
+  machine_total?: number;
+  machine_running?: number;
+  machine_idle?: number;
+  machine_stale?: number;
+  items?: ShopFloorLiveProductionSummaryItem[];
+};
+
+export type ShopFloorDeliveryReadinessSummaryItem = {
+  identity?: {
+    uniq_code?: string;
+    product_name?: string;
+    customer_name?: string;
+  };
+  delivery?: {
+    schedule_date?: string;
+    schedule_time?: string;
+    due_at?: string;
+    required_qty?: number;
+  };
+  inventory?: {
+    finished_goods_qty?: number;
+    wip_qty?: number;
+    total_available_qty?: number;
+    shortfall_qty?: number;
+  };
+  readiness?: {
+    status?: string;
+    coverage_percent?: number;
+  };
+};
+
+export type ShopFloorDeliveryReadinessSummary = {
+  as_of?: string;
+  scheduled_total?: number;
+  ready_total?: number;
+  critical_total?: number;
+  required_qty_total?: number;
+  available_qty_total?: number;
+  shortfall_qty_total?: number;
+  items?: ShopFloorDeliveryReadinessSummaryItem[];
+};
+
+export type ShopFloorProductionIssuesSummaryItem = {
+  issue_id?: string;
+  title?: string;
+  issue_type?: string;
+  description?: string;
+  machine_name?: string;
+  machine_code?: string;
+  production_line?: string;
+  reported_by?: string;
+  operator_name?: string;
+  priority?: string;
+  status?: string;
+  impact?: string;
+  reported_at?: string;
+};
+
+export type ShopFloorProductionIssuesSummary = {
+  as_of?: string;
+  source_available?: boolean;
+  window_hours?: number;
+  total_issues?: number;
+  high_priority?: number;
+  medium_priority?: number;
+  low_priority?: number;
+  items?: ShopFloorProductionIssuesSummaryItem[];
+};
+
+export type ShopFloorScanEventsSummaryItem = {
+  id?: string | number;
+  event_at?: string;
+  scan_type?: string;
+  machine_name?: string;
+  machine_code?: string;
+  uniq_code?: string;
+  work_order?: string;
+  operator_name?: string;
+  process_name?: string;
+  qty?: number;
+  good_qty?: number;
+  ng_qty?: number;
+  scrap_qty?: number;
+};
+
+export type ShopFloorScanEventsSummary = {
+  as_of?: string;
+  window_hours?: number;
+  scan_in_count?: number;
+  scan_out_count?: number;
+  qc_count?: number;
+  total_events?: number;
+  items?: ShopFloorScanEventsSummaryItem[];
 };
 
 export type ShopFloorWorkOrder = {
@@ -173,9 +317,67 @@ export type ShopFloorMachineDetail = ShopFloorMachine & {
 
 export const shopFloorApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
+    getShopFloorLiveProductionSummary: builder.query<ApiResponse<ShopFloorLiveProductionSummary>, ShopFloorLiveProductionSummaryParams | void>({
+      query: (arg) => {
+        const params = isRecord(arg) ? (arg as ShopFloorLiveProductionSummaryParams) : {};
+        return {
+          url: "/shop-floor/live-production/summary",
+          method: "GET",
+          params,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        };
+      },
+      transformResponse: (response: unknown) => ok((parseObjectResponse<ShopFloorLiveProductionSummary>(response) ?? {}) as ShopFloorLiveProductionSummary),
+    }),
+
+    getShopFloorDeliveryReadinessSummary: builder.query<
+      ApiResponse<ShopFloorDeliveryReadinessSummary>,
+      ShopFloorDeliveryReadinessSummaryParams | void
+    >({
+      query: (arg) => {
+        const params = isRecord(arg) ? (arg as ShopFloorDeliveryReadinessSummaryParams) : {};
+        return {
+          url: "/shop-floor/delivery-readiness/summary",
+          method: "GET",
+          params,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        };
+      },
+      transformResponse: (response: unknown) => ok((parseObjectResponse<ShopFloorDeliveryReadinessSummary>(response) ?? {}) as ShopFloorDeliveryReadinessSummary),
+    }),
+
+    getShopFloorProductionIssuesSummary: builder.query<
+      ApiResponse<ShopFloorProductionIssuesSummary>,
+      ShopFloorProductionIssuesSummaryParams | void
+    >({
+      query: (arg) => {
+        const params = isRecord(arg) ? (arg as ShopFloorProductionIssuesSummaryParams) : {};
+        return {
+          url: "/shop-floor/production-issues/summary",
+          method: "GET",
+          params,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        };
+      },
+      transformResponse: (response: unknown) => ok((parseObjectResponse<ShopFloorProductionIssuesSummary>(response) ?? {}) as ShopFloorProductionIssuesSummary),
+    }),
+
+    getShopFloorScanEventsSummary: builder.query<ApiResponse<ShopFloorScanEventsSummary>, ShopFloorScanEventsSummaryParams | void>({
+      query: (arg) => {
+        const params = isRecord(arg) ? (arg as ShopFloorScanEventsSummaryParams) : {};
+        return {
+          url: "/shop-floor/scan-events/summary",
+          method: "GET",
+          params,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        };
+      },
+      transformResponse: (response: unknown) => ok((parseObjectResponse<ShopFloorScanEventsSummary>(response) ?? {}) as ShopFloorScanEventsSummary),
+    }),
+
     getShopFloorLiveProduction: builder.query<ApiResponse<ShopFloorLiveProduction[]>, void>({
       query: () => ({
-        url: "/api/shop-floor/live-production",
+        url: "/shop-floor/live-production",
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
@@ -184,7 +386,7 @@ export const shopFloorApiSlice = apiSlice.injectEndpoints({
 
     getShopFloorDeliveryReadiness: builder.query<ApiResponse<ShopFloorDeliveryReadiness[]>, void>({
       query: () => ({
-        url: "/api/shop-floor/delivery-readiness",
+        url: "/shop-floor/delivery-readiness",
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
@@ -193,7 +395,7 @@ export const shopFloorApiSlice = apiSlice.injectEndpoints({
 
     getShopFloorProductionIssues: builder.query<ApiResponse<ShopFloorProductionIssue[]>, void>({
       query: () => ({
-        url: "/api/shop-floor/production-issues",
+        url: "/shop-floor/production-issues",
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
@@ -202,7 +404,7 @@ export const shopFloorApiSlice = apiSlice.injectEndpoints({
 
     getShopFloorScanEvents: builder.query<ApiResponse<ShopFloorScanEvent[]>, void>({
       query: () => ({
-        url: "/api/shop-floor/scan-events",
+        url: "/shop-floor/scan-events",
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
@@ -211,7 +413,7 @@ export const shopFloorApiSlice = apiSlice.injectEndpoints({
 
     getShopFloorMachineDetail: builder.query<ApiResponse<ShopFloorMachineDetail>, string>({
       query: (machineId) => ({
-        url: `/api/shop-floor/machine/${encodeURIComponent(machineId)}`,
+        url: `/shop-floor/machine/${encodeURIComponent(machineId)}`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
@@ -221,6 +423,10 @@ export const shopFloorApiSlice = apiSlice.injectEndpoints({
 });
 
 export const {
+  useGetShopFloorLiveProductionSummaryQuery,
+  useGetShopFloorDeliveryReadinessSummaryQuery,
+  useGetShopFloorProductionIssuesSummaryQuery,
+  useGetShopFloorScanEventsSummaryQuery,
   useGetShopFloorLiveProductionQuery,
   useGetShopFloorDeliveryReadinessQuery,
   useGetShopFloorProductionIssuesQuery,

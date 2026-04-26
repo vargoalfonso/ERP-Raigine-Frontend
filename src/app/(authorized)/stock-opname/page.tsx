@@ -7,8 +7,6 @@ import { useRouter } from "next/navigation";
 import {
   CalendarOutlined,
   CheckCircleOutlined,
-  DeleteOutlined,
-  EditOutlined,
   EyeOutlined,
   ExportOutlined,
   QrcodeOutlined,
@@ -22,10 +20,8 @@ import {
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
   type StockInventoryType,
-  type StockOpnameListRecord,
-  useDeleteStockOpnameMutation,
-  useGetStockOpnameListQuery,
-  useGetStockOpnameSummaryQuery,
+  type StockOpnameSessionListRecord,
+  useGetStockOpnameSessionsQuery,
 } from "@/lib/api/stock-opname/api";
 
 type StockTab = "finished" | "raw" | "indirect" | "wip";
@@ -51,10 +47,10 @@ type StockOpnameRow = {
 const DEFAULT_PERIOD = "01/2024";
 
 const TAB_TO_INVENTORY_TYPE: Record<StockTab, StockInventoryType> = {
-  finished: "finished_good",
-  raw: "raw_material",
-  indirect: "indirect",
-  wip: "wip",
+  finished: "FG",
+  raw: "RM",
+  indirect: "IDR",
+  wip: "WIP",
 };
 
 function normalizeStatus(value?: string): StockOpnameRow["status"] {
@@ -72,28 +68,28 @@ function normalizeApproval(value?: string): StockOpnameRow["approval"] {
   return "-";
 }
 
-function mapRecordToRow(record: StockOpnameListRecord): StockOpnameRow {
-  const systemQty = record.system_total ?? record.summary?.system_total ?? 0;
-  const physicalQty = record.physical_total ?? record.summary?.physical_total ?? 0;
-  const impactSource = record.ui_impact ?? record.impact;
-  const statusSource = record.ui_status ?? record.status_label ?? record.status;
-  const approvalSource = record.status_label ?? record.status ?? record.decision_status;
+function mapRecordToRow(record: StockOpnameSessionListRecord): StockOpnameRow {
+  const systemQty = record.system_qty_total ?? 0;
+  const physicalQty = record.physical_qty_total ?? 0;
+  const impactSource = record.impact_label;
+  const statusSource = record.status_label ?? record.status;
+  const approvalSource = record.impact_label ?? record.status;
 
   return {
-    key: record.opname_number || String(record.id),
+    key: record.uuid || record.session_number || String(record.id),
     apiId: record.id,
-    opnameId: record.opname_number,
-    period: record.period ?? DEFAULT_PERIOD,
-    location: record.location ?? "-",
+    opnameId: record.session_number,
+    period: record.period_label ?? DEFAULT_PERIOD,
+    location: record.warehouse_location ?? "-",
     systemQty,
     physicalQty,
     status: normalizeStatus(statusSource),
     approval: normalizeApproval(approvalSource),
-    costImpact: record.cost_impact ?? record.summary?.cost_impact ?? 0,
-    itemName: record.opname_number,
-    itemCode: record.inventory_type,
-    countedBy: undefined,
-    countedAt: record.period,
+    costImpact: record.cost_impact ?? 0,
+    itemName: record.session_number,
+    itemCode: String(record.inventory_type ?? "-"),
+    countedBy: record.submitted_by ?? record.created_by ?? undefined,
+    countedAt: record.counted_date ?? record.schedule_date ?? undefined,
     impact:
       (impactSource ?? "").toLowerCase().includes("waiting") ||
       (impactSource ?? "").toLowerCase().includes("pending") ||
@@ -152,21 +148,14 @@ export default function StockOpnamePage() {
     setPage(1);
   }, [tab]);
 
-  const { data: summaryData } = useGetStockOpnameSummaryQuery(undefined, {
-    skip: !apiEnabled,
-  });
-  const { data: listData, isFetching: listLoading } = useGetStockOpnameListQuery(
+  const { data: listData, isFetching: listLoading } = useGetStockOpnameSessionsQuery(
     {
-      inventory_type: inventoryType,
-      period: DEFAULT_PERIOD,
+      type: inventoryType,
       page,
       limit: pageSize,
     },
-    {
-      skip: !apiEnabled,
-    }
+    { skip: !apiEnabled }
   );
-  const [deleteStockOpname, { isLoading: deleting }] = useDeleteStockOpnameMutation();
 
   const tabs = useMemo(
     () => [
@@ -323,9 +312,9 @@ export default function StockOpnamePage() {
   );
 
   const allRows = useMemo(() => {
-    if (apiEnabled) return (listData?.rows ?? []).map(mapRecordToRow);
+    if (apiEnabled) return (listData?.items ?? []).map(mapRecordToRow);
     return rowsByTab[tab];
-  }, [apiEnabled, listData?.rows, rowsByTab, tab]);
+  }, [apiEnabled, listData?.items, rowsByTab, tab]);
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -352,17 +341,16 @@ export default function StockOpnamePage() {
   }, [allRows, search, typeFilter]);
 
   const kpis = useMemo(() => {
-    if (apiEnabled && summaryData) {
-      const listCostImpact = (listData?.rows ?? []).reduce(
-        (total, row) => total + (row.cost_impact ?? row.summary?.cost_impact ?? 0),
-        0
-      );
-
+    if (apiEnabled) {
+      const items = listData?.items ?? [];
+      const completed = items.filter((r) => normalizeStatus(r.status_label ?? r.status) === "Completed").length;
+      const withVariance = items.filter((r) => (r.variance_qty_total ?? 0) !== 0).length;
+      const costImpact = items.reduce((total, r) => total + (r.cost_impact ?? 0), 0);
       return {
-        totalRecords: summaryData.total_records,
-        completed: summaryData.completed,
-        withVariance: summaryData.with_variance,
-        costImpact: listCostImpact,
+        totalRecords: listData?.pagination.total ?? items.length,
+        completed,
+        withVariance,
+        costImpact,
       };
     }
     const all = Object.values(rowsByTab).flat();
@@ -375,21 +363,7 @@ export default function StockOpnamePage() {
       withVariance,
       costImpact,
     };
-  }, [apiEnabled, listData?.rows, rowsByTab, summaryData]);
-
-  const handleDelete = async (row: StockOpnameRow) => {
-    if (!apiEnabled || !row.apiId) {
-      message.info(`Delete ${row.opnameId}`);
-      return;
-    }
-
-    try {
-      await deleteStockOpname(row.apiId).unwrap();
-      message.success(`Deleted ${row.opnameId}`);
-    } catch {
-      message.error(`Failed to delete ${row.opnameId}`);
-    }
-  };
+  }, [apiEnabled, listData?.items, listData?.pagination.total, rowsByTab]);
 
   const columns = useMemo<ColumnsType<StockOpnameRow>>(
     () => {
@@ -423,21 +397,7 @@ export default function StockOpnamePage() {
               size="small"
               className="!rounded-lg"
               icon={<EyeOutlined />}
-              onClick={() => router.push(`/stock-opname/detail/${encodeURIComponent(r.opnameId)}?tab=${tab}`)}
-            />
-            <Button
-              size="small"
-              className="!rounded-lg"
-              icon={<EditOutlined />}
-              onClick={() => router.push(`/stock-opname/start-count?tab=${tab}`)}
-            />
-            <Button
-              size="small"
-              danger
-              className="!rounded-lg"
-              icon={<DeleteOutlined />}
-              loading={deleting}
-              onClick={() => void handleDelete(r)}
+              onClick={() => router.push(`/stock-opname/detail/${encodeURIComponent(r.key)}?tab=${tab}`)}
             />
           </div>
         ),
@@ -602,7 +562,7 @@ export default function StockOpnamePage() {
         actionsCol,
       ];
     },
-    [deleting, router, tab]
+    [router, tab]
   );
 
   const itemsCounted = useMemo(() => filteredRows.length, [filteredRows.length]);
@@ -725,7 +685,7 @@ export default function StockOpnamePage() {
             pagination={{
               current: page,
               pageSize,
-              total: apiEnabled ? (listData?.total ?? filteredRows.length) : 521390,
+              total: apiEnabled ? (listData?.pagination.total ?? filteredRows.length) : 521390,
               showSizeChanger: true,
               showQuickJumper: true,
               showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} Results`,

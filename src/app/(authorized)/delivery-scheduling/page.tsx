@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import {
   Button,
   Input,
   Modal,
+  Select,
   Table,
   Tag,
   message,
@@ -26,11 +27,12 @@ import {
   CalendarOutlined,
   FileTextOutlined,
 } from "@ant-design/icons";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useApproveBulkDeliveryScheduleMutation,
   useApproveDeliveryScheduleMutation,
   useGetDeliveryScheduleDnCreationListQuery,
+  useGetDeliverySchedulesSummaryQuery,
   useGetDeliverySchedulesQuery,
   useScanDeliveryScheduleDnRobotMutation,
 } from "@/lib/api/delivery-schedule/api";
@@ -112,11 +114,30 @@ const toDnStatus = (status: string): DnStatus => {
   return "Created";
 };
 
-export default function DeliverySchedulingPage() {
+const normalizeQrSrc = (value: string): string => {
+  const qr = String(value ?? "").trim();
+  if (!qr || qr === "-") return "";
+  if (qr.startsWith("data:image/")) return qr;
+  if (qr.startsWith("http://") || qr.startsWith("https://")) return qr;
+
+  // If backend returns raw base64, convert to a data URL.
+  const looksLikeBase64 = qr.length > 80 && /^[A-Za-z0-9+/=]+$/.test(qr);
+  return looksLikeBase64 ? `data:image/png;base64,${qr}` : qr;
+};
+
+function DeliverySchedulingPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabKey>("schedule");
   const [query, setQuery] = useState("");
   const [customer, setCustomer] = useState<string>("");
+
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (tab === "dn" || tab === "schedule") {
+      setActiveTab(tab);
+    }
+  }, [searchParams]);
 
   const [approveAllOpen, setApproveAllOpen] = useState(false);
   const [approveAllTargetGroupKey, setApproveAllTargetGroupKey] = useState<string>("");
@@ -126,19 +147,24 @@ export default function DeliverySchedulingPage() {
   const [scanOpen, setScanOpen] = useState(false);
   const [scanDnNumber, setScanDnNumber] = useState("");
 
-  const schedulesQuery = useGetDeliverySchedulesQuery();
-  const dnCreationQuery = useGetDeliveryScheduleDnCreationListQuery();
+  const schedulesQuery = useGetDeliverySchedulesQuery({ status: "scheduled", page: 1, limit: 20 });
+  const schedulesSummaryQuery = useGetDeliverySchedulesSummaryQuery();
+  const dnCreationQuery = useGetDeliveryScheduleDnCreationListQuery({ page: 1, limit: 20 });
   const [approveDeliverySchedule, approveState] = useApproveDeliveryScheduleMutation();
   const [approveBulkDeliverySchedule, approveBulkState] = useApproveBulkDeliveryScheduleMutation();
   const [scanDeliveryScheduleDnRobot, scanState] = useScanDeliveryScheduleDnRobotMutation();
-
-  const adminName = "Admin ERP";
 
   useEffect(() => {
     if (schedulesQuery.error) {
       message.error(getApiErrorMessage(schedulesQuery.error, "Failed to load delivery schedules"));
     }
   }, [schedulesQuery.error]);
+
+  useEffect(() => {
+    if (schedulesSummaryQuery.error) {
+      message.error(getApiErrorMessage(schedulesSummaryQuery.error, "Failed to load delivery schedules summary"));
+    }
+  }, [schedulesSummaryQuery.error]);
 
   useEffect(() => {
     if (dnCreationQuery.error) {
@@ -174,7 +200,7 @@ export default function DeliverySchedulingPage() {
             model: item.model,
             partNo: item.partNo,
             partName: item.partName,
-            quantity: item.quantity,
+            quantity: item.totalDelivery,
             cycle,
             dnNumber: toScheduleStatus(schedule.status) === "Approved" ? schedule.poDnName || "-" : "-",
             status: toScheduleStatus(schedule.status),
@@ -214,7 +240,7 @@ export default function DeliverySchedulingPage() {
         dnDate: formatDateShort(row.dnDate),
         customer: row.customerName || "-",
         customerPo: row.customerPo || row.poDnName || "-",
-        partTitle: row.partTitle || row.partName || "-",
+        partTitle: row.partTitle || row.partName || row.partNo || "-",
         uniq: row.uniq || "-",
         partNo: row.partNo || "-",
         quantity: row.quantity,
@@ -246,18 +272,39 @@ export default function DeliverySchedulingPage() {
       .filter((g) => g.rows.length > 0);
   }, [activeTab, groups, query, customer]);
 
+  const customerOptions = useMemo(() => {
+    const names = new Set<string>();
+    groups.forEach((g) => g.rows.forEach((r) => {
+      const name = String(r.customer ?? "").trim();
+      if (name && name !== "-") names.add(name);
+    }));
+    return Array.from(names)
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ label: name, value: name }));
+  }, [groups]);
+
   const approveAllTargetGroup = useMemo(
     () => filteredGroups.find((group) => group.key === approveAllTargetGroupKey) ?? null,
     [approveAllTargetGroupKey, filteredGroups]
   );
 
   const dnCounts = useMemo(() => {
+    const s = schedulesSummaryQuery.data?.data;
+    if (s) {
+      return {
+        total: Number(s.total_deliveries ?? 0),
+        inTransit: Number(s.in_transit ?? 0),
+        pendingApproval: Number(s.pending_approval ?? 0),
+        dnCreated: Number(s.dn_created ?? 0),
+      };
+    }
+
     const total = dnRows.length;
     const inTransit = dnRows.filter((r) => r.status === "Scanned").length;
     const pendingApproval = dnRows.filter((r) => r.status === "Created").length;
     const dnCreated = dnRows.length;
     return { total, inTransit, pendingApproval, dnCreated };
-  }, [dnRows]);
+  }, [dnRows, schedulesSummaryQuery.data]);
 
   const filteredDnRows = useMemo(() => {
     if (activeTab !== "dn") return [];
@@ -306,7 +353,7 @@ export default function DeliverySchedulingPage() {
         <div className="leading-tight">
           <div className="text-sm font-semibold text-gray-900">{record.partTitle}</div>
           <div className="text-xs text-gray-500">
-            {record.uniq}  {record.partNo}
+            {record.uniq} • {record.partNo}
           </div>
         </div>
       ),
@@ -336,7 +383,18 @@ export default function DeliverySchedulingPage() {
       width: 170,
       render: (_: unknown, record) => (
         <div className="leading-tight">
-          <div className="text-xs text-gray-600">{record.qrCode}</div>
+          {normalizeQrSrc(record.qrCode) ? (
+            <div className="flex items-center gap-2">
+              <img
+                src={normalizeQrSrc(record.qrCode)}
+                alt="QR"
+                className="h-12 w-12 rounded-lg border border-gray-200 bg-white object-contain"
+              />
+              <div className="text-xs text-gray-500">QR</div>
+            </div>
+          ) : (
+            <div className="text-xs text-gray-400">No QR</div>
+          )}
           <span className="inline-flex items-center rounded-md border border-gray-200 bg-white px-2 py-0.5 text-xs font-semibold text-gray-700 mt-1">
             {record.packingList}
           </span>
@@ -505,7 +563,7 @@ export default function DeliverySchedulingPage() {
                 icon={<CheckCircleOutlined />}
                 loading={approveState.isLoading}
                 onClick={() => {
-                  approveDeliverySchedule({ schedule_id: record.scheduleId, admin_name: adminName })
+                  approveDeliverySchedule({ schedule_id: record.scheduleId, notes: "", force_partial: false })
                     .unwrap()
                     .then(() => message.success(`Approved ${record.poDnName}`))
                     .catch((error) =>
@@ -544,7 +602,20 @@ export default function DeliverySchedulingPage() {
             <div className="flex items-center gap-2">
               <Button className="!rounded-lg" icon={<QrcodeOutlined />} onClick={() => setScanOpen(true)}>Scan Mode</Button>
               <Button className="!rounded-lg" icon={<DownloadOutlined />} onClick={() => message.info("Reports (mock)")}>Reports</Button>
-              <Button type="primary" className="!rounded-lg" icon={<PlusOutlined />} onClick={() => router.push("/delivery-scheduling/add")}>Schedule Delivery</Button>
+              <Button
+                type="primary"
+                className="!rounded-lg"
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  if (activeTab === "dn") {
+                    router.push("/delivery-scheduling/dn-creation/create");
+                    return;
+                  }
+                  router.push("/delivery-scheduling/add");
+                }}
+              >
+                {activeTab === "dn" ? "+ DN Creation" : "+ Schedule Delivery"}
+              </Button>
             </div>
           </div>
         </div>
@@ -604,13 +675,20 @@ export default function DeliverySchedulingPage() {
           />
 
           <div className="flex items-center gap-2">
-            <Input
+            <Select
               allowClear
-              value={customer}
-              onChange={(e) => setCustomer(e.target.value)}
-              placeholder="Customer Name"
+              showSearch
+              value={customer || undefined}
+              onChange={(v) => setCustomer(String(v ?? ""))}
+              placeholder="Customers"
+              options={customerOptions}
               className="!rounded-lg"
               style={{ width: 180 }}
+              filterOption={(input, option) =>
+                String(option?.label ?? "")
+                  .toLowerCase()
+                  .includes(input.trim().toLowerCase())
+              }
             />
             <Button className="!rounded-lg" icon={<DownloadOutlined />} onClick={() => message.info("Export (mock)")}>Export</Button>
           </div>
@@ -702,7 +780,12 @@ export default function DeliverySchedulingPage() {
             return;
           }
 
-          approveBulkDeliverySchedule({ schedule_ids: scheduleIds, admin_name: adminName })
+          approveBulkDeliverySchedule({
+            delivery_date: approveAllTargetGroup.key,
+            schedule_ids: scheduleIds,
+            notes: "",
+            force_partial: false,
+          })
             .unwrap()
             .then(() => {
               setApproveAllOpen(false);
@@ -813,7 +896,7 @@ export default function DeliverySchedulingPage() {
               <div className="text-xs text-gray-500">Part Details</div>
               <div className="font-semibold text-gray-900">{selectedDn.partTitle}</div>
               <div className="text-xs text-gray-500 mt-1">
-                {selectedDn.uniq}  {selectedDn.partNo}
+                {selectedDn.uniq} • {selectedDn.partNo}
               </div>
             </div>
 
@@ -831,7 +914,15 @@ export default function DeliverySchedulingPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="rounded-lg border border-gray-100 p-3">
                 <div className="text-xs text-gray-500">QR Code</div>
-                <div className="font-semibold text-gray-900">{selectedDn.qrCode}</div>
+                {normalizeQrSrc(selectedDn.qrCode) ? (
+                  <img
+                    src={normalizeQrSrc(selectedDn.qrCode)}
+                    alt="QR"
+                    className="mt-2 h-40 w-40 rounded-xl border border-gray-200 bg-white object-contain"
+                  />
+                ) : (
+                  <div className="font-semibold text-gray-400">-</div>
+                )}
               </div>
               <div className="rounded-lg border border-gray-100 p-3">
                 <div className="text-xs text-gray-500">Packing List</div>
@@ -842,5 +933,13 @@ export default function DeliverySchedulingPage() {
         )}
       </Modal>
     </div>
+  );
+}
+
+export default function DeliverySchedulingPage() {
+  return (
+    <Suspense fallback={<div className="p-6">Loading...</div>}>
+      <DeliverySchedulingPageInner />
+    </Suspense>
   );
 }

@@ -387,7 +387,7 @@ export default function CustomerPoDnSoPage() {
               size="small"
               icon={<EyeOutlined />}
               className="!rounded-lg"
-              onClick={() => router.push(`/customer-po/detail/${encodeURIComponent(r.dnNumber)}`)}
+              onClick={() => router.push(`/customer-po/detail/${encodeURIComponent(r.key)}`)}
             />
             <Button
               size="small"
@@ -457,7 +457,7 @@ export default function CustomerPoDnSoPage() {
               size="small"
               icon={<EyeOutlined />}
               className="!rounded-lg"
-              onClick={() => router.push(`/customer-po/detail/${encodeURIComponent(r.poNumber)}`)}
+              onClick={() => router.push(`/customer-po/detail/${encodeURIComponent(r.key)}`)}
             />
             <Button
               size="small"
@@ -532,7 +532,7 @@ export default function CustomerPoDnSoPage() {
               size="small"
               icon={<EyeOutlined />}
               className="!rounded-lg"
-              onClick={() => router.push(`/customer-po/detail/${encodeURIComponent(r.soNumber)}`)}
+              onClick={() => router.push(`/customer-po/detail/${encodeURIComponent(r.key)}`)}
             />
             <Button
               size="small"
@@ -588,7 +588,7 @@ export default function CustomerPoDnSoPage() {
         <StatCard label="Active DNs" value={kpis.activeDns} icon={<MdOutlineLocalShipping size={18} />} accent="bg-blue-50 text-blue-600" />
         <StatCard label="Customer POs" value={kpis.customerPos} icon={<MdInventory2 size={18} />} accent="bg-green-50 text-green-600" />
         <StatCard label="Special Orders" value={kpis.specialOrders} icon={<MdDescription size={18} />} accent="bg-purple-50 text-purple-600" />
-        <StatCard label="Total Value" value={"$351,700"} icon={<MdPaid size={18} />} accent="bg-orange-50 text-orange-600" />
+        {/*<StatCard label="Total Value" value={"$351,700"} icon={<MdPaid size={18} />} accent="bg-orange-50 text-orange-600" /> */}
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">

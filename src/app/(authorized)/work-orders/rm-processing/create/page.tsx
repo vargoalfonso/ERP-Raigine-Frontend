@@ -1,9 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Button, DatePicker, Form, Input, InputNumber, Select, message } from "antd";
+import { AutoComplete, Button, DatePicker, Form, Input, InputNumber, Select, message } from "antd";
 import { useRouter } from "next/navigation";
 import dayjs, { type Dayjs } from "dayjs";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetInventoryListQuery } from "@/lib/api/inventory/api";
+import {
+  useCreateRmProcessingWorkOrderMutation,
+} from "@/lib/api/work-orders/api";
 
 type RmOption = {
   uniq: string;
@@ -27,6 +33,13 @@ export default function CreateRmProcessingWoPage() {
   const [form] = Form.useForm();
   const [packingNumber] = useState(buildPackingNumber);
   const { TextArea } = Input;
+  const apiEnabled = Boolean(apiBaseUrl);
+
+  const inventoryQuery = useGetInventoryListQuery(
+    { type: "raw-materials", page: 1, limit: 200 },
+    { skip: !apiEnabled }
+  );
+  const [createRmProcessingWorkOrder, createState] = useCreateRmProcessingWorkOrderMutation();
 
   const fallbackOptions: RmOption[] = useMemo(
     () => [
@@ -68,42 +81,84 @@ export default function CreateRmProcessingWoPage() {
   );
 
   const rmOptions: RmOption[] = useMemo(() => {
+    const inv = inventoryQuery.data?.data ?? [];
+    if (apiEnabled && inv.length) {
+      return inv
+        .filter((r) => (Number(r.stock_qty ?? 0) || 0) > 0 && String(r.uniq_code ?? "").trim())
+        .map((r) => {
+          const uniq = String(r.uniq_code ?? "").trim();
+          const partName = String(r.part_name ?? r.item_name ?? "-").trim() || "-";
+          const partNumber = String(r.part_number ?? "-").trim() || "-";
+          const unit = String(r.uom ?? "pcs").trim() || "pcs";
+          const stockQty = Number(r.stock_qty ?? 0) || 0;
+          return {
+            uniq,
+            name: partName === "-" ? uniq : partName,
+            partName,
+            partNumber,
+            model: undefined,
+            gradeSize: undefined,
+            unit,
+            label: `${uniq}${partName && partName !== "-" ? ` - ${partName}` : ""} (stock: ${stockQty} ${unit})`,
+            value: uniq,
+          };
+        })
+        .filter((o) => Boolean(o.value));
+    }
     return fallbackOptions;
-  }, [fallbackOptions]);
-
-  const modelOptions = [
-    { label: "SPHC", value: "SPHC" },
-    { label: "PP", value: "PP" },
-    { label: "Compound A", value: "Compound A" },
-  ];
-
-  const approvalManagers = [
-    { label: "Jane Smith - Operations Mgr", value: "Jane Smith - Operations Mgr" },
-    { label: "John Smith - Production Manager", value: "John Smith - Production Manager" },
-    { label: "Mike Johnson - Manufacturing Head", value: "Mike Johnson - Manufacturing Head" },
-  ];
+  }, [apiEnabled, fallbackOptions, inventoryQuery.data]);
 
   const onSelectSourceRm = (value: string) => {
     const found = rmOptions.find((o) => o.value === value);
     if (!found) return;
-    form.setFieldsValue({
+
+    const currentTarget = form.getFieldValue("targetMaterialUniq");
+
+    const nextValues: Record<string, unknown> = {
       partName: found.partName,
       partNumber: found.partNumber,
       model: found.model,
       gradeSize: found.gradeSize,
-      targetMaterialUniq: value,
-    });
+      sourceMaterialUniq: value,
+      inputUom: found.unit ?? form.getFieldValue("inputUom"),
+    };
+
+    if (!currentTarget) {
+      nextValues.targetMaterialUniq = value;
+      nextValues.outputUom = found.unit ?? form.getFieldValue("outputUom");
+    }
+
+    form.setFieldsValue(nextValues);
   };
 
   const onCreate = async () => {
     try {
       const values = await form.validateFields();
-      void values;
-      message.success("RM Processing WO created locally");
+      if (!apiEnabled) {
+        message.success("RM Processing WO created locally");
+        router.push("/work-orders");
+        return;
+      }
+
+      const dateIssued = values.dateIssued as Dayjs;
+      await createRmProcessingWorkOrder({
+        source_material_uniq: String(values.sourceMaterialUniq),
+        target_material_uniq: String(values.targetMaterialUniq),
+        model: String(values.model),
+        grade_size: String(values.gradeSize),
+        input_qty: Number(values.qtyInput),
+        input_uom: String(values.inputUom ?? "pcs"),
+        output_qty: Number(values.qtyOutput),
+        output_uom: String(values.outputUom ?? "pcs"),
+        date_issued: dayjs(dateIssued).format("YYYY-MM-DD"),
+        remarks: values.remarks ? String(values.remarks) : null,
+      }).unwrap();
+
+      message.success("RM Processing WO created");
       router.push("/work-orders");
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error("Failed to create RM processing work order");
+      message.error(getApiErrorMessage(err, "Failed to create RM processing work order"));
     }
   };
 
@@ -128,7 +183,7 @@ export default function CreateRmProcessingWoPage() {
               type="primary"
               className="!rounded-lg"
               onClick={onCreate}
-              loading={false}
+              loading={createState.isLoading}
             >
               Create RM Processing WO
             </Button>
@@ -148,6 +203,8 @@ export default function CreateRmProcessingWoPage() {
         initialValues={{
           woType: "RM Processing",
           packingNumber,
+          inputUom: "pcs",
+          outputUom: "pcs",
         }}
       >
         <div className="space-y-6">
@@ -157,7 +214,7 @@ export default function CreateRmProcessingWoPage() {
 
             <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
               <Form.Item
-                name="sourceMaterial"
+                name="sourceMaterialUniq"
                 label="Source Material UNIQ / Name"
                 rules={[{ required: true, message: "Select raw material" }]}
               >
@@ -166,6 +223,7 @@ export default function CreateRmProcessingWoPage() {
                   placeholder="Select raw material"
                   options={rmOptions.map((o) => ({ label: o.label, value: o.value }))}
                   onChange={onSelectSourceRm}
+                  loading={inventoryQuery.isFetching}
                 />
               </Form.Item>
 
@@ -181,8 +239,8 @@ export default function CreateRmProcessingWoPage() {
                 <Input className="!rounded-lg" disabled placeholder="Auto-filled from RM Master Data" />
               </Form.Item>
 
-              <Form.Item name="model" label="Model" rules={[{ required: true, message: "Select model/type" }]}>
-                <Select className="!rounded-lg" placeholder="Select model/type" options={modelOptions} allowClear />
+              <Form.Item name="model" label="Model" rules={[{ required: true, message: "Enter model" }]}>
+                <Input className="!rounded-lg" placeholder="Auto-filled from RM selection" />
               </Form.Item>
 
               <Form.Item name="gradeSize" label="Grade / Size" rules={[{ required: true, message: "Enter grade/size" }]}>
@@ -201,13 +259,18 @@ export default function CreateRmProcessingWoPage() {
                 label="Target Material Uniq"
                 rules={[{ required: true, message: "Select target material uniq" }]}
               >
-                <Select
+                <AutoComplete
                   className="!rounded-lg"
-                  placeholder="Select target UNIQ"
+                  placeholder="e.g. EMA-LV7-001111"
                   options={rmOptions.map((o) => ({ label: o.label, value: o.value }))}
+                  filterOption={(inputValue, option) =>
+                    String(option?.label ?? "").toLowerCase().includes(inputValue.toLowerCase())
+                  }
                 />
               </Form.Item>
-              <div className="md:col-span-2 -mt-2 text-xs text-gray-400">Will be deducted from RM stock</div>
+              <div className="md:col-span-2 -mt-2 text-xs text-gray-400">
+                Default follows input RM UNIQ; defines deduction source for RM
+              </div>
             </div>
           </div>
 
@@ -225,6 +288,10 @@ export default function CreateRmProcessingWoPage() {
                 <InputNumber className="!rounded-lg w-full" min={0} placeholder="e.g 100 Sheet / Coil / kg" />
               </Form.Item>
 
+              <Form.Item name="inputUom" label="Input UoM" rules={[{ required: true }]}>
+                <Input className="!rounded-lg" placeholder="e.g. pcs" />
+              </Form.Item>
+
               <Form.Item
                 name="qtyOutput"
                 label="Quantity Output"
@@ -232,6 +299,10 @@ export default function CreateRmProcessingWoPage() {
                 extra={<span className="text-xs text-gray-400">Semi-finished produced</span>}
               >
                 <InputNumber className="!rounded-lg w-full" min={0} placeholder="e.g 50 ccPieces / kg" />
+              </Form.Item>
+
+              <Form.Item name="outputUom" label="Output UoM" rules={[{ required: true }]}>
+                <Input className="!rounded-lg" placeholder="e.g. pcs" />
               </Form.Item>
 
               <Form.Item
@@ -268,15 +339,6 @@ export default function CreateRmProcessingWoPage() {
             <div className="text-xs text-gray-500 mt-1">Manager approval and special instructions</div>
 
             <div className="mt-5 grid grid-cols-1 gap-4">
-              <Form.Item
-                name="approvalManager"
-                label="Approval Manager"
-                rules={[{ required: true, message: "Select approver" }]}
-                extra={<span className="text-xs text-gray-400">Required before inventory update</span>}
-              >
-                <Select className="!rounded-lg" placeholder="Select approver" options={approvalManagers} />
-              </Form.Item>
-
               <Form.Item
                 name="remarks"
                 label="Remarks"

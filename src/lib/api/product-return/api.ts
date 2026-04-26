@@ -11,16 +11,6 @@ const ok = <T,>(data: T, message = "OK"): ApiResponse<T> => ({
   data,
 });
 
-const parseArrayResponse = <T,>(response: unknown): T[] => {
-  if (Array.isArray(response)) return response as T[];
-  if (isRecord(response)) {
-    const d = response.data;
-    if (Array.isArray(d)) return d as T[];
-    if (isRecord(d) && Array.isArray(d.data)) return d.data as T[];
-  }
-  return [];
-};
-
 const parseObjectResponse = <T,>(response: unknown): T | null => {
   if (isRecord(response)) {
     const d = response.data;
@@ -31,8 +21,71 @@ const parseObjectResponse = <T,>(response: unknown): T | null => {
   return null;
 };
 
+type Pagination = {
+  page: number;
+  limit: number;
+  total?: number;
+};
+
+export type ProductReturnListParams = {
+  page?: number;
+  limit?: number;
+};
+
+export type ProductReturnListData = {
+  items: BackendProductReturn[];
+  pagination: Pagination;
+};
+
+const parsePagination = (response: unknown, fallback: { page: number; limit: number }): Pagination => {
+  const base: Pagination = { page: fallback.page, limit: fallback.limit };
+  if (!isRecord(response)) return base;
+
+  const d = response.data;
+  const candidates = [response, d, isRecord(d) ? d.data : null].filter(Boolean) as UnknownRecord[];
+
+  const pickNum = (...vals: unknown[]): number | undefined => {
+    for (const v of vals) {
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+      if (typeof v === "string" && v.trim() && Number.isFinite(Number(v))) return Number(v);
+    }
+    return undefined;
+  };
+
+  for (const c of candidates) {
+    const page = pickNum(c.page, c.current_page, c.currentPage);
+    const limit = pickNum(c.limit, c.per_page, c.perPage, c.page_size, c.pageSize);
+    const total = pickNum(c.total, c.total_items, c.totalItems, c.count);
+
+    if (typeof page === "number") base.page = page;
+    if (typeof limit === "number") base.limit = limit;
+    if (typeof total === "number") base.total = total;
+  }
+
+  return base;
+};
+
+const parseListItems = <T,>(response: unknown): T[] => {
+  if (Array.isArray(response)) return response as T[];
+  if (!isRecord(response)) return [];
+
+  const d = response.data;
+  if (Array.isArray(d)) return d as T[];
+  if (isRecord(d)) {
+    if (Array.isArray(d.items)) return d.items as T[];
+    if (Array.isArray(d.data)) return d.data as T[];
+    if (isRecord(d.data)) {
+      if (Array.isArray(d.data.items)) return d.data.items as T[];
+      if (Array.isArray(d.data.data)) return d.data.data as T[];
+    }
+  }
+
+  if (Array.isArray(response.items)) return response.items as T[];
+  return [];
+};
+
 export type BackendProductReturn = {
-  id?: string;
+  id?: string | number;
   uuid?: string;
   return_id?: string;
   returnId?: string;
@@ -56,6 +109,7 @@ export type BackendProductReturn = {
   packingNumber?: string;
   uniq_id?: string;
   uniqId?: string;
+  uniq?: string;
 
   model?: string;
   dn_number?: string;
@@ -84,149 +138,101 @@ export type BackendProductReturn = {
   remark?: string;
 };
 
-export type CreateProductReturnRequest = {
-  // Backend requires this field name
-  uniq?: string;
-  // Legacy/alternative naming
-  uniq_id?: string;
-
-  kanban?: string;
-  part_no?: string;
-  part_name?: string;
-  model?: string;
-  packing_number?: string;
-  dn_number?: string;
-  date_received?: string;
-
-  // Backend expects these names
-  quantity_scrap?: number;
-  quantity_rework?: number;
-
-  // Legacy aliases used by older clients
-  scrap_qty?: number;
-  rework_qty?: number;
-
-  weight?: number;
-  unit?: string;
-  notes?: string;
-  submitted_by?: string;
+export type UpsertProductReturnRequest = {
+  uniq: string;
+  dn_number: string;
+  quantity_scrap: number;
+  quantity_rework: number;
+  status: string;
 };
 
-export type ProductReturnDecisionRequest = {
-  id: string;
-  decision: "approve" | "reject";
-  remark?: string;
+export type UpdateProductReturnRequest = {
+  id: string | number;
+  body: UpsertProductReturnRequest;
 };
 
 export const productReturnSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
-    createProductReturn: builder.mutation<ApiResponse<BackendProductReturn>, CreateProductReturnRequest>({
-      query: (body) => {
-        const uniq = (typeof body.uniq === "string" && body.uniq.trim()) ? body.uniq.trim() : (typeof body.uniq_id === "string" ? body.uniq_id.trim() : "");
-        const quantityScrap =
-          typeof body.quantity_scrap === "number" ? body.quantity_scrap :
-          typeof body.scrap_qty === "number" ? body.scrap_qty :
-          0;
-        const quantityRework =
-          typeof body.quantity_rework === "number" ? body.quantity_rework :
-          typeof body.rework_qty === "number" ? body.rework_qty :
-          0;
-
+    getProductReturnList: builder.query<ApiResponse<ProductReturnListData>, ProductReturnListParams | void>({
+      query: (params) => {
+        const page = typeof params?.page === "number" && params.page > 0 ? params.page : 1;
+        const limit = typeof params?.limit === "number" && params.limit > 0 ? params.limit : 10;
         return {
-          url: "/api/product-return",
-          method: "POST",
-          body: {
-            // Required by backend validators
-            uniq,
-            scrap_type: "Product Return",
-            quantity_scrap: quantityScrap,
-            quantity_rework: quantityRework,
-
-            // Helpful extras (backend can ignore if not used)
-            kanban: body.kanban,
-            part_no: body.part_no,
-            part_name: body.part_name,
-            model: body.model,
-            packing_number: body.packing_number,
-            dn_number: body.dn_number,
-            date_received: body.date_received,
-            weight: body.weight,
-            unit: body.unit,
-            notes: body.notes,
-            submitted_by: body.submitted_by,
-          },
+          url: "/product-return",
+          method: "GET",
+          params: { page, limit },
           meta: { useAuthorization: true, contentType: "application/json" },
         };
       },
-      transformResponse: (response: unknown) => ok((parseObjectResponse<BackendProductReturn>(response) ?? {}) as BackendProductReturn, "Created"),
-      invalidatesTags: [{ type: "ProductReturns", id: "PENDING" }, { type: "ProductReturns", id: "HISTORY" }],
-    }),
-
-    getProductReturnPending: builder.query<ApiResponse<BackendProductReturn[]>, void>({
-      query: () => ({
-        url: "/api/product-return/pending",
-        method: "GET",
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => ok(parseArrayResponse<BackendProductReturn>(response)),
-      providesTags: [{ type: "ProductReturns", id: "PENDING" }],
-    }),
-
-    getProductReturnPendingById: builder.query<ApiResponse<BackendProductReturn>, string>({
-      query: (id) => ({
-        url: `/api/product-return/pending/${encodeURIComponent(id)}`,
-        method: "GET",
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => ok((parseObjectResponse<BackendProductReturn>(response) ?? {}) as BackendProductReturn),
-      providesTags: (_result, _error, id) => [{ type: "ProductReturns", id }],
-    }),
-
-    getProductReturnHistory: builder.query<ApiResponse<BackendProductReturn[]>, void>({
-      query: () => ({
-        url: "/api/product-return/history",
-        method: "GET",
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => ok(parseArrayResponse<BackendProductReturn>(response)),
-      providesTags: [{ type: "ProductReturns", id: "HISTORY" }],
-    }),
-
-    getProductReturnById: builder.query<ApiResponse<BackendProductReturn>, string>({
-      query: (id) => ({
-        url: `/api/product-return/${encodeURIComponent(id)}`,
-        method: "GET",
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => ok((parseObjectResponse<BackendProductReturn>(response) ?? {}) as BackendProductReturn),
-      providesTags: (_result, _error, id) => [{ type: "ProductReturns", id }],
-    }),
-
-    decideProductReturn: builder.mutation<ApiResponse<{ id: string }>, ProductReturnDecisionRequest>({
-      query: ({ id, decision, remark }) => ({
-        url: `/api/product-return/${encodeURIComponent(id)}/decision`,
-        method: "POST",
-        body: { decision, remark },
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => {
-        const r = response as Partial<{ id: string; message: string }>;
-        return ok({ id: typeof r?.id === "string" ? r.id : "" }, r?.message ?? "Updated");
+      transformResponse: (response: unknown, _meta, arg) => {
+        const page = typeof arg?.page === "number" && arg.page > 0 ? arg.page : 1;
+        const limit = typeof arg?.limit === "number" && arg.limit > 0 ? arg.limit : 10;
+        return ok({ items: parseListItems<BackendProductReturn>(response), pagination: parsePagination(response, { page, limit }) });
       },
+      providesTags: (result) => {
+        const base = [{ type: "ProductReturns" as const, id: "LIST" }];
+        const ids = (result?.data.items ?? [])
+          .map((it) => (typeof it.id === "number" || typeof it.id === "string") ? String(it.id) : "")
+          .filter(Boolean)
+          .map((id) => ({ type: "ProductReturns" as const, id }));
+        return [...base, ...ids];
+      },
+    }),
+
+    getProductReturnDetail: builder.query<ApiResponse<BackendProductReturn>, string | number>({
+      query: (id) => ({
+        url: `/product-return/${encodeURIComponent(String(id))}`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => ok((parseObjectResponse<BackendProductReturn>(response) ?? {}) as BackendProductReturn),
+      providesTags: (_result, _error, id) => [{ type: "ProductReturns", id: String(id) }],
+    }),
+
+    createProductReturn: builder.mutation<ApiResponse<BackendProductReturn>, UpsertProductReturnRequest>({
+      query: (body) => ({
+        url: "/product-return",
+        method: "POST",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => ok((parseObjectResponse<BackendProductReturn>(response) ?? {}) as BackendProductReturn, "Created"),
+      invalidatesTags: [{ type: "ProductReturns", id: "LIST" }],
+    }),
+
+    updateProductReturn: builder.mutation<ApiResponse<BackendProductReturn>, UpdateProductReturnRequest>({
+      query: ({ id, body }) => ({
+        url: `/product-return/${encodeURIComponent(String(id))}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => ok((parseObjectResponse<BackendProductReturn>(response) ?? {}) as BackendProductReturn, "Updated"),
       invalidatesTags: (_result, _error, { id }) => [
-        { type: "ProductReturns", id: "PENDING" },
-        { type: "ProductReturns", id: "HISTORY" },
-        { type: "ProductReturns", id },
+        { type: "ProductReturns", id: "LIST" },
+        { type: "ProductReturns", id: String(id) },
+      ],
+    }),
+
+    deleteProductReturn: builder.mutation<ApiResponse<{ id: string }>, string | number>({
+      query: (id) => ({
+        url: `/product-return/${encodeURIComponent(String(id))}`,
+        method: "DELETE",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (_response: unknown, _meta, id) => ok({ id: String(id) }, "Deleted"),
+      invalidatesTags: (_result, _error, id) => [
+        { type: "ProductReturns", id: "LIST" },
+        { type: "ProductReturns", id: String(id) },
       ],
     }),
   }),
 });
 
 export const {
+  useGetProductReturnListQuery,
+  useGetProductReturnDetailQuery,
   useCreateProductReturnMutation,
-  useGetProductReturnPendingQuery,
-  useGetProductReturnPendingByIdQuery,
-  useGetProductReturnHistoryQuery,
-  useGetProductReturnByIdQuery,
-  useDecideProductReturnMutation,
+  useUpdateProductReturnMutation,
+  useDeleteProductReturnMutation,
 } = productReturnSlice;

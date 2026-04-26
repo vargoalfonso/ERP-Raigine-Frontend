@@ -1,104 +1,76 @@
 "use client";
 
-import React, { Suspense, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeftOutlined, EyeOutlined } from "@ant-design/icons";
-import { Button, Card, Table, Tabs, Tag } from "antd";
+import { ArrowLeftOutlined } from "@ant-design/icons";
+import { Button, Card, Table, Tabs, Tag, message } from "antd";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetWipDetailQuery } from "@/lib/api/wip/api";
 
-interface RowHistory {
+type UnknownRecord = Record<string, unknown>;
+const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+const isMissingRouteError = (error: unknown): boolean => isRecord(error) && error.status === 404;
+
+const formatNumber = (value: number | undefined) => new Intl.NumberFormat("en-US").format(Number(value ?? 0));
+
+interface RowProcess {
   key: string;
-  uniq: string;
   process: string;
   stock: number;
-  reason: string;
-  qty: number;
-  lastUpdate: string;
 }
 
 function WorkInProgressDetailPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const uniq = searchParams.get("uniq") ?? "LV7-001";
+  const id = searchParams.get("id") ?? "";
+  const apiEnabled = Boolean(apiBaseUrl);
 
   const [activeTab, setActiveTab] = useState("1");
 
+  const detailQuery = useGetWipDetailQuery({ id }, { skip: !apiEnabled || !id });
+
+  useEffect(() => {
+    if (!apiEnabled || !detailQuery.error) return;
+    if (isMissingRouteError(detailQuery.error)) {
+      message.warning("WIP detail API route is not available yet; showing placeholder data.");
+      return;
+    }
+    message.error(getApiErrorMessage(detailQuery.error, "Failed to load WIP detail"));
+  }, [apiEnabled, detailQuery.error]);
+
+  const useMock = !apiEnabled || !id || isMissingRouteError(detailQuery.error);
+  const detail = useMock ? null : detailQuery.data?.data;
+
   const detailInfo = useMemo(
     () => ({
-      uniq,
-      partNumber: "EMA7-001",
-      partName: "Engine Mount Assembly",
-      model: "Camry 2024",
-      woNumber: "WO-001-2024",
-      process: "Assembly",
-      station: "Welding Station 2",
-      stock: 200,
-      kanbanCode: "KBN-001-2024",
-      type: "Child Part",
-      stockToCompleteKanban: 250,
-      kanban: 5,
-      status: "On Track",
+      id: detail?.id ?? id,
+      uniq: detail?.uniq ?? uniq,
+      partNumber: detail?.part_number ?? "-",
+      partName: detail?.part_name ?? "-",
+      woNumber: detail?.wo_number ?? "-",
     }),
-    [uniq]
+    [detail, id, uniq]
   );
 
-  const historyData: RowHistory[] = [
-    {
-      key: "1",
-      uniq,
-      process: "Assembly",
-      stock: -10,
-      reason: "Move Station",
-      qty: 190,
-      lastUpdate: "Feb 04, 2025 13.06",
-    },
-    {
-      key: "2",
-      uniq,
-      process: "Machining",
-      stock: +6,
-      reason: "Scan",
-      qty: 196,
-      lastUpdate: "Jan 04, 2025 13.06",
-    },
-    {
-      key: "3",
-      uniq,
-      process: "Quality Check",
-      stock: -12,
-      reason: "Rework",
-      qty: 184,
-      lastUpdate: "Dec 04, 2024 13.06",
-    },
-  ];
+  const processRows = useMemo<RowProcess[]>(() => {
+    if (useMock) return [];
+    return (detail?.processes ?? []).map((p, index) => ({
+      key: `${index}`,
+      process: p.process ?? "-",
+      stock: Number(p.stock ?? 0),
+    }));
+  }, [detail?.processes, useMock]);
 
-  const historyColumns = [
-    { title: "Uniq", dataIndex: "uniq", key: "uniq" },
+  const processColumns = [
     { title: "Process", dataIndex: "process", key: "process" },
     {
       title: "Stock",
       dataIndex: "stock",
       key: "stock",
-      render: (value: number) => {
-        if (value < 0) {
-          return <Tag className="bg-red-100 text-red-600">{value}</Tag>;
-        }
-        return <Tag className="bg-green-100 text-green-600">+{value}</Tag>;
-      },
-    },
-    { title: "Reason", dataIndex: "reason", key: "reason" },
-    { title: "Qty", dataIndex: "qty", key: "qty" },
-    { title: "Last Update", dataIndex: "lastUpdate", key: "lastUpdate" },
-    {
-      title: "Action",
-      key: "action",
-      render: (_: unknown, record: RowHistory) => (
-        <Button
-          type="text"
-          icon={<EyeOutlined />}
-          className="text-blue-600 hover:text-blue-800"
-          onClick={() => router.push(`/work-in-progress/detail?uniq=${encodeURIComponent(record.uniq)}`)}
-        />
-      ),
+      align: "right" as const,
+      render: (v: number) => <Tag className="bg-blue-100 text-blue-600">{formatNumber(v)}</Tag>,
     },
   ];
 
@@ -116,7 +88,7 @@ function WorkInProgressDetailPageContent() {
       </div>
 
       <div className="p-8">
-        <Card className="rounded-2xl shadow">
+        <Card className="rounded-2xl shadow" loading={apiEnabled ? detailQuery.isFetching : false}>
           <h2 className="text-xl font-bold">Details & History Log</h2>
           <p className="text-gray-400">Complete Work In-Progress Detail for {detailInfo.uniq}</p>
 
@@ -146,48 +118,8 @@ function WorkInProgressDetailPageContent() {
                       </div>
 
                       <div>
-                        <p className="text-gray-400">Model</p>
-                        <p className="font-semibold">{detailInfo.model}</p>
-                      </div>
-
-                      <div>
                         <p className="text-gray-400">WO Number</p>
                         <p className="font-semibold">{detailInfo.woNumber}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Process</p>
-                        <Tag className="bg-blue-100 text-blue-600">{detailInfo.process}</Tag>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Station</p>
-                        <p className="font-semibold">{detailInfo.station}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Stock</p>
-                        <Tag className="bg-blue-100 text-blue-600">{detailInfo.stock}</Tag>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Kanban</p>
-                        <p className="font-semibold">{detailInfo.kanban}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Type</p>
-                        <p className="font-semibold">{detailInfo.type}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Stock to Complete Kanban</p>
-                        <p className="font-semibold">{detailInfo.stockToCompleteKanban}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Status</p>
-                        <Tag className="bg-green-100 text-green-600">{detailInfo.status}</Tag>
                       </div>
                     </div>
                   </Card>
@@ -195,20 +127,20 @@ function WorkInProgressDetailPageContent() {
               },
               {
                 key: "2",
-                label: <span className="flex items-center gap-2">🕘 History Logs</span>,
+                label: <span className="flex items-center gap-2">🧾 Processes</span>,
                 children: (
                   <div className="mt-6">
                     <div className="bg-blue-50 p-4 rounded-xl mb-5">
-                      <p className="text-blue-600 font-semibold">Note: Activity Log {detailInfo.uniq}</p>
+                      <p className="text-blue-600 font-semibold">Note: Process stock breakdown for {detailInfo.uniq}</p>
                     </div>
 
                     <div style={{ overflowX: "auto" }}>
-                      <Table<RowHistory>
-                        columns={historyColumns}
-                        dataSource={historyData}
+                      <Table<RowProcess>
+                        columns={processColumns}
+                        dataSource={processRows}
                         pagination={false}
                         rowKey="key"
-                        locale={{ emptyText: "No history data" }}
+                        locale={{ emptyText: "No process data" }}
                       />
                     </div>
                   </div>

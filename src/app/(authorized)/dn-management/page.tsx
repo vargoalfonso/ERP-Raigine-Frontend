@@ -95,6 +95,16 @@ const receiptStatus = (progressPercent: number) => {
   return "Pending Receipt";
 };
 
+const normalizeQrSrc = (value: unknown): string => {
+  const qr = String(value ?? "").trim();
+  if (!qr || qr === "-") return "";
+  if (qr.startsWith("data:image/")) return qr;
+  if (qr.startsWith("http://") || qr.startsWith("https://")) return qr;
+
+  const looksLikeBase64 = qr.length > 80 && /^[A-Za-z0-9+/=]+$/.test(qr);
+  return looksLikeBase64 ? `data:image/png;base64,${qr}` : qr;
+};
+
 export default function DnManagementPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<ProcurementTab>("raw");
@@ -281,8 +291,8 @@ export default function DnManagementPage() {
     (async () => {
       for (const packing of missingPackings) {
         try {
-          const res = await runScanPacking({ packing }).unwrap();
-          const qr = res.data?.qr;
+          const res = await runScanPacking({ packing, qty: 1 }).unwrap();
+          const qr = normalizeQrSrc(res.data?.qr);
           if (!qr) continue;
           if (cancelled) return;
           setBarcodeQrByPacking((prev) => (prev[packing] ? prev : { ...prev, [packing]: qr }));
@@ -301,7 +311,7 @@ export default function DnManagementPage() {
     return barcodeLabelItems.map((it) => {
       const packingKey = it.packing_number ? String(it.packing_number).trim() : "";
       const resolvedQr = it.qr ?? (packingKey ? barcodeQrByPacking[packingKey] : undefined);
-      return { ...it, qr: resolvedQr };
+      return { ...it, qr: normalizeQrSrc(resolvedQr) };
     });
   }, [barcodeLabelItems, barcodeQrByPacking]);
 
@@ -333,8 +343,8 @@ export default function DnManagementPage() {
         if (qrByPacking[packingKey]) continue;
 
         try {
-          const res = await runScanPacking({ packing: packingKey }).unwrap();
-          const qr = res.data?.qr;
+          const res = await runScanPacking({ packing: packingKey, qty: 1 }).unwrap();
+          const qr = normalizeQrSrc(res.data?.qr);
           if (qr) qrByPacking[packingKey] = qr;
         } catch {
           // ignore; we'll just skip that label
@@ -348,7 +358,7 @@ export default function DnManagementPage() {
           const packingKey = it.packing_number ? String(it.packing_number).trim() : "";
           const packingDisplay = it.packing_number ?? "-";
           const uniq = it.item_uniq_code ?? "-";
-          const qr = it.qr ?? (packingKey ? qrByPacking[packingKey] : "") ?? "";
+          const qr = normalizeQrSrc(it.qr ?? (packingKey ? qrByPacking[packingKey] : "") ?? "");
           return { packing: packingDisplay, uniq, qr };
         })
         .filter((l) => Boolean(l.qr));
@@ -456,7 +466,7 @@ export default function DnManagementPage() {
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-              Create DN
+              + Create DN
             </button>
           </div>
         </div>

@@ -2,10 +2,9 @@ import { apiSlice } from "@/lib/api/instance";
 
 type UnknownRecord = Record<string, unknown>;
 
-const TAG = "StockOpname" as const;
+const TAG = "StockOpnameSessions" as const;
 
-const isRecord = (value: unknown): value is UnknownRecord =>
-  typeof value === "object" && value !== null;
+const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
 
 const getString = (record: UnknownRecord, keys: string[]): string | undefined => {
   for (const key of keys) {
@@ -28,300 +27,225 @@ const getNumber = (record: UnknownRecord, keys: string[]): number | undefined =>
   return undefined;
 };
 
-const getArray = (value: unknown): unknown[] => {
-  if (Array.isArray(value)) return value;
-  if (isRecord(value)) {
-    if (Array.isArray(value.data)) return value.data;
-    if (isRecord(value.data) && Array.isArray(value.data.data)) return value.data.data;
-    if (Array.isArray(value.items)) return value.items;
-    if (isRecord(value.data) && Array.isArray(value.data.items)) return value.data.items;
+export type Pagination = {
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+};
+
+export type Paginated<T> = {
+  items: T[];
+  pagination: Pagination;
+};
+
+const normalizeArrayResponse = <T,>(response: unknown): T[] => {
+  if (Array.isArray(response)) return response as T[];
+  if (isRecord(response)) {
+    const data = response.data;
+    if (Array.isArray(data)) return data as T[];
+    if (isRecord(data)) {
+      const items = (data as UnknownRecord).items;
+      if (Array.isArray(items)) return items as T[];
+      const nested = (data as UnknownRecord).data;
+      if (Array.isArray(nested)) return nested as T[];
+      if (isRecord(nested) && Array.isArray((nested as UnknownRecord).items)) return (nested as UnknownRecord).items as T[];
+    }
   }
   return [];
 };
 
-const getObject = (value: unknown): UnknownRecord | null => {
-  if (isRecord(value)) {
-    if (isRecord(value.data)) {
-      if (isRecord(value.data.data)) return value.data.data;
-      return value.data;
+const normalizeObjectResponse = <T,>(response: unknown): T | null => {
+  if (isRecord(response)) {
+    const data = response.data;
+    if (isRecord(data)) {
+      const nested = data.data;
+      if (isRecord(nested)) return nested as T;
+      return data as T;
     }
-    return value;
   }
-  return null;
+  return isRecord(response) ? (response as T) : null;
 };
 
-export type StockInventoryType = "finished_good" | "raw_material" | "indirect" | "wip";
+const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
+  const empty: Paginated<T> = {
+    items: [],
+    pagination: { total: 0, page: 1, limit: 20, total_pages: 1 },
+  };
 
-export type StockOpnameSummary = {
-  total_records: number;
-  completed: number;
-  completed_approved: number;
-  with_variance: number;
-  pending_verification: number;
-  waiting_approval: number;
-};
+  if (!isRecord(response)) return empty;
+  const data = response.data;
+  if (!isRecord(data)) return empty;
 
-export type StockOpnameSessionRecord = {
-  id: number;
-  opname_number: string;
-  inventory_type: StockInventoryType;
-  method?: string;
-  period?: string;
-  location?: string;
-  status?: string;
-  impact?: string;
-  status_label?: string;
-  remarks?: string;
-  summary?: {
-    total_items?: number;
-    items_counted?: number;
-    items_with_variance?: number;
-    system_total?: number;
-    physical_total?: number;
-    variance_total?: number;
-    variance_percentage?: number;
-    cost_impact?: number;
+  const itemsRaw = (data as UnknownRecord).items;
+  const paginationRaw = (data as UnknownRecord).pagination;
+
+  const items = Array.isArray(itemsRaw) ? (itemsRaw as T[]) : [];
+  const paginationRecord = isRecord(paginationRaw) ? (paginationRaw as UnknownRecord) : {};
+
+  return {
+    items,
+    pagination: {
+      total: getNumber(paginationRecord, ["total"]) ?? empty.pagination.total,
+      page: getNumber(paginationRecord, ["page"]) ?? empty.pagination.page,
+      limit: getNumber(paginationRecord, ["limit"]) ?? empty.pagination.limit,
+      total_pages: getNumber(paginationRecord, ["total_pages", "totalPages"]) ?? empty.pagination.total_pages,
+    },
   };
 };
 
-export type StockOpnameListRecord = {
-  id: number;
-  opname_number: string;
-  inventory_type: StockInventoryType;
-  period?: string;
-  location?: string;
-  ui_status?: string;
-  ui_impact?: string;
-  decision_status?: string;
-  status?: string;
-  impact?: string;
-  status_label?: string;
-  system_total?: number;
-  physical_total?: number;
-  variance_total?: number;
-  variance_percentage?: number;
-  cost_impact?: number;
-  summary?: StockOpnameSessionRecord["summary"];
-};
+export type StockInventoryType = "RM" | "FG" | "WIP" | "IDR";
+export type StockOpnameMethod = "manual" | "bulk";
+export type StockOpnameApprovalAction = "approve" | "reject";
 
-export type StockOpnameUniqSearchRecord = {
-  id: string;
-  inventory_id: string;
-  uniq: string;
-  item_name?: string;
-  part_number?: string;
-  unit_measurement?: string;
-  system_quantity?: number;
-  location?: string;
+export type StockOpnameUniqOption = {
+  uniq_code: string;
+  part_number: string;
+  part_name: string;
+  uom: string;
+  system_qty: number;
+  weight_kg: number | null;
 };
 
 export type StockOpnameCreateItemRequest = {
-  inventory_id: string | null;
-  counted_quantity: number;
-  user_counter: string | null;
-  unit_measurement: string | null;
+  uniq_code: string;
+  counted_qty: number;
+  user_counter?: string;
+  weight_kg?: number | null;
 };
 
 export type StockOpnameCreateRequest = {
   inventory_type: StockInventoryType;
-  period: string;
-  method: "manual" | "bulk";
-  location: string | null;
-  remarks: string | null;
+  method: StockOpnameMethod | string;
+  period_month: number;
+  period_year: number;
+  warehouse_location?: string | null;
+  schedule_date: string;
+  counted_date: string;
+  remarks?: string;
+  approver?: string;
   items: StockOpnameCreateItemRequest[];
 };
 
-export type StockOpnameDetailItem = {
+export type StockOpnameSessionListRecord = {
   id: number;
-  opname_id: number;
-  inventory_type: StockInventoryType;
-  inventory_id: string;
-  uniq: string;
-  item_name?: string;
-  part_number?: string | null;
-  unit_measurement?: string;
-  user_counter?: string;
-  location?: string;
-  system_quantity?: number;
-  counted_quantity?: number;
-  difference?: number;
+  uuid: string;
+  session_number: string;
+  inventory_type: StockInventoryType | string;
+  method?: string;
+  period_month?: number;
+  period_year?: number;
+  period_label?: string;
+  warehouse_location?: string | null;
+  schedule_date?: string;
+  counted_date?: string;
+  remarks?: string;
+  total_entries?: number;
+  total_variance_qty?: number;
+  system_qty_total?: number;
+  physical_qty_total?: number;
+  variance_qty_total?: number;
+  variance_pct_total?: number;
+  cost_impact?: number;
   status?: string;
-  verification_status?: string;
-  approval_status?: string;
-  reject_reason?: string | null;
-  notes?: string | null;
-  counted_at?: string;
+  status_label?: string;
+  impact_label?: string;
+  submitted_by?: string | null;
+  submitted_at?: string | null;
+  approver?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  approval_remarks?: string | null;
+  created_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
-export type StockOpnameLogRecord = {
-  id: number;
-  action?: string;
-  description?: string;
-  performed_by?: string | null;
-  createdAt?: string;
+export type StockOpnameSessionDetail = StockOpnameSessionListRecord & {
+  items?: unknown[];
 };
 
-export type StockOpnameDetailResponse = {
-  session: StockOpnameSessionRecord;
-  items: StockOpnameDetailItem[];
-  items_pagination?: {
-    page?: number;
-    limit?: number;
-    total_records?: number;
-    total_pages?: number;
-  };
-  logs: StockOpnameLogRecord[];
+export type StockOpnameApprovalRequest = {
+  action: StockOpnameApprovalAction | string;
+  remarks?: string;
 };
 
-export type StockOpnameDetailRequest = {
-  opname_number: string;
-  item_status?: string;
-  page?: number;
-  limit?: number;
+export type StockOpnameHistoryLogRecord = {
+  uniq_code: string;
+  packing: string;
+  qty_change: number;
+  reason: string;
+  qty: number;
+  last_update: string;
 };
 
-export type StockOpnameSubmitRequest = {
-  opname_id: number;
-  action: string;
-  verified_by: string | null;
-  items: Array<{
-    item_id: number;
-    verification_status: string;
-    reject_reason?: string;
-  }>;
-};
-
-export type StockOpnameSubmitResponse = {
-  opname_id: number;
-  opname_number: string;
-  status: string;
-  impact: string;
-  status_label: string;
-};
-
-const toSummary = (value: unknown): StockOpnameSummary => {
-  const record = getObject(value) ?? {};
+const toUniqOption = (raw: unknown): StockOpnameUniqOption => {
+  const r = isRecord(raw) ? raw : {};
   return {
-    total_records: getNumber(record, ["total_records"]) ?? 0,
-    completed: getNumber(record, ["completed"]) ?? 0,
-    completed_approved: getNumber(record, ["completed_approved"]) ?? 0,
-    with_variance: getNumber(record, ["with_variance"]) ?? 0,
-    pending_verification: getNumber(record, ["pending_verification"]) ?? 0,
-    waiting_approval: getNumber(record, ["waiting_approval"]) ?? 0,
+    uniq_code: getString(r, ["uniq_code", "uniq", "uniqCode"]) ?? "",
+    part_number: getString(r, ["part_number", "partNumber"]) ?? "",
+    part_name: getString(r, ["part_name", "partName", "item_name", "itemName"]) ?? "",
+    uom: getString(r, ["uom", "unit", "unit_measurement"]) ?? "",
+    system_qty: getNumber(r, ["system_qty", "systemQty", "system_quantity"]) ?? 0,
+    weight_kg: ((): number | null => {
+      const v = (r as UnknownRecord)["weight_kg"];
+      if (v === null) return null;
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+      if (typeof v === "string" && v.trim()) {
+        const parsed = Number(v);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      return null;
+    })(),
   };
 };
 
-const toSession = (value: unknown): StockOpnameSessionRecord => {
-  const record = isRecord(value) ? value : {};
-  const summary = isRecord(record.summary) ? record.summary : undefined;
+const toSessionListRecord = (raw: unknown): StockOpnameSessionListRecord => {
+  const r = isRecord(raw) ? raw : {};
   return {
-    id: getNumber(record, ["id"]) ?? 0,
-    opname_number: getString(record, ["opname_number"]) ?? "-",
-    inventory_type: (getString(record, ["inventory_type"]) ?? "finished_good") as StockInventoryType,
-    method: getString(record, ["method"]),
-    period: getString(record, ["period"]),
-    location: getString(record, ["location"]),
-    status: getString(record, ["status"]),
-    impact: getString(record, ["impact"]),
-    status_label: getString(record, ["status_label"]),
-    remarks: getString(record, ["remarks"]),
-    summary: summary
-      ? {
-          total_items: getNumber(summary, ["total_items"]),
-          items_counted: getNumber(summary, ["items_counted"]),
-          items_with_variance: getNumber(summary, ["items_with_variance"]),
-          system_total: getNumber(summary, ["system_total"]),
-          physical_total: getNumber(summary, ["physical_total"]),
-          variance_total: getNumber(summary, ["variance_total"]),
-          variance_percentage: getNumber(summary, ["variance_percentage"]),
-          cost_impact: getNumber(summary, ["cost_impact"]),
-        }
-      : undefined,
+    id: getNumber(r, ["id"]) ?? 0,
+    uuid: getString(r, ["uuid"]) ?? "",
+    session_number: getString(r, ["session_number", "sessionNumber"]) ?? "-",
+    inventory_type: (getString(r, ["inventory_type", "type"]) ?? "RM") as StockInventoryType,
+    method: getString(r, ["method"]),
+    period_month: getNumber(r, ["period_month"]) ?? undefined,
+    period_year: getNumber(r, ["period_year"]) ?? undefined,
+    period_label: getString(r, ["period_label"]) ?? undefined,
+    warehouse_location: getString(r, ["warehouse_location"]) ?? null,
+    schedule_date: getString(r, ["schedule_date"]) ?? undefined,
+    counted_date: getString(r, ["counted_date"]) ?? undefined,
+    remarks: getString(r, ["remarks"]) ?? undefined,
+    total_entries: getNumber(r, ["total_entries"]) ?? undefined,
+    total_variance_qty: getNumber(r, ["total_variance_qty"]) ?? undefined,
+    system_qty_total: getNumber(r, ["system_qty_total"]) ?? undefined,
+    physical_qty_total: getNumber(r, ["physical_qty_total"]) ?? undefined,
+    variance_qty_total: getNumber(r, ["variance_qty_total"]) ?? undefined,
+    variance_pct_total: getNumber(r, ["variance_pct_total"]) ?? undefined,
+    cost_impact: getNumber(r, ["cost_impact"]) ?? undefined,
+    status: getString(r, ["status"]) ?? undefined,
+    status_label: getString(r, ["status_label"]) ?? undefined,
+    impact_label: getString(r, ["impact_label"]) ?? undefined,
+    submitted_by: getString(r, ["submitted_by"]) ?? null,
+    submitted_at: getString(r, ["submitted_at"]) ?? null,
+    approver: getString(r, ["approver"]) ?? null,
+    approved_by: getString(r, ["approved_by"]) ?? null,
+    approved_at: getString(r, ["approved_at"]) ?? null,
+    approval_remarks: getString(r, ["approval_remarks"]) ?? null,
+    created_by: getString(r, ["created_by"]) ?? null,
+    created_at: getString(r, ["created_at"]) ?? null,
+    updated_at: getString(r, ["updated_at"]) ?? null,
   };
 };
 
-const toListRecord = (value: unknown): StockOpnameListRecord => {
-  const record = isRecord(value) ? value : {};
-  const summary = isRecord(record.summary) ? record.summary : undefined;
+const toHistoryLogRecord = (raw: unknown): StockOpnameHistoryLogRecord => {
+  const r = isRecord(raw) ? raw : {};
   return {
-    id: getNumber(record, ["id"]) ?? 0,
-    opname_number: getString(record, ["opname_number"]) ?? "-",
-    inventory_type: (getString(record, ["inventory_type"]) ?? "finished_good") as StockInventoryType,
-    period: getString(record, ["period"]),
-    location: getString(record, ["location"]),
-    ui_status: getString(record, ["ui_status"]),
-    ui_impact: getString(record, ["ui_impact"]),
-    decision_status: getString(record, ["decision_status"]),
-    status: getString(record, ["status"]),
-    impact: getString(record, ["impact"]),
-    status_label: getString(record, ["status_label"]),
-    system_total: getNumber(record, ["system_total"]),
-    physical_total: getNumber(record, ["physical_total"]),
-    variance_total: getNumber(record, ["variance_total"]),
-    variance_percentage: getNumber(record, ["variance_percentage"]),
-    cost_impact: getNumber(record, ["cost_impact"]),
-    summary: summary
-      ? {
-          total_items: getNumber(summary, ["total_items"]),
-          items_counted: getNumber(summary, ["items_counted"]),
-          items_with_variance: getNumber(summary, ["items_with_variance"]),
-          system_total: getNumber(summary, ["system_total"]),
-          physical_total: getNumber(summary, ["physical_total"]),
-          variance_total: getNumber(summary, ["variance_total"]),
-          variance_percentage: getNumber(summary, ["variance_percentage"]),
-          cost_impact: getNumber(summary, ["cost_impact"]),
-        }
-      : undefined,
-  };
-};
-
-const toUniqSearchRecord = (value: unknown): StockOpnameUniqSearchRecord => {
-  const record = isRecord(value) ? value : {};
-  return {
-    id: getString(record, ["id", "inventory_id"]) ?? "",
-    inventory_id: getString(record, ["inventory_id", "id"]) ?? "",
-    uniq: getString(record, ["uniq", "item_uniq_code", "uniq_code"]) ?? "-",
-    item_name: getString(record, ["item_name", "part_name", "name"]),
-    part_number: getString(record, ["part_number", "part_no"]),
-    unit_measurement: getString(record, ["unit_measurement", "uom", "unit"]),
-    system_quantity: getNumber(record, ["system_quantity", "stock", "quantity", "current_stock"]),
-    location: getString(record, ["location", "warehouse", "warehouse_code"]),
-  };
-};
-
-const toDetailItem = (value: unknown): StockOpnameDetailItem => {
-  const record = isRecord(value) ? value : {};
-  return {
-    id: getNumber(record, ["id"]) ?? 0,
-    opname_id: getNumber(record, ["opname_id"]) ?? 0,
-    inventory_type: (getString(record, ["inventory_type"]) ?? "finished_good") as StockInventoryType,
-    inventory_id: getString(record, ["inventory_id"]) ?? "",
-    uniq: getString(record, ["uniq"]) ?? "-",
-    item_name: getString(record, ["item_name"]),
-    part_number: getString(record, ["part_number"]),
-    unit_measurement: getString(record, ["unit_measurement"]),
-    user_counter: getString(record, ["user_counter"]),
-    location: getString(record, ["location"]),
-    system_quantity: getNumber(record, ["system_quantity"]),
-    counted_quantity: getNumber(record, ["counted_quantity"]),
-    difference: getNumber(record, ["difference"]),
-    status: getString(record, ["status"]),
-    verification_status: getString(record, ["verification_status"]),
-    approval_status: getString(record, ["approval_status"]),
-    reject_reason: getString(record, ["reject_reason"]),
-    notes: getString(record, ["notes"]),
-    counted_at: getString(record, ["counted_at"]),
-  };
-};
-
-const toLogRecord = (value: unknown): StockOpnameLogRecord => {
-  const record = isRecord(value) ? value : {};
-  return {
-    id: getNumber(record, ["id"]) ?? 0,
-    action: getString(record, ["action"]),
-    description: getString(record, ["description"]),
-    performed_by: getString(record, ["performed_by"]),
-    createdAt: getString(record, ["createdAt", "created_at"]),
+    uniq_code: getString(r, ["uniq_code", "uniq"]) ?? "",
+    packing: getString(r, ["packing"]) ?? "-",
+    qty_change: getNumber(r, ["qty_change", "qtyChange"]) ?? 0,
+    reason: getString(r, ["reason"]) ?? "-",
+    qty: getNumber(r, ["qty"]) ?? 0,
+    last_update: getString(r, ["last_update", "lastUpdate", "updated_at"]) ?? "-",
   };
 };
 
@@ -329,135 +253,116 @@ export const stockOpnameApiSlice = apiSlice
   .enhanceEndpoints({ addTagTypes: [TAG] })
   .injectEndpoints({
     endpoints: (builder) => ({
-      getStockOpnameSummary: builder.query<StockOpnameSummary, void>({
-        query: () => ({
-          url: "/api/stock-opname/summary",
+      getStockOpnameUniqOptions: builder.query<StockOpnameUniqOption[], { type: StockInventoryType; q: string; limit: number }>({
+        query: ({ type, q, limit }) => ({
+          url: "/stock-opname-sessions/form-options/uniq",
           method: "GET",
+          params: { type, q, limit },
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => toSummary(response),
-        providesTags: [{ type: TAG, id: "SUMMARY" }],
+        transformResponse: (response: unknown) =>
+          normalizeArrayResponse<unknown>(response)
+            .map(toUniqOption)
+            .filter((x) => Boolean(x.uniq_code)),
       }),
-      getStockOpnameList: builder.query<
-        { rows: StockOpnameListRecord[]; total: number },
-        { inventory_type: StockInventoryType; period: string; page: number; limit: number }
-      >({
-        query: ({ inventory_type, period, page, limit }) => ({
-          url: `/api/stock-opname/list?inventory_type=${encodeURIComponent(inventory_type)}&period=${encodeURIComponent(period)}&page=${page}&limit=${limit}`,
+
+      createStockOpnameSession: builder.mutation<unknown, StockOpnameCreateRequest>({
+        query: (body) => ({
+          url: "/stock-opname-sessions",
+          method: "POST",
+          body,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        invalidatesTags: [{ type: TAG, id: "LIST" }],
+      }),
+
+      getStockOpnameSessions: builder.query<Paginated<StockOpnameSessionListRecord>, { type: StockInventoryType; page: number; limit: number }>({
+        query: ({ type, page, limit }) => ({
+          url: "/stock-opname-sessions",
+          method: "GET",
+          params: { type, page, limit },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => {
+          const normalized = normalizePaginatedResponse<unknown>(response);
+          return {
+            items: normalized.items.map(toSessionListRecord),
+            pagination: normalized.pagination,
+          };
+        },
+        providesTags: (result) => {
+          const base: Array<{ type: typeof TAG; id: string }> = [{ type: TAG, id: "LIST" }];
+          const ids = result?.items?.map((r) => r.uuid || String(r.id)).filter(Boolean) ?? [];
+          return base.concat(ids.map((id) => ({ type: TAG, id })));
+        },
+      }),
+
+      // Not in the provided spec, but common in the backend; used by detail page if available.
+      getStockOpnameSessionById: builder.query<StockOpnameSessionDetail | null, { id: string | number }>({
+        query: ({ id }) => ({
+          url: `/stock-opname-sessions/${encodeURIComponent(String(id))}`,
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) => {
-          const root = getObject(response) ?? {};
-          const rows = getArray(response).map(toListRecord);
-          const paginationSource = isRecord(root.pagination) ? root.pagination : root;
-          const total = getNumber(paginationSource, ["total_records", "total", "count"]) ?? rows.length;
-          return { rows, total };
+          const obj = normalizeObjectResponse<unknown>(response);
+          if (!obj) return null;
+          return toSessionListRecord(obj) as StockOpnameSessionDetail;
         },
-        providesTags: (result, _error, arg) => [
-          { type: TAG, id: `LIST-${arg.inventory_type}` },
-          ...(result?.rows ?? []).map((row) => ({ type: TAG, id: row.id } as const)),
+        providesTags: (_r, _e, arg) => [{ type: TAG, id: String(arg.id) }],
+      }),
+
+      approveStockOpnameSession: builder.mutation<unknown, { id: string | number; body: StockOpnameApprovalRequest }>({
+        query: ({ id, body }) => ({
+          url: `/stock-opname-sessions/${encodeURIComponent(String(id))}/approve`,
+          method: "PUT",
+          body,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        invalidatesTags: (_r, _e, arg) => [
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: String(arg.id) },
         ],
       }),
-      deleteStockOpname: builder.mutation<{ success?: boolean }, number | string>({
-        query: (id) => ({
-          url: `/api/stock-opname/${encodeURIComponent(String(id))}`,
-          method: "DELETE",
-          meta: { useAuthorization: true, contentType: "application/json" },
-        }),
-        invalidatesTags: [{ type: TAG, id: "SUMMARY" }],
-      }),
-      searchStockOpnameUniq: builder.query<
-        StockOpnameUniqSearchRecord[],
-        { inventory_type: StockInventoryType; q: string; limit?: number }
-      >({
-        query: ({ inventory_type, q, limit = 20 }) => ({
-          url: `/api/stock-opname/uniq/search?inventory_type=${encodeURIComponent(inventory_type)}&q=${encodeURIComponent(q)}&limit=${limit}`,
-          method: "GET",
-          meta: { useAuthorization: true, contentType: "application/json" },
-        }),
-        transformResponse: (response: unknown) => getArray(response).map(toUniqSearchRecord),
-      }),
-      getStockOpnameUomList: builder.query<string[], void>({
-        query: () => ({
-          url: "/api/stock-opname/uom/list",
-          method: "GET",
-          meta: { useAuthorization: true, contentType: "application/json" },
-        }),
-        transformResponse: (response: unknown) => {
-          const values = getArray(response)
-            .map((item) => {
-              if (typeof item === "string") return item;
-              if (isRecord(item)) return getString(item, ["name", "code", "uom", "unit_measurement"]);
-              return undefined;
-            })
-            .filter((value): value is string => Boolean(value));
-          return Array.from(new Set(values));
-        },
-      }),
-      createStockOpname: builder.mutation<UnknownRecord, StockOpnameCreateRequest>({
-        query: (body) => ({
-          url: "/api/stock-opname/create",
-          method: "POST",
+
+      rejectStockOpnameSession: builder.mutation<unknown, { id: string | number; body: StockOpnameApprovalRequest }>({
+        query: ({ id, body }) => ({
+          url: `/stock-opname-sessions/${encodeURIComponent(String(id))}/reject`,
+          method: "PUT",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        invalidatesTags: [{ type: TAG, id: "SUMMARY" }],
+        invalidatesTags: (_r, _e, arg) => [
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: String(arg.id) },
+        ],
       }),
-      getStockOpnameDetail: builder.query<StockOpnameDetailResponse, StockOpnameDetailRequest>({
-        query: (body) => ({
-          url: "/api/stock-opname/detail",
-          method: "POST",
-          body,
+
+      getStockOpnameHistoryLogs: builder.query<Paginated<StockOpnameHistoryLogRecord>, { type: StockInventoryType; uniq_code: string; page: number; limit: number }>({
+        query: ({ type, uniq_code, page, limit }) => ({
+          url: "/stock-opname-sessions/history-logs",
+          method: "GET",
+          params: { type, uniq_code, page, limit },
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) => {
-          const root = getObject(response) ?? {};
+          const normalized = normalizePaginatedResponse<unknown>(response);
           return {
-            session: toSession(root.session),
-            items: getArray(root.items).map(toDetailItem),
-            items_pagination: isRecord(root.items_pagination)
-              ? {
-                  page: getNumber(root.items_pagination, ["page"]),
-                  limit: getNumber(root.items_pagination, ["limit"]),
-                  total_records: getNumber(root.items_pagination, ["total_records"]),
-                  total_pages: getNumber(root.items_pagination, ["total_pages"]),
-                }
-              : undefined,
-            logs: getArray(root.logs).map(toLogRecord),
+            items: normalized.items.map(toHistoryLogRecord),
+            pagination: normalized.pagination,
           };
         },
-        providesTags: (_result, _error, arg) => [{ type: TAG, id: `DETAIL-${arg.opname_number}` }],
-      }),
-      submitStockOpname: builder.mutation<StockOpnameSubmitResponse, StockOpnameSubmitRequest>({
-        query: (body) => ({
-          url: "/api/stock-opname/submit",
-          method: "POST",
-          body,
-          meta: { useAuthorization: true, contentType: "application/json" },
-        }),
-        transformResponse: (response: unknown) => {
-          const record = getObject(response) ?? {};
-          return {
-            opname_id: getNumber(record, ["opname_id"]) ?? 0,
-            opname_number: getString(record, ["opname_number"]) ?? "-",
-            status: getString(record, ["status"]) ?? "-",
-            impact: getString(record, ["impact"]) ?? "-",
-            status_label: getString(record, ["status_label"]) ?? "-",
-          };
-        },
-        invalidatesTags: [{ type: TAG, id: "SUMMARY" }],
       }),
     }),
   });
 
 export const {
-  useGetStockOpnameSummaryQuery,
-  useGetStockOpnameListQuery,
-  useDeleteStockOpnameMutation,
-  useLazySearchStockOpnameUniqQuery,
-  useGetStockOpnameUomListQuery,
-  useCreateStockOpnameMutation,
-  useGetStockOpnameDetailQuery,
-  useSubmitStockOpnameMutation,
+  useGetStockOpnameUniqOptionsQuery,
+  useLazyGetStockOpnameUniqOptionsQuery,
+  useCreateStockOpnameSessionMutation,
+  useGetStockOpnameSessionsQuery,
+  useGetStockOpnameSessionByIdQuery,
+  useApproveStockOpnameSessionMutation,
+  useRejectStockOpnameSessionMutation,
+  useGetStockOpnameHistoryLogsQuery,
 } = stockOpnameApiSlice;

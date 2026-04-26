@@ -7,12 +7,12 @@ import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
   type ShopFloorMachineDetail,
-  type ShopFloorProductionIssue,
-  type ShopFloorScanEvent,
-  useGetShopFloorDeliveryReadinessQuery,
-  useGetShopFloorLiveProductionQuery,
-  useGetShopFloorProductionIssuesQuery,
-  useGetShopFloorScanEventsQuery,
+  type ShopFloorProductionIssuesSummaryItem,
+  type ShopFloorScanEventsSummaryItem,
+  useGetShopFloorDeliveryReadinessSummaryQuery,
+  useGetShopFloorLiveProductionSummaryQuery,
+  useGetShopFloorProductionIssuesSummaryQuery,
+  useGetShopFloorScanEventsSummaryQuery,
   useLazyGetShopFloorMachineDetailQuery,
 } from "@/lib/api/shop-floor/api";
 
@@ -467,8 +467,16 @@ const mapDeliveryRisk = (status?: string | null, shortage = 0, requiredQty = 0):
   return "Ready";
 };
 
-const mapIssuePriority = (issue: ShopFloorProductionIssue): IssuePriority => {
-  const raw = [issue.priority, issue.status, issue.issue_type, issue.production_impact]
+type IssuePrioritySource = {
+  priority?: string | null;
+  status?: string | null;
+  issue_type?: string | null;
+  production_impact?: string | null;
+  impact?: string | null;
+};
+
+const mapIssuePriority = (issue: IssuePrioritySource): IssuePriority => {
+  const raw = [issue.priority, issue.status, issue.issue_type, issue.production_impact, issue.impact]
     .map((value) => toText(value, ""))
     .join(" ")
     .toUpperCase();
@@ -491,23 +499,9 @@ const mapScanEventType = (value?: string | null): ScanEventType => {
   return "Scan In";
 };
 
-const getEventTimestamp = (event?: ShopFloorScanEvent | null): number =>
-  parseTimestamp(event?.createdAt ?? event?.updatedAt ?? event?.report_date ?? undefined);
+const getSummaryEventTimestamp = (event?: ShopFloorScanEventsSummaryItem | null): number => parseTimestamp(event?.event_at ?? null);
 
-const getMachineLabel = (event?: ShopFloorScanEvent | null): string =>
-  toText(event?.master_machine?.machine_number ?? event?.master_machine?.machine_name ?? event?.production_line, "Unknown Machine");
-
-const getNextProcess = (event?: ShopFloorScanEvent | null): string => {
-  const routes = event?.wo_item?.product_details?.process_routes ?? [];
-  const currentProcess = toText(event?.process_name, "");
-  if (routes.length && currentProcess) {
-    const currentIndex = routes.findIndex((route) => toText(route.process_name, "") === currentProcess);
-    if (currentIndex >= 0 && currentIndex < routes.length - 1) {
-      return toText(routes[currentIndex + 1]?.process_name);
-    }
-  }
-  return toText(event?.wo_item?.process_name ?? event?.process_name);
-};
+const mapIssueSummaryStatus = (issue?: ShopFloorProductionIssuesSummaryItem | null): IssueStatus => mapIssueStatus(issue?.status);
 
 const emptyState = (title: string, description: string) => (
   <div className="rounded-xl border border-dashed border-gray-200 bg-white px-6 py-12 text-center">
@@ -522,137 +516,81 @@ export default function ShopFloor() {
   const [isMachineModalOpen, setIsMachineModalOpen] = useState(false);
 
   const apiEnabled = Boolean(apiBaseUrl);
-  const liveProductionQuery = useGetShopFloorLiveProductionQuery(undefined, { skip: !apiEnabled });
-  const deliveryReadinessQuery = useGetShopFloorDeliveryReadinessQuery(undefined, { skip: !apiEnabled });
-  const productionIssuesQuery = useGetShopFloorProductionIssuesQuery(undefined, { skip: !apiEnabled });
-  const scanEventsQuery = useGetShopFloorScanEventsQuery(undefined, { skip: !apiEnabled });
+  const liveProductionQuery = useGetShopFloorLiveProductionSummaryQuery(
+    { limit: 10, stale_minutes: 1440 },
+    { skip: !apiEnabled }
+  );
+  const deliveryReadinessQuery = useGetShopFloorDeliveryReadinessSummaryQuery({ limit: 10 }, { skip: !apiEnabled });
+  const productionIssuesQuery = useGetShopFloorProductionIssuesSummaryQuery({ limit: 10 }, { skip: !apiEnabled });
+  const scanEventsQuery = useGetShopFloorScanEventsSummaryQuery(
+    { limit: 20, window_hours: 24 },
+    { skip: !apiEnabled }
+  );
   const [fetchMachineDetail, machineDetailQuery] = useLazyGetShopFloorMachineDetailQuery();
 
-  const liveProductionData = liveProductionQuery.data?.data ?? [];
-  const deliveryReadinessData = deliveryReadinessQuery.data?.data ?? [];
-  const productionIssuesData = productionIssuesQuery.data?.data ?? [];
-  const scanEventData = useMemo(
-    () => [...(scanEventsQuery.data?.data ?? [])].sort((left, right) => getEventTimestamp(right) - getEventTimestamp(left) || toNumber(right.id) - toNumber(left.id)),
-    [scanEventsQuery.data?.data]
-  );
+  const liveProductionSummary = liveProductionQuery.data?.data;
+  const deliveryReadinessSummary = deliveryReadinessQuery.data?.data;
+  const productionIssuesSummary = productionIssuesQuery.data?.data;
+  const scanEventsSummary = scanEventsQuery.data?.data;
 
-  const latestReportDate = useMemo(() => {
-    const dates = scanEventData.map((event) => toText(event.report_date, "")).filter(Boolean);
-    if (!dates.length) return null;
-    return [...dates].sort().at(-1) ?? null;
-  }, [scanEventData]);
+  const scanEventItems = useMemo(() => {
+    const items = scanEventsSummary?.items ?? [];
+    return [...items].sort((left, right) => getSummaryEventTimestamp(right) - getSummaryEventTimestamp(left));
+  }, [scanEventsSummary?.items]);
 
-  const machineEventsMap = useMemo(() => {
-    const map = new Map<string, ShopFloorScanEvent[]>();
-    scanEventData.forEach((event) => {
-      const machineId = toText(event.machine_id, "");
-      if (!machineId) return;
-      const existing = map.get(machineId) ?? [];
-      existing.push(event);
-      map.set(machineId, existing);
-    });
-    return map;
-  }, [scanEventData]);
-
-  const uniqEventsMap = useMemo(() => {
-    const map = new Map<string, ShopFloorScanEvent[]>();
-    scanEventData.forEach((event) => {
-      const uniq = toText(event.item_uniq_code ?? event.wo_item?.product_details?.uniq, "");
-      if (!uniq) return;
-      const existing = map.get(uniq) ?? [];
-      existing.push(event);
-      map.set(uniq, existing);
-    });
-    return map;
-  }, [scanEventData]);
+  const asOfDate = useMemo(() => {
+    return (
+      liveProductionSummary?.as_of ??
+      scanEventsSummary?.as_of ??
+      (scanEventItems.length ? scanEventItems[0]?.event_at : null) ??
+      null
+    );
+  }, [liveProductionSummary?.as_of, scanEventItems, scanEventsSummary?.as_of]);
 
   const liveLines = useMemo<LineCard[]>(() => {
-    const machineRows =
-      liveProductionData.length > 0
-        ? liveProductionData
-        : Array.from(machineEventsMap.entries()).map(([machineId, events]) => {
-            const latest = events[0];
-            return {
-              machine_id: machineId,
-              machine_name: latest?.master_machine?.machine_name,
-              machine_number: latest?.master_machine?.machine_number,
-              production_line: latest?.master_machine?.production_line,
-              status: latest?.master_machine?.status,
-              current_wo: latest?.work_order?.wo_number,
-              current_uniq: latest?.item_uniq_code ?? latest?.wo_item?.product_details?.uniq,
-              operator: latest?.operator_name,
-              last_update: latest?.updatedAt ?? latest?.createdAt,
-            };
-          });
+    if (!apiEnabled) return lines;
 
-    return machineRows.map((machine, index) => {
-      const machineId = toText(machine.machine_id, `machine-${index + 1}`);
-      const events = machineEventsMap.get(machineId) ?? [];
-      const latestEvent = events[0];
-      const targetQty = toNumber(latestEvent?.wo_item?.quantity);
-      const scanOutQty = events
-        .filter((event) => toText(event.scan_type, "").toLowerCase() === "scan_out")
-        .reduce((sum, event) => sum + toNumber(event.good_quantity || event.quantity), 0);
-      const progressPercent = targetQty > 0 ? clamp(Math.round((scanOutQty / targetQty) * 100), 0, 100) : 0;
-      const latestDayEvents = latestReportDate ? events.filter((event) => toText(event.report_date, "") === latestReportDate) : events;
-      const throughputToday = latestDayEvents
-        .filter((event) => toText(event.scan_type, "").toLowerCase() === "scan_out")
-        .reduce((sum, event) => sum + toNumber(event.good_quantity || event.quantity), 0);
-      const processedQty = latestDayEvents.reduce((sum, event) => sum + toNumber(event.quantity), 0);
-      const status = mapLineStatus(machine.status ?? latestEvent?.master_machine?.status);
-      const machineCapacity = toNumber(latestEvent?.master_machine?.machine_capacity);
-      const utilization = machineCapacity > 0
-        ? clamp(Math.round((processedQty / machineCapacity) * 100), 0, 100)
-        : status === "Running"
-          ? 100
-          : status === "Issue"
-            ? 25
-            : 60;
-      const goodQty = latestDayEvents.reduce((sum, event) => sum + toNumber(event.good_quantity), 0);
-      const rejectQty = latestDayEvents.reduce(
-        (sum, event) => sum + toNumber(event.ng_setting_machine) + toNumber(event.ng_process) + toNumber(event.scrap_quantity),
-        0
-      );
-      const qualityBase = goodQty + rejectQty;
-      const qualityRate = qualityBase > 0 ? Number(((goodQty / qualityBase) * 100).toFixed(1)) : 100;
-      const durationValues = latestDayEvents
-        .map((event) => parseDurationMinutes(event.dandori_time ?? event.setup_qc_time ?? null))
-        .filter((value): value is number => value != null && Number.isFinite(value));
-      const avgDuration = durationValues.length
-        ? durationValues.reduce((sum, value) => sum + value, 0) / durationValues.length
-        : null;
+    const items = liveProductionSummary?.items ?? [];
+    return items.map((row, index) => {
+      const machineId = toText(row.machine?.id ?? row.machine?.code, `machine-${index + 1}`);
+      const progressFromPercent = toNumber(row.progress?.percent);
+      const doneQty = toNumber(row.progress?.done_qty);
+      const targetQty = toNumber(row.progress?.target_qty);
+      const computedPercent = targetQty > 0 ? clamp(Math.round((doneQty / targetQty) * 100), 0, 100) : 0;
+      const progressPercent = progressFromPercent > 0 ? clamp(Math.round(progressFromPercent), 0, 100) : computedPercent;
+      const status = mapLineStatus(row.machine?.status ?? row.progress?.status ?? row.progress?.label);
 
       return {
         key: machineId,
         machineId,
-        lineName: toText(machine.machine_name, toText(latestEvent?.master_machine?.machine_name, `Machine ${index + 1}`)),
-        lineCode: toText(machine.machine_number ?? latestEvent?.master_machine?.machine_number ?? machine.production_line, `LINE-${index + 1}`),
+        lineName: toText(row.machine?.name, `Machine ${index + 1}`),
+        lineCode: toText(row.machine?.code ?? row.machine?.id, `LINE-${index + 1}`),
         status,
         currentProduction: {
-          uniq: toText(machine.current_uniq ?? latestEvent?.item_uniq_code ?? latestEvent?.wo_item?.product_details?.uniq),
-          workOrder: toText(machine.current_wo ?? latestEvent?.work_order?.wo_number),
-          part: toText(latestEvent?.wo_item?.product_details?.part_name ?? latestEvent?.wo_item?.process_name, "Part not available"),
-          lastScan: formatRelativeTime(machine.last_update ?? latestEvent?.updatedAt ?? latestEvent?.createdAt ?? null),
+          uniq: toText(row.production?.uniq_code, "—"),
+          workOrder: toText(row.production?.work_order, "—"),
+          part: toText(row.production?.part_name, "Part not available"),
+          lastScan: formatRelativeTime(row.production?.last_scan_at ?? liveProductionSummary?.as_of ?? null),
         },
         operator: {
-          name: toText(machine.operator ?? latestEvent?.operator_name, "Operator not assigned"),
-          time: formatClock(latestEvent?.createdAt ?? latestEvent?.updatedAt ?? null),
-          shiftStart: toText(latestEvent?.shift, "—"),
+          name: toText(row.production?.operator_name, "Operator not assigned"),
+          time: formatClock(row.production?.last_scan_at ?? liveProductionSummary?.as_of ?? null),
+          shiftStart: "—",
           shiftState: status,
-          nextProcess: getNextProcess(latestEvent),
-          cycleTime: formatDuration(avgDuration),
+          nextProcess: "—",
+          cycleTime: "—",
         },
         progressPercent,
-        progressLabel: progressPercent >= 100 ? "Completed" : "In Progress",
+        progressLabel: toText(row.progress?.label, progressPercent >= 100 ? "Completed" : "In Progress"),
         bottomStats: {
-          throughputToday,
-          utilization,
-          qualityRate,
-          avgCycleTime: formatDuration(avgDuration),
+          throughputToday: doneQty,
+          utilization: status === "Running" ? 100 : status === "Issue" ? 25 : 60,
+          qualityRate: 100,
+          avgCycleTime: "—",
         },
       };
     });
-  }, [latestReportDate, liveProductionData, machineEventsMap]);
+  }, [apiEnabled, liveProductionSummary?.as_of, liveProductionSummary?.items]);
 
   useEffect(() => {
     if (!liveLines.length) {
@@ -666,116 +604,109 @@ export default function ShopFloor() {
   }, [liveLines, selectedMachineId]);
 
   const mappedDeliveryItems = useMemo<DeliveryItem[]>(() => {
-    return deliveryReadinessData.map((item, index) => {
-      const uniq = toText(item.uniq, `UNIQ-${index + 1}`);
-      const relatedEvents = uniqEventsMap.get(uniq) ?? [];
-      const latestEvent = relatedEvents[0];
-      const stock = toNumber(item.stock);
-      const scanInQty = relatedEvents
-        .filter((event) => toText(event.scan_type, "").toLowerCase() === "scan_in")
-        .reduce((sum, event) => sum + toNumber(event.quantity), 0);
-      const scanOutQty = relatedEvents
-        .filter((event) => toText(event.scan_type, "").toLowerCase() === "scan_out")
-        .reduce((sum, event) => sum + toNumber(event.good_quantity || event.quantity), 0);
-      const wipStock = Math.max(0, scanInQty - scanOutQty);
-      const totalAvailable = stock + wipStock;
-      const shortage = toNumber(item.shortage);
-      const requiredQty = Math.max(totalAvailable + shortage, toNumber(latestEvent?.wo_item?.quantity));
-      const risk = mapDeliveryRisk(item.status, shortage, requiredQty);
+    if (!apiEnabled) return deliveryItems;
+
+    const items = deliveryReadinessSummary?.items ?? [];
+    return items.map((item, index) => {
+      const uniq = toText(item.identity?.uniq_code, `UNIQ-${index + 1}`);
+      const finishedGoods = toNumber(item.inventory?.finished_goods_qty);
+      const wipStock = toNumber(item.inventory?.wip_qty);
+      const totalAvailable = toNumber(item.inventory?.total_available_qty) || finishedGoods + wipStock;
+      const requiredQty = toNumber(item.delivery?.required_qty);
+      const shortfallQty = toNumber(item.inventory?.shortfall_qty);
+      const risk = mapDeliveryRisk(item.readiness?.status, Math.max(0, shortfallQty), requiredQty);
+      const coveragePercent =
+        toNumber(item.readiness?.coverage_percent) ||
+        (requiredQty > 0 ? clamp(Math.round((totalAvailable / requiredQty) * 100), 0, 999) : risk === "Ready" ? 100 : 0);
+
       return {
         key: `${uniq}-${index}`,
-        productName: toText(latestEvent?.wo_item?.product_details?.part_name, uniq),
+        productName: toText(item.identity?.product_name, uniq),
         uniq,
-        customer: toText(latestEvent?.work_order?.wo_type, "—"),
-        dueDate: formatDate(latestEvent?.work_order?.target_date ?? null),
-        dueTime: latestEvent?.work_order?.target_date ? "23:59" : "—",
-        hoursUntilDue: formatHoursUntilDue(latestEvent?.work_order?.target_date ?? null),
+        customer: toText(item.identity?.customer_name, "—"),
+        dueDate: formatDate(item.delivery?.due_at ?? item.delivery?.schedule_date ?? null),
+        dueTime: toText(item.delivery?.schedule_time, item.delivery?.due_at ? "23:59" : "—"),
+        hoursUntilDue: formatHoursUntilDue(item.delivery?.due_at ?? item.delivery?.schedule_date ?? null),
         requiredQty,
-        finishedGoods: stock,
+        finishedGoods,
         wipStock,
         totalAvailable,
-        shortfall: shortage > 0 ? -shortage : 0,
-        coveragePercent: requiredQty > 0 ? clamp(Math.round((totalAvailable / requiredQty) * 100), 0, 999) : risk === "Ready" ? 100 : 0,
+        shortfall: shortfallQty > 0 ? -shortfallQty : 0,
+        coveragePercent,
         risk,
-        priority: shortage > 0 ? (shortage > 20 ? "Urgent" : "High") : "Medium",
+        priority: shortfallQty > 0 ? (shortfallQty > 20 ? "Urgent" : "High") : "Medium",
       };
     });
-  }, [deliveryReadinessData, uniqEventsMap]);
+  }, [apiEnabled, deliveryReadinessSummary?.items]);
 
   const mappedProductionIssues = useMemo<ProductionIssueItem[]>(() => {
-    const derivedIssues: ShopFloorProductionIssue[] = scanEventData
-      .filter((event) => toText(event.issue_type, "") || toText(event.issue_description, ""))
-      .map((event) => ({
-        id: event.issue_id ?? event.id,
-        issue_id: event.issue_id ?? event.id,
-        title: event.issue_type ?? undefined,
-        issue_type: event.issue_type,
-        issue_description: event.issue_description,
-        machine_name: event.master_machine?.machine_name,
-        machine_id: event.machine_id,
-        production_line: event.master_machine?.production_line ?? event.production_line,
-        process_name: event.process_name,
-        operator_name: event.operator_name,
-        status: event.issue_type ? "Under Investigation" : undefined,
-        issue_time: event.issue_time ?? event.createdAt,
-      }));
+    if (!apiEnabled) return productionIssues;
 
-    const source = productionIssuesData.length ? productionIssuesData : derivedIssues;
+    const source = productionIssuesSummary?.items ?? [];
     return source.map((issue, index) => ({
-      key: String(issue.id ?? issue.issue_id ?? index + 1),
+      key: String(issue.issue_id ?? index + 1),
       title: toText(issue.title ?? issue.issue_type, `Issue ${index + 1}`),
-      description: toText(issue.issue_description ?? issue.description, "No issue description provided"),
-      machine: toText(issue.machine_name ?? issue.production_line ?? issue.process_name ?? issue.machine_id, "Unknown machine"),
+      description: toText(issue.description, "No issue description provided"),
+      machine: toText(issue.machine_name ?? issue.production_line ?? issue.machine_code, "Unknown machine"),
       reportedBy: toText(issue.reported_by ?? issue.operator_name, "System"),
-      time: formatClock(issue.issue_time ?? issue.createdAt ?? issue.updatedAt ?? null),
+      time: formatClock(issue.reported_at ?? null),
       priority: mapIssuePriority(issue),
-      status: mapIssueStatus(issue.status),
-      estResolution: toText(issue.estimated_resolution, "TBD"),
-      productionImpact: toText(issue.production_impact ?? issue.impact, "Needs review"),
-      issueId: toText(issue.issue_id ?? issue.id, `ISSUE-${index + 1}`),
+      status: mapIssueSummaryStatus(issue),
+      estResolution: "TBD",
+      productionImpact: toText(issue.impact, "Needs review"),
+      issueId: toText(issue.issue_id, `ISSUE-${index + 1}`),
     }));
-  }, [productionIssuesData, scanEventData]);
+  }, [apiEnabled, productionIssuesSummary?.items]);
 
   const mappedScanEvents = useMemo<ScanEventRow[]>(() => {
-    return scanEventData.map((event, index) => ({
+    if (!apiEnabled) return scanEvents;
+
+    return scanEventItems.map((event, index) => ({
       key: String(event.id ?? index + 1),
-      time: formatClock(event.createdAt ?? event.updatedAt ?? event.report_date ?? null),
+      time: formatClock(event.event_at ?? null),
       event: mapScanEventType(event.scan_type),
-      machine: getMachineLabel(event),
-      uniq: toText(event.item_uniq_code ?? event.wo_item?.product_details?.uniq),
-      workOrder: toText(event.work_order?.wo_number),
+      machine: toText(event.machine_code ?? event.machine_name, "Unknown Machine"),
+      uniq: toText(event.uniq_code),
+      workOrder: toText(event.work_order),
       operator: toText(event.operator_name, "System"),
       process: toText(event.process_name),
-      qty: toNumber(event.good_quantity || event.quantity),
+      qty: toNumber(event.good_qty ?? event.qty),
     }));
-  }, [scanEventData]);
+  }, [apiEnabled, scanEventItems]);
 
-  const activeLinesCount = useMemo(() => liveLines.filter((line) => line.status === "Running").length, [liveLines]);
-  const criticalCount = useMemo(() => mappedDeliveryItems.filter((item) => item.risk === "Critical").length, [mappedDeliveryItems]);
+  const activeLinesCount = useMemo(() => {
+    const fromSummary = toNumber(liveProductionSummary?.machine_running);
+    return fromSummary > 0 ? fromSummary : liveLines.filter((line) => line.status === "Running").length;
+  }, [liveLines, liveProductionSummary?.machine_running]);
+  const criticalCount = useMemo(() => {
+    const fromSummary = toNumber(deliveryReadinessSummary?.critical_total);
+    return fromSummary > 0 ? fromSummary : mappedDeliveryItems.filter((item) => item.risk === "Critical").length;
+  }, [deliveryReadinessSummary?.critical_total, mappedDeliveryItems]);
   const atRiskCount = useMemo(() => mappedDeliveryItems.filter((item) => item.risk === "At Risk").length, [mappedDeliveryItems]);
   const highPriorityCount = useMemo(() => mappedProductionIssues.filter((item) => item.priority === "High").length, [mappedProductionIssues]);
-  const throughputToday = useMemo(() => liveLines.reduce((sum, line) => sum + line.bottomStats.throughputToday, 0), [liveLines]);
+  const throughputToday = useMemo(() => {
+    const fromSummary = toNumber(liveProductionSummary?.throughput_today);
+    return fromSummary > 0 ? fromSummary : liveLines.reduce((sum, line) => sum + line.bottomStats.throughputToday, 0);
+  }, [liveLines, liveProductionSummary?.throughput_today]);
   const lineEfficiency = useMemo(() => {
     if (!liveLines.length) return 0;
     return Math.round(liveLines.reduce((sum, line) => sum + line.bottomStats.utilization, 0) / liveLines.length);
   }, [liveLines]);
   const qualityRate = useMemo(() => {
-    const totalGood = scanEventData.reduce((sum, event) => sum + toNumber(event.good_quantity), 0);
-    const totalReject = scanEventData.reduce(
-      (sum, event) => sum + toNumber(event.ng_setting_machine) + toNumber(event.ng_process) + toNumber(event.scrap_quantity),
-      0
-    );
+    const totalGood = scanEventItems.reduce((sum, event) => sum + toNumber(event.good_qty), 0);
+    const totalReject = scanEventItems.reduce((sum, event) => sum + toNumber(event.ng_qty) + toNumber(event.scrap_qty), 0);
     const total = totalGood + totalReject;
     return total > 0 ? Number(((totalGood / total) * 100).toFixed(1)) : 0;
-  }, [scanEventData]);
+  }, [scanEventItems]);
   const lastUpdatedText = useMemo(() => {
     const latestTs = Math.max(
-      ...liveProductionData.map((row) => parseTimestamp(row.last_update)),
-      ...scanEventData.map((row) => getEventTimestamp(row)),
+      parseTimestamp(liveProductionSummary?.as_of ?? null),
+      parseTimestamp(scanEventsSummary?.as_of ?? null),
+      ...scanEventItems.map((row) => getSummaryEventTimestamp(row)),
       0
     );
     return latestTs ? formatRelativeTime(new Date(latestTs).toISOString()) : "No updates yet";
-  }, [liveProductionData, scanEventData]);
+  }, [liveProductionSummary?.as_of, scanEventItems, scanEventsSummary?.as_of]);
   const selectedLine = useMemo(() => liveLines.find((line) => line.machineId === selectedMachineId) ?? null, [liveLines, selectedMachineId]);
   const pageError = useMemo(() => {
     const firstError = [
@@ -953,7 +884,7 @@ export default function ShopFloor() {
           type="warning"
           showIcon
           className="mb-6 !rounded-xl"
-          message="NEXT_PUBLIC_API_URL belum dikonfigurasi. Shop floor memakai data API lokal."
+          message="NEXT_PUBLIC_API_URL belum dikonfigurasi. Shop floor memakai data mock."
         />
       ) : null}
 
@@ -963,7 +894,7 @@ export default function ShopFloor() {
         <StatsCard
           title="Total Throughput Today"
           value={throughputToday}
-          subtitle={latestReportDate ? `units • ${formatDate(latestReportDate)}` : "units"}
+          subtitle={asOfDate ? `units • ${formatDate(asOfDate)}` : "units"}
           icon={throughputIcon}
           bgColor="bg-blue-50"
           textColor="text-blue-600"
@@ -981,7 +912,7 @@ export default function ShopFloor() {
         />
         <StatsCard
           title="Active Machines"
-          value={`${activeLinesCount}/${liveLines.length || liveProductionData.length || 0}`}
+          value={`${activeLinesCount}/${toNumber(liveProductionSummary?.machine_total) || liveLines.length || 0}`}
           subtitle="running"
           icon={machinesIcon}
           bgColor="bg-red-50"
@@ -1179,6 +1110,15 @@ export default function ShopFloor() {
             </>
           ) : activeTab === "production-issues" ? (
             <>
+              {apiEnabled && productionIssuesSummary?.source_available === false ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  className="!rounded-xl"
+                  message="Production issues source is unavailable"
+                  description="Backend summary reports `source_available: false`. Showing any cached/mock issues only."
+                />
+              ) : null}
               {mappedProductionIssues.length ? mappedProductionIssues.map((i) => (
                 <div key={i.key} className="bg-white rounded-xl border border-gray-100">
                   <div className="px-4 py-4 flex items-start justify-between gap-4">

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { Button, InputNumber, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -11,6 +11,11 @@ import {
   SaveOutlined,
 } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
+import {
+  useApproveBulkDeliveryScheduleMutation,
+  useGetDeliverySchedulesQuery,
+} from "@/lib/api/delivery-schedule/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type ApproveRow = {
   key: string;
@@ -45,47 +50,62 @@ function ApprovePartialDeliverySchedulePageContent() {
   const searchParams = useSearchParams();
   const groupKey = searchParams.get("group") ?? "2025-10-15";
 
-  const headerInfo = useMemo(
-    () => ({
-      customer: "Toyota Motor Indonesia",
-      deliverySchedule: formatDateMMDDYYYY(groupKey),
-      cycle: "Daily",
-    }),
-    [groupKey]
-  );
+  const schedulesQuery = useGetDeliverySchedulesQuery({ status: "scheduled", page: 1, limit: 200 });
+  const [approveBulkDeliverySchedule, approveBulkState] = useApproveBulkDeliveryScheduleMutation();
 
-  const [rows, setRows] = useState<ApproveRow[]>([
-    {
-      key: "ap-1",
-      poDnNumber: "DN-TMC-2025-001",
-      uniq: "LV-001",
-      partNo: "BRK-001-A",
-      partName: "Bracket Assembly",
-      model: "Avanza Model A",
-      totalOrder: 100,
-      totalDelivery: 100,
-    },
-    {
-      key: "ap-2",
-      poDnNumber: "DN-TMC-2025-001",
-      uniq: "LV-001",
-      partNo: "SA-001-A",
-      partName: "Suspension Arm",
-      model: "Avanza Model A",
-      totalOrder: 100,
-      totalDelivery: 50,
-    },
-    {
-      key: "ap-3",
-      poDnNumber: "DN-TMC-2025-001",
-      uniq: "LV-001",
-      partNo: "SA-001-A",
-      partName: "Suspension Arm",
-      model: "Avanza Model A",
-      totalOrder: 100,
-      totalDelivery: 50,
-    },
-  ]);
+  const fetchedRows = useMemo(() => {
+    const list = schedulesQuery.data?.data ?? [];
+    const inGroup = list.filter((s) => String(s.deliveryDate ?? "").trim() === String(groupKey).trim());
+    const mapped: ApproveRow[] = [];
+    inGroup.forEach((schedule) => {
+      const poDnNumber = schedule.poDnName || "-";
+      if (schedule.items?.length) {
+        schedule.items.forEach((item, idx) => {
+          mapped.push({
+            key: `${schedule.id}-${item.uniq}-${idx}`,
+            poDnNumber,
+            uniq: item.uniq,
+            partNo: item.partNo,
+            partName: item.partName,
+            model: item.model,
+            totalOrder: Number(item.totalOrder ?? 0),
+            totalDelivery: Number(item.totalDelivery ?? 0),
+          });
+        });
+      } else {
+        mapped.push({
+          key: `${schedule.id}-empty`,
+          poDnNumber,
+          uniq: "-",
+          partNo: "-",
+          partName: "-",
+          model: "-",
+          totalOrder: 0,
+          totalDelivery: 0,
+        });
+      }
+    });
+    return mapped;
+  }, [groupKey, schedulesQuery.data]);
+
+  const [rows, setRows] = useState<ApproveRow[]>([]);
+
+  const headerInfo = useMemo(() => {
+    const list = schedulesQuery.data?.data ?? [];
+    const inGroup = list.filter((s) => String(s.deliveryDate ?? "").trim() === String(groupKey).trim());
+    const first = inGroup[0];
+    return {
+      customer: first?.customerName || "-",
+      deliverySchedule: formatDateMMDDYYYY(groupKey),
+      cycle: first?.cycle || "-",
+      scheduleIds: Array.from(new Set(inGroup.map((s) => s.id).filter(Boolean))),
+    };
+  }, [groupKey, schedulesQuery.data]);
+
+  // Keep rows in sync with fetched data (but preserve edits when possible)
+  useEffect(() => {
+    if (!rows.length && fetchedRows.length) setRows(fetchedRows);
+  }, [fetchedRows, rows.length]);
 
   const columns: ColumnsType<ApproveRow> = [
     {
@@ -167,9 +187,26 @@ function ApprovePartialDeliverySchedulePageContent() {
               className="!rounded-lg"
               icon={<SaveOutlined />}
               onClick={() => {
-                message.success("Saved delivery schedule (mock)");
-                router.push("/delivery-scheduling");
+                const scheduleIds = headerInfo.scheduleIds;
+                if (!scheduleIds.length) {
+                  message.error("No schedules found to approve");
+                  return;
+                }
+
+                approveBulkDeliverySchedule({
+                  delivery_date: groupKey,
+                  schedule_ids: scheduleIds,
+                  notes: "Approve selected schedules only",
+                  force_partial: false,
+                })
+                  .unwrap()
+                  .then(() => {
+                    message.success("Saved delivery schedule");
+                    router.push("/delivery-scheduling");
+                  })
+                  .catch((error) => message.error(getApiErrorMessage(error, "Failed to approve schedules")));
               }}
+              loading={approveBulkState.isLoading}
             >
               Save Delivery Schedule
             </Button>
@@ -214,6 +251,7 @@ function ApprovePartialDeliverySchedulePageContent() {
             size="middle"
             pagination={false}
             scroll={{ x: "max-content" }}
+            loading={schedulesQuery.isFetching || approveBulkState.isLoading}
           />
         </div>
       </div>
