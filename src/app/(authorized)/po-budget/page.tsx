@@ -764,33 +764,16 @@ export default function PoBudgetPage() {
     );
   }, [approvedPrls, customerIdByName]);
 
+  // UNIQ dropdown: always show all uniq_code from PRL management, no filter
   const uniqOptions = useMemo(() => {
     const deduped = new Map<string, { value: string; label: string }>();
-
-    approvedPrls
-      .filter((item) => {
-        if (addForm.customerId == null && !addForm.customer) return true;
-
-        const itemCustomerId = resolvePrlCustomerId(item as Record<string, unknown>);
-        const itemCustomerName = String(item.customer_name ?? item.customer?.customer_name ?? "")
-          .trim()
-          .toLowerCase();
-
-        return (
-          (addForm.customerId != null && itemCustomerId === addForm.customerId) ||
-          (addForm.customer && itemCustomerName === String(addForm.customer).trim().toLowerCase())
-        );
-      })
-      .forEach((item) => {
-        const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "").trim();
-        if (!uniqCode) return;
-        deduped.set(uniqCode, { value: uniqCode, label: uniqCode });
-      });
-
-    return Array.from(deduped.values()).sort((a, b) =>
-      a.label.localeCompare(b.label),
-    );
-  }, [addForm.customer, addForm.customerId, approvedPrls, customerIdByName]);
+    prls.forEach((item) => {
+      const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "").trim();
+      if (!uniqCode) return;
+      deduped.set(uniqCode, { value: uniqCode, label: uniqCode });
+    });
+    return Array.from(deduped.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [prls]);
 
   const filteredRows = useMemo(() => {
     const sourceRows = useApi
@@ -1921,7 +1904,7 @@ export default function PoBudgetPage() {
             <Select
               showSearch
               allowClear
-              value={addForm.customerId ?? undefined}
+              value={addForm.customer ?? undefined}
               options={customerOptions}
               placeholder="Select customer from approved PRL"
               className="w-full"
@@ -1982,10 +1965,10 @@ export default function PoBudgetPage() {
               }
               onChange={(value) => {
                 const uniqCode = String(value ?? "");
-                const matchedPrl = findApprovedPrlMatch(
-                  addForm.customerId,
-                  addForm.customer,
-                  uniqCode,
+                // Find the PRL entry for this uniq_code (no filter by status/customer)
+                const matchedPrl = prls.find(
+                  (item) =>
+                    String(item.uniq_code ?? item.item_uniq_code ?? "").trim() === uniqCode
                 );
                 const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ?? [])[0];
                 const partName =
@@ -2000,10 +1983,14 @@ export default function PoBudgetPage() {
                   matchedPrl?.product_model ??
                   bomIndex.assemblyCodeByUniq[uniqCode] ??
                   "";
+                const customerName = matchedPrl?.customer_name ?? matchedPrl?.customer?.customer_name ?? "";
+                const customerId = matchedPrl?.customer_id ?? matchedPrl?.customer?.code ?? null;
 
                 setAddForm((prev) => ({
                   ...prev,
                   uniq: uniqCode,
+                  customer: customerName,
+                  customerId: customerId ? Number(customerId) : null,
                   productModel,
                   partName,
                   partNumber,

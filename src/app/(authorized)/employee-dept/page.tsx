@@ -327,10 +327,23 @@ function EmployeeDeptPageContent() {
     if (!selectedEmployee?.apiId) return;
     if (!employeeEditApiData) return;
 
+    const departmentId =
+      employeeEditApiData.department_id == null
+        ? selectedEmployee.departmentId
+        : String(employeeEditApiData.department_id);
+    const roleId =
+      employeeEditApiData.role_id == null
+        ? selectedEmployee.roleId
+        : String(employeeEditApiData.role_id);
+    const reportsToId =
+      employeeEditApiData.reports_to_id == null
+        ? null
+        : String(employeeEditApiData.reports_to_id);
+
     editEmployeeForm.setFieldsValue({
-      departmentId: employeeEditApiData.department_id ?? selectedEmployee.departmentId,
-      roleId: employeeEditApiData.role_id ?? selectedEmployee.roleId,
-      reportsToId: employeeEditApiData.reports_to_id ?? null,
+      departmentId,
+      roleId,
+      reportsToId,
       joinDate: employeeEditApiData.join_date ? dayjs(employeeEditApiData.join_date) : undefined,
       notes: employeeEditApiData.notes ?? "",
     });
@@ -598,8 +611,8 @@ function EmployeeDeptPageContent() {
                 name: record.name,
                 email: record.email === "-" ? "" : record.email,
                 department: record.department === "-" ? undefined : record.department,
-                departmentId: record.departmentId,
-                roleId: record.roleId,
+                departmentId: record.departmentId ? String(record.departmentId) : undefined,
+                roleId: record.roleId ? String(record.roleId) : undefined,
                 phone: record.phone === "-" ? "" : record.phone,
                 jobTitle: record.jobTitle === "-" ? "" : record.jobTitle,
                 status: record.status,
@@ -979,9 +992,9 @@ function EmployeeDeptPageContent() {
               if (!apiId) throw new Error("Missing employee id");
 
               const apiStatus = String(values.status ?? "active").toLowerCase() === "inactive" ? "inactive" : "active";
-              const departmentNameForAccessControl = values.departmentId
-                ? departmentById[String(values.departmentId)]?.department_name
-                : values.department;
+              const departmentIdForAccessControl =
+                values.departmentId ?? selectedEmployee.departmentId ?? null;
+              const apiAccessControlStatus = apiStatus;
 
               await updateEmployee({
                 id: apiId,
@@ -1006,16 +1019,18 @@ function EmployeeDeptPageContent() {
                   body: {
                     employee_id: selectedEmployee.empId,
                     full_name: values.name,
-                    department: departmentNameForAccessControl,
+                    department_id: departmentIdForAccessControl,
                     role_id: values.roleId,
+                    status: apiAccessControlStatus,
                   },
                 }).unwrap();
-              } else if (departmentNameForAccessControl && values.roleId) {
+              } else if (departmentIdForAccessControl && values.roleId) {
                 await createAccessControl({
                   employee_id: selectedEmployee.empId,
                   full_name: values.name,
-                  department: departmentNameForAccessControl,
+                  department_id: departmentIdForAccessControl,
                   role_id: values.roleId,
+                  status: apiAccessControlStatus,
                 }).unwrap();
               }
 

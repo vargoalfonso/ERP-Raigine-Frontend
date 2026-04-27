@@ -4,6 +4,9 @@ import React, { useMemo, useState } from "react";
 import { Button, Card, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useCreateApprovalWorkflowMutation } from "@/lib/api/system-settings/api";
+import { getCurrentUserDisplayName } from "@/lib/utils/currentUser";
 
 type StatusType = "Active" | "Inactive";
 
@@ -19,8 +22,10 @@ type Entry = {
 };
 
 const MENU_ACTION_OPTIONS = [
-  { label: "Update Budget for PO", value: "Update Budget for PO" },
-  { label: "Approve Work Order", value: "Approve Work Order" },
+  { label: "BOM", value: "BOM" },
+  { label: "PRL", value: "PRL" },
+  { label: "PO Budget", value: "PO Budget" },
+  { label: "Stock opname", value: "Stock opname" },
 ] as const;
 
 const ROLE_OPTIONS = [
@@ -54,6 +59,9 @@ function makeEntry(idx: number): Entry {
 
 export default function ApprovalWorkflowCreatePage() {
   const router = useRouter();
+  const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
+  const [createApprovalWorkflow, createApprovalWorkflowState] = useCreateApprovalWorkflowMutation();
+  const createdBy = getCurrentUserDisplayName();
 
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
 
@@ -80,17 +88,35 @@ export default function ApprovalWorkflowCreatePage() {
     setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
   };
 
-  const onSave = () => {
-    for (const e of entries) {
-      const err = validateEntry(e);
-      if (err) {
-        message.error(`Entry ${entries.indexOf(e) + 1}: ${err}`);
-        return;
+  const onSave = async () => {
+    try {
+      for (const e of entries) {
+        const err = validateEntry(e);
+        if (err) {
+          message.error(`Entry ${entries.indexOf(e) + 1}: ${err}`);
+          return;
+        }
       }
-    }
 
-    message.success("Approval workflow saved");
-    router.push("/system-settings");
+      if (apiEnabled) {
+        for (const entry of entries) {
+          await createApprovalWorkflow({
+            action_name: String(entry.menuAction ?? "").trim(),
+            level_1_role: String(entry.level1Role ?? "").trim(),
+            level_2_role: String(entry.level2Role ?? "").trim(),
+            level_3_role: String(entry.level3Role ?? "").trim(),
+            level_4_role: String(entry.level4Role ?? "").trim(),
+            status: String(entry.status ?? "Active").toLowerCase(),
+            created_by: createdBy ?? undefined,
+          }).unwrap();
+        }
+      }
+
+      message.success("Approval workflow saved");
+      router.push("/system-settings");
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to save approval workflow"));
+    }
   };
 
   return (
@@ -108,7 +134,12 @@ export default function ApprovalWorkflowCreatePage() {
 
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                onClick={() => void onSave()}
+                loading={createApprovalWorkflowState.isLoading}
+              >
                 Save Parameter
               </Button>
             </div>

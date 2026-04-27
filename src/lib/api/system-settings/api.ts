@@ -11,17 +11,17 @@ const ROUTES = {
   role: "/roles",
   employee: "/employee",
   department: "/department",
-  accessControlMatrix: "/api/access-control",
-  approvalWorkflow: "/api/approval-workflows",
+  accessControlMatrix: "/user",
+  approvalWorkflow: "/approval-workflows",
   globalWorkingDays: "/global-parameters",
   kanban: "/kanban",
   machinePattern: "/api/machine-parameters",
   process: "/process",
   uom: "/unit-measurement",
   typeParameter: "/type-parameter",
-  safetyStock: "/api/safety-stock",
+  safetyStock: "/safety-stock",
   stockdays: "/api/stockdays",
-  poSplit: "/api/po-split-settings",
+  poSplit: "/po-split-setting",
 } as const;
 
 const normalizeArrayResponse = <T>(response: unknown): T[] => {
@@ -171,16 +171,19 @@ export type CreateDepartmentRequest = {
 export type CreateAccessControlMatrixRequest = {
   full_name: string;
   employee_id: string;
-  department: string;
-  role_id: string;
+  department_id: string | number;
+  role_id: string | number;
+  status: string;
 };
 
 export type AccessControlMatrixRecord = {
   id: string;
   full_name: string;
   employee_id: string;
-  department: string;
-  role_id: string;
+  department_id?: string | number;
+  role_id: string | number;
+  status?: string;
+  department?: string;
 };
 
 export type CreateApprovalWorkflowRequest = {
@@ -189,6 +192,8 @@ export type CreateApprovalWorkflowRequest = {
   level_2_role: string;
   level_3_role: string;
   level_4_role: string;
+  status?: StatusType;
+  created_by?: string;
 };
 
 export type ApprovalWorkflowRecord = {
@@ -199,6 +204,30 @@ export type ApprovalWorkflowRecord = {
   level_3_role: string;
   level_4_role: string;
   status: StatusType;
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+const normalizeApprovalWorkflowRecord = (record: unknown): ApprovalWorkflowRecord | null => {
+  if (!record || typeof record !== "object") return null;
+  const raw = record as Record<string, unknown>;
+
+  const id = raw.id ?? raw.ID;
+  if (id == null || id === "") return null;
+
+  return {
+    id: String(id),
+    action_name: String(raw.action_name ?? raw.ActionName ?? ""),
+    level_1_role: String(raw.level_1_role ?? raw.Level1Role ?? ""),
+    level_2_role: String(raw.level_2_role ?? raw.Level2Role ?? ""),
+    level_3_role: String(raw.level_3_role ?? raw.Level3Role ?? ""),
+    level_4_role: String(raw.level_4_role ?? raw.Level4Role ?? ""),
+    status: String(raw.status ?? raw.Status ?? "active"),
+    created_by: raw.created_by == null ? raw.CreatedBy == null ? undefined : String(raw.CreatedBy) : String(raw.created_by),
+    created_at: raw.created_at == null ? raw.CreatedAt == null ? undefined : String(raw.CreatedAt) : String(raw.created_at),
+    updated_at: raw.updated_at == null ? raw.UpdatedAt == null ? undefined : String(raw.UpdatedAt) : String(raw.updated_at),
+  };
 };
 
 export type CreateGlobalWorkingDaysRequest = {
@@ -347,12 +376,35 @@ export type CreateSafetyStockRequest = {
   constanta: number;
 };
 
+export type CreateSafetyStockBulkRequest = {
+  items: CreateSafetyStockRequest[];
+};
+
+export type CalculateSafetyStockRequest = {
+  item_code: string;
+  prl: number;
+  po: number;
+  working_days: number;
+};
+
+export type CalculateSafetyStockResponse = {
+  safety_stock?: number;
+  suggested_order?: number;
+  remaining_stock?: number;
+  item_code?: string;
+  calculation_type?: string;
+  [key: string]: unknown;
+};
+
 export type SafetyStockRecord = {
   id: string;
   inventory_type: string;
   item_uniq_code: string;
   calculation_type: string;
   constanta: number;
+  status?: string;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type CreateStockdaysRequest = {
@@ -371,19 +423,29 @@ export type StockdaysRecord = {
 };
 
 export type CreatePoSplitRequest = {
-  material_type: string;
+  budget_type: string;
+  po1_pct: number;
+  po2_pct: number;
+  description?: string;
   min_order_qty: number;
   max_split_lines: number;
   split_rule: string;
+  status?: StatusType;
 };
 
 export type PoSplitRecord = {
   id: string;
-  material_type: string;
+  budget_type: string;
+  po1_pct: number;
+  po2_pct: number;
+  description?: string | null;
   min_order_qty: number;
   max_split_lines: number;
   split_rule: string;
   status: StatusType;
+  po_split_sum?: number;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export const systemSettingsSlice = apiSlice.injectEndpoints({
@@ -581,6 +643,26 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
       transformResponse: (response: unknown) =>
         normalizeArrayResponse<AccessControlMatrixRecord>(response),
+      providesTags: (result) =>
+        result
+          ? [
+              { type: "SystemSettingsAccessControl", id: "LIST" },
+              ...result
+                .map((record) => record?.id)
+                .filter((id): id is string => Boolean(id))
+                .map((id) => ({ type: "SystemSettingsAccessControl" as const, id })),
+            ]
+          : [{ type: "SystemSettingsAccessControl", id: "LIST" }],
+    }),
+
+    getAccessControlMatrixById: builder.query<AccessControlMatrixRecord | null, string>({
+      query: (id) => ({
+        url: `${ROUTES.accessControlMatrix}/${encodeURIComponent(id)}`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => normalizeObjectResponse<AccessControlMatrixRecord>(response),
+      providesTags: (_res, _err, id) => [{ type: "SystemSettingsAccessControl", id }],
     }),
 
     // Access control matrix
@@ -594,6 +676,7 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: [{ type: "SystemSettingsAccessControl", id: "LIST" }],
     }),
 
     updateAccessControlMatrix: builder.mutation<
@@ -606,6 +689,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: (_res, _err, arg) => [
+        { type: "SystemSettingsAccessControl", id: "LIST" },
+        { type: "SystemSettingsAccessControl", id: arg.id },
+      ],
     }),
 
     deleteAccessControlMatrix: builder.mutation<{ message?: string; id?: string }, string>({
@@ -614,6 +701,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: (_res, _err, id) => [
+        { type: "SystemSettingsAccessControl", id: "LIST" },
+        { type: "SystemSettingsAccessControl", id },
+      ],
     }),
 
     // Approval workflow
@@ -627,6 +718,7 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: [{ type: "SystemSettingsApprovalWorkflow", id: "LIST" }],
     }),
 
     updateApprovalWorkflow: builder.mutation<
@@ -639,6 +731,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: (_res, _err, arg) => [
+        { type: "SystemSettingsApprovalWorkflow", id: "LIST" },
+        { type: "SystemSettingsApprovalWorkflow", id: arg.id },
+      ],
     }),
 
     deleteApprovalWorkflow: builder.mutation<{ message?: string; id?: string }, string>({
@@ -647,6 +743,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: (_res, _err, id) => [
+        { type: "SystemSettingsApprovalWorkflow", id: "LIST" },
+        { type: "SystemSettingsApprovalWorkflow", id },
+      ],
     }),
 
     getApprovalWorkflows: builder.query<ApprovalWorkflowRecord[], void>({
@@ -656,7 +756,30 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) =>
-        normalizeArrayResponse<ApprovalWorkflowRecord>(response),
+        normalizeArrayResponse<unknown>(response)
+          .map((item) => normalizeApprovalWorkflowRecord(item))
+          .filter((item): item is ApprovalWorkflowRecord => Boolean(item)),
+      providesTags: (result) =>
+        result
+          ? [
+              { type: "SystemSettingsApprovalWorkflow", id: "LIST" },
+              ...result
+                .map((record) => record?.id)
+                .filter((id): id is string => Boolean(id))
+                .map((id) => ({ type: "SystemSettingsApprovalWorkflow" as const, id })),
+            ]
+          : [{ type: "SystemSettingsApprovalWorkflow", id: "LIST" }],
+    }),
+
+    getApprovalWorkflowById: builder.query<ApprovalWorkflowRecord | null, string>({
+      query: (id) => ({
+        url: `${ROUTES.approvalWorkflow}/${encodeURIComponent(id)}`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) =>
+        normalizeApprovalWorkflowRecord(normalizeObjectResponse<unknown>(response) ?? response),
+      providesTags: (_res, _err, id) => [{ type: "SystemSettingsApprovalWorkflow", id }],
     }),
 
     // Global working days
@@ -1084,6 +1207,20 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: [{ type: "SystemSettingsSafetyStock", id: "LIST" }],
+    }),
+
+    createSafetyStockBulk: builder.mutation<
+      { message?: string; data?: SafetyStockRecord[] },
+      CreateSafetyStockBulkRequest
+    >({
+      query: (body) => ({
+        url: `${ROUTES.safetyStock}`,
+        method: "POST",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      invalidatesTags: [{ type: "SystemSettingsSafetyStock", id: "LIST" }],
     }),
 
     updateSafetyStock: builder.mutation<
@@ -1096,6 +1233,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: (_res, _err, arg) => [
+        { type: "SystemSettingsSafetyStock", id: "LIST" },
+        { type: "SystemSettingsSafetyStock", id: arg.id },
+      ],
     }),
 
     deleteSafetyStock: builder.mutation<{ message?: string; id?: string }, string>({
@@ -1104,6 +1245,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: (_res, _err, id) => [
+        { type: "SystemSettingsSafetyStock", id: "LIST" },
+        { type: "SystemSettingsSafetyStock", id },
+      ],
     }),
 
     getSafetyStock: builder.query<SafetyStockRecord[], void>({
@@ -1114,6 +1259,41 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
       transformResponse: (response: unknown) =>
         normalizeArrayResponse<SafetyStockRecord>(response),
+      providesTags: (result) =>
+        result
+          ? [
+              { type: "SystemSettingsSafetyStock", id: "LIST" },
+              ...result
+                .map((record) => record?.id)
+                .filter((id): id is string => Boolean(id))
+                .map((id) => ({ type: "SystemSettingsSafetyStock" as const, id })),
+            ]
+          : [{ type: "SystemSettingsSafetyStock", id: "LIST" }],
+    }),
+
+    getSafetyStockById: builder.query<SafetyStockRecord | null, string>({
+      query: (id) => ({
+        url: `${ROUTES.safetyStock}/${encodeURIComponent(id)}`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => normalizeObjectResponse<SafetyStockRecord>(response),
+      providesTags: (_res, _err, id) => [{ type: "SystemSettingsSafetyStock", id }],
+    }),
+
+    calculateSafetyStock: builder.query<CalculateSafetyStockResponse | null, CalculateSafetyStockRequest>({
+      query: ({ item_code, prl, po, working_days }) => ({
+        url: `${ROUTES.safetyStock}/calculate`,
+        method: "GET",
+        params: {
+          item_code,
+          prl,
+          po,
+          working_days,
+        },
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => normalizeObjectResponse<CalculateSafetyStockResponse>(response),
     }),
 
     // Stockdays
@@ -1167,6 +1347,7 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: [{ type: "SystemSettingsPoSplit", id: "LIST" }],
     }),
 
     updatePoSplit: builder.mutation<
@@ -1179,6 +1360,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: (_res, _err, arg) => [
+        { type: "SystemSettingsPoSplit", id: "LIST" },
+        { type: "SystemSettingsPoSplit", id: arg.id },
+      ],
     }),
 
     deletePoSplit: builder.mutation<{ message?: string; id?: string }, string>({
@@ -1187,6 +1372,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: (_res, _err, id) => [
+        { type: "SystemSettingsPoSplit", id: "LIST" },
+        { type: "SystemSettingsPoSplit", id },
+      ],
     }),
 
     getPoSplitSettings: builder.query<PoSplitRecord[], void>({
@@ -1197,6 +1386,26 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
       transformResponse: (response: unknown) =>
         normalizeArrayResponse<PoSplitRecord>(response),
+      providesTags: (result) =>
+        result
+          ? [
+              { type: "SystemSettingsPoSplit", id: "LIST" },
+              ...result
+                .map((record) => record?.id)
+                .filter((id): id is string => Boolean(id))
+                .map((id) => ({ type: "SystemSettingsPoSplit" as const, id })),
+            ]
+          : [{ type: "SystemSettingsPoSplit", id: "LIST" }],
+    }),
+
+    getPoSplitSettingById: builder.query<PoSplitRecord | null, string>({
+      query: (id) => ({
+        url: `${ROUTES.poSplit}/${encodeURIComponent(id)}`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => normalizeObjectResponse<PoSplitRecord>(response),
+      providesTags: (_res, _err, id) => [{ type: "SystemSettingsPoSplit", id }],
     }),
   }),
 });
@@ -1216,6 +1425,7 @@ export const {
   useUpdateEmployeeMutation,
   useDeleteEmployeeMutation,
   useGetAccessControlMatrixQuery,
+  useGetAccessControlMatrixByIdQuery,
   useCreateAccessControlMatrixMutation,
   useUpdateAccessControlMatrixMutation,
   useDeleteAccessControlMatrixMutation,
@@ -1223,6 +1433,7 @@ export const {
   useUpdateApprovalWorkflowMutation,
   useDeleteApprovalWorkflowMutation,
   useGetApprovalWorkflowsQuery,
+  useGetApprovalWorkflowByIdQuery,
   useCreateGlobalWorkingDaysMutation,
   useUpdateGlobalWorkingDaysMutation,
   useDeleteGlobalWorkingDaysMutation,
@@ -1252,9 +1463,12 @@ export const {
   useGetTypeParametersQuery,
   useGetTypeParameterByIdQuery,
   useCreateSafetyStockMutation,
+  useCreateSafetyStockBulkMutation,
   useUpdateSafetyStockMutation,
   useDeleteSafetyStockMutation,
   useGetSafetyStockQuery,
+  useGetSafetyStockByIdQuery,
+  useCalculateSafetyStockQuery,
   useCreateStockdaysMutation,
   useUpdateStockdaysMutation,
   useDeleteStockdaysMutation,
@@ -1263,6 +1477,7 @@ export const {
   useUpdatePoSplitMutation,
   useDeletePoSplitMutation,
   useGetPoSplitSettingsQuery,
+  useGetPoSplitSettingByIdQuery,
   useGetRoleByIdQuery,
   useGetDepartmentByIdQuery,
   useGetKanbanStandardByIdQuery,

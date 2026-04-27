@@ -5,6 +5,8 @@ import { Button, Card, DatePicker, InputNumber, message } from "antd";
 import { LeftOutlined, PlusOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import type { Dayjs } from "dayjs";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useCreatePoSplitMutation } from "@/lib/api/system-settings/api";
 
 type SplitMethod = "percentage" | "history";
 type HistoryRange = {
@@ -22,8 +24,8 @@ const DEFAULT_PERCENTAGE = {
   po2: 100,
 };
 
-const cardBaseClass = "rounded-[14px] border bg-white transition-all";
-const labelClass = "mb-1 text-[12px] font-medium text-gray-700";
+const cardBaseClass = "rounded-[10px] border bg-white transition-all";
+const labelClass = "mb-1 text-[10px] font-medium text-gray-700";
 
 function formatDateRange(range: HistoryRange) {
   if (!range.from || !range.to) return "Not set";
@@ -32,6 +34,8 @@ function formatDateRange(range: HistoryRange) {
 
 export default function PurchaseOrderCreatePage() {
   const router = useRouter();
+  const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
+  const [createPoSplit, createPoSplitState] = useCreatePoSplitMutation();
   const [method, setMethod] = useState<SplitMethod>("percentage");
   const [percentage, setPercentage] = useState(DEFAULT_PERCENTAGE);
   const [historyConfig, setHistoryConfig] = useState<HistoryConfig>({
@@ -59,27 +63,62 @@ export default function PurchaseOrderCreatePage() {
     });
   };
 
-  const validateAndSave = () => {
-    if (method === "percentage") {
-      if (totalPercentage !== 100) {
-        message.error("Total percentage must equal 100%.");
+  const validateAndSave = async () => {
+    try {
+      if (method === "percentage") {
+        if (totalPercentage !== 100) {
+          message.error("Total percentage must equal 100%.");
+          return;
+        }
+
+        if (apiEnabled) {
+          await createPoSplit({
+            budget_type: "all",
+            po1_pct: Number(percentage.po1 || 0),
+            po2_pct: Number(percentage.po2 || 0),
+            description: `Global percentage split for all UNIQ. PO1 ${Number(
+              percentage.po1 || 0
+            )}% and PO2 ${Number(percentage.po2 || 0)}%.`,
+            min_order_qty: 0,
+            max_split_lines: 2,
+            split_rule: "percentage",
+            status: "active",
+          }).unwrap();
+        }
+
+        message.success("PO split configuration saved");
+        router.push("/system-settings");
         return;
       }
+
+      const invalidPo1 = !historyConfig.po1.from || !historyConfig.po1.to;
+      const invalidPo2 = !historyConfig.po2.from || !historyConfig.po2.to;
+
+      if (invalidPo1 || invalidPo2) {
+        message.error("Please complete PO1 and PO2 history delivery date ranges.");
+        return;
+      }
+
+      if (apiEnabled) {
+        await createPoSplit({
+          budget_type: "all",
+          po1_pct: 0,
+          po2_pct: 0,
+          description:
+            `History forecasting split. PO1 ${formatDateRange(historyConfig.po1)}; ` +
+            `PO2 ${formatDateRange(historyConfig.po2)}.`,
+          min_order_qty: 0,
+          max_split_lines: 2,
+          split_rule: "history",
+          status: "active",
+        }).unwrap();
+      }
+
       message.success("PO split configuration saved");
       router.push("/system-settings");
-      return;
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to save PO split configuration"));
     }
-
-    const invalidPo1 = !historyConfig.po1.from || !historyConfig.po1.to;
-    const invalidPo2 = !historyConfig.po2.from || !historyConfig.po2.to;
-
-    if (invalidPo1 || invalidPo2) {
-      message.error("Please complete PO1 and PO2 history delivery date ranges.");
-      return;
-    }
-
-    message.success("PO split configuration saved");
-    router.push("/system-settings");
   };
 
   const updateHistoryRange = (
@@ -97,53 +136,53 @@ export default function PurchaseOrderCreatePage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#EEF5FF] px-6 py-6">
-      <div className="mx-auto max-w-[820px]">
-        <div className="overflow-hidden rounded-[18px] border border-gray-200 bg-white shadow-sm">
-          <div className="border-b border-gray-200 px-5 py-4">
+    <div className="min-h-screen bg-[#EEF5FF] px-5 py-5">
+      <div className="mx-auto max-w-[760px]">
+        <div className="overflow-hidden rounded-[12px] border border-[#DCE3F0] bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+          <div className="border-b border-[#E8ECF4] px-4 py-3">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-white">
                     <PlusOutlined />
                   </div>
                   <div>
-                    <div className="text-[18px] font-semibold text-gray-900">System Parameters</div>
-                    <div className="text-[12px] text-gray-500">Comprehensive ERP parameter management and configuration</div>
+                    <div className="text-[14px] font-semibold text-gray-900">System Parameters</div>
+                    <div className="text-[10px] text-gray-500">Comprehensive ERP parameter management and configuration</div>
                   </div>
                 </div>
               </div>
 
-              <Button type="primary" className="rounded-lg" icon={<PlusOutlined />}>
+              <Button type="primary" size="small" className="rounded-md text-[11px]" icon={<PlusOutlined />}>
                 19 Configuration Modules
               </Button>
             </div>
           </div>
 
-          <div className="space-y-4 px-5 py-5">
+          <div className="space-y-4 px-4 py-4">
             <button
               type="button"
-              className="flex items-center gap-2 text-sm text-gray-600 transition hover:text-gray-900"
+              className="flex items-center gap-2 text-[12px] text-gray-600 transition hover:text-gray-900"
               onClick={() => router.push("/system-settings")}
             >
               <LeftOutlined />
               <span>Back to System Parameters</span>
             </button>
 
-            <Card className="rounded-2xl border border-gray-200 shadow-none" bodyStyle={{ padding: 18 }}>
+            <Card className="rounded-xl border border-[#E5EAF3] shadow-none" bodyStyle={{ padding: 14 }}>
               <div className="mb-4 flex items-center justify-between gap-4">
                 <div>
-                  <div className="text-[18px] font-semibold text-gray-900">PO - Split Settings</div>
-                  <div className="text-[12px] text-gray-500">Configure purchase order split settings</div>
+                  <div className="text-[14px] font-semibold text-gray-900">PO - Split Settings</div>
+                  <div className="text-[10px] text-gray-500">Configure purchase order split settings</div>
                 </div>
-                <Button type="primary" size="small" icon={<PlusOutlined />} className="rounded-md">
+                <Button type="primary" size="small" icon={<PlusOutlined />} className="rounded-md text-[11px]">
                   Add Parameter
                 </Button>
               </div>
 
-              <div className="rounded-2xl border border-gray-200 bg-[#FCFCFD] p-4">
-                <div className="mb-1 text-[15px] font-semibold text-gray-900">Purchase Order Split Method</div>
-                <div className="mb-4 text-[12px] text-gray-500">
+              <div className="rounded-xl border border-[#E5EAF3] bg-white p-3">
+                <div className="mb-1 text-[12px] font-semibold text-gray-900">Purchase Order Split Method</div>
+                <div className="mb-4 text-[10px] leading-4 text-gray-500">
                   Choose how to split purchase orders between PO1 and PO2. Total must equal 100% of Purchase Request.
                 </div>
 
@@ -151,30 +190,30 @@ export default function PurchaseOrderCreatePage() {
                   <div
                     className={`${cardBaseClass} ${
                       method === "percentage"
-                        ? "border-blue-400 bg-blue-50/40 shadow-[0_0_0_1px_rgba(59,130,246,0.15)]"
-                        : "border-gray-200"
+                        ? "border-[#7AA2FF] bg-[#F7FAFF] shadow-[0_0_0_1px_rgba(59,130,246,0.18)]"
+                        : "border-[#E5E7EB]"
                     }`}
                   >
                     <button
                       type="button"
-                      className="w-full p-4 text-left"
+                      className="w-full p-3 text-left"
                       onClick={() => setMethod("percentage")}
                     >
                       <div className="flex items-start gap-3">
-                        <div className="mt-1 h-4 w-4 rounded-full border border-gray-400 p-[3px]">
+                        <div className={`mt-[2px] flex h-4 w-4 items-center justify-center rounded-full border ${method === "percentage" ? "border-blue-500" : "border-gray-300"}`}>
                           <div
-                            className={`h-full w-full rounded-full ${
+                            className={`h-2 w-2 rounded-full ${
                               method === "percentage" ? "bg-blue-600" : "bg-transparent"
                             }`}
                           />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="text-[14px] font-semibold text-gray-900">Option 1: PO based on Percentage</div>
-                          <div className="mt-1 text-[11px] text-gray-500">Applied for all UNIQ. Set fixed percentage split between PO1 and PO2.</div>
+                          <div className="text-[12px] font-semibold text-gray-900">Option 1: PO based on Percentage</div>
+                          <div className="mt-1 text-[10px] leading-4 text-gray-500">Applied for all UNIQ. Set fixed percentage split between PO1 and PO2.</div>
 
                           {method === "percentage" ? (
-                            <div className="mt-4 rounded-xl border border-blue-200 bg-white p-4">
-                              <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50 p-3 text-[11px] text-blue-700">
+                            <div className="mt-3 rounded-lg border border-[#C9D8FF] bg-white p-3">
+                              <div className="mb-3 rounded-md border border-[#DCE8FF] bg-[#F3F7FF] p-3 text-[10px] leading-4 text-[#3F6FD9]">
                                 <div className="font-semibold">Information:</div>
                                 <div>You can fill the percentage at menu PO Budget. Total percentage must equal 100%.</div>
                               </div>
@@ -183,6 +222,7 @@ export default function PurchaseOrderCreatePage() {
                                 <div>
                                   <div className={labelClass}>PO 1 Percentage <span className="text-red-500">*</span></div>
                                   <InputNumber
+                                    size="small"
                                     min={0}
                                     max={100}
                                     value={percentage.po1}
@@ -194,6 +234,7 @@ export default function PurchaseOrderCreatePage() {
                                 <div>
                                   <div className={labelClass}>PO 2 Percentage <span className="text-red-500">*</span></div>
                                   <InputNumber
+                                    size="small"
                                     min={0}
                                     max={100}
                                     value={percentage.po2}
@@ -204,13 +245,13 @@ export default function PurchaseOrderCreatePage() {
                                 </div>
                                 <div>
                                   <div className={labelClass}>Total Percentage</div>
-                                  <div className={`flex h-8 items-center rounded-md border px-3 text-sm font-semibold ${totalClassName}`}>
+                                  <div className={`flex h-7 items-center rounded-md border px-3 text-[11px] font-semibold ${totalClassName}`}>
                                     {totalPercentage}%
                                   </div>
                                 </div>
                               </div>
 
-                              <div className="mt-4 rounded-lg bg-gray-50 p-3 text-[11px] text-gray-600">
+                              <div className="mt-3 rounded-md bg-[#F8FAFC] p-3 text-[10px] leading-4 text-gray-600">
                                 <div><span className="font-semibold">Logic:</span> if percentage is created, then number of PR will be divided based on PO 1 and PO 2 percentage.</div>
                                 <div className="mt-1">Example: if PR = 1000 pcs, PO1 (50%) = 500 pcs, PO2 (50%) = 500 pcs.</div>
                               </div>
@@ -224,41 +265,42 @@ export default function PurchaseOrderCreatePage() {
                   <div
                     className={`${cardBaseClass} ${
                       method === "history"
-                        ? "border-fuchsia-400 bg-fuchsia-50/40 shadow-[0_0_0_1px_rgba(217,70,239,0.12)]"
-                        : "border-gray-200"
+                        ? "border-[#D980FA] bg-[#FFF9FF] shadow-[0_0_0_1px_rgba(217,70,239,0.16)]"
+                        : "border-[#E5E7EB]"
                     }`}
                   >
                     <button
                       type="button"
-                      className="w-full p-4 text-left"
+                      className="w-full p-3 text-left"
                       onClick={() => setMethod("history")}
                     >
                       <div className="flex items-start gap-3">
-                        <div className="mt-1 h-4 w-4 rounded-full border border-gray-400 p-[3px]">
+                        <div className={`mt-[2px] flex h-4 w-4 items-center justify-center rounded-full border ${method === "history" ? "border-fuchsia-500" : "border-gray-300"}`}>
                           <div
-                            className={`h-full w-full rounded-full ${
+                            className={`h-2 w-2 rounded-full ${
                               method === "history" ? "bg-blue-600" : "bg-transparent"
                             }`}
                           />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="text-[14px] font-semibold text-gray-900">Option 2: PO based on History Forecasting</div>
-                          <div className="mt-1 text-[11px] text-gray-500">Can be applied per UNIQ. Based on historical delivery data from specific date ranges.</div>
+                          <div className="text-[12px] font-semibold text-gray-900">Option 2: PO based on History Forecasting</div>
+                          <div className="mt-1 text-[10px] leading-4 text-gray-500">Can be applied per UNIQ. Based on historical delivery data from specific date ranges.</div>
 
                           {method === "history" ? (
-                            <div className="mt-4 rounded-xl border border-fuchsia-200 bg-white p-4">
-                              <div className="mb-4 rounded-lg border border-fuchsia-100 bg-fuchsia-50 p-3 text-[11px] text-fuchsia-700">
+                            <div className="mt-3 rounded-lg border border-[#EDC5FF] bg-white p-3">
+                              <div className="mb-3 rounded-md border border-[#F1D9FF] bg-[#FFF5FF] p-3 text-[10px] leading-4 text-[#B14ED5]">
                                 <div className="font-semibold">Information:</div>
                                 <div>Set date ranges for historical delivery analysis. System will calculate optimal split based on historical data.</div>
                               </div>
 
-                              <div className="space-y-4">
+                              <div className="space-y-3">
                                 <div>
-                                  <div className="mb-2 inline-flex rounded-md bg-[#EEE8FF] px-2 py-0.5 text-[10px] font-semibold text-[#6B46C1]">PO 1</div>
+                                  <div className="mb-2 inline-flex rounded-md bg-[#F5EBFF] px-2 py-0.5 text-[9px] font-semibold text-[#A855F7]">PO 1</div>
                                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                                     <div>
                                       <div className={labelClass}>From Date <span className="text-red-500">*</span></div>
                                       <DatePicker
+                                        size="small"
                                         value={historyConfig.po1.from ?? null}
                                         onChange={(value) => updateHistoryRange("po1", "from", value)}
                                         className="w-full"
@@ -268,6 +310,7 @@ export default function PurchaseOrderCreatePage() {
                                     <div>
                                       <div className={labelClass}>To Date <span className="text-red-500">*</span></div>
                                       <DatePicker
+                                        size="small"
                                         value={historyConfig.po1.to ?? null}
                                         onChange={(value) => updateHistoryRange("po1", "to", value)}
                                         className="w-full"
@@ -278,11 +321,12 @@ export default function PurchaseOrderCreatePage() {
                                 </div>
 
                                 <div>
-                                  <div className="mb-2 inline-flex rounded-md bg-[#F3E8FF] px-2 py-0.5 text-[10px] font-semibold text-[#A21CAF]">PO 2</div>
+                                  <div className="mb-2 inline-flex rounded-md bg-[#FDF0FF] px-2 py-0.5 text-[9px] font-semibold text-[#C026D3]">PO 2</div>
                                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                                     <div>
                                       <div className={labelClass}>From Date <span className="text-red-500">*</span></div>
                                       <DatePicker
+                                        size="small"
                                         value={historyConfig.po2.from ?? null}
                                         onChange={(value) => updateHistoryRange("po2", "from", value)}
                                         className="w-full"
@@ -292,6 +336,7 @@ export default function PurchaseOrderCreatePage() {
                                     <div>
                                       <div className={labelClass}>To Date <span className="text-red-500">*</span></div>
                                       <DatePicker
+                                        size="small"
                                         value={historyConfig.po2.to ?? null}
                                         onChange={(value) => updateHistoryRange("po2", "to", value)}
                                         className="w-full"
@@ -302,7 +347,7 @@ export default function PurchaseOrderCreatePage() {
                                 </div>
                               </div>
 
-                              <div className="mt-4 rounded-lg bg-gray-50 p-3 text-[11px] text-gray-600">
+                              <div className="mt-3 rounded-md bg-[#F8FAFC] p-3 text-[10px] leading-4 text-gray-600">
                                 <div><span className="font-semibold">Logic:</span> System analyzes historical delivery data within specified date ranges to determine optimal split ratios for PO1 and PO2.</div>
                                 <div className="mt-1">Example: PO1 based on Jan-Mar delivery history, PO2 based on Apr-Jun delivery history.</div>
                               </div>
@@ -314,21 +359,28 @@ export default function PurchaseOrderCreatePage() {
                   </div>
                 </div>
 
-                <div className="mt-5 flex items-center justify-end gap-3">
-                  <Button onClick={resetDefaults}>Reset to Default</Button>
-                  <Button type="primary" onClick={validateAndSave}>Save Configuration</Button>
+                <div className="mt-4 flex items-center justify-end gap-2 border-t border-[#EEF2F7] pt-3">
+                  <Button size="small" onClick={resetDefaults}>Reset to Default</Button>
+                  <Button
+                    type="primary"
+                    size="small"
+                    onClick={() => void validateAndSave()}
+                    loading={createPoSplitState.isLoading}
+                  >
+                    Save Configuration
+                  </Button>
                 </div>
               </div>
             </Card>
 
-            <Card className="rounded-2xl border border-gray-200 shadow-none" bodyStyle={{ padding: 18 }}>
-              <div className="mb-4 text-[14px] font-semibold text-gray-900">Configuration Summary</div>
+            <Card className="rounded-xl border border-[#E5EAF3] shadow-none" bodyStyle={{ padding: 14 }}>
+              <div className="mb-4 text-[12px] font-semibold text-gray-900">Configuration Summary</div>
 
               {method === "percentage" ? (
-                <div className="space-y-2 text-[12px]">
+                <div className="space-y-2 text-[11px]">
                   <div className="flex items-center justify-between gap-4">
                     <span className="text-gray-500">Selected Method:</span>
-                    <span className="inline-flex rounded-md bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white">Percentage Based</span>
+                    <span className="inline-flex rounded-md bg-blue-600 px-2 py-0.5 text-[9px] font-semibold text-white">Percentage Based</span>
                   </div>
                   <div className="flex items-center justify-between gap-4">
                     <span className="text-gray-500">PO 1 Percentage:</span>
@@ -344,7 +396,7 @@ export default function PurchaseOrderCreatePage() {
                   </div>
                 </div>
               ) : (
-                <div className="space-y-2 text-[12px]">
+                <div className="space-y-2 text-[11px]">
                   <div className="flex items-center justify-between gap-4">
                     <span className="text-gray-500">Selected Method:</span>
                     <span className="font-medium text-gray-900">History Forecasting</span>

@@ -35,32 +35,53 @@ import {
 
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
+  useCreateAccessControlMatrixMutation,
+  useCreateApprovalWorkflowMutation,
   useCreateKanbanStandardMutation,
   useCreateGlobalWorkingDaysMutation,
+  useCreatePoSplitMutation,
   useCreateProcessMutation,
+  useCreateSafetyStockMutation,
   useCreateTypeParameterMutation,
+  useDeleteAccessControlMatrixMutation,
+  useDeleteApprovalWorkflowMutation,
   useDeleteGlobalWorkingDaysMutation,
+  useDeletePoSplitMutation,
   useDeleteProcessMutation,
+  useDeleteSafetyStockMutation,
   useDeleteTypeParameterMutation,
   useDeleteKanbanStandardMutation,
   useDeleteRoleMutation,
   useDeleteUomMutation,
+  useGetAccessControlMatrixQuery,
+  useGetApprovalWorkflowByIdQuery,
+  useGetApprovalWorkflowsQuery,
+  useGetDepartmentsQuery,
   useGetGlobalWorkingDaysByIdQuery,
   useGetGlobalWorkingDaysQuery,
   useGetProcessByIdQuery,
   useGetProcessesQuery,
+  useGetSafetyStockByIdQuery,
+  useGetSafetyStockQuery,
   useGetTypeParametersQuery,
   useGetUomsQuery,
   useGetKanbanStandardsQuery,
+  useGetPoSplitSettingByIdQuery,
+  useGetPoSplitSettingsQuery,
   useGetRolesQuery,
+  useUpdateAccessControlMatrixMutation,
+  useUpdateApprovalWorkflowMutation,
   useCreateUomMutation,
   useUpdateGlobalWorkingDaysMutation,
+  useUpdatePoSplitMutation,
   useUpdateProcessMutation,
+  useUpdateSafetyStockMutation,
   useUpdateTypeParameterMutation,
   useUpdateUomMutation,
   useUpdateKanbanStandardMutation,
 } from "@/lib/api/system-settings/api";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 
 type StatusType = "Active" | "Inactive";
 
@@ -69,7 +90,9 @@ type ParameterRow = {
   name: string;
   empId: string;
   department: string;
+  departmentId?: string;
   role: string;
+  roleId?: string;
   team: string;
   permissions: string[];
   lastLogin: string;
@@ -86,9 +109,12 @@ type RoleRow = {
 type SafetyStockRow = {
   id: string;
   inventoryType: string;
+  itemUniqCode: string;
   parameter: string;
   constanta: number;
   status: StatusType;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 type StockdaysRow = {
@@ -118,9 +144,13 @@ type UomRow = {
 type PurchaseOrderRow = {
   id: string;
   materialType: string;
+  po1Pct: number;
+  po2Pct: number;
+  description?: string;
   minOrderQty: number;
   maxSplitLines: number;
   splitRule: string;
+  poSplitSum?: number;
   status: StatusType;
 };
 
@@ -354,36 +384,36 @@ const initialRoleRows: RoleRow[] = [
   { id: "ROLE-005", roleName: "Finance", numberOfPeople: 8, lastUpdated: "1/15/2024" },
 ];
 
-const initialSafetyStockRows: SafetyStockRow[] = [
-  {
-    id: "SSP-001",
-    inventoryType: "Raw Material",
-    parameter: "PRL/Working days * days",
-    constanta: 7,
-    status: "Inactive",
-  },
-  {
-    id: "SSP-002",
-    inventoryType: "Indirect Raw Material",
-    parameter: "PRL/Working days * days",
-    constanta: 7,
-    status: "Active",
-  },
-  {
-    id: "SSP-003",
-    inventoryType: "SubCon",
-    parameter: "PRL/Working days * days",
-    constanta: 7,
-    status: "Active",
-  },
-  {
-    id: "SSP-004",
-    inventoryType: "Finished Goods",
-    parameter: "PRL/Working days * days",
-    constanta: 7,
-    status: "Active",
-  },
-];
+// const initialSafetyStockRows: SafetyStockRow[] = [
+//   {
+//     id: "SSP-001",
+//     inventoryType: "Raw Material",
+//     parameter: "PRL/Working days * days",
+//     constanta: 7,
+//     status: "Inactive",
+//   },
+//   {
+//     id: "SSP-002",
+//     inventoryType: "Indirect Raw Material",
+//     parameter: "PRL/Working days * days",
+//     constanta: 7,
+//     status: "Active",
+//   },
+//   {
+//     id: "SSP-003",
+//     inventoryType: "SubCon",
+//     parameter: "PRL/Working days * days",
+//     constanta: 7,
+//     status: "Active",
+//   },
+//   {
+//     id: "SSP-004",
+//     inventoryType: "Finished Goods",
+//     parameter: "PRL/Working days * days",
+//     constanta: 7,
+//     status: "Active",
+//   },
+// ];
 
 const initialStockdaysRows: StockdaysRow[] = [
   {
@@ -436,9 +466,13 @@ const initialPurchaseOrderRows: PurchaseOrderRow[] = [
   {
     id: "PO-001",
     materialType: "Raw Material",
+    po1Pct: 50,
+    po2Pct: 50,
+    description: "By Supplier Capacity",
     minOrderQty: 1000,
     maxSplitLines: 3,
     splitRule: "By Supplier Capacity",
+    poSplitSum: 100,
     status: "Active",
   },
 ];
@@ -463,6 +497,8 @@ const initialApprovalWorkflowRows: ApprovalWorkflowRow[] = [
     status: "Active",
   },
 ];
+
+const initialSafetyStockRows: SafetyStockRow[] = [];
 
 const initialKanbanRows: KanbanRow[] = [
   {
@@ -557,11 +593,48 @@ type UomFormValues = {
 
 type PurchaseOrderFormValues = {
   materialType: string;
+  po1Pct: number;
+  po2Pct: number;
+  vendor?: string;
+  description?: string;
   minOrderQty: number;
   maxSplitLines: number;
   splitRule: string;
   status: StatusType;
 };
+
+const PURCHASE_ORDER_DEFAULT_VALUES: PurchaseOrderFormValues = {
+  materialType: "raw_material",
+  po1Pct: 50,
+  po2Pct: 50,
+  vendor: undefined,
+  description: "",
+  minOrderQty: 10,
+  maxSplitLines: 2,
+  splitRule: "percentage",
+  status: "Active",
+};
+
+const PURCHASE_ORDER_MATERIAL_OPTIONS = [
+  { label: "Raw Material", value: "raw_material" },
+  { label: "Indirect", value: "indirect" },
+  { label: "Subcon", value: "subcon" },
+  // { label: "CAPEX", value: "CAPEX" },
+  // { label: "CAPEX1", value: "CAPEX1" },
+  // { label: "CAPEX2", value: "CAPEX2" },
+  // { label: "CAPEX3", value: "CAPEX3" },
+];
+
+const PURCHASE_ORDER_SPLIT_RULE_OPTIONS = [
+  { label: "Equal", value: "equal" },
+  { label: "Percentage", value: "percentage" },
+  { label: "History", value: "history" },
+];
+
+const PURCHASE_ORDER_STATUS_OPTIONS = [
+  { label: "Active", value: "Active" },
+  { label: "Inactive", value: "Inactive" },
+];
 
 type ApprovalWorkflowFormValues = {
   menuAction: string;
@@ -617,7 +690,16 @@ export default function SystemSettingsPage() {
   };
 
   const { data: rolesApiData } = useGetRolesQuery(undefined, { skip: !apiEnabled });
+  const { data: departmentsApiData } = useGetDepartmentsQuery(undefined, { skip: !apiEnabled });
+  const { data: accessControlApiData } = useGetAccessControlMatrixQuery(undefined, { skip: !apiEnabled });
+  const [createAccessControl] = useCreateAccessControlMatrixMutation();
+  const [updateAccessControl] = useUpdateAccessControlMatrixMutation();
+  const [deleteAccessControl] = useDeleteAccessControlMatrixMutation();
   const [deleteRole] = useDeleteRoleMutation();
+  const { data: safetyStockApiData } = useGetSafetyStockQuery(undefined, { skip: !apiEnabled });
+  const [createSafetyStock] = useCreateSafetyStockMutation();
+  const [updateSafetyStock] = useUpdateSafetyStockMutation();
+  const [deleteSafetyStock] = useDeleteSafetyStockMutation();
 
   const { data: typeParametersApiData } = useGetTypeParametersQuery(undefined, { skip: !apiEnabled });
   const [createTypeParameter] = useCreateTypeParameterMutation();
@@ -633,6 +715,7 @@ export default function SystemSettingsPage() {
   const [createGlobalWorkingDays] = useCreateGlobalWorkingDaysMutation();
   const [updateGlobalWorkingDays] = useUpdateGlobalWorkingDaysMutation();
   const [deleteGlobalWorkingDays] = useDeleteGlobalWorkingDaysMutation();
+  const { data: suppliersApiData } = useListSuppliersQuery(undefined, { skip: !apiEnabled });
 
   const { data: uomsApiData } = useGetUomsQuery(undefined, { skip: !apiEnabled });
   const [createUom] = useCreateUomMutation();
@@ -643,6 +726,14 @@ export default function SystemSettingsPage() {
   const [createKanbanStandard] = useCreateKanbanStandardMutation();
   const [updateKanbanStandard] = useUpdateKanbanStandardMutation();
   const [deleteKanbanStandard] = useDeleteKanbanStandardMutation();
+  const { data: poSplitApiData } = useGetPoSplitSettingsQuery(undefined, { skip: !apiEnabled });
+  const [createPoSplit] = useCreatePoSplitMutation();
+  const [updatePoSplit] = useUpdatePoSplitMutation();
+  const [deletePoSplit] = useDeletePoSplitMutation();
+  const { data: approvalWorkflowApiData } = useGetApprovalWorkflowsQuery(undefined, { skip: !apiEnabled });
+  const [createApprovalWorkflow] = useCreateApprovalWorkflowMutation();
+  const [updateApprovalWorkflow] = useUpdateApprovalWorkflowMutation();
+  const [deleteApprovalWorkflow] = useDeleteApprovalWorkflowMutation();
 
   const { data: bomTreeApiData } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
 
@@ -689,6 +780,9 @@ export default function SystemSettingsPage() {
 
   const [safetyDetailOpen, setSafetyDetailOpen] = useState(false);
   const [safetyDetailRow, setSafetyDetailRow] = useState<SafetyStockRow | null>(null);
+  const { data: safetyStockDetailApiData } = useGetSafetyStockByIdQuery(safetyDetailRow?.id ?? "", {
+    skip: !apiEnabled || !safetyDetailOpen || !safetyDetailRow?.id,
+  });
 
   const [typeParameterDetailOpen, setTypeParameterDetailOpen] = useState(false);
   const [typeParameterDetailRow, setTypeParameterDetailRow] = useState<TypeParameterRow | null>(
@@ -702,10 +796,17 @@ export default function SystemSettingsPage() {
   const [purchaseOrderDetailRow, setPurchaseOrderDetailRow] = useState<PurchaseOrderRow | null>(
     null
   );
+  const { data: poSplitDetailApiData } = useGetPoSplitSettingByIdQuery(purchaseOrderDetailRow?.id ?? "", {
+    skip: !apiEnabled || !purchaseOrderDetailOpen || !purchaseOrderDetailRow?.id,
+  });
 
   const [approvalWorkflowDetailOpen, setApprovalWorkflowDetailOpen] = useState(false);
   const [approvalWorkflowDetailRow, setApprovalWorkflowDetailRow] = useState<ApprovalWorkflowRow | null>(
     null
+  );
+  const { data: approvalWorkflowDetailApiData } = useGetApprovalWorkflowByIdQuery(
+    approvalWorkflowDetailRow?.id ?? "",
+    { skip: !apiEnabled || !approvalWorkflowDetailOpen || !approvalWorkflowDetailRow?.id }
   );
 
   const [kanbanDetailOpen, setKanbanDetailOpen] = useState(false);
@@ -761,6 +862,28 @@ export default function SystemSettingsPage() {
     "edit"
   );
   const [purchaseOrderForm] = Form.useForm<PurchaseOrderFormValues>();
+  const purchaseOrderSplitRule = Form.useWatch("splitRule", purchaseOrderForm) ?? "percentage";
+  const purchaseOrderMaterialType = Form.useWatch("materialType", purchaseOrderForm) ?? "raw_material";
+  const purchaseOrderStatus = Form.useWatch("status", purchaseOrderForm) ?? "Active";
+  const purchaseOrderVendor = Form.useWatch("vendor", purchaseOrderForm) ?? "";
+  const purchaseOrderDescription = Form.useWatch("description", purchaseOrderForm) ?? "";
+  const purchaseOrderMinOrderQty = Form.useWatch("minOrderQty", purchaseOrderForm) ?? 0;
+  const purchaseOrderMaxSplitLines = Form.useWatch("maxSplitLines", purchaseOrderForm) ?? 0;
+  const purchaseOrderPo1Pct = Form.useWatch("po1Pct", purchaseOrderForm) ?? 0;
+  const purchaseOrderPo2Pct = Form.useWatch("po2Pct", purchaseOrderForm) ?? 0;
+  const purchaseOrderPctTotal = Number(purchaseOrderPo1Pct || 0) + Number(purchaseOrderPo2Pct || 0);
+  const purchaseOrderIsHistory = String(purchaseOrderSplitRule).toLowerCase() === "history";
+  const purchaseOrderVendorOptions = useMemo(
+    () =>
+      (suppliersApiData ?? [])
+        .map((supplier) => ({
+          label: String(supplier.supplier_name ?? supplier.supplier_code ?? ""),
+          value: String(supplier.supplier_name ?? supplier.supplier_code ?? ""),
+        }))
+        .filter((option) => option.value.trim())
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [suppliersApiData]
+  );
 
   const [approvalWorkflowEditOpen, setApprovalWorkflowEditOpen] = useState(false);
   const [approvalWorkflowEditingRow, setApprovalWorkflowEditingRow] = useState<ApprovalWorkflowRow | null>(
@@ -838,9 +961,82 @@ export default function SystemSettingsPage() {
   const [machinePatternDeletingRow, setMachinePatternDeletingRow] =
     useState<MachinePatternRow | null>(null);
 
+  const departmentNameToId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const department of departmentsApiData ?? []) {
+      const name = String(department.department_name ?? "").trim().toLowerCase();
+      if (name) map.set(name, String(department.id));
+    }
+    return map;
+  }, [departmentsApiData]);
+
+  const departmentIdToName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const department of departmentsApiData ?? []) {
+      if (department.id != null) {
+        map.set(String(department.id), String(department.department_name ?? department.id));
+      }
+    }
+    return map;
+  }, [departmentsApiData]);
+
+  const roleNameToId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const role of rolesApiData ?? []) {
+      const name = String(role.name ?? "").trim().toLowerCase();
+      if (name) map.set(name, String(role.id));
+    }
+    return map;
+  }, [rolesApiData]);
+
+  const roleIdToName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const role of rolesApiData ?? []) {
+      if (role.id != null) {
+        map.set(String(role.id), String(role.name ?? role.id));
+      }
+    }
+    return map;
+  }, [rolesApiData]);
+
+  const formatInventoryTypeLabel = (value: string) =>
+    value
+      .split("_")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+
+  const normalizeInventoryTypeValue = (value: string) =>
+    value.trim().toLowerCase().replace(/\s+/g, "_");
+
+  const rowsView = useMemo<ParameterRow[]>(() => {
+    if (!apiEnabled || !accessControlApiData) return rows;
+    return accessControlApiData
+      .filter((record) => Boolean(record?.id))
+      .map((record) => {
+        const departmentId =
+          record.department_id == null ? undefined : String(record.department_id);
+        const roleId = record.role_id == null ? undefined : String(record.role_id);
+        return {
+          id: String(record.id),
+          name: String(record.full_name ?? "-"),
+          empId: String(record.employee_id ?? "-"),
+          department: record.department
+            ? String(record.department)
+            : departmentIdToName.get(String(departmentId ?? "")) ?? String(record.department_id ?? "-"),
+          departmentId,
+          role: roleId ? roleIdToName.get(roleId) ?? roleId : "-",
+          roleId,
+          team: "-",
+          permissions: [],
+          lastLogin: "-",
+          status: fromBackendStatus(record.status),
+        };
+      });
+  }, [accessControlApiData, apiEnabled, departmentIdToName, roleIdToName, rows]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return rows
+    return rowsView
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -849,7 +1045,7 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, rows, typeFilter]);
+  }, [query, rowsView, typeFilter]);
 
   const roleRowsView = useMemo<RoleRow[]>(() => {
     if (!apiEnabled || !rolesApiData) return roleRows;
@@ -913,60 +1109,27 @@ export default function SystemSettingsPage() {
   const filteredRoles = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return roleRowsView;
-    return roleRowsView.filter((r) => r.roleName.toLowerCase().includes(q));
+    return roleRowsView.filter((r) =>
+      [r.roleName, String(r.numberOfPeople), r.lastUpdated].join(" ").toLowerCase().includes(q)
+    );
   }, [query, roleRowsView]);
 
-  const filteredSafety = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return safetyRows
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
-      .filter((r) => {
-        if (!q) return true;
-        return [r.inventoryType, r.parameter]
-          .join(" ")
-          .toLowerCase()
-          .includes(q);
-      });
-  }, [query, safetyRows, typeFilter]);
-
-  const filteredStockdays = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return stockdaysRows
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
-      .filter((r) => {
-        if (!q) return true;
-        return [r.inventoryType, r.parameter]
-          .join(" ")
-          .toLowerCase()
-          .includes(q);
-      });
-  }, [query, stockdaysRows, typeFilter]);
-
-  const typeParameterRowsView = useMemo<TypeParameterRow[]>(() => {
-    if (!apiEnabled || !typeParametersApiData) return typeParameterRows;
-    return typeParametersApiData
-      .filter((t) => Boolean(t?.id))
-      .map((t) => ({
-        id: String(t.id),
-        typeCode: String(t.type_code ?? ""),
-        typeName: String(t.type_name ?? ""),
-        description: String(t.description ?? ""),
-        status: fromBackendStatus(t.status),
+  const safetyRowsView = useMemo<SafetyStockRow[]>(() => {
+    if (!apiEnabled || !safetyStockApiData) return safetyRows;
+    return safetyStockApiData
+      .filter((record) => Boolean(record?.id))
+      .map((record) => ({
+        id: String(record.id),
+        inventoryType: formatInventoryTypeLabel(String(record.inventory_type ?? "")),
+        itemUniqCode: String(record.item_uniq_code ?? ""),
+        parameter: String(record.calculation_type ?? ""),
+        constanta: Number(record.constanta ?? 0),
+        status: fromBackendStatus(record.status),
+        createdAt: record.created_at,
+        updatedAt: record.updated_at,
       }));
-  }, [apiEnabled, typeParameterRows, typeParametersApiData]);
 
-  const filteredTypeParameters = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return typeParameterRowsView
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
-      .filter((r) => {
-        if (!q) return true;
-        return [r.typeCode, r.typeName, r.description]
-          .join(" ")
-          .toLowerCase()
-          .includes(q);
-      });
-  }, [query, typeFilter, typeParameterRowsView]);
+  }, [apiEnabled, safetyRows, safetyStockApiData]);
 
   const uomRowsView = useMemo<UomRow[]>(() => {
     if (!apiEnabled || !uomsApiData) return uomRows;
@@ -1022,6 +1185,58 @@ export default function SystemSettingsPage() {
       });
   }, [apiEnabled, globalParametersApiData, globalWorkingDaysRows]);
 
+  const typeParameterRowsView = useMemo<TypeParameterRow[]>(() => {
+    if (!apiEnabled || !typeParametersApiData) return typeParameterRows;
+    return typeParametersApiData
+      .filter((record) => Boolean(record?.id))
+      .map((record) => ({
+        id: String(record.id),
+        typeCode: String(record.type_code ?? ""),
+        typeName: String(record.type_name ?? ""),
+        description: String(record.description ?? ""),
+        status: fromBackendStatus(record.status),
+      }));
+  }, [apiEnabled, typeParameterRows, typeParametersApiData]);
+
+  const filteredSafety = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return safetyRowsView
+      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) => {
+        if (!q) return true;
+        return [r.inventoryType, r.itemUniqCode, r.parameter]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
+      });
+  }, [query, safetyRowsView, typeFilter]);
+
+  const filteredStockdays = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return stockdaysRows
+      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) => {
+        if (!q) return true;
+        return [r.inventoryType, r.parameter]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
+      });
+  }, [query, stockdaysRows, typeFilter]);
+
+  const filteredTypeParameters = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return typeParameterRowsView
+      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) => {
+        if (!q) return true;
+        return [r.typeCode, r.typeName, r.description]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
+      });
+  }, [query, typeFilter, typeParameterRowsView]);
+
   const filteredUom = useMemo(() => {
     const q = query.trim().toLowerCase();
     return uomRowsView
@@ -1037,20 +1252,51 @@ export default function SystemSettingsPage() {
 
   const filteredPurchaseOrder = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return purchaseOrderRows
+    const source = apiEnabled && poSplitApiData
+      ? poSplitApiData
+          .filter((record) => Boolean(record?.id))
+          .map((record) => ({
+            id: String(record.id),
+            materialType: String(record.budget_type ?? ""),
+            po1Pct: Number(record.po1_pct ?? 0),
+            po2Pct: Number(record.po2_pct ?? 0),
+            description: record.description ? String(record.description) : undefined,
+            minOrderQty: Number(record.min_order_qty ?? 0),
+            maxSplitLines: Number(record.max_split_lines ?? 0),
+            splitRule: String(record.split_rule ?? ""),
+            poSplitSum: Number(record.po_split_sum ?? 0),
+            status: fromBackendStatus(record.status),
+          }))
+      : purchaseOrderRows;
+
+    return source
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
-        return [r.materialType, r.splitRule]
+        return [r.materialType, r.splitRule, r.description ?? ""]
           .join(" ")
           .toLowerCase()
           .includes(q);
       });
-  }, [query, purchaseOrderRows, typeFilter]);
+  }, [apiEnabled, poSplitApiData, purchaseOrderRows, query, typeFilter]);
 
   const filteredApprovalWorkflow = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return approvalWorkflowRows
+    const source = apiEnabled && approvalWorkflowApiData
+      ? approvalWorkflowApiData
+          .filter((record) => Boolean(record?.id))
+          .map((record) => ({
+            id: String(record.id),
+            menuAction: String(record.action_name ?? ""),
+            level1Role: String(record.level_1_role ?? ""),
+            level2Role: String(record.level_2_role ?? ""),
+            level3Role: String(record.level_3_role ?? ""),
+            level4Role: String(record.level_4_role ?? ""),
+            status: fromBackendStatus(record.status),
+          }))
+      : approvalWorkflowRows;
+
+    return source
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
@@ -1065,7 +1311,7 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [query, approvalWorkflowRows, typeFilter]);
+  }, [apiEnabled, approvalWorkflowApiData, approvalWorkflowRows, query, typeFilter]);
 
   const filteredKanban = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1166,7 +1412,7 @@ export default function SystemSettingsPage() {
     setSafetyEditingRow(row);
     safetyForm.setFieldsValue({
       inventoryType: row.inventoryType,
-      parameter: row.parameter,
+      parameter: row.itemUniqCode,
       constanta: row.constanta,
       status: row.status,
     });
@@ -1219,13 +1465,7 @@ export default function SystemSettingsPage() {
     setPurchaseOrderEditMode("create");
     setPurchaseOrderEditingRow(null);
     purchaseOrderForm.resetFields();
-    purchaseOrderForm.setFieldsValue({
-      materialType: "Raw Material",
-      minOrderQty: 1000,
-      maxSplitLines: 3,
-      splitRule: "By Supplier Capacity",
-      status: "Active",
-    });
+    purchaseOrderForm.setFieldsValue(PURCHASE_ORDER_DEFAULT_VALUES);
     setPurchaseOrderEditOpen(true);
   };
 
@@ -1234,6 +1474,10 @@ export default function SystemSettingsPage() {
     setPurchaseOrderEditingRow(row);
     purchaseOrderForm.setFieldsValue({
       materialType: row.materialType,
+      po1Pct: row.po1Pct,
+      po2Pct: row.po2Pct,
+      vendor: row.description,
+      description: row.description,
       minOrderQty: row.minOrderQty,
       maxSplitLines: row.maxSplitLines,
       splitRule: row.splitRule,
@@ -1393,6 +1637,25 @@ export default function SystemSettingsPage() {
     purchaseOrderForm.resetFields();
   };
 
+  const resetPurchaseOrderEdit = () => {
+    if (purchaseOrderEditMode === "edit" && purchaseOrderEditingRow) {
+      purchaseOrderForm.setFieldsValue({
+        materialType: purchaseOrderEditingRow.materialType,
+        po1Pct: purchaseOrderEditingRow.po1Pct,
+        po2Pct: purchaseOrderEditingRow.po2Pct,
+        vendor: purchaseOrderEditingRow.description,
+        description: purchaseOrderEditingRow.description,
+        minOrderQty: purchaseOrderEditingRow.minOrderQty,
+        maxSplitLines: purchaseOrderEditingRow.maxSplitLines,
+        splitRule: purchaseOrderEditingRow.splitRule,
+        status: purchaseOrderEditingRow.status,
+      });
+      return;
+    }
+
+    purchaseOrderForm.setFieldsValue(PURCHASE_ORDER_DEFAULT_VALUES);
+  };
+
   const closeApprovalWorkflowEdit = () => {
     setApprovalWorkflowEditOpen(false);
     setApprovalWorkflowEditingRow(null);
@@ -1424,53 +1687,129 @@ export default function SystemSettingsPage() {
   };
 
   const saveEdit = async () => {
-    const values = await form.validateFields();
+    try {
+      const values = await form.validateFields();
 
-    const next: ParameterRow = {
-      id: values.empId,
-      name: values.name,
-      empId: values.empId,
-      department: values.department,
-      role: values.role,
-      team: values.team,
-      permissions: String(values.permissions || "")
-        .split(",")
-        .map((p) => p.trim())
-        .filter(Boolean),
-      lastLogin: editMode === "create" ? "-" : (editingRow?.lastLogin ?? "-"),
-      status: values.status,
-    };
+      if (apiEnabled) {
+        const departmentId =
+          departmentNameToId.get(String(values.department ?? "").trim().toLowerCase()) ??
+          editingRow?.departmentId;
+        const roleId =
+          roleNameToId.get(String(values.role ?? "").trim().toLowerCase()) ??
+          editingRow?.roleId;
 
-    if (editMode === "create") {
-      setRows((prev) => [next, ...prev]);
-    } else {
-      setRows((prev) => prev.map((r) => (r.id === editingRow?.id ? next : r)));
+        if (!departmentId) throw new Error("Department name must match existing department");
+        if (!roleId) throw new Error("Role name must match existing role");
+
+        const payload = {
+          full_name: String(values.name ?? "").trim(),
+          employee_id: String(values.empId ?? "").trim(),
+          department_id: departmentId,
+          role_id: roleId,
+          status: toBackendStatus(values.status),
+        };
+
+        if (editMode === "edit") {
+          if (!editingRow?.id) throw new Error("Missing access control id");
+          await updateAccessControl({ id: editingRow.id, body: payload }).unwrap();
+          message.success("Access control updated");
+        } else {
+          await createAccessControl(payload).unwrap();
+          message.success("Access control created");
+        }
+
+        closeEdit();
+        return;
+      }
+
+      const next: ParameterRow = {
+        id:
+          editMode === "create"
+            ? `EMP-${String(values.empId || rows.length + 1)}`
+            : (editingRow?.id ?? `EMP-${String(values.empId || rows.length + 1)}`),
+        name: String(values.name ?? ""),
+        empId: String(values.empId ?? ""),
+        department: String(values.department ?? ""),
+        departmentId:
+          departmentNameToId.get(String(values.department ?? "").trim().toLowerCase()) ??
+          editingRow?.departmentId,
+        role: String(values.role ?? ""),
+        roleId:
+          roleNameToId.get(String(values.role ?? "").trim().toLowerCase()) ?? editingRow?.roleId,
+        team: String(values.team ?? ""),
+        permissions: String(values.permissions ?? "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+        lastLogin: editingRow?.lastLogin ?? "-",
+        status: values.status,
+      };
+
+      if (editMode === "create") {
+        setRows((prev) => [next, ...prev]);
+      } else {
+        setRows((prev) => prev.map((r) => (r.id === editingRow?.id ? next : r)));
+      }
+
+      closeEdit();
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      message.error(getApiErrorMessage(err, "Failed to save access control"));
     }
-
-    closeEdit();
   };
 
   const saveSafetyEdit = async () => {
-    const values = await safetyForm.validateFields();
+    try {
+      const values = await safetyForm.validateFields();
+      const inventoryTypeLabel = String(values.inventoryType ?? "").trim();
+      const inventoryTypeValue = inventoryTypeLabel.toLowerCase().replace(/[\s-]+/g, "_");
+      const payload = {
+        inventory_type: inventoryTypeValue,
+        item_uniq_code: String(values.parameter ?? "").trim(),
+        calculation_type: "PRL/Working days * days",
+        constanta: Number(values.constanta ?? 0),
+        status: toBackendStatus(values.status),
+      };
 
-    const next: SafetyStockRow = {
-      id:
-        safetyEditMode === "create"
-          ? `SSP-${String(safetyRows.length + 1).padStart(3, "0")}`
-          : (safetyEditingRow?.id ?? `SSP-${String(safetyRows.length + 1).padStart(3, "0")}`),
-      inventoryType: values.inventoryType,
-      parameter: values.parameter,
-      constanta: Number(values.constanta ?? 0),
-      status: values.status,
-    };
+      if (apiEnabled) {
+        if (safetyEditMode === "edit") {
+          if (!safetyEditingRow?.id) throw new Error("Missing safety stock id");
+          await updateSafetyStock({ id: safetyEditingRow.id, body: payload }).unwrap();
+          message.success("Safety stock updated");
+        } else {
+          await createSafetyStock(payload).unwrap();
+          message.success("Safety stock created");
+        }
 
-    if (safetyEditMode === "create") {
-      setSafetyRows((prev) => [next, ...prev]);
-    } else {
-      setSafetyRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+        closeSafetyEdit();
+        return;
+      }
+
+      const next: SafetyStockRow = {
+        id:
+          safetyEditMode === "create"
+            ? `SS-${String(safetyRows.length + 1).padStart(3, "0")}`
+            : (safetyEditingRow?.id ?? `SS-${String(safetyRows.length + 1).padStart(3, "0")}`),
+        inventoryType: inventoryTypeLabel,
+        itemUniqCode: String(values.parameter ?? ""),
+        parameter: "PRL/Working days * days",
+        constanta: Number(values.constanta ?? 0),
+        status: values.status,
+        createdAt: safetyEditingRow?.createdAt,
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (safetyEditMode === "create") {
+        setSafetyRows((prev) => [next, ...prev]);
+      } else {
+        setSafetyRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+      }
+
+      closeSafetyEdit();
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      message.error(getApiErrorMessage(err, "Failed to save safety stock"));
     }
-
-    closeSafetyEdit();
   };
 
   const saveTypeParameterEdit = async () => {
@@ -1479,9 +1818,9 @@ export default function SystemSettingsPage() {
 
       if (apiEnabled) {
         const payload = {
-          type_code: String(values.typeCode ?? ""),
-          type_name: String(values.typeName ?? ""),
-          description: String(values.description ?? ""),
+          type_code: String(values.typeCode ?? "").trim(),
+          type_name: String(values.typeName ?? "").trim(),
+          description: String(values.description ?? "").trim(),
           status: toBackendStatus(values.status),
         };
 
@@ -1579,54 +1918,117 @@ export default function SystemSettingsPage() {
   };
 
   const savePurchaseOrderEdit = async () => {
-    const values = await purchaseOrderForm.validateFields();
+    try {
+      const values = await purchaseOrderForm.validateFields();
 
-    const next: PurchaseOrderRow = {
-      id:
-        purchaseOrderEditMode === "create"
-          ? `PO-${String(purchaseOrderRows.length + 1).padStart(3, "0")}`
-          : (purchaseOrderEditingRow?.id ??
-              `PO-${String(purchaseOrderRows.length + 1).padStart(3, "0")}`),
-      materialType: values.materialType,
-      minOrderQty: Number(values.minOrderQty ?? 0),
-      maxSplitLines: Number(values.maxSplitLines ?? 0),
-      splitRule: values.splitRule,
-      status: values.status,
-    };
+      if (apiEnabled) {
+        const vendorValue = String(values.vendor ?? values.description ?? "").trim();
+        const payload = {
+          budget_type: String(values.materialType ?? "").trim(),
+          po1_pct: Number(values.po1Pct ?? 0),
+          po2_pct: Number(values.po2Pct ?? 0),
+          description: vendorValue,
+          min_order_qty: Number(values.minOrderQty ?? 0),
+          max_split_lines: Number(values.maxSplitLines ?? 0),
+          split_rule: String(values.splitRule ?? "").trim(),
+          status: toBackendStatus(values.status),
+        };
 
-    if (purchaseOrderEditMode === "create") {
-      setPurchaseOrderRows((prev) => [next, ...prev]);
-    } else {
-      setPurchaseOrderRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+        if (purchaseOrderEditMode === "create") {
+          await createPoSplit(payload).unwrap();
+          message.success("PO split setting created");
+        } else {
+          if (!purchaseOrderEditingRow?.id) throw new Error("Missing PO split id");
+          await updatePoSplit({ id: purchaseOrderEditingRow.id, body: payload }).unwrap();
+          message.success("PO split setting updated");
+        }
+
+        closePurchaseOrderEdit();
+        return;
+      }
+
+      const next: PurchaseOrderRow = {
+        id:
+          purchaseOrderEditMode === "create"
+            ? `PO-${String(purchaseOrderRows.length + 1).padStart(3, "0")}`
+            : (purchaseOrderEditingRow?.id ??
+                `PO-${String(purchaseOrderRows.length + 1).padStart(3, "0")}`),
+        materialType: values.materialType,
+        po1Pct: Number(values.po1Pct ?? 0),
+        po2Pct: Number(values.po2Pct ?? 0),
+        description: String(values.vendor ?? values.description ?? "").trim(),
+        minOrderQty: Number(values.minOrderQty ?? 0),
+        maxSplitLines: Number(values.maxSplitLines ?? 0),
+        splitRule: values.splitRule,
+        poSplitSum: Number(values.po1Pct ?? 0) + Number(values.po2Pct ?? 0),
+        status: values.status,
+      };
+
+      if (purchaseOrderEditMode === "create") {
+        setPurchaseOrderRows((prev) => [next, ...prev]);
+      } else {
+        setPurchaseOrderRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+      }
+
+      closePurchaseOrderEdit();
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      message.error(getApiErrorMessage(err, "Failed to save PO split setting"));
     }
-
-    closePurchaseOrderEdit();
   };
 
   const saveApprovalWorkflowEdit = async () => {
-    const values = await approvalWorkflowForm.validateFields();
+    try {
+      const values = await approvalWorkflowForm.validateFields();
 
-    const next: ApprovalWorkflowRow = {
-      id:
-        approvalWorkflowEditMode === "create"
-          ? `AW-${String(approvalWorkflowRows.length + 1).padStart(3, "0")}`
-          : (approvalWorkflowEditingRow?.id ??
-              `AW-${String(approvalWorkflowRows.length + 1).padStart(3, "0")}`),
-      menuAction: values.menuAction,
-      level1Role: values.level1Role,
-      level2Role: values.level2Role,
-      level3Role: values.level3Role,
-      level4Role: values.level4Role,
-      status: values.status,
-    };
+      if (apiEnabled) {
+        const payload = {
+          action_name: String(values.menuAction ?? "").trim(),
+          level_1_role: String(values.level1Role ?? "").trim(),
+          level_2_role: String(values.level2Role ?? "").trim(),
+          level_3_role: String(values.level3Role ?? "").trim(),
+          level_4_role: String(values.level4Role ?? "").trim(),
+          status: toBackendStatus(values.status),
+        };
 
-    if (approvalWorkflowEditMode === "create") {
-      setApprovalWorkflowRows((prev) => [next, ...prev]);
-    } else {
-      setApprovalWorkflowRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+        if (approvalWorkflowEditMode === "create") {
+          await createApprovalWorkflow(payload).unwrap();
+          message.success("Approval workflow created");
+        } else {
+          if (!approvalWorkflowEditingRow?.id) throw new Error("Missing approval workflow id");
+          await updateApprovalWorkflow({ id: approvalWorkflowEditingRow.id, body: payload }).unwrap();
+          message.success("Approval workflow updated");
+        }
+
+        closeApprovalWorkflowEdit();
+        return;
+      }
+
+      const next: ApprovalWorkflowRow = {
+        id:
+          approvalWorkflowEditMode === "create"
+            ? `AW-${String(approvalWorkflowRows.length + 1).padStart(3, "0")}`
+            : (approvalWorkflowEditingRow?.id ??
+                `AW-${String(approvalWorkflowRows.length + 1).padStart(3, "0")}`),
+        menuAction: values.menuAction,
+        level1Role: values.level1Role,
+        level2Role: values.level2Role,
+        level3Role: values.level3Role,
+        level4Role: values.level4Role,
+        status: values.status,
+      };
+
+      if (approvalWorkflowEditMode === "create") {
+        setApprovalWorkflowRows((prev) => [next, ...prev]);
+      } else {
+        setApprovalWorkflowRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+      }
+
+      closeApprovalWorkflowEdit();
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      message.error(getApiErrorMessage(err, "Failed to save approval workflow"));
     }
-
-    closeApprovalWorkflowEdit();
   };
 
   const saveKanbanEdit = async () => {
@@ -2042,10 +2444,19 @@ export default function SystemSettingsPage() {
     setMachinePatternDeletingRow(null);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deletingRow) return;
-    setRows((prev) => prev.filter((r) => r.id !== deletingRow.id));
-    closeDelete();
+    try {
+      if (apiEnabled) {
+        await deleteAccessControl(deletingRow.id).unwrap();
+        message.success("Access control deleted");
+      } else {
+        setRows((prev) => prev.filter((r) => r.id !== deletingRow.id));
+      }
+      closeDelete();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to delete access control"));
+    }
   };
 
   const confirmRoleDelete = async () => {
@@ -2063,10 +2474,19 @@ export default function SystemSettingsPage() {
     }
   };
 
-  const confirmSafetyDelete = () => {
+  const confirmSafetyDelete = async () => {
     if (!safetyDeletingRow) return;
-    setSafetyRows((prev) => prev.filter((r) => r.id !== safetyDeletingRow.id));
-    closeSafetyDelete();
+    try {
+      if (apiEnabled) {
+        await deleteSafetyStock(safetyDeletingRow.id).unwrap();
+        message.success("Safety stock deleted");
+      } else {
+        setSafetyRows((prev) => prev.filter((r) => r.id !== safetyDeletingRow.id));
+      }
+      closeSafetyDelete();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to delete safety stock"));
+    }
   };
 
   const confirmTypeParameterDelete = async () => {
@@ -2099,16 +2519,34 @@ export default function SystemSettingsPage() {
     }
   };
 
-  const confirmPurchaseOrderDelete = () => {
+  const confirmPurchaseOrderDelete = async () => {
     if (!purchaseOrderDeletingRow) return;
-    setPurchaseOrderRows((prev) => prev.filter((r) => r.id !== purchaseOrderDeletingRow.id));
-    closePurchaseOrderDelete();
+    try {
+      if (apiEnabled) {
+        await deletePoSplit(purchaseOrderDeletingRow.id).unwrap();
+        message.success("PO split setting deleted");
+      } else {
+        setPurchaseOrderRows((prev) => prev.filter((r) => r.id !== purchaseOrderDeletingRow.id));
+      }
+      closePurchaseOrderDelete();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to delete PO split setting"));
+    }
   };
 
-  const confirmApprovalWorkflowDelete = () => {
+  const confirmApprovalWorkflowDelete = async () => {
     if (!approvalWorkflowDeletingRow) return;
-    setApprovalWorkflowRows((prev) => prev.filter((r) => r.id !== approvalWorkflowDeletingRow.id));
-    closeApprovalWorkflowDelete();
+    try {
+      if (apiEnabled) {
+        await deleteApprovalWorkflow(approvalWorkflowDeletingRow.id).unwrap();
+        message.success("Approval workflow deleted");
+      } else {
+        setApprovalWorkflowRows((prev) => prev.filter((r) => r.id !== approvalWorkflowDeletingRow.id));
+      }
+      closeApprovalWorkflowDelete();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to delete approval workflow"));
+    }
   };
 
   const confirmKanbanDelete = async () => {
@@ -2516,6 +2954,14 @@ export default function SystemSettingsPage() {
       key: "materialType",
       width: 160,
       render: (v: string) => <div className="font-medium text-gray-900">{v}</div>,
+    },
+    {
+      title: "PO Split",
+      key: "poSplit",
+      width: 150,
+      render: (_: unknown, r: PurchaseOrderRow) => (
+        <div className="text-gray-700">{r.po1Pct}% / {r.po2Pct}%</div>
+      ),
     },
     {
       title: "Min Order Qty",
@@ -3064,20 +3510,36 @@ export default function SystemSettingsPage() {
           <div className="space-y-3">
             <div>
               <div className="text-xs text-gray-500">Inventory Type</div>
-              <div className="font-medium text-gray-900">{safetyDetailRow.inventoryType}</div>
+              <div className="font-medium text-gray-900">
+                {safetyStockDetailApiData?.inventory_type
+                  ? formatInventoryTypeLabel(String(safetyStockDetailApiData.inventory_type))
+                  : safetyDetailRow.inventoryType}
+              </div>
             </div>
             <div>
-              <div className="text-xs text-gray-500">Parameter</div>
-              <div className="font-medium text-gray-900">{safetyDetailRow.parameter}</div>
+              <div className="text-xs text-gray-500">UNIQ Code</div>
+              <div className="font-medium text-gray-900">
+                {safetyStockDetailApiData?.item_uniq_code || safetyDetailRow.itemUniqCode}
+              </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs text-gray-500">Constanta</div>
-                <div className="font-medium text-gray-900">{safetyDetailRow.constanta}</div>
+                <div className="font-medium text-gray-900">
+                  {Number(safetyStockDetailApiData?.constanta ?? safetyDetailRow.constanta)}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Status</div>
-                <div className="font-medium text-gray-900">{safetyDetailRow.status}</div>
+                <div className="font-medium text-gray-900">
+                  {safetyStockDetailApiData ? fromBackendStatus(safetyStockDetailApiData.status) : safetyDetailRow.status}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">Calculation Type</div>
+                <div className="font-medium text-gray-900">
+                  {safetyStockDetailApiData?.calculation_type || safetyDetailRow.parameter}
+                </div>
               </div>
             </div>
           </div>
@@ -3156,27 +3618,39 @@ export default function SystemSettingsPage() {
           <div className="space-y-3">
             <div>
               <div className="text-xs text-gray-500">Material Type</div>
-              <div className="font-medium text-gray-900">{purchaseOrderDetailRow.materialType}</div>
+              <div className="font-medium text-gray-900">{poSplitDetailApiData?.budget_type || purchaseOrderDetailRow.materialType}</div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
+                <div className="text-xs text-gray-500">PO 1 Percentage</div>
+                <div className="font-medium text-gray-900">{Number(poSplitDetailApiData?.po1_pct ?? purchaseOrderDetailRow.po1Pct)}%</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">PO 2 Percentage</div>
+                <div className="font-medium text-gray-900">{Number(poSplitDetailApiData?.po2_pct ?? purchaseOrderDetailRow.po2Pct)}%</div>
+              </div>
+              <div>
                 <div className="text-xs text-gray-500">Min Order Qty</div>
                 <div className="font-medium text-gray-900">
-                  {purchaseOrderDetailRow.minOrderQty.toLocaleString("en-US")}
+                  {Number(poSplitDetailApiData?.min_order_qty ?? purchaseOrderDetailRow.minOrderQty).toLocaleString("en-US")}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Max Split Lines</div>
-                <div className="font-medium text-gray-900">{purchaseOrderDetailRow.maxSplitLines}</div>
+                <div className="font-medium text-gray-900">{Number(poSplitDetailApiData?.max_split_lines ?? purchaseOrderDetailRow.maxSplitLines)}</div>
               </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Split Rule</div>
-              <div className="font-medium text-gray-900">{purchaseOrderDetailRow.splitRule}</div>
+              <div className="font-medium text-gray-900">{poSplitDetailApiData?.split_rule || purchaseOrderDetailRow.splitRule}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500">Description</div>
+              <div className="font-medium text-gray-900">{poSplitDetailApiData?.description || purchaseOrderDetailRow.description || "-"}</div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Status</div>
-              <div className="font-medium text-gray-900">{purchaseOrderDetailRow.status}</div>
+              <div className="font-medium text-gray-900">{poSplitDetailApiData ? fromBackendStatus(poSplitDetailApiData.status) : purchaseOrderDetailRow.status}</div>
             </div>
           </div>
         )}
@@ -3194,29 +3668,29 @@ export default function SystemSettingsPage() {
           <div className="space-y-3">
             <div>
               <div className="text-xs text-gray-500">Menu/Action</div>
-              <div className="font-medium text-gray-900">{approvalWorkflowDetailRow.menuAction}</div>
+              <div className="font-medium text-gray-900">{approvalWorkflowDetailApiData?.action_name || approvalWorkflowDetailRow.menuAction}</div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs text-gray-500">Level 1 Role</div>
-                <div className="font-medium text-gray-900">{approvalWorkflowDetailRow.level1Role}</div>
+                <div className="font-medium text-gray-900">{approvalWorkflowDetailApiData?.level_1_role || approvalWorkflowDetailRow.level1Role}</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Level 2 Role</div>
-                <div className="font-medium text-gray-900">{approvalWorkflowDetailRow.level2Role}</div>
+                <div className="font-medium text-gray-900">{approvalWorkflowDetailApiData?.level_2_role || approvalWorkflowDetailRow.level2Role}</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Level 3 Role</div>
-                <div className="font-medium text-gray-900">{approvalWorkflowDetailRow.level3Role}</div>
+                <div className="font-medium text-gray-900">{approvalWorkflowDetailApiData?.level_3_role || approvalWorkflowDetailRow.level3Role}</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Level 4 Role</div>
-                <div className="font-medium text-gray-900">{approvalWorkflowDetailRow.level4Role}</div>
+                <div className="font-medium text-gray-900">{approvalWorkflowDetailApiData?.level_4_role || approvalWorkflowDetailRow.level4Role}</div>
               </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Status</div>
-              <div className="font-medium text-gray-900">{approvalWorkflowDetailRow.status}</div>
+              <div className="font-medium text-gray-900">{approvalWorkflowDetailApiData ? fromBackendStatus(approvalWorkflowDetailApiData.status) : approvalWorkflowDetailRow.status}</div>
             </div>
           </div>
         )}
@@ -3466,7 +3940,7 @@ export default function SystemSettingsPage() {
           </Form.Item>
 
           <Form.Item label="Parameter" name="parameter" rules={[{ required: true }]}>
-            <Input placeholder="PRL/Working days * days" />
+            <Input placeholder="ITEM001" />
           </Form.Item>
 
           <Form.Item
@@ -3569,66 +4043,247 @@ export default function SystemSettingsPage() {
         </Form>
       </Drawer>
 
-      <Drawer
-        title={purchaseOrderEditMode === "create" ? "Add Parameter" : "Edit"}
-        placement="right"
+      <Modal
+        title={purchaseOrderEditMode === "create" ? "Add Parameter" : "Edit Parameter"}
         open={purchaseOrderEditOpen}
-        onClose={closePurchaseOrderEdit}
-        width={460}
+        onCancel={closePurchaseOrderEdit}
+        width={940}
+        centered
         destroyOnClose
-        footer={
-          <div className="flex items-center justify-end gap-2">
-            <Button onClick={closePurchaseOrderEdit}>Cancel</Button>
-            <Button type="primary" onClick={savePurchaseOrderEdit}>
-              Save
-            </Button>
-          </div>
-        }
+        styles={{ body: { padding: 24, background: "#f8fbff" } }}
+        footer={null}
       >
-        <Form form={purchaseOrderForm} layout="vertical">
-          <Form.Item label="Material Type" name="materialType" rules={[{ required: true }]}>
-            <Select
-              placeholder="Select Material Type"
-              options={[
-                { label: "Raw Material", value: "Raw Material" },
-                { label: "Indirect Raw Material", value: "Indirect Raw Material" },
-                { label: "Finished Goods", value: "Finished Goods" },
-                { label: "Work In Process", value: "Work In Process" },
-                { label: "SubCon", value: "SubCon" },
-              ]}
-            />
-          </Form.Item>
+        <div className="space-y-5">
+          <div className="rounded-2xl border border-[#d6e5ff] bg-[#eef5ff] px-5 py-4 shadow-sm">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
+                  <SettingOutlined />
+                </div>
+                <div>
+                  <div className="text-[22px] font-semibold text-gray-900">System Parameters</div>
+                  <div className="text-sm text-gray-500">Comprehensive ERP parameter management and configuration</div>
+                </div>
+              </div>
+              <Button type="primary" className="rounded-lg px-4">19 Configuration Modules</Button>
+            </div>
+          </div>
 
-          <Form.Item label="Min Order Qty" name="minOrderQty" rules={[{ required: true }]}>
-            <InputNumber className="w-full" min={0} placeholder="1000" />
-          </Form.Item>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-[28px] font-semibold leading-tight text-gray-900">PO - Split Settings</div>
+              <div className="mt-1 text-sm text-gray-500">Configure purchase order split settings</div>
+            </div>
+            <Button type="primary" className="rounded-lg" icon={<PlusOutlined />}>Add Parameter</Button>
+          </div>
 
-          <Form.Item label="Max Split Lines" name="maxSplitLines" rules={[{ required: true }]}>
-            <InputNumber className="w-full" min={1} placeholder="3" />
-          </Form.Item>
+          <Form form={purchaseOrderForm} layout="vertical" requiredMark={false} colon={false}>
+            <Form.Item name="splitRule" hidden>
+              <Input />
+            </Form.Item>
 
-          <Form.Item label="Split Rule" name="splitRule" rules={[{ required: true }]}>
-            <Select
-              placeholder="Select Split Rule"
-              options={[
-                { label: "By Supplier Capacity", value: "By Supplier Capacity" },
-                { label: "Equal Split", value: "Equal Split" },
-                { label: "Manual", value: "Manual" },
-              ]}
-            />
-          </Form.Item>
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="text-lg font-semibold text-gray-900">Purchase Order Split Method</div>
+              <div className="mt-1 text-sm text-gray-500">
+                Choose how to split purchase orders between PO1 and PO2. Total must equal 100% of Purchase Request.
+              </div>
 
-          <Form.Item label="Status" name="status" rules={[{ required: true }]}>
-            <Select
-              placeholder="Select Status"
-              options={[
-                { label: "Active", value: "Active" },
-                { label: "Inactive", value: "Inactive" },
-              ]}
-            />
-          </Form.Item>
-        </Form>
-      </Drawer>
+              <div className="mt-5 space-y-4">
+                <button
+                  type="button"
+                  className={`w-full rounded-2xl border p-4 text-left transition ${!purchaseOrderIsHistory ? "border-blue-500 bg-blue-50/50 shadow-[0_0_0_1px_rgba(59,130,246,0.16)]" : "border-gray-200 bg-white"}`}
+                  onClick={() => purchaseOrderForm.setFieldsValue({ splitRule: "percentage" })}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 flex h-4 w-4 items-center justify-center rounded-full border border-blue-500">
+                      <div className={`h-2 w-2 rounded-full ${!purchaseOrderIsHistory ? "bg-blue-600" : "bg-transparent"}`} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[17px] font-semibold text-gray-900">Option 1: PO based on Percentage</div>
+                      <div className="mt-1 text-sm text-gray-500">Applied for all UNIQ. Set fixed percentage split between PO1 and PO2.</div>
+
+                      {!purchaseOrderIsHistory ? (
+                        <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-4">
+                          <div className="rounded-xl border border-blue-200 bg-[#f5f9ff] px-4 py-3 text-sm text-blue-700">
+                            <div className="font-semibold">Information:</div>
+                            <div className="mt-1">You can fill the percentage at menu PO Budget. Total percentage must equal 100%.</div>
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                            <Form.Item
+                              label={<span className="text-sm font-medium text-gray-700">PO 1 Percentage <span className="text-red-500">*</span></span>}
+                              name="po1Pct"
+                              rules={[{ required: true, message: "PO 1 Percentage is required" }]}
+                            >
+                              <InputNumber className="w-full" size="large" min={0} max={100} addonAfter="%" />
+                            </Form.Item>
+
+                            <Form.Item
+                              label={<span className="text-sm font-medium text-gray-700">PO 2 Percentage <span className="text-red-500">*</span></span>}
+                              name="po2Pct"
+                              rules={[{ required: true, message: "PO 2 Percentage is required" }]}
+                            >
+                              <InputNumber className="w-full" size="large" min={0} max={100} addonAfter="%" />
+                            </Form.Item>
+
+                            <div>
+                              <div className="mb-2 text-sm font-medium text-gray-700">Total Percentage</div>
+                              <div className={`flex h-10 items-center rounded-lg border px-4 text-lg font-semibold ${purchaseOrderPctTotal === 100 ? "border-emerald-400 bg-emerald-50 text-emerald-600" : "border-amber-300 bg-amber-50 text-amber-600"}`}>
+                                {purchaseOrderPctTotal}%
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="mt-2 rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                            <div><span className="font-semibold text-gray-700">Logic:</span> If percentage is created, then number of PR will be divided based on PO 1 and PO 2 percentage.</div>
+                            <div className="mt-2">Example: If PR = 1000 pcs, PO1 (50%) = 500 pcs, PO2 (50%) = 500 pcs</div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  className={`w-full rounded-2xl border p-4 text-left transition ${purchaseOrderIsHistory ? "border-fuchsia-400 bg-fuchsia-50/40 shadow-[0_0_0_1px_rgba(217,70,239,0.14)]" : "border-gray-200 bg-white"}`}
+                  onClick={() => purchaseOrderForm.setFieldsValue({ splitRule: "history" })}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`mt-1 flex h-4 w-4 items-center justify-center rounded-full border ${purchaseOrderIsHistory ? "border-blue-500" : "border-gray-400"}`}>
+                      <div className={`h-2 w-2 rounded-full ${purchaseOrderIsHistory ? "bg-blue-600" : "bg-transparent"}`} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[17px] font-semibold text-gray-900">Option 2: PO based on History Forecasting</div>
+                      <div className="mt-1 text-sm text-gray-500">Can be applied per UNIQ. Based on historical delivery data from specific date ranges.</div>
+
+                      {purchaseOrderIsHistory ? (
+                        <div className="mt-4 rounded-2xl border border-fuchsia-200 bg-white p-4">
+                          <div className="rounded-xl border border-fuchsia-100 bg-fuchsia-50 px-4 py-3 text-sm text-fuchsia-700">
+                            <div className="font-semibold">Information:</div>
+                            <div className="mt-1">Set date ranges for historical delivery analysis. System will calculate optimal split based on historical data.</div>
+                          </div>
+
+                          <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                            <div><span className="font-semibold text-gray-700">Logic:</span> System analyzes historical delivery data to determine optimal split ratios for PO1 and PO2.</div>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Form.Item
+                  label={<span className="text-sm font-medium text-gray-700">Material Type <span className="text-red-500">*</span></span>}
+                  name="materialType"
+                  rules={[{ required: true, message: "Material Type is required" }]}
+                >
+                  <Select size="large" options={PURCHASE_ORDER_MATERIAL_OPTIONS} />
+                </Form.Item>
+
+                <Form.Item
+                  label={<span className="text-sm font-medium text-gray-700">Vendor <span className="text-red-500">*</span></span>}
+                  name="vendor"
+                  rules={[{ required: true, message: "Vendor is required" }]}
+                >
+                  <Select
+                    size="large"
+                    placeholder="Select vendor"
+                    options={purchaseOrderVendorOptions}
+                    showSearch
+                    filterOption={(input, option) =>
+                      String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                    }
+                  />
+                </Form.Item>
+
+                <Form.Item
+                  label={<span className="text-sm font-medium text-gray-700">Status <span className="text-red-500">*</span></span>}
+                  name="status"
+                  rules={[{ required: true, message: "Status is required" }]}
+                >
+                  <Select size="large" options={PURCHASE_ORDER_STATUS_OPTIONS} />
+                </Form.Item>
+
+                <Form.Item
+                  label={<span className="text-sm font-medium text-gray-700">Description</span>}
+                  name="description"
+                  className="md:col-span-2"
+                >
+                  <Input size="large" placeholder="Optional note" />
+                </Form.Item>
+
+                <Form.Item
+                  label={<span className="text-sm font-medium text-gray-700">Min Order Qty <span className="text-red-500">*</span></span>}
+                  name="minOrderQty"
+                  rules={[{ required: true, message: "Min Order Qty is required" }]}
+                >
+                  <InputNumber className="w-full" size="large" min={0} />
+                </Form.Item>
+
+                <Form.Item
+                  label={<span className="text-sm font-medium text-gray-700">Max Split Lines <span className="text-red-500">*</span></span>}
+                  name="maxSplitLines"
+                  rules={[{ required: true, message: "Max Split Lines is required" }]}
+                >
+                  <InputNumber className="w-full" size="large" min={1} />
+                </Form.Item>
+              </div>
+
+              <div className="mt-5 flex items-center justify-end gap-3 border-t border-gray-100 pt-4">
+                <Button className="rounded-lg" onClick={resetPurchaseOrderEdit}>Reset to Default</Button>
+                <Button type="primary" className="rounded-lg" onClick={savePurchaseOrderEdit}>Save Configuration</Button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+              <div className="text-lg font-semibold text-gray-900">Configuration Summary</div>
+              <div className="mt-5 space-y-3 text-sm">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-gray-500">Selected Method:</span>
+                  <span className="inline-flex rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
+                    {purchaseOrderIsHistory ? "History Forecasting" : "Percentage Based"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-gray-500">PO 1 Percentage:</span>
+                  <span className="font-semibold text-gray-900">{Number(purchaseOrderPo1Pct || 0)}%</span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-gray-500">PO 2 Percentage:</span>
+                  <span className="font-semibold text-gray-900">{Number(purchaseOrderPo2Pct || 0)}%</span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-gray-500">Material Type:</span>
+                  <span className="font-semibold text-gray-900">{PURCHASE_ORDER_MATERIAL_OPTIONS.find((option) => option.value === purchaseOrderMaterialType)?.label ?? purchaseOrderMaterialType}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-gray-500">Status:</span>
+                  <span className="font-semibold text-gray-900">{purchaseOrderStatus}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-gray-500">Min / Max Split:</span>
+                  <span className="font-semibold text-gray-900">{Number(purchaseOrderMinOrderQty || 0)} / {Number(purchaseOrderMaxSplitLines || 0)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-gray-500">Vendor:</span>
+                  <span className="max-w-[55%] truncate text-right font-semibold text-gray-900">{purchaseOrderVendor || "-"}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-gray-500">Description:</span>
+                  <span className="max-w-[55%] truncate text-right font-medium text-gray-900">{purchaseOrderDescription || "-"}</span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-gray-500">Total:</span>
+                  <span className={`font-semibold ${purchaseOrderPctTotal === 100 ? "text-emerald-600" : "text-amber-600"}`}>{purchaseOrderPctTotal}%</span>
+                </div>
+              </div>
+            </div>
+          </Form>
+        </div>
+      </Modal>
 
       <Drawer
         title={approvalWorkflowEditMode === "create" ? "Add Parameter" : "Edit"}
@@ -4038,7 +4693,7 @@ export default function SystemSettingsPage() {
                       return;
                     }
                     if (selectedModuleId === "purchase-order") {
-                      router.push("/system-settings/purchase-order/create");
+                      openCreatePurchaseOrder();
                       return;
                     }
                     if (selectedModuleId === "approval-workflow") {

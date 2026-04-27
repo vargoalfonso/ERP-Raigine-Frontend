@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Button, Card, Input, InputNumber, Select, Tag, message } from "antd";
+import { Button, Card, InputNumber, Select, Tag, message } from "antd";
 import {
   InfoCircleOutlined,
   LeftOutlined,
@@ -9,6 +9,11 @@ import {
   SaveOutlined,
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import { getApiErrorMessage } from "@/lib/api/error";
+import {
+  useCreateSafetyStockBulkMutation,
+  useCreateSafetyStockMutation,
+} from "@/lib/api/system-settings/api";
 
 type Entry = {
   id: string;
@@ -19,24 +24,24 @@ type Entry = {
 };
 
 const TYPE_OPTIONS = [
-  { label: "Raw Material", value: "Raw Material" },
-  { label: "Indirect Raw Material", value: "Indirect Raw Material" },
-  { label: "SubCon", value: "SubCon" },
-  { label: "Finished Goods", value: "Finished Goods" },
+  { label: "Raw Material", value: "raw_material" },
+  { label: "Indirect Raw Material", value: "indirect_material" },
+  { label: "SubCon", value: "subcon" },
+  { label: "Finished Goods", value: "finished_goods" },
 ];
 
 const UNIQ_OPTIONS = [
-  { label: "Raw Material", value: "Raw Material" },
-  { label: "Indirect Raw Material", value: "Indirect Raw Material" },
-  { label: "SubCon", value: "SubCon" },
-  { label: "Finished Goods", value: "Finished Goods" },
+  { label: "ITEM001", value: "ITEM001" },
+  { label: "ITEM002", value: "ITEM002" },
+  { label: "ITEM003", value: "ITEM003" },
+  { label: "EMA-LV7-001", value: "EMA-LV7-001" },
 ];
 
 const CALCULATION_OPTIONS = [
-  {
-    label: "Type | (PRL / Working Days * Parameter)",
-    value: "Type | (PRL / Working Days * Parameter)",
-  },
+  { label: "Days", value: "days" },
+  { label: "Percentage", value: "percentage" },
+  { label: "Forecast", value: "forecast" },
+  { label: "Using PRL/working days * days (C)", value: "Using PRL/working days * days (C)" },
 ];
 
 function makeEntry(idx: number): Entry {
@@ -51,6 +56,9 @@ function makeEntry(idx: number): Entry {
 
 export default function SafetyStockCreatePage() {
   const router = useRouter();
+  const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
+  const [createSafetyStock, createSafetyStockState] = useCreateSafetyStockMutation();
+  const [createSafetyStockBulk, createSafetyStockBulkState] = useCreateSafetyStockBulkMutation();
 
   const [type, setType] = useState<string | undefined>(undefined);
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
@@ -86,22 +94,45 @@ export default function SafetyStockCreatePage() {
     setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
   };
 
-  const onSave = () => {
-    if (!type) {
-      message.error("Type is required");
-      return;
-    }
-
-    for (const e of entries) {
-      const err = validateEntry(e);
-      if (err) {
-        message.error(`Entry ${entries.indexOf(e) + 1}: ${err}`);
+  const onSave = async () => {
+    try {
+      if (!type) {
+        message.error("Type is required");
         return;
       }
-    }
 
-    message.success("Safety stock parameter saved");
-    router.push("/system-settings");
+      for (const e of entries) {
+        const err = validateEntry(e);
+        if (err) {
+          message.error(`Entry ${entries.indexOf(e) + 1}: ${err}`);
+          return;
+        }
+      }
+
+      if (!apiEnabled) {
+        message.success("Safety stock parameter saved");
+        router.push("/system-settings");
+        return;
+      }
+
+      const items = entries.map((entry) => ({
+        inventory_type: String(type),
+        item_uniq_code: String(entry.uniq ?? "").trim(),
+        calculation_type: String(entry.calculationType ?? "").trim(),
+        constanta: Number(entry.constanta ?? 0),
+      }));
+
+      if (items.length === 1) {
+        await createSafetyStock(items[0]).unwrap();
+      } else {
+        await createSafetyStockBulk({ items }).unwrap();
+      }
+
+      message.success("Safety stock parameter saved");
+      router.push("/system-settings");
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to save safety stock parameter"));
+    }
   };
 
   return (
@@ -119,7 +150,12 @@ export default function SafetyStockCreatePage() {
 
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                onClick={() => void onSave()}
+                loading={createSafetyStockState.isLoading || createSafetyStockBulkState.isLoading}
+              >
                 Save Parameter
               </Button>
             </div>
@@ -157,6 +193,7 @@ export default function SafetyStockCreatePage() {
                   onChange={setType}
                   placeholder="Select Type"
                   options={TYPE_OPTIONS}
+                  optionFilterProp="label"
                 />
               </div>
               <InfoCircleOutlined className="text-blue-600" />
@@ -197,7 +234,7 @@ export default function SafetyStockCreatePage() {
                     </div>
 
                     <div className="lg:col-span-4">
-                      <div className="text-sm text-gray-700 mb-2">Calculation Type</div>
+                      <div className="text-sm text-gray-700 mb-2 max-w-2xl">Calculation Type</div>
                       <Select
                         value={e.calculationType}
                         onChange={(v) => updateEntry(e.id, { calculationType: v, created: false })}
@@ -222,6 +259,7 @@ export default function SafetyStockCreatePage() {
                         className="w-full"
                         icon={<PlusOutlined />}
                         onClick={() => onCreateStockDays(e.id)}
+                        loading={createSafetyStockState.isLoading || createSafetyStockBulkState.isLoading}
                       >
                         Create Stock days
                       </Button>
