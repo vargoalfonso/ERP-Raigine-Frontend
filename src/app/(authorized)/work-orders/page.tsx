@@ -25,6 +25,7 @@ import { useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex, type BomUniqIndex } from "@/lib/utils/bomUniq";
+import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
 import {
   type RmProcessingWorkOrderRecord,
   type WorkOrderRecord,
@@ -377,7 +378,7 @@ const toWorkOrderRow = (record: WorkOrderRecord, bomIndex: BomUniqIndex): WorkOr
   return {
     key: record.id || record.wo_number,
     id: record.id,
-    woNumber: record.wo_number || "-",
+    woNumber: formatWorkOrderDisplayNumber(record.wo_number) || "-",
     type: normalizeType(record.wo_type),
     status: normalizeStatus(record.status),
     approvalStatus: normalizeApproval(record.approval_status),
@@ -395,7 +396,7 @@ const toWorkOrderRow = (record: WorkOrderRecord, bomIndex: BomUniqIndex): WorkOr
 const toRmProcessingRow = (record: RmProcessingWorkOrderRecord): RmProcessingRow => ({
   key: record.id,
   id: record.id,
-  woNumber: record.wo_number ?? "-",
+  woNumber: formatWorkOrderDisplayNumber(record.wo_number) || "-",
   approvalStatus: record.approval_status ?? "-",
   createdDate: formatDisplayDate(record.created_date ?? record.created_at),
   createdByName: record.created_by_name ?? "-",
@@ -417,7 +418,7 @@ const toRmProcessingRow = (record: RmProcessingWorkOrderRecord): RmProcessingRow
 const toBulkWoRow = (record: BulkWorkOrderRecordApi): BulkWoRow => ({
   key: record.id,
   id: record.id,
-  woNumber: record.wo_number ?? "-",
+  woNumber: formatWorkOrderDisplayNumber(record.wo_number) || "-",
   sourceDocumentType: record.source_document_type ?? "-",
   sourceDocumentId: record.source_document_id ?? "-",
   woType: record.wo_type ?? "-",

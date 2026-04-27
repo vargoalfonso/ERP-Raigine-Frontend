@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -18,7 +19,9 @@ import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
 import { useCreateScrapStockMutation } from "@/lib/api/scrap-stock/api";
+import { useGetWorkOrdersQuery } from "@/lib/api/work-orders/api";
 
 const { Title } = Typography;
 
@@ -58,25 +61,118 @@ export default function CreateScrapStockPage() {
 
   const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
   const bomIndex = buildBomUniqIndex(bomTreeRes?.data ?? []);
-  const uniqOptions = bomIndex.uniqs.map((uniq) => {
-    const partName = bomIndex.partNameByUniq[uniq];
-    return {
-      label: partName ? `${uniq} - ${partName}` : uniq,
-      value: uniq,
-    };
-  });
+  const selectedWoNumber = Form.useWatch("wo_number", form);
+  const selectedUniq = Form.useWatch("uniq", form);
+
+  const workOrdersQuery = useGetWorkOrdersQuery({ page: 1, limit: 200 }, { skip: !apiEnabled });
+  const workOrders = workOrdersQuery.data?.items ?? [];
+
+  const selectedWorkOrder = useMemo(
+    () => workOrders.find((item) => item.wo_number === selectedWoNumber),
+    [selectedWoNumber, workOrders]
+  );
+
+  const selectedWorkOrderItems = selectedWorkOrder?.items ?? [];
+
+  const workOrderOptions = useMemo(
+    () =>
+      workOrders
+        .filter((item) => Boolean(item.wo_number))
+        .map((item) => ({
+          label: formatWorkOrderDisplayNumber(item.wo_number),
+          value: item.wo_number,
+        })),
+    [workOrders]
+  );
+
+  const uniqOptions = useMemo(() => {
+    if (selectedWorkOrderItems.length > 0) {
+      return Array.from(
+        new Map(
+          selectedWorkOrderItems
+            .filter((item) => Boolean(item.item_uniq_code))
+            .map((item) => {
+              const uniq = item.item_uniq_code;
+              const partName = item.part_name ?? bomIndex.partNameByUniq[uniq] ?? "";
+              return [uniq, { label: partName ? `${uniq} - ${partName}` : uniq, value: uniq }] as const;
+            })
+        ).values()
+      );
+    }
+
+    return bomIndex.uniqs.map((uniq) => {
+      const partName = bomIndex.partNameByUniq[uniq];
+      return {
+        label: partName ? `${uniq} - ${partName}` : uniq,
+        value: uniq,
+      };
+    });
+  }, [bomIndex.partNameByUniq, bomIndex.uniqs, selectedWorkOrderItems]);
+
+  const packingOptions = useMemo(() => {
+    const options = Array.from(
+      new Map(
+        selectedWorkOrderItems
+          .filter((item) => !selectedUniq || item.item_uniq_code === selectedUniq)
+          .map((item) => {
+            const packing = String(item.kanban_number ?? "").trim();
+            if (!packing) return null;
+            return [packing, { label: packing, value: packing }] as const;
+          })
+          .filter((item): item is readonly [string, { label: string; value: string }] => Boolean(item))
+      ).values()
+    );
+
+    if (options.length > 0) return options;
+
+    const bomPacking = selectedUniq ? bomIndex.packingNumberByUniq[selectedUniq] : undefined;
+    return bomPacking ? [{ label: bomPacking, value: bomPacking }] : [];
+  }, [bomIndex.packingNumberByUniq, selectedUniq, selectedWorkOrderItems]);
 
   const [createScrapStock, createState] = useCreateScrapStockMutation();
 
-  const onSelectUniq = (uniq: string) => {
+  const applyUniqAutofill = (uniq: string, packingOverride?: string) => {
+    const workOrderItem = selectedWorkOrderItems.find(
+      (item) => item.item_uniq_code === uniq && (!packingOverride || item.kanban_number === packingOverride)
+    ) ?? selectedWorkOrderItems.find((item) => item.item_uniq_code === uniq);
+
+    const packingNumber =
+      packingOverride ??
+      workOrderItem?.kanban_number ??
+      bomIndex.packingNumberByUniq[uniq] ??
+      form.getFieldValue("packing_number");
+
     form.setFieldsValue({
       uniq,
-      part_name: bomIndex.partNameByUniq[uniq] ?? "",
-      part_number: bomIndex.partNumberByUniq[uniq] ?? "",
-      model: bomIndex.modelByUniq[uniq] ?? "",
+      packing_number: packingNumber,
+      part_name: workOrderItem?.part_name ?? bomIndex.partNameByUniq[uniq] ?? "",
+      part_number: workOrderItem?.part_number ?? bomIndex.partNumberByUniq[uniq] ?? "",
+      model: workOrderItem?.model ?? bomIndex.modelByUniq[uniq] ?? "",
       uom: bomIndex.uomByUniq[uniq] ?? form.getFieldValue("uom"),
       weight_kg: bomIndex.weightKgByUniq[uniq] ?? form.getFieldValue("weight_kg") ?? 0,
     });
+  };
+
+  const onSelectWo = (woNumber: string) => {
+    const workOrder = workOrders.find((item) => item.wo_number === woNumber);
+    const firstItem = workOrder?.items?.[0];
+
+    form.setFieldsValue({
+      wo_number: woNumber,
+      uniq: undefined,
+      packing_number: undefined,
+      part_name: "",
+      part_number: "",
+      model: "",
+    });
+
+    if (firstItem?.item_uniq_code) {
+      applyUniqAutofill(firstItem.item_uniq_code, firstItem.kanban_number ?? undefined);
+    }
+  };
+
+  const onSelectUniq = (uniq: string) => {
+    applyUniqAutofill(uniq);
   };
 
   const handleSave = async () => {
@@ -160,6 +256,18 @@ export default function CreateScrapStockPage() {
         >
           <Card className="!rounded-xl" styles={{ body: { padding: 20 } }}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Form.Item name="wo_number" label="WO Number">
+                <Select
+                  placeholder="Select work order"
+                  options={workOrderOptions}
+                  showSearch
+                  optionFilterProp="label"
+                  loading={apiEnabled && workOrdersQuery.isFetching}
+                  onChange={onSelectWo}
+                  allowClear
+                />
+              </Form.Item>
+
               <Form.Item name="uniq" label="UNIQ" rules={[{ required: true, message: "Select UNIQ" }]}>
                 <Select
                   placeholder="Select UNIQ from BOM"
@@ -171,7 +279,17 @@ export default function CreateScrapStockPage() {
               </Form.Item>
 
               <Form.Item name="packing_number" label="Packing Number" rules={[{ required: true, message: "Enter packing number" }]}>
-                <Input placeholder="KBN-2026-0001-..." />
+                <Select
+                  placeholder="Select related packing number"
+                  options={packingOptions}
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={(value) => {
+                    const uniq = form.getFieldValue("uniq");
+                    if (uniq) applyUniqAutofill(uniq, value);
+                  }}
+                  allowClear
+                />
               </Form.Item>
 
               <Form.Item name="date_received" label="Date Received" rules={[{ required: true, message: "Select date received" }]}>
@@ -188,10 +306,6 @@ export default function CreateScrapStockPage() {
 
               <Form.Item name="model" label="Model" rules={[{ required: true }]}>
                 <Input disabled placeholder="Auto-filled" />
-              </Form.Item>
-
-              <Form.Item name="wo_number" label="WO Number (optional)">
-                <Input placeholder="WO-2026-000001" />
               </Form.Item>
 
               <Form.Item name="scrap_type" label="Scrap Type" rules={[{ required: true, message: "Select scrap type" }]}>

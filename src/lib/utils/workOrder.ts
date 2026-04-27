@@ -18,6 +18,12 @@ export const formatWorkOrderNumber = (prefix: string, sequence: number): string 
   return `${prefix}${pad3(sequence)}`;
 };
 
+export const formatWorkOrderDisplayNumber = (woNumber?: string | null): string => {
+  const value = String(woNumber ?? "").trim();
+  if (!value) return "";
+  return value.replace(/-\d{2}$/, "");
+};
+
 export const tryParseWorkOrderSequence = (woNumber: string, prefix: string): number | null => {
   if (!woNumber.startsWith(prefix)) return null;
   const suffix = woNumber.slice(prefix.length);

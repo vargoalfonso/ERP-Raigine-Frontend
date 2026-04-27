@@ -8,6 +8,7 @@ import type { ColumnsType } from "antd/es/table";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
   useApproveWorkOrderMutation,
@@ -119,7 +120,7 @@ export default function WorkOrderDetailPage() {
             <Button className="!rounded-lg" onClick={() => router.push("/work-orders")}>
               Close
             </Button>
-            <Button
+            {/* <Button
               danger
               className="!rounded-lg"
               loading={approveState.isLoading}
@@ -158,7 +159,7 @@ export default function WorkOrderDetailPage() {
               }}
             >
               Approve
-            </Button>
+            </Button> */}
           </div>
         </div>
 
@@ -176,7 +177,9 @@ export default function WorkOrderDetailPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
               <div>
                 <div className="text-gray-500">WO Number</div>
-                <div className="font-semibold text-gray-900 mt-1">{workOrder?.wo_number || "-"}</div>
+                <div className="font-semibold text-gray-900 mt-1">
+                  {formatWorkOrderDisplayNumber(workOrder?.wo_number) || "-"}
+                </div>
               </div>
               <div>
                 <div className="text-gray-500">WO Type</div>
@@ -184,7 +187,9 @@ export default function WorkOrderDetailPage() {
               </div>
               <div>
                 <div className="text-gray-500">Reference WO</div>
-                <div className="font-semibold text-gray-900 mt-1">{workOrder?.reference_wo || "-"}</div>
+                <div className="font-semibold text-gray-900 mt-1">
+                  {formatWorkOrderDisplayNumber(workOrder?.reference_wo) || "-"}
+                </div>
               </div>
               <div>
                 <div className="text-gray-500">Status</div>

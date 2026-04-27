@@ -151,6 +151,7 @@ const RawMaterialForm = ({
     if (!uniq || !bomIndex) return;
     const partName = bomIndex.partNameByUniq[uniq];
     const partNumber = bomIndex.partNumberByUniq[uniq];
+    const model = bomIndex.modelByUniq[uniq] || bomIndex.assemblyCodeByUniq[uniq];
     const uom = bomIndex.uomByUniq[uniq];
     const rmType = bomIndex.rawMaterialTypeByUniq[uniq];
     const rmSource = bomIndex.rmSourceByUniq[uniq];
@@ -159,6 +160,7 @@ const RawMaterialForm = ({
     const nextValues: Partial<RawMaterialFormData> = {};
     if (partName) nextValues.name = partName;
     if (partNumber) nextValues.part_no = partNumber;
+    if (model) nextValues.model = model;
     if (uom) nextValues.unit = uom;
     if (rmType) nextValues.category = rmType;
     if (rmSource) nextValues.master_list_supplier_id = normalizeRmSource(rmSource);
@@ -316,12 +318,15 @@ const RawMaterialForm = ({
           </Form.Item>
         </div>
 
-        {/* Row 1b: Part No + Part Name (auto-filled from BOM) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Row 1b: Part No + Part Name + Model (auto-filled from BOM) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Form.Item label="Part Number" name="part_no">
             <Input placeholder="Auto-filled from BOM" size="large" />
           </Form.Item>
           <Form.Item label="Part Name" name="name">
+            <Input placeholder="Auto-filled from BOM" size="large" />
+          </Form.Item>
+          <Form.Item label="Model" name="model">
             <Input placeholder="Auto-filled from BOM" size="large" />
           </Form.Item>
         </div>

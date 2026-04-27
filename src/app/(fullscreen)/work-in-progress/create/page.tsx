@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Form,
@@ -20,6 +20,15 @@ import {
 } from "@ant-design/icons";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { useGetInventoryKanbanSummaryQuery } from "@/lib/api/inventory/api";
+import { useGetProcessesQuery } from "@/lib/api/system-settings/api";
+import {
+  useGetWorkOrderByIdQuery,
+  useGetWorkOrdersQuery,
+} from "@/lib/api/work-orders/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
 import { useCreateWipMutation } from "@/lib/api/wip/api";
 
 type WipType = "draft" | "in_progress" | "completed";
@@ -27,6 +36,8 @@ type Process = string;
 
 type WipEntry = {
   id: string;
+  groupId: string;
+  woId: string | number | null;
   uniq: string;
   woNumber: string;
   packingNumber: string;
@@ -47,122 +58,356 @@ type WipFormValues = {
   stockToCompleteKanban?: number;
 };
 
+type UnknownRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+
+const toText = (value: unknown): string | undefined => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+};
+
+const toNumber = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+};
+
+const uniqueStrings = (values: Array<string | undefined>): string[] =>
+  Array.from(new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean)));
+
+const parseProcessFlowNames = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return uniqueStrings(
+      value.flatMap((item) => {
+        if (typeof item === "string") return [item];
+        if (!isRecord(item)) return [];
+        return [
+          toText(item.process_name),
+          toText(item.processName),
+          toText(item.process),
+          toText(item.machine_name),
+          toText(item.machineName),
+        ];
+      })
+    );
+  }
+
+  if (isRecord(value)) {
+    return parseProcessFlowNames(value.processes ?? value.process_flow ?? value.steps ?? value.items ?? []);
+  }
+
+  return [];
+};
+
 export default function CreateWorkInProgressPage() {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const apiEnabled = Boolean(apiBaseUrl);
   const [createWip] = useCreateWipMutation();
-  const [woId, setWoId] = useState<number | null>(null);
-  const [entries, setEntries] = useState<WipEntry[]>([
-    {
-      id: "1",
-      uniq: "LV-001",
-      woNumber: "WO-2024-0239",
-      packingNumber: "KBN-004-2024",
-      wipType: "draft",
-      process: "Welding",
-      stock: 100,
-      stockToCompleteKanban: 100,
-      pcsPerKanban: 20,
-    },
-    {
-      id: "2",
-      uniq: "LV-001",
-      woNumber: "WO-2024-0239",
-      packingNumber: "KBN-004-2024",
-      wipType: "draft",
-      process: "CNC Machine",
-      stock: 100,
-      stockToCompleteKanban: 100,
-      pcsPerKanban: 20,
-    },
-    {
-      id: "3",
-      uniq: "LV-001",
-      woNumber: "WO-2024-0239",
-      packingNumber: "KBN-004-2024",
-      wipType: "draft",
-      process: "Quality Check",
-      stock: 100,
-      stockToCompleteKanban: 100,
-      pcsPerKanban: 20,
-    },
-  ]);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [woId, setWoId] = useState<string | number | null>(null);
+  const [entries, setEntries] = useState<WipEntry[]>([]);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [form] = Form.useForm<WipFormValues>();
 
-  const uniqTargets = useMemo(() => {
-    return new Map<string, number>([
-      ["LV-001", 250],
-      ["LV-002", 250],
-      ["LV-003", 250],
-    ]);
-  }, []);
+  const selectedWoNumber = Form.useWatch("woNumber", form);
+  const selectedUniq = Form.useWatch("uniq", form);
+  const selectedPackingNumber = Form.useWatch("packingNumber", form);
 
-  const updateAutoFill = () => {
-    const uniq = form.getFieldValue("uniq");
-    const stock = form.getFieldValue("stock");
-    const target = uniq ? uniqTargets.get(uniq) ?? 250 : 250;
-    const next = Math.max(0, target - (Number(stock) || 0));
-    form.setFieldValue("stockToCompleteKanban", next);
-  };
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
+
+  const workOrdersQuery = useGetWorkOrdersQuery({ page: 1, limit: 200 }, { skip: !apiEnabled });
+  const workOrders = workOrdersQuery.data?.items ?? [];
+
+  const { data: processRecords = [] } = useGetProcessesQuery(undefined, { skip: !apiEnabled });
+  const processNameOptions = useMemo(
+    () =>
+      uniqueStrings(
+        processRecords.map((item) => (item.process_name ? String(item.process_name) : undefined))
+      ),
+    [processRecords]
+  );
+
+  const workOrderByNumber = useMemo(
+    () => new Map(workOrders.map((record) => [record.wo_number, record] as const)),
+    [workOrders]
+  );
+
+  const selectedWorkOrderSummary = selectedWoNumber ? workOrderByNumber.get(selectedWoNumber) : undefined;
+  const selectedWorkOrderId = selectedWorkOrderSummary?.id ?? "";
+  const selectedWorkOrderDetailQuery = useGetWorkOrderByIdQuery(selectedWorkOrderId, {
+    skip: !apiEnabled || !selectedWorkOrderId,
+  });
+
+  const selectedWorkOrder = selectedWorkOrderDetailQuery.data ?? selectedWorkOrderSummary;
+  const selectedWorkOrderItems = selectedWorkOrder?.items ?? [];
+  const selectedWorkOrderResolvedId =
+    toText(selectedWorkOrder?.id) ??
+    toText(selectedWorkOrderSummary?.id) ??
+    toText(selectedWorkOrderId);
+
+  const inventorySummaryQuery = useGetInventoryKanbanSummaryQuery(
+    { uniq_code: String(selectedUniq ?? "") },
+    { skip: !apiEnabled || !selectedUniq }
+  );
+  const inventorySummary = inventorySummaryQuery.data?.data;
+
+  const workOrderOptions = useMemo(
+    () =>
+      workOrders
+        .filter((record) => Boolean(record.wo_number))
+        .map((record) => ({
+          label: formatWorkOrderDisplayNumber(record.wo_number),
+          value: record.wo_number,
+        })),
+    [workOrders]
+  );
+
+  const uniqOptions = useMemo(() => {
+    if (selectedWorkOrderItems.length > 0) {
+      return Array.from(
+        new Map(
+          selectedWorkOrderItems
+            .filter((item) => Boolean(item.item_uniq_code))
+            .map((item) => {
+              const uniq = item.item_uniq_code;
+              const partName = item.part_name ?? bomIndex.partNameByUniq[uniq] ?? "";
+              return [
+                uniq,
+                {
+                  label: partName ? `${uniq} — ${partName}` : uniq,
+                  value: uniq,
+                },
+              ] as const;
+            })
+        ).values()
+      );
+    }
+
+    return bomIndex.options.map((option) => ({
+      label: bomIndex.partNameByUniq[option.value]
+        ? `${option.value} — ${bomIndex.partNameByUniq[option.value]}`
+        : option.label,
+      value: option.value,
+    }));
+  }, [bomIndex.options, bomIndex.partNameByUniq, selectedWorkOrderItems]);
+
+  const packingOptions = useMemo(() => {
+    const fromWorkOrder = Array.from(
+      new Map(
+        selectedWorkOrderItems
+          .filter((item) => !selectedUniq || item.item_uniq_code === selectedUniq)
+          .map((item) => {
+            const packingNumber = item.kanban_number?.trim();
+            if (!packingNumber) return null;
+            return [
+              packingNumber,
+              {
+                label: packingNumber,
+                value: packingNumber,
+              },
+            ] as const;
+          })
+          .filter((item): item is readonly [string, { label: string; value: string }] => Boolean(item))
+      ).values()
+    );
+
+    if (fromWorkOrder.length > 0) return fromWorkOrder;
+
+    const bomPacking = selectedUniq ? bomIndex.packingNumberByUniq[selectedUniq] : undefined;
+    return bomPacking
+      ? [
+          {
+            label: bomPacking,
+            value: bomPacking,
+          },
+        ]
+      : [];
+  }, [bomIndex.packingNumberByUniq, selectedUniq, selectedWorkOrderItems]);
+
+  const selectedWorkOrderItem = useMemo(() => {
+    const itemsByUniq = selectedWorkOrderItems.filter((item) => !selectedUniq || item.item_uniq_code === selectedUniq);
+
+    if (selectedPackingNumber) {
+      const exact = itemsByUniq.find((item) => item.kanban_number === selectedPackingNumber);
+      if (exact) return exact;
+    }
+
+    return itemsByUniq[0];
+  }, [selectedPackingNumber, selectedUniq, selectedWorkOrderItems]);
+
+  const selectedProcessNames = useMemo(() => {
+    const flowNames = parseProcessFlowNames(selectedWorkOrderItem?.process_flow_json);
+    if (flowNames.length > 0) return flowNames;
+
+    const directProcess = uniqueStrings([selectedWorkOrderItem?.process_name]);
+    if (directProcess.length > 0) return directProcess;
+
+    return [];
+  }, [selectedWorkOrderItem?.process_flow_json, selectedWorkOrderItem?.process_name]);
+
+  const processDisplayValue = selectedProcessNames.join(", ");
+  const stockValue = Number(selectedWorkOrderItem?.quantity ?? 0);
+  const stockToCompleteValue = Number(
+    inventorySummary?.stock_to_complete_kanban ?? Math.max(0, stockValue - Number(inventorySummary?.stock_qty ?? 0))
+  );
+  const pcsPerKanbanValue = Number(inventorySummary?.kanban_pkg_qty ?? 0);
+
+  useEffect(() => {
+    setWoId(selectedWorkOrderResolvedId ?? null);
+  }, [selectedWorkOrderResolvedId]);
+
+  useEffect(() => {
+    if (!selectedWoNumber) {
+      form.setFieldsValue({
+        uniq: undefined,
+        packingNumber: undefined,
+        process: undefined,
+        stock: undefined,
+        stockToCompleteKanban: undefined,
+      });
+      return;
+    }
+
+    if (selectedUniq && !uniqOptions.some((option) => option.value === selectedUniq)) {
+      form.setFieldsValue({
+        uniq: undefined,
+        packingNumber: undefined,
+        process: undefined,
+        stock: undefined,
+        stockToCompleteKanban: undefined,
+      });
+    }
+  }, [form, selectedUniq, selectedWoNumber, uniqOptions]);
+
+  useEffect(() => {
+    if (!selectedUniq) {
+      form.setFieldsValue({
+        packingNumber: undefined,
+        process: undefined,
+        stock: undefined,
+        stockToCompleteKanban: undefined,
+      });
+      return;
+    }
+
+    const nextValues: Partial<WipFormValues> = {
+      process: processDisplayValue || undefined,
+      stock: stockValue,
+      stockToCompleteKanban: stockToCompleteValue,
+    };
+
+    if (!selectedPackingNumber || !packingOptions.some((option) => option.value === selectedPackingNumber)) {
+      nextValues.packingNumber = packingOptions[0]?.value;
+    }
+
+    form.setFieldsValue(nextValues);
+  }, [
+    form,
+    packingOptions,
+    processDisplayValue,
+    selectedPackingNumber,
+    selectedUniq,
+    stockToCompleteValue,
+    stockValue,
+  ]);
 
   const handleAddOrUpdate = async () => {
     try {
       const values = await form.validateFields();
 
-      const newEntry: WipEntry = {
-        id: editingId ?? `${Date.now()}`,
-        uniq: values.uniq ?? "-",
-        woNumber: values.woNumber ?? "-",
-        packingNumber: values.packingNumber ?? "-",
-        wipType: (values.wipType ?? "draft") as WipType,
-        process: (values.process ?? "Welding") as Process,
-        stock: Number(values.stock ?? 0),
-        stockToCompleteKanban: Number(values.stockToCompleteKanban ?? 0),
-        pcsPerKanban: 20,
-      };
+      const groupId = editingGroupId ?? `wip-${Date.now()}`;
+      const resolvedProcesses = selectedProcessNames.length
+        ? selectedProcessNames
+        : uniqueStrings([values.process]);
 
-      if (editingId) {
-        setEntries((prev) => prev.map((e) => (e.id === editingId ? newEntry : e)));
+      if (!resolvedProcesses.length) {
+        message.error("Process is not available for the selected work order item");
+        return;
+      }
+
+      const resolvedWoNumber = String(values.woNumber ?? "").trim();
+      const resolvedUniq = String(values.uniq ?? "").trim();
+      const resolvedPackingNumber = String(values.packingNumber ?? "").trim();
+      const resolvedStock = Number(values.stock ?? stockValue ?? 0);
+      const resolvedStockToComplete = Number(values.stockToCompleteKanban ?? stockToCompleteValue ?? 0);
+      const resolvedWipType = (values.wipType ?? "draft") as WipType;
+
+      const nextEntries = resolvedProcesses.map((processName, index) => ({
+        id: `${groupId}-${index}`,
+        groupId,
+        woId: selectedWorkOrderResolvedId ?? null,
+        uniq: resolvedUniq || "-",
+        woNumber: resolvedWoNumber || "-",
+        packingNumber: resolvedPackingNumber || bomIndex.packingNumberByUniq[resolvedUniq] || "-",
+        wipType: resolvedWipType,
+        process: processName,
+        stock: resolvedStock,
+        stockToCompleteKanban: resolvedStockToComplete,
+        pcsPerKanban: pcsPerKanbanValue,
+      } satisfies WipEntry));
+
+      if (editingGroupId) {
+        setEntries((prev) => {
+          const startIndex = prev.findIndex((entry) => entry.groupId === editingGroupId);
+          const remaining = prev.filter((entry) => entry.groupId !== editingGroupId);
+          if (startIndex < 0) return [...nextEntries, ...remaining];
+          const updated = [...remaining];
+          updated.splice(startIndex, 0, ...nextEntries);
+          return updated;
+        });
         message.success("Updated");
       } else {
-        setEntries((prev) => [newEntry, ...prev]);
+        setEntries((prev) => [...nextEntries, ...prev]);
         message.success("Added");
       }
 
-      setEditingId(null);
+      setEditingGroupId(null);
       form.resetFields();
+      form.setFieldsValue({ wipType: "draft" });
     } catch {
       // validation errors shown by antd
     }
   };
 
   const handleEditRow = (row: WipEntry) => {
-    setEditingId(row.id);
+    const groupedEntries = entries.filter((entry) => entry.groupId === row.groupId);
+    const firstEntry = groupedEntries[0] ?? row;
+
+    setEditingGroupId(row.groupId);
+    setWoId(firstEntry.woId);
     form.setFieldsValue({
-      uniq: row.uniq,
-      woNumber: row.woNumber,
-      packingNumber: row.packingNumber,
-      wipType: row.wipType,
-      process: row.process,
-      stock: row.stock,
-      stockToCompleteKanban: row.stockToCompleteKanban,
+      uniq: firstEntry.uniq,
+      woNumber: firstEntry.woNumber,
+      packingNumber: firstEntry.packingNumber,
+      wipType: firstEntry.wipType,
+      process: groupedEntries.map((entry) => entry.process).join(", "),
+      stock: firstEntry.stock,
+      stockToCompleteKanban: firstEntry.stockToCompleteKanban,
     });
   };
 
   const handleDeleteRow = (row: WipEntry) => {
     Modal.confirm({
-      title: "Delete WIP entry?",
-      content: `This will remove ${row.uniq} (${row.process}) from the list.`,
+      title: "Delete WIP entry group?",
+      content: `This will remove ${row.uniq} (${row.packingNumber}) and all generated process rows from the list.`,
       okText: "Delete",
       okButtonProps: { danger: true },
       cancelText: "Cancel",
       onOk: () => {
-        setEntries((prev) => prev.filter((e) => e.id !== row.id));
-        if (editingId === row.id) {
-          setEditingId(null);
+        setEntries((prev) => prev.filter((entry) => entry.groupId !== row.groupId));
+        if (editingGroupId === row.groupId) {
+          setEditingGroupId(null);
           form.resetFields();
+          form.setFieldsValue({ wipType: "draft" });
         }
         message.success("Deleted");
       },
@@ -174,7 +419,12 @@ export default function CreateWorkInProgressPage() {
       message.warning("No entries to save");
       return;
     }
-    if (!woId || !Number.isFinite(woId)) {
+    const payloadWoId =
+      entries[0]?.woId ??
+      woId ??
+      selectedWorkOrderResolvedId ??
+      (selectedWoNumber ? workOrderByNumber.get(selectedWoNumber)?.id : null);
+    if (payloadWoId === null || payloadWoId === undefined || String(payloadWoId).trim() === "") {
       message.error("WO ID is required");
       return;
     }
@@ -194,10 +444,7 @@ export default function CreateWorkInProgressPage() {
 
       const items = Array.from(grouped.values()).map((groupEntries) => {
         const first = groupEntries[0];
-        const process_flow = groupEntries
-          .slice()
-          .sort((a, b) => a.process.localeCompare(b.process))
-          .map((e, index) => ({
+        const process_flow = groupEntries.map((e, index) => ({
             op_seq: (index + 1) * 10,
             machine_name: `${e.process} Station`,
             process_name: e.process,
@@ -207,7 +454,7 @@ export default function CreateWorkInProgressPage() {
           uniq: first.uniq,
           kanban_number: first.packingNumber,
           wip_type: first.wipType,
-          uom: "Piece",
+          uom: bomIndex.uomByUniq[first.uniq] || "Piece",
           stock: Number(first.stock ?? 0),
           stock_kanban: Number(first.pcsPerKanban ?? 0),
           process_flow,
@@ -216,12 +463,12 @@ export default function CreateWorkInProgressPage() {
 
       if (apiEnabled) {
         await createWip({
-          wo_id: woId,
+          wo_id: payloadWoId,
           wo_number: woNumber,
           items,
         }).unwrap();
       } else {
-        console.log("WIP payload:", { wo_id: woId, wo_number: woNumber, items });
+        console.log("WIP payload:", { wo_id: payloadWoId, wo_number: woNumber, items });
       }
 
       message.success("Saved");
@@ -259,7 +506,7 @@ export default function CreateWorkInProgressPage() {
       dataIndex: "stockToCompleteKanban",
       key: "stockToCompleteKanban",
       width: 160,
-      render: (v: number) => <span className="text-xs text-gray-700">pcs</span>,
+      render: (v: number) => <span className="text-xs text-gray-700">{v} pcs</span>,
     },
     {
       title: "Pcs/Kanban",
@@ -316,7 +563,7 @@ export default function CreateWorkInProgressPage() {
             <div className="flex items-start justify-between gap-4 mb-4">
               <div>
                 <div className="text-sm font-semibold text-gray-900">Step 1: Input WIP Data</div>
-                <div className="text-xs text-gray-500">Input WIP Data based on each uniq and process</div>
+                <div className="text-xs text-gray-500">Select WO and UNIQ first, then process, stock, and kanban values fill automatically</div>
               </div>
               <span className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-xs text-blue-700">Required</span>
             </div>
@@ -325,17 +572,17 @@ export default function CreateWorkInProgressPage() {
               form={form}
               layout="vertical"
               requiredMark={false}
-              onValuesChange={() => updateAutoFill()}
+              initialValues={{ wipType: "draft" }}
             >
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <Form.Item label="Uniq" name="uniq" rules={[{ required: true, message: "Uniq is required" }]}>
                   <Select
                     placeholder="Select Uniq"
-                    options={[
-                      { label: "LV-001", value: "LV-001" },
-                      { label: "LV-002", value: "LV-002" },
-                      { label: "LV-003", value: "LV-003" },
-                    ]}
+                    options={uniqOptions}
+                    disabled={!selectedWoNumber && uniqOptions.length === 0}
+                    loading={apiEnabled && (workOrdersQuery.isFetching || selectedWorkOrderDetailQuery.isFetching)}
+                    showSearch
+                    optionFilterProp="label"
                   />
                 </Form.Item>
 
@@ -346,10 +593,10 @@ export default function CreateWorkInProgressPage() {
                 >
                   <Select
                     placeholder="Select WO"
-                    options={[
-                      { label: "WO-2024-0239", value: "WO-2024-0239" },
-                      { label: "WO-2024-0240", value: "WO-2024-0240" },
-                    ]}
+                    options={workOrderOptions}
+                    loading={apiEnabled && workOrdersQuery.isFetching}
+                    showSearch
+                    optionFilterProp="label"
                   />
                 </Form.Item>
 
@@ -360,10 +607,9 @@ export default function CreateWorkInProgressPage() {
                 >
                   <Select
                     placeholder="Select Packing"
-                    options={[
-                      { label: "WH-FG-029", value: "WH-FG-029" },
-                      { label: "KBN-004-2024", value: "KBN-004-2024" },
-                    ]}
+                    options={packingOptions}
+                    disabled={!selectedUniq}
+                    loading={apiEnabled && selectedWorkOrderDetailQuery.isFetching}
                   />
                 </Form.Item>
 
@@ -389,14 +635,7 @@ export default function CreateWorkInProgressPage() {
                   name="process"
                   rules={[{ required: true, message: "Process is required" }]}
                 >
-                  <Select
-                    placeholder="Select Process or Add new"
-                    options={[
-                      { label: "Welding", value: "Welding" },
-                      { label: "CNC Machine", value: "CNC Machine" },
-                      { label: "Quality Check", value: "Quality Check" },
-                    ]}
-                  />
+                  <Input disabled placeholder="Auto-filled from selected work order process flow" />
                 </Form.Item>
 
                 <Form.Item
@@ -404,7 +643,7 @@ export default function CreateWorkInProgressPage() {
                   name="stock"
                   rules={[{ required: true, message: "Stock is required" }]}
                 >
-                  <InputNumber className="w-full" min={0} placeholder="Input Stock" />
+                  <InputNumber className="w-full" min={0} placeholder="Auto-filled from selected WO qty" disabled />
                 </Form.Item>
 
                 <Form.Item label="Stock to Complete Kanban" name="stockToCompleteKanban">
@@ -413,7 +652,7 @@ export default function CreateWorkInProgressPage() {
 
                 <div className="pb-[24px]">
                   <Button type="primary" className="w-full" onClick={handleAddOrUpdate}>
-                    + Add WIP
+                    {editingGroupId ? "Update WIP" : "+ Add WIP"}
                   </Button>
                 </div>
               </div>
@@ -437,6 +676,7 @@ export default function CreateWorkInProgressPage() {
                 pagination={false}
                 bordered
                 scroll={{ x: "max-content" }}
+                locale={{ emptyText: "No WIP rows yet. Select a work order and add generated process rows." }}
               />
             </div>
           </Card>

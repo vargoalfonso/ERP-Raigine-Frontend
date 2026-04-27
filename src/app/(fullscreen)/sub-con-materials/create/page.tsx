@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MutableRefObject } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -20,27 +20,53 @@ import {
   DeleteOutlined,
 } from "@ant-design/icons";
 import type { FormInstance } from "antd";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { useCreateInventoryMutation } from "@/lib/api/inventory/api";
+import { useListProcurementDnsQuery } from "@/lib/api/procurement-dn/api";
+import { useListProcurementPosQuery, type ProcurementPoRecord } from "@/lib/api/procurement-po/api";
+import { useListWarehousesQuery, type WarehouseRecord } from "@/lib/api/warehouse/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 
 const { Title, Text } = Typography;
 
 type SubConStockReceivedFormData = {
+  poNumber?: string;
   deliveryNotesNumber?: string;
   invoiceNumber?: string;
   uniq?: string;
   partNumber?: string;
   partName?: string;
+  model?: string;
   periodPo?: string;
   dateReceived?: any;
   quantityReceived?: number;
   subconVendorName?: string;
+  warehouseDestination?: string;
   addStock?: number;
 };
 
 type FormEntry = {
   id: number;
   key: string;
-  formRef: React.MutableRefObject<FormInstance | null>;
+  formRef: MutableRefObject<FormInstance<SubConStockReceivedFormData> | null>;
+};
+
+type SelectOption = { label: string; value: string };
+
+const getPoUniq = (po: ProcurementPoRecord | undefined): string | undefined => {
+  if (!po) return undefined;
+  if (po.uniq_code) return po.uniq_code;
+  const firstItem = Array.isArray(po.items) ? po.items[0] : undefined;
+  if (!firstItem || typeof firstItem !== "object" || firstItem === null) return undefined;
+  const record = firstItem as Record<string, unknown>;
+  return typeof record.uniq_code === "string"
+    ? record.uniq_code
+    : typeof record.item_uniq_code === "string"
+      ? record.item_uniq_code
+      : typeof record.uniq === "string"
+        ? record.uniq
+        : undefined;
 };
 
 const SubConStockReceivedFormCard = ({
@@ -48,17 +74,67 @@ const SubConStockReceivedFormCard = ({
   formRef,
   showRemove,
   onRemove,
+  uniqOptions,
+  poOptions,
+  dnOptions,
+  warehouseOptions,
+  bomIndex,
+  procurementPos,
+  procurementDns,
 }: {
   entryNumber: number;
-  formRef: React.MutableRefObject<FormInstance | null>;
+  formRef: MutableRefObject<FormInstance<SubConStockReceivedFormData> | null>;
   showRemove: boolean;
   onRemove: () => void;
+  uniqOptions: SelectOption[];
+  poOptions: SelectOption[];
+  dnOptions: SelectOption[];
+  warehouseOptions: SelectOption[];
+  bomIndex: ReturnType<typeof buildBomUniqIndex>;
+  procurementPos: ProcurementPoRecord[];
+  procurementDns: Array<{ dn_number?: string; po_number?: string; supplier_name?: string; items: Array<{ item_uniq_code?: string }> }>;
 }) => {
   const [form] = Form.useForm<SubConStockReceivedFormData>();
 
   useEffect(() => {
     formRef.current = form;
   }, [form, formRef]);
+
+  const fillUniq = (uniq?: string) => {
+    if (!uniq) return;
+    form.setFieldsValue({
+      uniq,
+      partNumber: bomIndex.partNumberByUniq[uniq] ?? "",
+      partName: bomIndex.partNameByUniq[uniq] ?? "",
+      model: bomIndex.modelByUniq[uniq] ?? bomIndex.assemblyCodeByUniq[uniq] ?? "",
+    });
+  };
+
+  const onSelectPo = (poNumber: string) => {
+    const po = procurementPos.find((item) => item.po_number === poNumber);
+    const uniq = getPoUniq(po);
+    const relatedDn = procurementDns.find((item) => item.po_number === poNumber);
+
+    form.setFieldsValue({
+      poNumber,
+      deliveryNotesNumber: relatedDn?.dn_number,
+      periodPo: po?.period,
+      subconVendorName: po?.supplier_name ?? relatedDn?.supplier_name,
+    });
+    fillUniq(uniq);
+  };
+
+  const onSelectDn = (dnNumber: string) => {
+    const dn = procurementDns.find((item) => item.dn_number === dnNumber);
+    const uniq = dn?.items?.[0]?.item_uniq_code;
+
+    form.setFieldsValue({
+      deliveryNotesNumber: dnNumber,
+      poNumber: dn?.po_number,
+      subconVendorName: dn?.supplier_name,
+    });
+    fillUniq(uniq);
+  };
 
   return (
     <Card>
@@ -90,11 +166,19 @@ const SubConStockReceivedFormCard = ({
       <Form form={form} layout="vertical">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Form.Item
+            label="PO Number"
+            name="poNumber"
+            rules={[{ required: true, message: "Please select PO number!" }]}
+          >
+            <Select placeholder="Select PO from procurement" size="large" allowClear options={poOptions} onChange={onSelectPo} showSearch optionFilterProp="label" />
+          </Form.Item>
+
+          <Form.Item
             label="Delivery Notes Number"
             name="deliveryNotesNumber"
-            rules={[{ required: true, message: "Please input delivery notes number!" }]}
+            rules={[{ required: true, message: "Please select delivery notes number!" }]}
           >
-            <Input placeholder="DN-SUB-2025-001" size="large" />
+            <Select placeholder="Select related DN" size="large" allowClear options={dnOptions} onChange={onSelectDn} showSearch optionFilterProp="label" />
           </Form.Item>
 
           <Form.Item
@@ -106,17 +190,13 @@ const SubConStockReceivedFormCard = ({
           </Form.Item>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <Form.Item
             label="Uniq"
             name="uniq"
             rules={[{ required: true, message: "Please select uniq!" }]}
           >
-            <Select placeholder="SUB-001" size="large" allowClear>
-              <Select.Option value="SUB-001">SUB-001</Select.Option>
-              <Select.Option value="SUB-002">SUB-002</Select.Option>
-              <Select.Option value="SUB-003">SUB-003</Select.Option>
-            </Select>
+            <Select placeholder="Select UNIQ from BOM" size="large" allowClear options={uniqOptions} onChange={fillUniq} showSearch optionFilterProp="label" />
           </Form.Item>
 
           <Form.Item
@@ -124,7 +204,7 @@ const SubConStockReceivedFormCard = ({
             name="partNumber"
             rules={[{ required: true, message: "Please input part number!" }]}
           >
-            <Input placeholder="Automatic field" size="large" />
+            <Input placeholder="Automatic field" size="large" disabled />
           </Form.Item>
 
           <Form.Item
@@ -132,7 +212,11 @@ const SubConStockReceivedFormCard = ({
             name="partName"
             rules={[{ required: true, message: "Please input part name!" }]}
           >
-            <Input placeholder="Automatic field" size="large" />
+            <Input placeholder="Automatic field" size="large" disabled />
+          </Form.Item>
+
+          <Form.Item label="Model" name="model">
+            <Input placeholder="Automatic field" size="large" disabled />
           </Form.Item>
 
           <Form.Item
@@ -140,12 +224,7 @@ const SubConStockReceivedFormCard = ({
             name="periodPo"
             rules={[{ required: true, message: "Please select period!" }]}
           >
-            <Select placeholder="Select Period" size="large" allowClear>
-              <Select.Option value="2025-Q1">2025-Q1</Select.Option>
-              <Select.Option value="2025-Q2">2025-Q2</Select.Option>
-              <Select.Option value="2025-Q3">2025-Q3</Select.Option>
-              <Select.Option value="2025-Q4">2025-Q4</Select.Option>
-            </Select>
+            <Input placeholder="Auto-filled from PO" size="large" disabled />
           </Form.Item>
         </div>
 
@@ -176,7 +255,15 @@ const SubConStockReceivedFormCard = ({
             name="subconVendorName"
             rules={[{ required: true, message: "Please input vendor name!" }]}
           >
-            <Input placeholder="Subcon Vendor Name" size="large" />
+            <Input placeholder="Auto-filled from PO / DN" size="large" />
+          </Form.Item>
+
+          <Form.Item
+            label="Warehouse Destination"
+            name="warehouseDestination"
+            rules={[{ required: true, message: "Please select warehouse!" }]}
+          >
+            <Select placeholder="Select warehouse destination" size="large" allowClear options={warehouseOptions} showSearch optionFilterProp="label" />
           </Form.Item>
 
           <Form.Item
@@ -197,6 +284,69 @@ export default function CreateSubConStockReceivedPage() {
   const [loading, setLoading] = useState(false);
   const [entries, setEntries] = useState<FormEntry[]>([]);
   const [createInventory] = useCreateInventoryMutation();
+  const apiEnabled = Boolean(apiBaseUrl);
+
+  const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeQuery.data?.data ?? []), [bomTreeQuery.data]);
+  const warehousesQuery = useListWarehousesQuery(undefined, { skip: !apiEnabled });
+  const procurementPosQuery = useListProcurementPosQuery({ po_type: "subcon" }, { skip: !apiEnabled });
+  const procurementDnsQuery = useListProcurementDnsQuery(undefined, { skip: !apiEnabled });
+
+  const uniqOptions = useMemo<SelectOption[]>(
+    () =>
+      bomIndex.uniqs.map((uniq) => ({
+        value: uniq,
+        label: bomIndex.partNameByUniq[uniq] ? `${uniq} — ${bomIndex.partNameByUniq[uniq]}` : uniq,
+      })),
+    [bomIndex.partNameByUniq, bomIndex.uniqs]
+  );
+
+  const warehouseOptions = useMemo<SelectOption[]>(
+    () =>
+      (warehousesQuery.data ?? []).map((warehouse: WarehouseRecord) => ({
+        value: warehouse.warehouse_name ?? warehouse.id ?? "",
+        label: warehouse.type_warehouse
+          ? `${warehouse.warehouse_name ?? warehouse.id ?? "-"} — ${warehouse.type_warehouse}`
+          : warehouse.warehouse_name ?? warehouse.id ?? "-",
+      })).filter((item) => Boolean(item.value)),
+    [warehousesQuery.data]
+  );
+
+  const procurementPos = procurementPosQuery.data?.data ?? [];
+  const poOptions = useMemo<SelectOption[]>(
+    () =>
+      procurementPos
+        .filter((po) => Boolean(po.po_number))
+        .map((po) => ({
+          value: po.po_number ?? "",
+          label: po.supplier_name ? `${po.po_number} — ${po.supplier_name}` : po.po_number ?? "",
+        })),
+    [procurementPos]
+  );
+
+  const procurementDns = useMemo(
+    () =>
+      (procurementDnsQuery.data?.data ?? [])
+        .filter((dn) => dn.type === "SC")
+        .map((dn) => ({
+          dn_number: dn.dn_number,
+          po_number: dn.po_number,
+          supplier_name: dn.supplier_name,
+          items: (dn.items ?? []).map((item) => ({ item_uniq_code: item.item_uniq_code })),
+        })),
+    [procurementDnsQuery.data]
+  );
+
+  const dnOptions = useMemo<SelectOption[]>(
+    () =>
+      procurementDns
+        .filter((dn) => Boolean(dn.dn_number))
+        .map((dn) => ({
+          value: dn.dn_number ?? "",
+          label: dn.po_number ? `${dn.dn_number} — ${dn.po_number}` : dn.dn_number ?? "",
+        })),
+    [procurementDns]
+  );
 
   useEffect(() => {
     if (entries.length === 0) {
@@ -210,6 +360,7 @@ export default function CreateSubConStockReceivedPage() {
       if (!form) return false;
       const v = form.getFieldsValue() as SubConStockReceivedFormData;
       return (
+        v.poNumber &&
         v.deliveryNotesNumber &&
         v.invoiceNumber &&
         v.uniq &&
@@ -219,6 +370,7 @@ export default function CreateSubConStockReceivedPage() {
         v.dateReceived &&
         typeof v.quantityReceived === "number" &&
         v.subconVendorName &&
+        v.warehouseDestination &&
         typeof v.addStock === "number"
       );
     }).length;
@@ -251,9 +403,10 @@ export default function CreateSubConStockReceivedPage() {
           body: {
             uniq_code: String(values.uniq ?? ""),
             raw_material_type: "Subcon",
-            rm_source: values.deliveryNotesNumber ?? values.invoiceNumber,
+            rm_source: [values.poNumber, values.deliveryNotesNumber, values.invoiceNumber].filter(Boolean).join(" / "),
             part_name: values.partName,
             part_number: values.partNumber,
+            warehouse_location: values.warehouseDestination,
             stock_qty: Number(values.addStock ?? values.quantityReceived ?? 0),
           },
         }).unwrap();
@@ -314,6 +467,13 @@ export default function CreateSubConStockReceivedPage() {
                 formRef={entry.formRef}
                 showRemove={entries.length > 1}
                 onRemove={() => removeEntry(entry.id)}
+                uniqOptions={uniqOptions}
+                poOptions={poOptions}
+                dnOptions={dnOptions}
+                warehouseOptions={warehouseOptions}
+                bomIndex={bomIndex}
+                procurementPos={procurementPos}
+                procurementDns={procurementDns}
               />
             </div>
           ))}

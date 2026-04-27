@@ -91,7 +91,7 @@ export type WipCreateItem = {
 };
 
 export type WipCreateRequest = {
-  wo_id: number;
+  wo_id: string | number;
   wo_number: string;
   items: WipCreateItem[];
 };

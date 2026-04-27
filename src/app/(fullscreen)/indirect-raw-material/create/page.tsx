@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MutableRefObject } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -19,7 +19,13 @@ import {
   DeleteOutlined,
 } from "@ant-design/icons";
 import type { FormInstance } from "antd";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import { useCreateInventoryMutation } from "@/lib/api/inventory/api";
+import { useListProcurementDnsQuery } from "@/lib/api/procurement-dn/api";
+import { useListProcurementPosQuery, type ProcurementPoRecord } from "@/lib/api/procurement-po/api";
+import { useListWarehousesQuery, type WarehouseRecord } from "@/lib/api/warehouse/api";
 
 const { Title, Text } = Typography;
 
@@ -27,6 +33,7 @@ type IndirectRawMaterialFormData = {
   uniq?: string;
   partNumber?: string;
   partName?: string;
+  model?: string;
   warehouseDestination?: string;
   poNumber?: string;
   deliveryNotesNumber?: string;
@@ -36,7 +43,30 @@ type IndirectRawMaterialFormData = {
 type FormEntry = {
   id: number;
   key: string;
-  formRef: React.MutableRefObject<FormInstance | null>;
+  formRef: MutableRefObject<FormInstance<IndirectRawMaterialFormData> | null>;
+};
+
+type SelectOption = { label: string; value: string };
+
+type DnLite = {
+  dn_number?: string;
+  po_number?: string;
+  items: Array<{ item_uniq_code?: string }>;
+};
+
+const getPoUniq = (po: ProcurementPoRecord | undefined): string | undefined => {
+  if (!po) return undefined;
+  if (po.uniq_code) return po.uniq_code;
+  const firstItem = Array.isArray(po.items) ? po.items[0] : undefined;
+  if (!firstItem || typeof firstItem !== "object" || firstItem === null) return undefined;
+  const record = firstItem as Record<string, unknown>;
+  return typeof record.uniq_code === "string"
+    ? record.uniq_code
+    : typeof record.item_uniq_code === "string"
+      ? record.item_uniq_code
+      : typeof record.uniq === "string"
+        ? record.uniq
+        : undefined;
 };
 
 const IndirectRawMaterialFormCard = ({
@@ -44,17 +74,66 @@ const IndirectRawMaterialFormCard = ({
   formRef,
   showRemove,
   onRemove,
+  uniqOptions,
+  warehouseOptions,
+  poOptions,
+  dnOptions,
+  bomIndex,
+  procurementPos,
+  procurementDns,
 }: {
   entryNumber: number;
-  formRef: React.MutableRefObject<FormInstance | null>;
+  formRef: MutableRefObject<FormInstance<IndirectRawMaterialFormData> | null>;
   showRemove: boolean;
   onRemove: () => void;
+  uniqOptions: SelectOption[];
+  warehouseOptions: SelectOption[];
+  poOptions: SelectOption[];
+  dnOptions: SelectOption[];
+  bomIndex: ReturnType<typeof buildBomUniqIndex>;
+  procurementPos: ProcurementPoRecord[];
+  procurementDns: DnLite[];
 }) => {
   const [form] = Form.useForm<IndirectRawMaterialFormData>();
 
   useEffect(() => {
     formRef.current = form;
   }, [form, formRef]);
+
+  const fillUniq = (uniq?: string) => {
+    if (!uniq) return;
+    form.setFieldsValue({
+      uniq,
+      partNumber: bomIndex.partNumberByUniq[uniq] ?? "",
+      partName: bomIndex.partNameByUniq[uniq] ?? "",
+      model: bomIndex.modelByUniq[uniq] ?? bomIndex.assemblyCodeByUniq[uniq] ?? "",
+    });
+  };
+
+  const onSelectPo = (poNumber: string) => {
+    const po = procurementPos.find((item) => item.po_number === poNumber);
+    const uniq = getPoUniq(po);
+    const relatedDn = procurementDns.find((item) => item.po_number === poNumber);
+
+    form.setFieldsValue({
+      poNumber,
+      deliveryNotesNumber: relatedDn?.dn_number,
+    });
+
+    fillUniq(uniq);
+  };
+
+  const onSelectDn = (dnNumber: string) => {
+    const dn = procurementDns.find((item) => item.dn_number === dnNumber);
+    const uniq = dn?.items?.[0]?.item_uniq_code;
+
+    form.setFieldsValue({
+      deliveryNotesNumber: dnNumber,
+      poNumber: dn?.po_number,
+    });
+
+    fillUniq(uniq);
+  };
 
   return (
     <Card>
@@ -86,31 +165,51 @@ const IndirectRawMaterialFormCard = ({
       <Form form={form} layout="vertical">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Form.Item
+            label="PO Number"
+            name="poNumber"
+            rules={[{ required: true, message: "Please select PO Number!" }]}
+          >
+            <Select
+              placeholder="Select PO from procurement"
+              size="large"
+              allowClear
+              options={poOptions}
+              onChange={onSelectPo}
+              showSearch
+              optionFilterProp="label"
+            />
+          </Form.Item>
+
+          <Form.Item
+            label="Delivery Notes Number"
+            name="deliveryNotesNumber"
+            rules={[{ required: true, message: "Please select delivery notes!" }]}
+          >
+            <Select
+              placeholder="Select DN number"
+              size="large"
+              allowClear
+              options={dnOptions}
+              onChange={onSelectDn}
+              showSearch
+              optionFilterProp="label"
+            />
+          </Form.Item>
+
+          <Form.Item
             label="Uniq"
             name="uniq"
-            rules={[{ required: true, message: "Please input uniq!" }]}
+            rules={[{ required: true, message: "Please select uniq!" }]}
           >
-            <Select placeholder="RM-001" size="large" allowClear>
-              <Select.Option value="RM-001">RM-001</Select.Option>
-              <Select.Option value="RM-002">RM-002</Select.Option>
-              <Select.Option value="RM-003">RM-003</Select.Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            label="Part Number"
-            name="partNumber"
-            rules={[{ required: true, message: "Please input part number!" }]}
-          >
-            <Input placeholder="Automotive Stud" size="large" />
-          </Form.Item>
-
-          <Form.Item
-            label="Part Name"
-            name="partName"
-            rules={[{ required: true, message: "Please input part name!" }]}
-          >
-            <Input placeholder="Automatic Field" size="large" />
+            <Select
+              placeholder="Select UNIQ from BOM"
+              size="large"
+              allowClear
+              options={uniqOptions}
+              onChange={fillUniq}
+              showSearch
+              optionFilterProp="label"
+            />
           </Form.Item>
 
           <Form.Item
@@ -118,29 +217,36 @@ const IndirectRawMaterialFormCard = ({
             name="warehouseDestination"
             rules={[{ required: true, message: "Please select warehouse!" }]}
           >
-            <Select placeholder="Automatic field" size="large" allowClear>
-              <Select.Option value="WH-A">WH-A</Select.Option>
-              <Select.Option value="WH-B">WH-B</Select.Option>
-              <Select.Option value="WH-C">WH-C</Select.Option>
-            </Select>
+            <Select
+              placeholder="Select warehouse destination"
+              size="large"
+              allowClear
+              options={warehouseOptions}
+              showSearch
+              optionFilterProp="label"
+            />
           </Form.Item>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Form.Item
-            label="PO Number"
-            name="poNumber"
-            rules={[{ required: true, message: "Please input PO Number!" }]}
+            label="Part Number"
+            name="partNumber"
+            rules={[{ required: true, message: "Please input part number!" }]}
           >
-            <Input placeholder="PO-RM-001" size="large" />
+            <Input placeholder="Auto-filled from BOM / PO / DN" size="large" disabled />
           </Form.Item>
 
           <Form.Item
-            label="Delivery Notes Number"
-            name="deliveryNotesNumber"
-            rules={[{ required: true, message: "Please input delivery notes!" }]}
+            label="Part Name"
+            name="partName"
+            rules={[{ required: true, message: "Please input part name!" }]}
           >
-            <Input placeholder="DN-PO-RM-001" size="large" />
+            <Input placeholder="Auto-filled from BOM / PO / DN" size="large" disabled />
+          </Form.Item>
+
+          <Form.Item label="Model" name="model">
+            <Input placeholder="Auto-filled from BOM / UNIQ" size="large" disabled />
           </Form.Item>
 
           <Form.Item
@@ -166,6 +272,71 @@ export default function CreateIndirectRawMaterialPage() {
   const [loading, setLoading] = useState(false);
   const [entries, setEntries] = useState<FormEntry[]>([]);
   const [createInventory] = useCreateInventoryMutation();
+  const apiEnabled = Boolean(apiBaseUrl);
+
+  const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const warehousesQuery = useListWarehousesQuery(undefined, { skip: !apiEnabled });
+  const procurementPosQuery = useListProcurementPosQuery({ po_type: "indirect" }, { skip: !apiEnabled });
+  const procurementDnsQuery = useListProcurementDnsQuery(undefined, { skip: !apiEnabled });
+
+  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeQuery.data?.data ?? []), [bomTreeQuery.data]);
+
+  const uniqOptions = useMemo<SelectOption[]>(
+    () =>
+      bomIndex.uniqs.map((uniq) => ({
+        value: uniq,
+        label: bomIndex.partNameByUniq[uniq] ? `${uniq} — ${bomIndex.partNameByUniq[uniq]}` : uniq,
+      })),
+    [bomIndex.partNameByUniq, bomIndex.uniqs]
+  );
+
+  const warehouseOptions = useMemo<SelectOption[]>(
+    () =>
+      (warehousesQuery.data ?? [])
+        .map((warehouse: WarehouseRecord) => ({
+          value: warehouse.warehouse_name ?? warehouse.id ?? "",
+          label: warehouse.type_warehouse
+            ? `${warehouse.warehouse_name ?? warehouse.id ?? "-"} — ${warehouse.type_warehouse}`
+            : warehouse.warehouse_name ?? warehouse.id ?? "-",
+        }))
+        .filter((item) => Boolean(item.value)),
+    [warehousesQuery.data]
+  );
+
+  const procurementPos = procurementPosQuery.data?.data ?? [];
+  const poOptions = useMemo<SelectOption[]>(
+    () =>
+      procurementPos
+        .filter((po) => Boolean(po.po_number))
+        .map((po) => ({
+          value: po.po_number ?? "",
+          label: po.supplier_name ? `${po.po_number} — ${po.supplier_name}` : po.po_number ?? "",
+        })),
+    [procurementPos]
+  );
+
+  const procurementDns = useMemo<DnLite[]>(
+    () =>
+      (procurementDnsQuery.data?.data ?? [])
+        .filter((dn) => dn.type === "IRM")
+        .map((dn) => ({
+          dn_number: dn.dn_number,
+          po_number: dn.po_number,
+          items: (dn.items ?? []).map((item) => ({ item_uniq_code: item.item_uniq_code })),
+        })),
+    [procurementDnsQuery.data]
+  );
+
+  const dnOptions = useMemo<SelectOption[]>(
+    () =>
+      procurementDns
+        .filter((dn) => Boolean(dn.dn_number))
+        .map((dn) => ({
+          value: dn.dn_number ?? "",
+          label: dn.po_number ? `${dn.dn_number} — ${dn.po_number}` : dn.dn_number ?? "",
+        })),
+    [procurementDns]
+  );
 
   useEffect(() => {
     if (entries.length === 0) {
@@ -216,7 +387,7 @@ export default function CreateIndirectRawMaterialPage() {
           body: {
             uniq_code: values.uniq,
             raw_material_type: "Indirect",
-            rm_source: values.poNumber,
+            rm_source: [values.poNumber, values.deliveryNotesNumber].filter(Boolean).join(" / "),
             warehouse_location: values.warehouseDestination,
             stock_qty: Number(values.addStock ?? 0),
             part_name: values.partName,
@@ -287,6 +458,13 @@ export default function CreateIndirectRawMaterialPage() {
                 formRef={entry.formRef}
                 showRemove={entries.length > 1}
                 onRemove={() => removeEntry(entry.id)}
+                uniqOptions={uniqOptions}
+                warehouseOptions={warehouseOptions}
+                poOptions={poOptions}
+                dnOptions={dnOptions}
+                bomIndex={bomIndex}
+                procurementPos={procurementPos}
+                procurementDns={procurementDns}
               />
             </div>
           ))}

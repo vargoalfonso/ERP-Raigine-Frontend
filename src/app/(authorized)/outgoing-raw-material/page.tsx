@@ -6,14 +6,23 @@ import type { ColumnsType } from "antd/es/table";
 import { EyeOutlined, PlusOutlined } from "@ant-design/icons";
 
 import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import {
   type OutgoingRawMaterial,
   useCreateOutgoingRawMaterialMutation,
   useGetOutgoingRawMaterialByIdQuery,
   useGetOutgoingRawMaterialsQuery,
 } from "@/lib/api/outgoing-raw-material/api";
+import { useListProcurementDnsQuery } from "@/lib/api/procurement-dn/api";
+import { useListProcurementPosQuery, type ProcurementPoRecord } from "@/lib/api/procurement-po/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
+import { useListWarehousesQuery } from "@/lib/api/warehouse/api";
+import { useGetWorkOrdersQuery } from "@/lib/api/work-orders/api";
 
 type OutgoingFormValues = {
+  po_number?: string;
+  dn_number?: string;
   packing_list_rm: string;
   uniq: string;
   unit: string;
@@ -35,6 +44,21 @@ const reasonOptions = [
   "Others",
 ];
 
+const getPoUniq = (po: ProcurementPoRecord | undefined): string | undefined => {
+  if (!po) return undefined;
+  if (po.uniq_code) return po.uniq_code;
+  const firstItem = Array.isArray(po.items) ? po.items[0] : undefined;
+  if (!firstItem || typeof firstItem !== "object" || firstItem === null) return undefined;
+  const record = firstItem as Record<string, unknown>;
+  return typeof record.uniq_code === "string"
+    ? record.uniq_code
+    : typeof record.item_uniq_code === "string"
+      ? record.item_uniq_code
+      : typeof record.uniq === "string"
+        ? record.uniq
+        : undefined;
+};
+
 export default function OutgoingRawMaterialPage() {
   const apiEnabled = Boolean(apiBaseUrl);
 
@@ -54,9 +78,73 @@ export default function OutgoingRawMaterialPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
 
+  const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeQuery.data?.data ?? []), [bomTreeQuery.data]);
+  const warehousesQuery = useListWarehousesQuery(undefined, { skip: !apiEnabled });
+  const procurementPosQuery = useListProcurementPosQuery({ po_type: "raw_material" }, { skip: !apiEnabled });
+  const procurementDnsQuery = useListProcurementDnsQuery(undefined, { skip: !apiEnabled });
+  const workOrdersQuery = useGetWorkOrdersQuery({ page: 1, limit: 200 }, { skip: !apiEnabled });
+
   const detailQuery = useGetOutgoingRawMaterialByIdQuery(
     { id: detailId ?? 0 },
     { skip: !apiEnabled || !detailOpen || !detailId }
+  );
+
+  const procurementPos = procurementPosQuery.data?.data ?? [];
+  const procurementDns = (procurementDnsQuery.data?.data ?? []).filter((item) => item.type === "RM");
+  const workOrders = workOrdersQuery.data?.items ?? [];
+
+  const poOptions = useMemo(
+    () =>
+      procurementPos
+        .filter((item) => Boolean(item.po_number))
+        .map((item) => ({
+          value: item.po_number ?? "",
+          label: item.supplier_name ? `${item.po_number} — ${item.supplier_name}` : item.po_number ?? "",
+        })),
+    [procurementPos]
+  );
+
+  const dnOptions = useMemo(
+    () =>
+      procurementDns
+        .filter((item) => Boolean(item.dn_number))
+        .map((item) => ({
+          value: item.dn_number ?? "",
+          label: item.po_number ? `${item.dn_number} — ${item.po_number}` : item.dn_number ?? "",
+        })),
+    [procurementDns]
+  );
+
+  const uniqOptions = useMemo(
+    () =>
+      bomIndex.uniqs.map((uniq) => ({
+        value: uniq,
+        label: bomIndex.partNameByUniq[uniq] ? `${uniq} — ${bomIndex.partNameByUniq[uniq]}` : uniq,
+      })),
+    [bomIndex.partNameByUniq, bomIndex.uniqs]
+  );
+
+  const warehouseOptions = useMemo(
+    () =>
+      (warehousesQuery.data ?? [])
+        .map((item) => ({
+          value: item.warehouse_name ?? item.id ?? "",
+          label: item.type_warehouse ? `${item.warehouse_name ?? item.id ?? "-"} — ${item.type_warehouse}` : item.warehouse_name ?? item.id ?? "-",
+        }))
+        .filter((item) => Boolean(item.value)),
+    [warehousesQuery.data]
+  );
+
+  const workOrderOptions = useMemo(
+    () =>
+      workOrders
+        .filter((item) => Boolean(item.wo_number))
+        .map((item) => ({
+          value: item.wo_number,
+          label: formatWorkOrderDisplayNumber(item.wo_number),
+        })),
+    [workOrders]
   );
 
   const rows = listQuery.data?.items ?? [];
@@ -74,6 +162,56 @@ export default function OutgoingRawMaterialPage() {
       quantity_out: 0,
       reason: "Production Use",
     });
+  };
+
+  const applyUniqAutofill = (uniq?: string) => {
+    if (!uniq) return;
+    form.setFieldsValue({
+      uniq,
+      unit: bomIndex.uomByUniq[uniq] || form.getFieldValue("unit") || "g",
+      packing_list_rm: form.getFieldValue("packing_list_rm") || bomIndex.packingNumberByUniq[uniq] || "",
+    });
+  };
+
+  const onSelectPo = (poNumber: string) => {
+    const po = procurementPos.find((item) => item.po_number === poNumber);
+    const uniq = getPoUniq(po);
+    const relatedDn = procurementDns.find((item) => item.po_number === poNumber);
+
+    form.setFieldsValue({
+      po_number: poNumber,
+      dn_number: relatedDn?.dn_number,
+      purpose: form.getFieldValue("purpose") || `PO ${poNumber}`,
+    });
+
+    applyUniqAutofill(uniq);
+  };
+
+  const onSelectDn = (dnNumber: string) => {
+    const dn = procurementDns.find((item) => item.dn_number === dnNumber);
+    const firstItem = dn?.items?.[0];
+    const uniq = firstItem?.item_uniq_code;
+
+    form.setFieldsValue({
+      dn_number: dnNumber,
+      po_number: dn?.po_number,
+      packing_list_rm: firstItem?.packing_number ?? dnNumber,
+      purpose: form.getFieldValue("purpose") || `DN ${dnNumber}`,
+    });
+
+    applyUniqAutofill(uniq);
+  };
+
+  const onSelectWorkOrder = (woNumber: string) => {
+    const workOrder = workOrders.find((item) => item.wo_number === woNumber);
+    const firstItem = workOrder?.items?.[0];
+
+    form.setFieldsValue({
+      work_order_no: woNumber,
+      purpose: form.getFieldValue("purpose") || `Work Order ${woNumber}`,
+    });
+
+    applyUniqAutofill(firstItem?.item_uniq_code);
   };
 
   const closeTrx = () => {
@@ -253,6 +391,14 @@ export default function OutgoingRawMaterialPage() {
       >
         <Form form={form} layout="vertical" requiredMark={false}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Form.Item label="PO Number" name="po_number">
+              <Select placeholder="Select PO from procurement" options={poOptions} showSearch optionFilterProp="label" allowClear onChange={onSelectPo} />
+            </Form.Item>
+
+            <Form.Item label="DN Number" name="dn_number">
+              <Select placeholder="Select related DN" options={dnOptions} showSearch optionFilterProp="label" allowClear onChange={onSelectDn} />
+            </Form.Item>
+
             <Form.Item
               label="Packing List RM"
               name="packing_list_rm"
@@ -262,7 +408,7 @@ export default function OutgoingRawMaterialPage() {
             </Form.Item>
 
             <Form.Item label="UNIQ" name="uniq" rules={[{ required: true, message: "uniq wajib" }]}>
-              <Input placeholder="LV3-001" />
+              <Select placeholder="Select UNIQ from BOM" options={uniqOptions} showSearch optionFilterProp="label" allowClear onChange={applyUniqAutofill} />
             </Form.Item>
 
             <Form.Item label="Unit" name="unit" rules={[{ required: true, message: "unit wajib" }]}>
@@ -282,7 +428,7 @@ export default function OutgoingRawMaterialPage() {
             </Form.Item>
 
             <Form.Item label="Work Order No" name="work_order_no">
-              <Input placeholder="WO-2024-045" />
+              <Select placeholder="Select work order" options={workOrderOptions} showSearch optionFilterProp="label" allowClear onChange={onSelectWorkOrder} />
             </Form.Item>
 
             <Form.Item label="Purpose" name="purpose">
@@ -290,7 +436,7 @@ export default function OutgoingRawMaterialPage() {
             </Form.Item>
 
             <Form.Item label="Destination Location" name="destination_location">
-              <Input placeholder="Production Line A" />
+              <Select placeholder="Select warehouse destination" options={warehouseOptions} showSearch optionFilterProp="label" allowClear />
             </Form.Item>
 
             <Form.Item label="Requested By" name="requested_by">
