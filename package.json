@@ -7,22 +7,22 @@
     "dev:legacy": "next dev",
     "build": "next build",
     "start": "next start"
-    
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.2",
     "@zxing/browser": "^0.1.5",
     "antd": "^5.27.3",
-    "axios": "^1.12.2",
+    "axios": "^1.15.0",
     "js-cookie": "^3.0.5",
     "jwt-decode": "^4.0.0",
     "lightningcss": "^1.24.1",
     "lodash": "^4.17.21",
-    "next": "15.5.3",
-    "next-auth": "^4.24.11",
+    "next": "^15.5.15",
+    "next-auth": "^4.24.12",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-icons": "^5.5.0",
+    "react-is": "^18.3.1",
     "recharts": "^3.2.0",
     "stylis": "^4.3.6"
   },

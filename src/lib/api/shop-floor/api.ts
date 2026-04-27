@@ -5,10 +5,15 @@ type UnknownRecord = Record<string, unknown>;
 
 const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
 
-const ok = <T,>(data: T, message = "OK"): ApiResponse<T> => ({
+const ok = <T,>(
+  data: T,
+  message = "OK",
+  pagination?: ApiResponse<T>["pagination"]
+): ApiResponse<T> => ({
   message,
   status: "success",
   data,
+  ...(pagination ? { pagination } : {}),
 });
 
 const parseArrayResponse = <T,>(response: unknown): T[] => {

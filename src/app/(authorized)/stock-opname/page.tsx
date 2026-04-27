@@ -605,7 +605,7 @@ export default function StockOpnamePage() {
         <StatCard label="Total Records" value={kpis.totalRecords} icon={<MdChecklist size={18} />} accent="bg-blue-50 text-blue-600" />
         <StatCard label="Completed" value={kpis.completed} icon={<CheckCircleOutlined />} accent="bg-green-50 text-green-600" />
         <StatCard label="With Variance" value={kpis.withVariance} icon={<MdOutlineWarningAmber size={18} />} accent="bg-orange-50 text-orange-600" />
-        <StatCard label="Cost Impact" value={formatMoney(kpis.costImpact)} icon={<MdOutlineTrendingDown size={18} />} accent="bg-red-50 text-red-600" />
+        {/* <StatCard label="Cost Impact" value={formatMoney(kpis.costImpact)} icon={<MdOutlineTrendingDown size={18} />} accent="bg-red-50 text-red-600" /> */}
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">

@@ -119,7 +119,7 @@ export default function SubConMaterialsClient() {
     refetch: refetchApiRows,
   } = useGetAllSubconRawMaterialQuery(
     { currentPage, pageSize },
-    { skip: !useApi, refetchOnMountOrArgChange: true }
+    { skip: !useApi }
   );
 
   const [deleteSubcon] = useDeleteSubconRawMaterialMutation();

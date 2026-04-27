@@ -42,6 +42,7 @@ import {
   useCreatePoSplitMutation,
   useCreateProcessMutation,
   useCreateSafetyStockMutation,
+  useCreateStockdaysMutation,
   useCreateTypeParameterMutation,
   useDeleteAccessControlMatrixMutation,
   useDeleteApprovalWorkflowMutation,
@@ -49,6 +50,7 @@ import {
   useDeletePoSplitMutation,
   useDeleteProcessMutation,
   useDeleteSafetyStockMutation,
+  useDeleteStockdaysMutation,
   useDeleteTypeParameterMutation,
   useDeleteKanbanStandardMutation,
   useDeleteRoleMutation,
@@ -63,6 +65,7 @@ import {
   useGetProcessesQuery,
   useGetSafetyStockByIdQuery,
   useGetSafetyStockQuery,
+  useGetStockdaysQuery,
   useGetTypeParametersQuery,
   useGetUomsQuery,
   useGetKanbanStandardsQuery,
@@ -76,6 +79,7 @@ import {
   useUpdatePoSplitMutation,
   useUpdateProcessMutation,
   useUpdateSafetyStockMutation,
+  useUpdateStockdaysMutation,
   useUpdateTypeParameterMutation,
   useUpdateUomMutation,
   useUpdateKanbanStandardMutation,
@@ -119,9 +123,9 @@ type SafetyStockRow = {
 
 type StockdaysRow = {
   id: string;
-  inventoryType: string;
-  parameter: string;
-  constanta: number;
+  itemCode: string;
+  stockDays: number;
+  safetyStock: number;
   status: StatusType;
 };
 
@@ -418,30 +422,16 @@ const initialRoleRows: RoleRow[] = [
 const initialStockdaysRows: StockdaysRow[] = [
   {
     id: "SDP-001",
-    inventoryType: "Raw Material",
-    parameter: "PRL/Working days * days",
-    constanta: 7,
+    itemCode: "ITEM001",
+    stockDays: 30,
+    safetyStock: 10,
     status: "Inactive",
   },
   {
     id: "SDP-002",
-    inventoryType: "Indirect Raw Material",
-    parameter: "PRL/Working days * days",
-    constanta: 7,
-    status: "Active",
-  },
-  {
-    id: "SDP-003",
-    inventoryType: "SubCon",
-    parameter: "PRL/Working days * days",
-    constanta: 7,
-    status: "Active",
-  },
-  {
-    id: "SDP-004",
-    inventoryType: "Finished Goods",
-    parameter: "PRL/Working days * days",
-    constanta: 7,
+    itemCode: "ITEM002",
+    stockDays: 45,
+    safetyStock: 15,
     status: "Active",
   },
 ];
@@ -680,6 +670,23 @@ export default function SystemSettingsPage() {
   const router = useRouter();
 
   const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
+  const [selectedModuleId, setSelectedModuleId] = useState<string>(
+    "access-control-matrix"
+  );
+  const shouldLoadAccessControl = apiEnabled && selectedModuleId === "access-control-matrix";
+  const shouldLoadRoles = apiEnabled && (selectedModuleId === "access-control-matrix" || selectedModuleId === "roles");
+  const shouldLoadDepartments = apiEnabled && selectedModuleId === "access-control-matrix";
+  const shouldLoadSafetyStock = apiEnabled && selectedModuleId === "safety-stock";
+  const shouldLoadStockdays = apiEnabled && selectedModuleId === "stockdays";
+  const shouldLoadTypeParameters = apiEnabled && selectedModuleId === "type-parameters";
+  const shouldLoadProcesses = apiEnabled && selectedModuleId === "process";
+  const shouldLoadGlobalParameters = apiEnabled && selectedModuleId === "global";
+  const shouldLoadSuppliers = apiEnabled && selectedModuleId === "purchase-order";
+  const shouldLoadUoms = apiEnabled && selectedModuleId === "uom-global";
+  const shouldLoadKanban = apiEnabled && selectedModuleId === "kanban";
+  const shouldLoadPoSplit = apiEnabled && selectedModuleId === "purchase-order";
+  const shouldLoadApprovalWorkflows = apiEnabled && selectedModuleId === "approval-workflow";
+  const shouldLoadBomTree = apiEnabled && (selectedModuleId === "safety-stock" || selectedModuleId === "kanban");
 
   const toBackendStatus = (s: StatusType): string =>
     s === "Inactive" ? "inactive" : "active";
@@ -689,57 +696,57 @@ export default function SystemSettingsPage() {
     return raw.includes("inact") ? "Inactive" : "Active";
   };
 
-  const { data: rolesApiData } = useGetRolesQuery(undefined, { skip: !apiEnabled });
-  const { data: departmentsApiData } = useGetDepartmentsQuery(undefined, { skip: !apiEnabled });
-  const { data: accessControlApiData } = useGetAccessControlMatrixQuery(undefined, { skip: !apiEnabled });
+  const { data: rolesApiData } = useGetRolesQuery(undefined, { skip: !shouldLoadRoles });
+  const { data: departmentsApiData } = useGetDepartmentsQuery(undefined, { skip: !shouldLoadDepartments });
+  const { data: accessControlApiData } = useGetAccessControlMatrixQuery(undefined, { skip: !shouldLoadAccessControl });
   const [createAccessControl] = useCreateAccessControlMatrixMutation();
   const [updateAccessControl] = useUpdateAccessControlMatrixMutation();
   const [deleteAccessControl] = useDeleteAccessControlMatrixMutation();
   const [deleteRole] = useDeleteRoleMutation();
-  const { data: safetyStockApiData } = useGetSafetyStockQuery(undefined, { skip: !apiEnabled });
+  const { data: safetyStockApiData } = useGetSafetyStockQuery(undefined, { skip: !shouldLoadSafetyStock });
   const [createSafetyStock] = useCreateSafetyStockMutation();
   const [updateSafetyStock] = useUpdateSafetyStockMutation();
   const [deleteSafetyStock] = useDeleteSafetyStockMutation();
+  const { data: stockdaysApiData } = useGetStockdaysQuery(undefined, { skip: !shouldLoadStockdays });
+  const [createStockdays] = useCreateStockdaysMutation();
+  const [updateStockdays] = useUpdateStockdaysMutation();
+  const [deleteStockdays] = useDeleteStockdaysMutation();
 
-  const { data: typeParametersApiData } = useGetTypeParametersQuery(undefined, { skip: !apiEnabled });
+  const { data: typeParametersApiData } = useGetTypeParametersQuery(undefined, { skip: !shouldLoadTypeParameters });
   const [createTypeParameter] = useCreateTypeParameterMutation();
   const [updateTypeParameter] = useUpdateTypeParameterMutation();
   const [deleteTypeParameter] = useDeleteTypeParameterMutation();
 
-  const { data: processesApiData } = useGetProcessesQuery(undefined, { skip: !apiEnabled });
+  const { data: processesApiData } = useGetProcessesQuery(undefined, { skip: !shouldLoadProcesses });
   const [createProcess] = useCreateProcessMutation();
   const [updateProcess] = useUpdateProcessMutation();
   const [deleteProcess] = useDeleteProcessMutation();
 
-  const { data: globalParametersApiData } = useGetGlobalWorkingDaysQuery(undefined, { skip: !apiEnabled });
+  const { data: globalParametersApiData } = useGetGlobalWorkingDaysQuery(undefined, { skip: !shouldLoadGlobalParameters });
   const [createGlobalWorkingDays] = useCreateGlobalWorkingDaysMutation();
   const [updateGlobalWorkingDays] = useUpdateGlobalWorkingDaysMutation();
   const [deleteGlobalWorkingDays] = useDeleteGlobalWorkingDaysMutation();
-  const { data: suppliersApiData } = useListSuppliersQuery(undefined, { skip: !apiEnabled });
+  const { data: suppliersApiData } = useListSuppliersQuery(undefined, { skip: !shouldLoadSuppliers });
 
-  const { data: uomsApiData } = useGetUomsQuery(undefined, { skip: !apiEnabled });
+  const { data: uomsApiData } = useGetUomsQuery(undefined, { skip: !shouldLoadUoms });
   const [createUom] = useCreateUomMutation();
   const [updateUom] = useUpdateUomMutation();
   const [deleteUom] = useDeleteUomMutation();
 
-  const { data: kanbanApiData } = useGetKanbanStandardsQuery(undefined, { skip: !apiEnabled });
+  const { data: kanbanApiData } = useGetKanbanStandardsQuery(undefined, { skip: !shouldLoadKanban });
   const [createKanbanStandard] = useCreateKanbanStandardMutation();
   const [updateKanbanStandard] = useUpdateKanbanStandardMutation();
   const [deleteKanbanStandard] = useDeleteKanbanStandardMutation();
-  const { data: poSplitApiData } = useGetPoSplitSettingsQuery(undefined, { skip: !apiEnabled });
+  const { data: poSplitApiData } = useGetPoSplitSettingsQuery(undefined, { skip: !shouldLoadPoSplit });
   const [createPoSplit] = useCreatePoSplitMutation();
   const [updatePoSplit] = useUpdatePoSplitMutation();
   const [deletePoSplit] = useDeletePoSplitMutation();
-  const { data: approvalWorkflowApiData } = useGetApprovalWorkflowsQuery(undefined, { skip: !apiEnabled });
+  const { data: approvalWorkflowApiData } = useGetApprovalWorkflowsQuery(undefined, { skip: !shouldLoadApprovalWorkflows });
   const [createApprovalWorkflow] = useCreateApprovalWorkflowMutation();
   const [updateApprovalWorkflow] = useUpdateApprovalWorkflowMutation();
   const [deleteApprovalWorkflow] = useDeleteApprovalWorkflowMutation();
 
-  const { data: bomTreeApiData } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
-
-  const [selectedModuleId, setSelectedModuleId] = useState<string>(
-    "access-control-matrix"
-  );
+  const { data: bomTreeApiData } = useGetBomTreeQuery(undefined, { skip: !shouldLoadBomTree });
   const selectedModule = useMemo(
     () => modules.find((m) => m.id === selectedModuleId) ?? modules[0],
     [selectedModuleId]
@@ -928,6 +935,9 @@ export default function SystemSettingsPage() {
 
   const [safetyDeleteOpen, setSafetyDeleteOpen] = useState(false);
   const [safetyDeletingRow, setSafetyDeletingRow] = useState<SafetyStockRow | null>(null);
+
+  const [stockdaysDeleteOpen, setStockdaysDeleteOpen] = useState(false);
+  const [stockdaysDeletingRow, setStockdaysDeletingRow] = useState<StockdaysRow | null>(null);
 
   const [typeParameterDeleteOpen, setTypeParameterDeleteOpen] = useState(false);
   const [typeParameterDeletingRow, setTypeParameterDeletingRow] = useState<TypeParameterRow | null>(
@@ -1211,18 +1221,31 @@ export default function SystemSettingsPage() {
       });
   }, [query, safetyRowsView, typeFilter]);
 
+  const stockdaysRowsView = useMemo<StockdaysRow[]>(() => {
+    if (!apiEnabled || !stockdaysApiData) return stockdaysRows;
+    return stockdaysApiData
+      .filter((record) => Boolean(record?.id))
+      .map((record) => ({
+        id: String(record.id),
+        itemCode: String(record.item_code ?? ""),
+        stockDays: Number(record.stock_days ?? 0),
+        safetyStock: Number(record.safety_stock ?? 0),
+        status: fromBackendStatus(record.status),
+      }));
+  }, [apiEnabled, stockdaysApiData, stockdaysRows]);
+
   const filteredStockdays = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return stockdaysRows
+    return stockdaysRowsView
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
-        return [r.inventoryType, r.parameter]
+        return [r.itemCode, String(r.stockDays), String(r.safetyStock)]
           .join(" ")
           .toLowerCase()
           .includes(q);
       });
-  }, [query, stockdaysRows, typeFilter]);
+  }, [query, stockdaysRowsView, typeFilter]);
 
   const filteredTypeParameters = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -2344,6 +2367,19 @@ export default function SystemSettingsPage() {
     setSafetyDeleteOpen(true);
   };
 
+  const openStockdaysDetail = (row: StockdaysRow) => {
+    router.push(`/system-settings/stockdays/create?mode=detail&id=${encodeURIComponent(row.id)}`);
+  };
+
+  const openEditStockdays = (row: StockdaysRow) => {
+    router.push(`/system-settings/stockdays/create?mode=edit&id=${encodeURIComponent(row.id)}`);
+  };
+
+  const openStockdaysDelete = (row: StockdaysRow) => {
+    setStockdaysDeletingRow(row);
+    setStockdaysDeleteOpen(true);
+  };
+
   const openTypeParameterDelete = (row: TypeParameterRow) => {
     setTypeParameterDeletingRow(row);
     setTypeParameterDeleteOpen(true);
@@ -2402,6 +2438,11 @@ export default function SystemSettingsPage() {
   const closeSafetyDelete = () => {
     setSafetyDeleteOpen(false);
     setSafetyDeletingRow(null);
+  };
+
+  const closeStockdaysDelete = () => {
+    setStockdaysDeleteOpen(false);
+    setStockdaysDeletingRow(null);
   };
 
   const closeTypeParameterDelete = () => {
@@ -2486,6 +2527,21 @@ export default function SystemSettingsPage() {
       closeSafetyDelete();
     } catch (err) {
       message.error(getApiErrorMessage(err, "Failed to delete safety stock"));
+    }
+  };
+
+  const confirmStockdaysDelete = async () => {
+    if (!stockdaysDeletingRow) return;
+    try {
+      if (apiEnabled) {
+        await deleteStockdays(stockdaysDeletingRow.id).unwrap();
+        message.success("Stockdays deleted");
+      } else {
+        setStockdaysRows((prev) => prev.filter((r) => r.id !== stockdaysDeletingRow.id));
+      }
+      closeStockdaysDelete();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to delete stockdays"));
     }
   };
 
@@ -2771,29 +2827,24 @@ export default function SystemSettingsPage() {
 
   const stockdaysColumns: ColumnsType<StockdaysRow> = [
     {
-      title: "Inventory Type",
-      dataIndex: "inventoryType",
-      key: "inventoryType",
-      width: 210,
+      title: "Item Code",
+      dataIndex: "itemCode",
+      key: "itemCode",
+      width: 220,
       render: (v: string) => <div className="font-medium text-gray-900">{v}</div>,
     },
     {
-      title: "Parameter",
-      dataIndex: "parameter",
-      key: "parameter",
-      width: 320,
-      render: (v: string) => (
-        <div>
-          <div className="text-gray-700">{v}</div>
-          <div className="text-xs text-gray-400">Parameter: 7</div>
-        </div>
-      ),
+      title: "Stock Days",
+      dataIndex: "stockDays",
+      key: "stockDays",
+      width: 140,
+      render: (v: number) => <div className="text-gray-700">{v}</div>,
     },
     {
-      title: "Constanta",
-      dataIndex: "constanta",
-      key: "constanta",
-      width: 120,
+      title: "Safety Stock",
+      dataIndex: "safetyStock",
+      key: "safetyStock",
+      width: 140,
       render: (v: number) => (
         <span className="inline-flex items-center justify-center min-w-7 px-2 py-0.5 text-xs border border-gray-200 rounded-md bg-white text-gray-700">
           {v}
@@ -2820,11 +2871,11 @@ export default function SystemSettingsPage() {
       key: "actions",
       width: 120,
       fixed: "right",
-      render: () => (
+      render: (_: unknown, r: StockdaysRow) => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} />
-          <Button type="text" icon={<EditOutlined />} />
-          <Button type="text" danger icon={<DeleteOutlined />} />
+          <Button type="text" icon={<EyeOutlined />} onClick={() => openStockdaysDetail(r)} />
+          <Button type="text" icon={<EditOutlined />} onClick={() => openEditStockdays(r)} />
+          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openStockdaysDelete(r)} />
         </div>
       ),
     },
@@ -3344,6 +3395,20 @@ export default function SystemSettingsPage() {
       >
         <div className="text-gray-700">
           This will remove <span className="font-semibold">{safetyDeletingRow?.inventoryType}</span>.
+        </div>
+      </Modal>
+
+      <Modal
+        title="Delete stockdays parameter?"
+        open={stockdaysDeleteOpen}
+        okText="Delete"
+        okButtonProps={{ danger: true }}
+        cancelText="Cancel"
+        onOk={confirmStockdaysDelete}
+        onCancel={closeStockdaysDelete}
+      >
+        <div className="text-gray-700">
+          This will remove <span className="font-semibold">{stockdaysDeletingRow?.itemCode}</span>.
         </div>
       </Modal>
 

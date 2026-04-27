@@ -408,18 +408,20 @@ export type SafetyStockRecord = {
 };
 
 export type CreateStockdaysRequest = {
-  inventory_type: string;
-  item_uniq_code: string;
-  calculation_type: string;
-  constanta: number;
+  item_code: string;
+  stock_days: number;
+  safety_stock: number;
+  status?: StatusType;
 };
 
 export type StockdaysRecord = {
   id: string;
-  inventory_type: string;
-  item_uniq_code: string;
-  calculation_type: string;
-  constanta: number;
+  item_code: string;
+  stock_days: number;
+  safety_stock: number;
+  status?: string;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type CreatePoSplitRequest = {
@@ -1307,6 +1309,7 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: [{ type: "SystemSettingsStockdays", id: "LIST" }],
     }),
 
     updateStockdays: builder.mutation<
@@ -1319,6 +1322,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: (_res, _err, arg) => [
+        { type: "SystemSettingsStockdays", id: "LIST" },
+        { type: "SystemSettingsStockdays", id: arg.id },
+      ],
     }),
 
     deleteStockdays: builder.mutation<{ message?: string; id?: string }, string>({
@@ -1327,6 +1334,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      invalidatesTags: (_res, _err, id) => [
+        { type: "SystemSettingsStockdays", id: "LIST" },
+        { type: "SystemSettingsStockdays", id },
+      ],
     }),
 
     getStockdays: builder.query<StockdaysRecord[], void>({
@@ -1337,6 +1348,26 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
       transformResponse: (response: unknown) =>
         normalizeArrayResponse<StockdaysRecord>(response),
+      providesTags: (result) =>
+        result
+          ? [
+              { type: "SystemSettingsStockdays", id: "LIST" },
+              ...result
+                .map((r) => r?.id)
+                .filter((id): id is string => Boolean(id))
+                .map((id) => ({ type: "SystemSettingsStockdays" as const, id })),
+            ]
+          : [{ type: "SystemSettingsStockdays", id: "LIST" }],
+    }),
+
+    getStockdaysById: builder.query<StockdaysRecord | null, string>({
+      query: (id) => ({
+        url: `${ROUTES.stockdays}/${encodeURIComponent(id)}`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => normalizeObjectResponse<StockdaysRecord>(response),
+      providesTags: (_res, _err, id) => [{ type: "SystemSettingsStockdays", id }],
     }),
 
     // PO split
@@ -1473,6 +1504,7 @@ export const {
   useUpdateStockdaysMutation,
   useDeleteStockdaysMutation,
   useGetStockdaysQuery,
+  useGetStockdaysByIdQuery,
   useCreatePoSplitMutation,
   useUpdatePoSplitMutation,
   useDeletePoSplitMutation,

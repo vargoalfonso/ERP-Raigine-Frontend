@@ -397,6 +397,7 @@ export default function DnManagementPage() {
           <head>
             <meta charset="utf-8" />
             <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline';" />
             <title>${escapeHtml(title)}</title>
             <style>
               :root { --border: #e5e7eb; --muted: #6b7280; --text: #111827; }
@@ -422,12 +423,11 @@ export default function DnManagementPage() {
                 ${cards.join("\n")}
               </div>
             </div>
-            <script>window.onload = () => window.print();</script>
           </body>
         </html>
       `;
 
-      const w = window.open("", "_blank");
+      const w = window.open("", "_blank", "noopener,noreferrer");
       if (!w) {
         window.alert("Pop-up blocked. Please allow pop-ups to print.");
         return;
@@ -435,6 +435,13 @@ export default function DnManagementPage() {
       w.document.open();
       w.document.write(html);
       w.document.close();
+      w.addEventListener(
+        "load",
+        () => {
+          w.print();
+        },
+        { once: true }
+      );
     } finally {
       setBarcodePreparing(false);
     }

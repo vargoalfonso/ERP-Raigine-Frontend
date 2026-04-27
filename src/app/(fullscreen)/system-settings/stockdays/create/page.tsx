@@ -1,106 +1,126 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
-import { Button, Card, InputNumber, Select, Tag, message } from "antd";
+import React, { Suspense, useEffect, useMemo } from "react";
+import { Button, Card, Form, InputNumber, Select, Tag, message } from "antd";
 import {
   InfoCircleOutlined,
   LeftOutlined,
-  PlusOutlined,
   SaveOutlined,
 } from "@ant-design/icons";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import {
+  useCreateStockdaysMutation,
+  useGetStockdaysByIdQuery,
+  useUpdateStockdaysMutation,
+} from "@/lib/api/system-settings/api";
 
-type Entry = {
-  id: string;
-  uniq?: string;
-  calculationType?: string;
-  constanta?: number;
-  created: boolean;
+type FormValues = {
+  itemCode?: string;
+  stockDays?: number;
+  safetyStock?: number;
+  status?: "Active" | "Inactive";
 };
 
-const TYPE_OPTIONS = [
-  {
-    label: "Stockdays - PRL = Stock / (PRL/Working days)",
-    value: "Stockdays - PRL = Stock / (PRL/Working days)",
-  },
-  {
-    label: "Stockdays - DailyUsage = Stock / Daily Usage (Data history)",
-    value: "Stockdays - DailyUsage = Stock / Daily Usage (Data history)",
-  },
-];
+const toUiStatus = (value: unknown): "Active" | "Inactive" =>
+  String(value ?? "active").toLowerCase().includes("inact") ? "Inactive" : "Active";
 
-const UNIQ_OPTIONS = TYPE_OPTIONS;
-
-const CALCULATION_OPTIONS = [
-  {
-    label: "Type | (PRL / Working Days * Parameter)",
-    value: "Type | (PRL / Working Days * Parameter)",
-  },
-];
-
-function makeEntry(idx: number): Entry {
-  return {
-    id: `entry-${idx}`,
-    uniq: undefined,
-    calculationType: CALCULATION_OPTIONS[0]?.value,
-    constanta: undefined,
-    created: false,
-  };
-}
+const toBackendStatus = (value: FormValues["status"]): string =>
+  value === "Inactive" ? "inactive" : "active";
 
 export default function StockdaysCreatePage() {
+  return (
+    <Suspense fallback={null}>
+      <StockdaysCreatePageContent />
+    </Suspense>
+  );
+}
+
+function StockdaysCreatePageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const apiEnabled = Boolean(apiBaseUrl);
+  const [form] = Form.useForm<FormValues>();
+  const [createStockdays, createState] = useCreateStockdaysMutation();
+  const [updateStockdays, updateState] = useUpdateStockdaysMutation();
 
-  const [type, setType] = useState<string | undefined>(undefined);
-  const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
+  const id = searchParams.get("id") ?? "";
+  const mode = (searchParams.get("mode") ?? "create").toLowerCase();
+  const isEditMode = mode === "edit";
+  const isDetailMode = mode === "detail" || mode === "view";
+  const isReadOnly = isDetailMode;
 
-  const completeCount = useMemo(() => entries.filter((e) => e.created).length, [entries]);
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
+  const itemCodeOptions = useMemo(
+    () =>
+      bomIndex.options.map((option) => ({
+        label: bomIndex.partNameByUniq[option.value]
+          ? `${option.value} — ${bomIndex.partNameByUniq[option.value]}`
+          : option.value,
+        value: option.value,
+      })),
+    [bomIndex.options, bomIndex.partNameByUniq]
+  );
 
-  const updateEntry = (id: string, patch: Partial<Entry>) => {
-    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
-  };
+  const stockdaysDetailQuery = useGetStockdaysByIdQuery(id, {
+    skip: !apiEnabled || !id,
+  });
 
-  const validateEntry = (e: Entry) => {
-    if (!e.uniq) return "Uniq is required";
-    if (!e.calculationType) return "Calculation Type is required";
-    if (e.constanta === undefined || e.constanta === null) return "Constanta is required";
-    return null;
-  };
-
-  const onCreateStockDays = (id: string) => {
-    const entry = entries.find((e) => e.id === id);
-    if (!entry) return;
-
-    const err = validateEntry(entry);
-    if (err) {
-      message.error(err);
+  useEffect(() => {
+    if (!id) {
+      form.setFieldsValue({ status: "Active" });
       return;
     }
 
-    updateEntry(id, { created: true });
-    message.success("Entry saved");
-  };
+    const detail = stockdaysDetailQuery.data;
+    if (!detail) return;
 
-  const addAnother = () => {
-    setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
-  };
+    form.setFieldsValue({
+      itemCode: String(detail.item_code ?? ""),
+      stockDays: Number(detail.stock_days ?? 0),
+      safetyStock: Number(detail.safety_stock ?? 0),
+      status: toUiStatus(detail.status),
+    });
+  }, [form, id, stockdaysDetailQuery.data]);
 
-  const onSave = () => {
-    if (!type) {
-      message.error("Type is required");
-      return;
-    }
+  const onSave = async () => {
+    try {
+      const values = await form.validateFields();
+      const payload = {
+        item_code: String(values.itemCode ?? "").trim(),
+        stock_days: Number(values.stockDays ?? 0),
+        safety_stock: Number(values.safetyStock ?? 0),
+        status: toBackendStatus(values.status),
+      };
 
-    for (const e of entries) {
-      const err = validateEntry(e);
-      if (err) {
-        message.error(`Entry ${entries.indexOf(e) + 1}: ${err}`);
-        return;
+      if (apiEnabled) {
+        if (isEditMode && id) {
+          await updateStockdays({
+            id,
+            body: {
+              stock_days: payload.stock_days,
+              safety_stock: payload.safety_stock,
+              status: payload.status,
+            },
+          }).unwrap();
+          message.success("Stockdays updated");
+        } else {
+          await createStockdays(payload).unwrap();
+          message.success("Stockdays created");
+        }
+      } else {
+        message.success(isEditMode ? "Stockdays updated" : "Stockdays created");
       }
-    }
 
-    message.success("Stockdays parameter saved");
-    router.push("/system-settings");
+      router.push("/system-settings");
+    } catch (error) {
+      if (error && typeof error === "object" && "errorFields" in error) return;
+      message.error(getApiErrorMessage(error, "Failed to save stockdays"));
+    }
   };
 
   return (
@@ -118,144 +138,91 @@ export default function StockdaysCreatePage() {
 
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
-                Save Parameter
-              </Button>
+              {!isReadOnly && (
+                <Button
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  onClick={onSave}
+                  loading={createState.isLoading || updateState.isLoading}
+                >
+                  {isEditMode ? "Update Parameter" : "Save Parameter"}
+                </Button>
+              )}
             </div>
           </div>
 
           <div className="mt-2">
             <div className="text-xl font-semibold text-gray-900">
-              Add Parameter for Stockdays Option
+              {isReadOnly ? "Stockdays Detail" : isEditMode ? "Edit Stockdays Parameter" : "Add Parameter for Stockdays Option"}
             </div>
             <div className="text-sm text-gray-500">
-              Create Stockdays <span className="mx-2">•</span> {entries.length} entry
+              Configure stock days and safety stock from BOM item code
             </div>
           </div>
         </div>
       </div>
 
       <div className="px-6 py-6">
-        <div className="max-w-6xl mx-auto space-y-5">
-          <Card className="rounded-2xl" bodyStyle={{ padding: 24 }}>
+        <div className="max-w-5xl mx-auto">
+          <Card className="rounded-2xl" bodyStyle={{ padding: 24 }} loading={Boolean(id) && stockdaysDetailQuery.isFetching}>
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="text-base font-semibold text-gray-900">Step 1: Select Type</div>
-                <div className="text-sm text-gray-500">Select Type before create Stockdays</div>
+                <div className="text-base font-semibold text-gray-900">Stockdays Parameter</div>
+                <div className="text-sm text-gray-500">Item code is sourced from BOM UNIQ code</div>
               </div>
               <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">
                 Required
               </Tag>
             </div>
 
-            <div className="mt-4 flex items-center gap-3">
-              <div className="w-20 text-sm text-gray-700">Type</div>
-              <div className="w-[280px]">
-                <Select
-                  value={type}
-                  onChange={setType}
-                  placeholder="Select Type"
-                  options={TYPE_OPTIONS}
-                />
+            <Form form={form} layout="vertical" requiredMark={false} className="mt-5">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Form.Item
+                  label="Item Code"
+                  name="itemCode"
+                  rules={[{ required: true, message: "Item Code is required" }]}
+                >
+                  <Select
+                    placeholder="Select Item Code"
+                    options={itemCodeOptions}
+                    showSearch
+                    optionFilterProp="label"
+                    disabled={isReadOnly || isEditMode}
+                  />
+                </Form.Item>
+
+                <Form.Item label="Status" name="status" rules={[{ required: true, message: "Status is required" }]}>
+                  <Select
+                    disabled={isReadOnly}
+                    options={[
+                      { label: "Active", value: "Active" },
+                      { label: "Inactive", value: "Inactive" },
+                    ]}
+                  />
+                </Form.Item>
+
+                <Form.Item
+                  label="Stock Days"
+                  name="stockDays"
+                  rules={[{ required: true, message: "Stock Days is required" }]}
+                >
+                  <InputNumber className="w-full" min={0} disabled={isReadOnly} />
+                </Form.Item>
+
+                <Form.Item
+                  label="Safety Stock"
+                  name="safetyStock"
+                  rules={[{ required: true, message: "Safety Stock is required" }]}
+                >
+                  <InputNumber className="w-full" min={0} disabled={isReadOnly} />
+                </Form.Item>
               </div>
-              <InfoCircleOutlined className="text-blue-600" />
-            </div>
-          </Card>
 
-          <Card className="rounded-2xl" bodyStyle={{ padding: 24 }}>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-base font-semibold text-gray-900">Step 2: Input Data</div>
-                <div className="text-sm text-gray-500">Input Data for each Items</div>
+              <div className="mt-2 flex items-center gap-2 text-sm text-gray-500">
+                <InfoCircleOutlined className="text-blue-600" />
+                <span>Item code akan dikirim menggunakan UNIQ code dari BOM.</span>
               </div>
-              <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">
-                Entry 1
-              </Tag>
-            </div>
-
-            <div className="mt-5 space-y-4">
-              {entries.map((e, idx) => (
-                <div key={e.id}>
-                  {idx > 0 && (
-                    <div className="flex items-center justify-end mb-2">
-                      <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">
-                        Entry {idx + 1}
-                      </Tag>
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end">
-                    <div className="lg:col-span-3">
-                      <div className="text-sm text-gray-700 mb-2">Uniq</div>
-                      <Select
-                        value={e.uniq}
-                        onChange={(v) => updateEntry(e.id, { uniq: v, created: false })}
-                        placeholder="Select Uniq"
-                        options={UNIQ_OPTIONS}
-                      />
-                    </div>
-
-                    <div className="lg:col-span-4">
-                      <div className="text-sm text-gray-700 mb-2">Calculation Type</div>
-                      <Select
-                        value={e.calculationType}
-                        onChange={(v) => updateEntry(e.id, { calculationType: v, created: false })}
-                        options={CALCULATION_OPTIONS}
-                      />
-                    </div>
-
-                    <div className="lg:col-span-3">
-                      <div className="text-sm text-gray-700 mb-2">Constanta</div>
-                      <InputNumber
-                        className="w-full"
-                        value={e.constanta}
-                        onChange={(v) => updateEntry(e.id, { constanta: v ?? undefined, created: false })}
-                        placeholder="Input Constanta"
-                        min={0}
-                      />
-                    </div>
-
-                    <div className="lg:col-span-2">
-                      <Button
-                        type="primary"
-                        className="w-full"
-                        icon={<PlusOutlined />}
-                        onClick={() => onCreateStockDays(e.id)}
-                      >
-                        Create Stock days
-                      </Button>
-                    </div>
-                  </div>
-
-                  {idx < entries.length - 1 && <div className="mt-6 border-t border-gray-200" />}
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <div className="flex items-center justify-center">
-            <Button icon={<PlusOutlined />} onClick={addAnother}>
-              Add Another Parameter
-            </Button>
-          </div>
-
-          <Card className="rounded-2xl" bodyStyle={{ padding: 18 }}>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-base font-semibold text-gray-900">Summary</div>
-                <div className="text-sm text-gray-500">{entries.length} Parameter ready to be saved</div>
-              </div>
-              <div className="flex items-center gap-10">
-                <div className="text-right">
-                  <div className="text-lg font-semibold text-gray-900">{entries.length}</div>
-                  <div className="text-xs text-gray-500">Entries</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-lg font-semibold text-gray-900">{completeCount}</div>
-                  <div className="text-xs text-gray-500">Complete</div>
-                </div>
-              </div>
-            </div>
+            </Form>
           </Card>
         </div>
       </div>

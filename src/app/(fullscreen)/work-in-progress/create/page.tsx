@@ -22,7 +22,7 @@ import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { useGetInventoryKanbanSummaryQuery } from "@/lib/api/inventory/api";
-import { useGetProcessesQuery } from "@/lib/api/system-settings/api";
+import { useGetProcessesQuery, useGetTypeParametersQuery } from "@/lib/api/system-settings/api";
 import {
   useGetWorkOrderByIdQuery,
   useGetWorkOrdersQuery,
@@ -31,7 +31,7 @@ import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
 import { useCreateWipMutation } from "@/lib/api/wip/api";
 
-type WipType = "draft" | "in_progress" | "completed";
+type WipType = string;
 type Process = string;
 
 type WipEntry = {
@@ -128,6 +128,7 @@ export default function CreateWorkInProgressPage() {
   const workOrders = workOrdersQuery.data?.items ?? [];
 
   const { data: processRecords = [] } = useGetProcessesQuery(undefined, { skip: !apiEnabled });
+  const { data: typeParameterRecords = [] } = useGetTypeParametersQuery(undefined, { skip: !apiEnabled });
   const processNameOptions = useMemo(
     () =>
       uniqueStrings(
@@ -135,6 +136,34 @@ export default function CreateWorkInProgressPage() {
       ),
     [processRecords]
   );
+
+  const wipTypeOptions = useMemo(() => {
+    const filtered = typeParameterRecords.filter((item) => {
+      const code = String(item.type_code ?? "").trim().toLowerCase();
+      const name = String(item.type_name ?? "").trim().toLowerCase();
+      return code.includes("wip") || name.includes("wip") || name.includes("work in progress") || code.includes("work in progress");
+    });
+
+    const options = filtered.map((item) => {
+      const code = String(item.type_code ?? "").trim();
+      const name = String(item.type_name ?? "").trim();
+      const value = code || name;
+      return {
+        label: code && name ? `${code} — ${name}` : value,
+        value,
+      };
+    }).filter((item) => Boolean(item.value));
+
+    if (options.length > 0) return options;
+
+    return [
+      { label: "Draft", value: "draft" },
+      { label: "In Progress", value: "in_progress" },
+      { label: "Completed", value: "completed" },
+    ];
+  }, [typeParameterRecords]);
+
+  const defaultWipType = wipTypeOptions[0]?.value ?? "draft";
 
   const workOrderByNumber = useMemo(
     () => new Map(workOrders.map((record) => [record.wo_number, record] as const)),
@@ -266,6 +295,12 @@ export default function CreateWorkInProgressPage() {
   }, [selectedWorkOrderResolvedId]);
 
   useEffect(() => {
+    if (!form.getFieldValue("wipType")) {
+      form.setFieldsValue({ wipType: defaultWipType });
+    }
+  }, [defaultWipType, form]);
+
+  useEffect(() => {
     if (!selectedWoNumber) {
       form.setFieldsValue({
         uniq: undefined,
@@ -339,7 +374,7 @@ export default function CreateWorkInProgressPage() {
       const resolvedPackingNumber = String(values.packingNumber ?? "").trim();
       const resolvedStock = Number(values.stock ?? stockValue ?? 0);
       const resolvedStockToComplete = Number(values.stockToCompleteKanban ?? stockToCompleteValue ?? 0);
-      const resolvedWipType = (values.wipType ?? "draft") as WipType;
+      const resolvedWipType = String(values.wipType ?? defaultWipType) as WipType;
 
       const nextEntries = resolvedProcesses.map((processName, index) => ({
         id: `${groupId}-${index}`,
@@ -372,7 +407,7 @@ export default function CreateWorkInProgressPage() {
 
       setEditingGroupId(null);
       form.resetFields();
-      form.setFieldsValue({ wipType: "draft" });
+      form.setFieldsValue({ wipType: defaultWipType });
     } catch {
       // validation errors shown by antd
     }
@@ -407,7 +442,7 @@ export default function CreateWorkInProgressPage() {
         if (editingGroupId === row.groupId) {
           setEditingGroupId(null);
           form.resetFields();
-          form.setFieldsValue({ wipType: "draft" });
+          form.setFieldsValue({ wipType: defaultWipType });
         }
         message.success("Deleted");
       },
@@ -572,7 +607,7 @@ export default function CreateWorkInProgressPage() {
               form={form}
               layout="vertical"
               requiredMark={false}
-              initialValues={{ wipType: "draft" }}
+              initialValues={{ wipType: defaultWipType }}
             >
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <Form.Item label="Uniq" name="uniq" rules={[{ required: true, message: "Uniq is required" }]}>
@@ -620,11 +655,7 @@ export default function CreateWorkInProgressPage() {
                 >
                   <Select
                     placeholder="Select Type"
-                    options={[
-                      { label: "Draft", value: "draft" },
-                      { label: "In Progress", value: "in_progress" },
-                      { label: "Completed", value: "completed" },
-                    ]}
+                    options={wipTypeOptions}
                   />
                 </Form.Item>
               </div>

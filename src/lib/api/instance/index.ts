@@ -1,7 +1,13 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 
+let cachedLocationPromise: Promise<{ latitude: number | null; longitude: number | null }> | null = null;
+
 export const getUserLocation = async () => {
-  return new Promise<{ latitude: number; longitude: number }>(
+  if (cachedLocationPromise) {
+    return cachedLocationPromise;
+  }
+
+  cachedLocationPromise = new Promise<{ latitude: number | null; longitude: number | null }>(
     (resolve, reject) => {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
@@ -13,6 +19,11 @@ export const getUserLocation = async () => {
           },
           (error) => {
             reject(error);
+          },
+          {
+            enableHighAccuracy: false,
+            timeout: 2000,
+            maximumAge: 5 * 60 * 1000,
           }
         );
       } else {
@@ -20,6 +31,11 @@ export const getUserLocation = async () => {
       }
     }
   );
+
+  return cachedLocationPromise.catch((error) => {
+    cachedLocationPromise = Promise.resolve({ latitude: null, longitude: null });
+    throw error;
+  });
 };
 
 export const getCookiesFromBrowser = (cookieName: string): string | null => {
@@ -55,8 +71,8 @@ export const generateHeaders = async ({
     // Browsers disallow setting the User-Agent header. Use a custom header instead.
     "X-User-Agent": deviceInfo.userAgent,
     "X-Device-Info": deviceInfo.deviceInfo,
-    "X-Longitude": location.latitude?.toString() ?? "",
-    "X-Latitude": location.longitude?.toString() ?? "",
+    "X-Longitude": location.longitude?.toString() ?? "",
+    "X-Latitude": location.latitude?.toString() ?? "",
     "X-Source-System": "web, mobile",
   };
 
@@ -91,13 +107,14 @@ export const apiSlice = createApi({
     "SystemSettingsApprovalWorkflow",
     "SystemSettingsKanban",
     "SystemSettingsSafetyStock",
+    "SystemSettingsStockdays",
     "SystemSettingsPoSplit",
     "SystemSettingsUom",
     "SystemSettingsTypeParameter",
     "SystemSettingsProcess",
     "SystemSettingsGlobalParameters",
   ],
-  refetchOnFocus: true,
+  refetchOnFocus: false,
   baseQuery: async (args, api, extraOptions) => {
     if (!apiBaseUrl) {
       return {

@@ -38,6 +38,7 @@ import {
   useGetScrapStocksQuery,
   useGetScrapStocksStatsQuery,
 } from "@/lib/api/scrap-stock/api";
+import { useGetEmployeesQuery } from "@/lib/api/system-settings/api";
 import {
   type ScrapReleaseRecord,
   useGetScrapReleasesLegacyQuery,
@@ -435,6 +436,12 @@ export default function ScrapStockPage() {
   const [editingScrap, setEditingScrap] = useState<ScrapRecord | null>(null);
   const [editForm] = Form.useForm<ScrapEditFormValues>();
 
+  const employeesQuery = useGetEmployeesQuery(undefined, { skip: !apiEnabled });
+  const employeeOptions = useMemo(() => {
+    return (employeesQuery.data ?? [])
+      .map((e) => ({ label: e.full_name ?? e.email ?? String(e.id), value: e.full_name ?? e.employee_id ?? e.id }));
+  }, [employeesQuery.data]);
+
   const openEditDrawer = (record: ScrapRecord) => {
     setEditingScrap(record);
     editForm.setFieldsValue({
@@ -443,7 +450,7 @@ export default function ScrapStockPage() {
       packing_number: record.packing_number,
       scrap_quantity: record.quantity,
       scrap_type: record.scrap_type,
-      validator: "John Mejer",
+      validator: record.validator ?? undefined,
       quantity: record.quantity,
     });
     setEditOpen(true);
@@ -739,7 +746,7 @@ export default function ScrapStockPage() {
           >
             <Select
               placeholder="Select Validator"
-              options={[
+              options={employeeOptions.length ? employeeOptions : [
                 { label: "John Mejer", value: "John Mejer" },
                 { label: "QC Inspector A", value: "QC Inspector A" },
                 { label: "Operator John", value: "Operator John" },

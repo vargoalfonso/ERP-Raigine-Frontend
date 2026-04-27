@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Suspense, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -35,6 +35,7 @@ import {
   useCreateStockOpnameSessionMutation,
   useLazyGetStockOpnameUniqOptionsQuery,
 } from "@/lib/api/stock-opname/api";
+import { useGetEmployeesQuery } from "@/lib/api/system-settings/api";
 
 type Method = "manual" | "bulk";
 
@@ -100,6 +101,7 @@ function StockOpnameStartCountPageContent() {
   }, [tab]);
 
   const [form] = Form.useForm();
+  const uniqSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [method, setMethod] = useState<Method>("manual");
   const [period, setPeriod] = useState<Dayjs>(dayjs("2024-01-01"));
   const [scheduleDate, setScheduleDate] = useState<Dayjs>(dayjs());
@@ -134,14 +136,13 @@ function StockOpnameStartCountPageContent() {
     []
   );
 
-  const userCounterOptions = useMemo(
-    () => [
-      { label: "John Meijer", value: "John Meijer" },
-      { label: "Sarah Tan", value: "Sarah Tan" },
-      { label: "Mike Johnson", value: "Mike Johnson" },
-    ],
-    []
-  );
+  const employeesQuery = useGetEmployeesQuery(undefined, { skip: !apiEnabled });
+  const liveUserCounterOptions = useMemo(() => {
+    return (employeesQuery.data ?? []).map((e) => ({
+      label: e.full_name ?? e.email ?? String(e.id),
+      value: e.full_name ?? e.employee_id ?? e.id,
+    }));
+  }, [employeesQuery.data]);
 
   const uniqOptions = useMemo(
     () =>
@@ -169,6 +170,14 @@ function StockOpnameStartCountPageContent() {
     if (!apiEnabled) return;
     void getUniqOptions({ type: inventoryType, q: "", limit: 10 });
   }, [apiEnabled, getUniqOptions, inventoryType]);
+
+  useEffect(() => {
+    return () => {
+      if (uniqSearchTimeoutRef.current) {
+        clearTimeout(uniqSearchTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const entryCountLabel = useMemo(() => {
     if (method === "bulk") return `${bulkRows.length || 0} entry`;
@@ -492,7 +501,18 @@ function StockOpnameStartCountPageContent() {
                           loading={uniqLoading}
                           onSearch={(value) => {
                             if (!apiEnabled) return;
-                            void getUniqOptions({ type: inventoryType, q: value, limit: 10 });
+                            if (uniqSearchTimeoutRef.current) {
+                              clearTimeout(uniqSearchTimeoutRef.current);
+                            }
+
+                            const normalizedValue = value.trim();
+                            if (normalizedValue.length > 0 && normalizedValue.length < 2) {
+                              return;
+                            }
+
+                            uniqSearchTimeoutRef.current = setTimeout(() => {
+                              void getUniqOptions({ type: inventoryType, q: normalizedValue, limit: 10 });
+                            }, 300);
                           }}
                           onChange={(v) => {
                             if (apiEnabled) {
@@ -542,7 +562,11 @@ function StockOpnameStartCountPageContent() {
                         <Select
                           placeholder="Select Counter"
                           value={e.userCounter}
-                          options={userCounterOptions}
+                          options={liveUserCounterOptions.length ? liveUserCounterOptions : [
+                            { label: "John Meijer", value: "John Meijer" },
+                            { label: "Sarah Tan", value: "Sarah Tan" },
+                            { label: "Mike Johnson", value: "Mike Johnson" },
+                          ]}
                           onChange={(v) => setEntry(e.id, { userCounter: v })}
                         />
                       </div>

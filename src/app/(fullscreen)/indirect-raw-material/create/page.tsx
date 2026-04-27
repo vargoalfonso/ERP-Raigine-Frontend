@@ -385,13 +385,13 @@ export default function CreateIndirectRawMaterialPage() {
         await createInventory({
           type: "indirect-materials",
           body: {
-            uniq_code: values.uniq,
+            uniq_code: String(values.uniq ?? ""),
             raw_material_type: "Indirect",
             rm_source: [values.poNumber, values.deliveryNotesNumber].filter(Boolean).join(" / "),
-            warehouse_location: values.warehouseDestination,
+            warehouse_location: String(values.warehouseDestination ?? ""),
             stock_qty: Number(values.addStock ?? 0),
-            part_name: values.partName,
-            part_number: values.partNumber,
+            part_name: String(values.partName ?? ""),
+            part_number: String(values.partNumber ?? ""),
           },
         }).unwrap();
       }

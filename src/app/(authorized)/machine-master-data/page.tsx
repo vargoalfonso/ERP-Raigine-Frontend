@@ -414,7 +414,7 @@ export default function MachineMasterDataPage() {
     const canvas = qrWrapperRef.current?.querySelector("canvas") as HTMLCanvasElement | null;
     const dataUrl = canvas?.toDataURL("image/png");
 
-    const w = window.open("", "_blank", "width=680,height=880");
+    const w = window.open("", "_blank", "noopener,noreferrer,width=680,height=880");
     if (!w) {
       message.error("Popup blocked. Please allow popups to print.");
       return;
@@ -422,6 +422,13 @@ export default function MachineMasterDataPage() {
 
     const title = "Machine Information Barcode";
     const capacityText = `${formatNumber(barcodeRow.capacity)} units/hour`;
+    const escapeHtml = (value: unknown) =>
+      String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
 
     w.document.open();
     w.document.write(`<!doctype html>
@@ -429,7 +436,8 @@ export default function MachineMasterDataPage() {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>${title}</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: https:; style-src 'unsafe-inline';" />
+    <title>${escapeHtml(title)}</title>
     <style>
       * { box-sizing: border-box; }
       body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; padding: 24px; color: #111827; }
@@ -452,32 +460,32 @@ export default function MachineMasterDataPage() {
   </head>
   <body>
     <div class="card">
-      <div class="top-title">${title}</div>
+      <div class="top-title">${escapeHtml(title)}</div>
       <div class="center-title">MACHINE INFORMATION</div>
-      <div class="center-sub">${barcodeRow.machineNumber}</div>
+      <div class="center-sub">${escapeHtml(barcodeRow.machineNumber)}</div>
       <div class="grid">
         <div>
           <div class="label">Machine Name</div>
-          <div class="value">${barcodeRow.machineName}</div>
+          <div class="value">${escapeHtml(barcodeRow.machineName)}</div>
         </div>
         <div>
           <div class="label">Production Line</div>
-          <div class="value">${barcodeRow.productionLine}</div>
+          <div class="value">${escapeHtml(barcodeRow.productionLine)}</div>
         </div>
         <div>
           <div class="label">Process</div>
-          <div class="value">${barcodeRow.processName}</div>
+          <div class="value">${escapeHtml(barcodeRow.processName)}</div>
         </div>
         <div>
           <div class="label">Capacity</div>
-          <div class="value">${capacityText}</div>
+          <div class="value">${escapeHtml(capacityText)}</div>
         </div>
       </div>
       <div class="divider"></div>
       <div class="qr">
         ${dataUrl ? `<img src="${dataUrl}" alt="QR" />` : `<div style="width:180px;height:180px;border:2px solid #111827"></div>`}
       </div>
-      <div class="bottom-code">${barcodeRow.machineNumber}</div>
+      <div class="bottom-code">${escapeHtml(barcodeRow.machineNumber)}</div>
     </div>
   </body>
 </html>`);

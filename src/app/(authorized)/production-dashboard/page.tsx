@@ -212,6 +212,13 @@ const calculateAgingDays = (targetDate: string | undefined, createdAt: string | 
 
 const openPrintWindow = (title: string, body: string) => {
   if (typeof window === "undefined") return;
+  const escapeHtml = (value: unknown): string =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   const popup = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
   if (!popup) {
     message.warning("Popup blocked. Izinkan popup untuk print.");
@@ -221,7 +228,8 @@ const openPrintWindow = (title: string, body: string) => {
   popup.document.write(`
     <html>
       <head>
-        <title>${title}</title>
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';" />
+        <title>${escapeHtml(title)}</title>
         <style>
           body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
           h1 { font-size: 20px; margin-bottom: 12px; }
@@ -237,7 +245,13 @@ const openPrintWindow = (title: string, body: string) => {
   `);
   popup.document.close();
   popup.focus();
-  popup.print();
+  popup.addEventListener(
+    "load",
+    () => {
+      popup.print();
+    },
+    { once: true }
+  );
 };
 
 const emptySummaryCards: ProductionDashboardSummaryCards = {
