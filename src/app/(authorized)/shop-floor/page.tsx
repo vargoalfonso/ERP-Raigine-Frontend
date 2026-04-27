@@ -5,6 +5,7 @@ import { Alert, Modal, Spin, message } from "antd";
 import StatsCard from "@/components/StatsCard";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
+import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
 import {
   type ShopFloorMachineDetail,
   type ShopFloorProductionIssuesSummaryItem,
@@ -451,6 +452,11 @@ const formatHoursUntilDue = (value?: string | null): string => {
   return diffHours < 0 ? `${Math.abs(diffHours)}h overdue` : `${diffHours}h`;
 };
 
+const formatHoursUntilDueValue = (value?: number | null): string => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return value < 0 ? `${Math.abs(Math.round(value))}h overdue` : `${Math.round(value)}h`;
+};
+
 const mapLineStatus = (value?: string | null): LineStatus => {
   const normalized = toText(value, "").toUpperCase();
   if (normalized.includes("RUN")) return "Running";
@@ -555,6 +561,7 @@ export default function ShopFloor() {
       const machineId = toText(row.machine?.id ?? row.machine?.code, `machine-${index + 1}`);
       const progressFromPercent = toNumber(row.progress?.percent);
       const doneQty = toNumber(row.progress?.done_qty);
+      const throughputToday = toNumber(row.progress?.throughput_today ?? row.progress?.done_qty);
       const targetQty = toNumber(row.progress?.target_qty);
       const computedPercent = targetQty > 0 ? clamp(Math.round((doneQty / targetQty) * 100), 0, 100) : 0;
       const progressPercent = progressFromPercent > 0 ? clamp(Math.round(progressFromPercent), 0, 100) : computedPercent;
@@ -568,8 +575,8 @@ export default function ShopFloor() {
         status,
         currentProduction: {
           uniq: toText(row.production?.uniq_code, "—"),
-          workOrder: toText(row.production?.work_order, "—"),
-          part: toText(row.production?.part_name, "Part not available"),
+          workOrder: formatWorkOrderDisplayNumber(row.production?.work_order) || "—",
+          part: toText(row.production?.part_name ?? row.production?.process_name, "Part not available"),
           lastScan: formatRelativeTime(row.production?.last_scan_at ?? liveProductionSummary?.as_of ?? null),
         },
         operator: {
@@ -577,15 +584,15 @@ export default function ShopFloor() {
           time: formatClock(row.production?.last_scan_at ?? liveProductionSummary?.as_of ?? null),
           shiftStart: "—",
           shiftState: status,
-          nextProcess: "—",
+          nextProcess: toText(row.production?.process_name, "—"),
           cycleTime: "—",
         },
         progressPercent,
         progressLabel: toText(row.progress?.label, progressPercent >= 100 ? "Completed" : "In Progress"),
         bottomStats: {
-          throughputToday: doneQty,
+          throughputToday,
           utilization: status === "Running" ? 100 : status === "Issue" ? 25 : 60,
-          qualityRate: 100,
+          qualityRate: toNumber(row.quality?.rate_percent) || 100,
           avgCycleTime: "—",
         },
       };
@@ -609,24 +616,28 @@ export default function ShopFloor() {
     const items = deliveryReadinessSummary?.items ?? [];
     return items.map((item, index) => {
       const uniq = toText(item.identity?.uniq_code, `UNIQ-${index + 1}`);
-      const finishedGoods = toNumber(item.inventory?.finished_goods_qty);
+      const finishedGoods = toNumber(item.inventory?.finished_goods_qty ?? item.inventory?.fg_qty);
       const wipStock = toNumber(item.inventory?.wip_qty);
-      const totalAvailable = toNumber(item.inventory?.total_available_qty) || finishedGoods + wipStock;
+      const totalAvailable = toNumber(item.inventory?.total_available_qty ?? item.inventory?.available_qty) || finishedGoods + wipStock;
       const requiredQty = toNumber(item.delivery?.required_qty);
-      const shortfallQty = toNumber(item.inventory?.shortfall_qty);
-      const risk = mapDeliveryRisk(item.readiness?.status, Math.max(0, shortfallQty), requiredQty);
+      const shortfallQty = toNumber(item.readiness?.shortfall_qty ?? item.inventory?.shortfall_qty);
+      const risk = mapDeliveryRisk(item.readiness?.status ?? item.readiness?.readiness_status, Math.max(0, shortfallQty), requiredQty);
       const coveragePercent =
         toNumber(item.readiness?.coverage_percent) ||
         (requiredQty > 0 ? clamp(Math.round((totalAvailable / requiredQty) * 100), 0, 999) : risk === "Ready" ? 100 : 0);
+      const hoursUntilDue =
+        typeof item.delivery?.hours_until_due === "number"
+          ? formatHoursUntilDueValue(item.delivery.hours_until_due)
+          : formatHoursUntilDue(item.delivery?.due_at ?? item.delivery?.schedule_date ?? null);
 
       return {
         key: `${uniq}-${index}`,
         productName: toText(item.identity?.product_name, uniq),
         uniq,
         customer: toText(item.identity?.customer_name, "—"),
-        dueDate: formatDate(item.delivery?.due_at ?? item.delivery?.schedule_date ?? null),
-        dueTime: toText(item.delivery?.schedule_time, item.delivery?.due_at ? "23:59" : "—"),
-        hoursUntilDue: formatHoursUntilDue(item.delivery?.due_at ?? item.delivery?.schedule_date ?? null),
+        dueDate: formatDate(item.delivery?.due_at ?? item.delivery?.due_date ?? item.delivery?.schedule_date ?? null),
+        dueTime: toText(item.delivery?.due_time ?? item.delivery?.schedule_time, item.delivery?.due_at ? "23:59" : "—"),
+        hoursUntilDue,
         requiredQty,
         finishedGoods,
         wipStock,
@@ -644,17 +655,17 @@ export default function ShopFloor() {
 
     const source = productionIssuesSummary?.items ?? [];
     return source.map((issue, index) => ({
-      key: String(issue.issue_id ?? index + 1),
+      key: String(issue.issue_id ?? issue.id ?? index + 1),
       title: toText(issue.title ?? issue.issue_type, `Issue ${index + 1}`),
-      description: toText(issue.description, "No issue description provided"),
-      machine: toText(issue.machine_name ?? issue.production_line ?? issue.machine_code, "Unknown machine"),
+      description: toText(issue.description ?? issue.issue_type, "No issue description provided"),
+      machine: toText(issue.machine_name ?? issue.machine ?? issue.production_line ?? issue.machine_code, "Unknown machine"),
       reportedBy: toText(issue.reported_by ?? issue.operator_name, "System"),
-      time: formatClock(issue.reported_at ?? null),
+      time: formatClock(issue.reported_at ?? issue.occurred_at ?? null),
       priority: mapIssuePriority(issue),
       status: mapIssueSummaryStatus(issue),
       estResolution: "TBD",
-      productionImpact: toText(issue.impact, "Needs review"),
-      issueId: toText(issue.issue_id, `ISSUE-${index + 1}`),
+      productionImpact: toText(issue.impact ?? issue.status, "Needs review"),
+      issueId: toText(issue.issue_id ?? issue.id, `ISSUE-${index + 1}`),
     }));
   }, [apiEnabled, productionIssuesSummary?.items]);
 
@@ -682,8 +693,14 @@ export default function ShopFloor() {
     const fromSummary = toNumber(deliveryReadinessSummary?.critical_total);
     return fromSummary > 0 ? fromSummary : mappedDeliveryItems.filter((item) => item.risk === "Critical").length;
   }, [deliveryReadinessSummary?.critical_total, mappedDeliveryItems]);
-  const atRiskCount = useMemo(() => mappedDeliveryItems.filter((item) => item.risk === "At Risk").length, [mappedDeliveryItems]);
-  const highPriorityCount = useMemo(() => mappedProductionIssues.filter((item) => item.priority === "High").length, [mappedProductionIssues]);
+  const atRiskCount = useMemo(() => {
+    const fromSummary = toNumber(deliveryReadinessSummary?.at_risk_total);
+    return fromSummary > 0 ? fromSummary : mappedDeliveryItems.filter((item) => item.risk === "At Risk").length;
+  }, [deliveryReadinessSummary?.at_risk_total, mappedDeliveryItems]);
+  const highPriorityCount = useMemo(() => {
+    const fromSummary = toNumber(productionIssuesSummary?.high_priority);
+    return fromSummary > 0 ? fromSummary : mappedProductionIssues.filter((item) => item.priority === "High").length;
+  }, [mappedProductionIssues, productionIssuesSummary?.high_priority]);
   const throughputToday = useMemo(() => {
     const fromSummary = toNumber(liveProductionSummary?.throughput_today);
     return fromSummary > 0 ? fromSummary : liveLines.reduce((sum, line) => sum + line.bottomStats.throughputToday, 0);
