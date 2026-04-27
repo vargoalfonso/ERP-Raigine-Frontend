@@ -14,6 +14,7 @@ import {
   useGetShopFloorLiveProductionSummaryQuery,
   useGetShopFloorProductionIssuesSummaryQuery,
   useGetShopFloorScanEventsSummaryQuery,
+  useGetShopFloorScanEventsQuery,
   useLazyGetShopFloorMachineDetailQuery,
 } from "@/lib/api/shop-floor/api";
 
@@ -87,6 +88,7 @@ type LineCard = {
     shiftState: string;
     nextProcess: string;
     cycleTime: string;
+    scannedBy?: string;
   };
   progressPercent: number;
   progressLabel: string;
@@ -532,17 +534,24 @@ export default function ShopFloor() {
     { limit: 20, window_hours: 24 },
     { skip: !apiEnabled }
   );
+  const [scanPage, setScanPage] = useState(1);
+  const [scanLimit, setScanLimit] = useState(10);
+  const pagedScanEventsQuery = useGetShopFloorScanEventsQuery(
+    { page: scanPage, limit: scanLimit },
+    { skip: !apiEnabled }
+  );
   const [fetchMachineDetail, machineDetailQuery] = useLazyGetShopFloorMachineDetailQuery();
 
   const liveProductionSummary = liveProductionQuery.data?.data;
   const deliveryReadinessSummary = deliveryReadinessQuery.data?.data;
   const productionIssuesSummary = productionIssuesQuery.data?.data;
   const scanEventsSummary = scanEventsQuery.data?.data;
+  const pagedScanPagination = pagedScanEventsQuery.data?.pagination;
 
   const scanEventItems = useMemo(() => {
-    const items = scanEventsSummary?.items ?? [];
+    const items = (pagedScanEventsQuery.data?.data ?? scanEventsSummary?.items ?? []) as ShopFloorScanEventsSummaryItem[];
     return [...items].sort((left, right) => getSummaryEventTimestamp(right) - getSummaryEventTimestamp(left));
-  }, [scanEventsSummary?.items]);
+  }, [pagedScanEventsQuery.data?.data, scanEventsSummary?.items]);
 
   const asOfDate = useMemo(() => {
     return (
@@ -586,6 +595,7 @@ export default function ShopFloor() {
           shiftState: status,
           nextProcess: toText(row.production?.process_name, "—"),
           cycleTime: "—",
+          scannedBy: toText((row.machine as any)?.scanned_by ?? (row.production as any)?.scanned_by ?? null),
         },
         progressPercent,
         progressLabel: toText(row.progress?.label, progressPercent >= 100 ? "Completed" : "In Progress"),
@@ -671,18 +681,28 @@ export default function ShopFloor() {
 
   const mappedScanEvents = useMemo<ScanEventRow[]>(() => {
     if (!apiEnabled) return scanEvents;
+    return scanEventItems.map((event, index) => {
+      const anyE = event as any;
+      const timeVal = anyE.scanned_at ?? anyE.event_at ?? anyE.createdAt ?? null;
+      const scanType = anyE.scan_type ?? anyE.scanType ?? anyE.scanType;
+      const machineVal = anyE.machine_number ?? anyE.machine_code ?? anyE.machine_name ?? (anyE.master_machine && (anyE.master_machine.machine_number ?? anyE.master_machine.machine_name));
+      const uniqVal = anyE.current_uniq ?? anyE.uniq_code ?? anyE.item_uniq_code ?? anyE.item_uniq;
+      const woVal = anyE.wo_number ?? anyE.work_order ?? (anyE.work_order && anyE.work_order.wo_number) ?? anyE.wo;
+      const operatorVal = anyE.scanned_by ?? anyE.operator_name ?? anyE.operator ?? anyE.created_by;
+      const qtyVal = anyE.qty ?? anyE.quantity ?? anyE.good_qty ?? anyE.good_quantity ?? anyE.quantity_rm_used;
 
-    return scanEventItems.map((event, index) => ({
-      key: String(event.id ?? index + 1),
-      time: formatClock(event.event_at ?? null),
-      event: mapScanEventType(event.scan_type),
-      machine: toText(event.machine_code ?? event.machine_name, "Unknown Machine"),
-      uniq: toText(event.uniq_code),
-      workOrder: toText(event.work_order),
-      operator: toText(event.operator_name, "System"),
-      process: toText(event.process_name),
-      qty: toNumber(event.good_qty ?? event.qty),
-    }));
+      return {
+        key: String(anyE.id ?? index + 1),
+        time: formatClock(timeVal),
+        event: mapScanEventType(scanType),
+        machine: toText(machineVal, "Unknown Machine"),
+        uniq: toText(uniqVal),
+        workOrder: formatWorkOrderDisplayNumber(toText(woVal, "—")) || toText(woVal, "—"),
+        operator: toText(operatorVal, "System"),
+        process: toText(anyE.process_name ?? anyE.process ?? null),
+        qty: toNumber(qtyVal),
+      };
+    });
   }, [apiEnabled, scanEventItems]);
 
   const activeLinesCount = useMemo(() => {
@@ -1245,24 +1265,59 @@ export default function ShopFloor() {
                   <div className="flex items-center gap-2 text-xs text-gray-500">
                     <span>Show rows</span>
                     <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-gray-200 bg-white text-gray-700">
-                      10
+                      {scanLimit}
                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                       </svg>
                     </span>
-                    <span>1-{Math.min(10, mappedScanEvents.length)} of {mappedScanEvents.length} Results</span>
+                    <span>
+                      {Math.max(1, (scanPage - 1) * scanLimit + 1)}-
+                      {Math.min(scanPage * scanLimit, pagedScanPagination?.total ?? mappedScanEvents.length)} of {pagedScanPagination?.total ?? (mappedScanEvents.length)} Results
+                    </span>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <button type="button" className="w-8 h-8 rounded-md border border-gray-200 bg-gray-50 text-gray-400">&lt;</button>
-                    <button type="button" className="w-8 h-8 rounded-md border border-blue-200 bg-blue-50 text-blue-700 text-sm font-medium">1</button>
-                    <button type="button" className="w-8 h-8 rounded-md border border-gray-200 bg-white text-gray-600 text-sm">2</button>
+                    <button
+                      type="button"
+                      onClick={() => setScanPage((p) => Math.max(1, p - 1))}
+                      className="w-8 h-8 rounded-md border border-gray-200 bg-gray-50 text-gray-400"
+                      disabled={scanPage <= 1}
+                    >&lt;</button>
+                    <button
+                      type="button"
+                      onClick={() => setScanPage(1)}
+                      className={`w-8 h-8 rounded-md border ${scanPage === 1 ? "border-blue-200 bg-blue-50 text-blue-700" : "border-gray-200 bg-white text-gray-600"} text-sm font-medium`}
+                    >1</button>
+                    <button
+                      type="button"
+                      onClick={() => setScanPage((p) => p + 1)}
+                      className={`w-8 h-8 rounded-md border ${scanPage === 2 ? "border-blue-200 bg-blue-50 text-blue-700" : "border-gray-200 bg-white text-gray-600"} text-sm`}
+                    >2</button>
                     <span className="px-1 text-gray-400">…</span>
-                    <button type="button" className="px-2 h-8 rounded-md border border-gray-200 bg-white text-gray-600 text-sm">12345</button>
-                    <button type="button" className="w-8 h-8 rounded-md border border-gray-200 bg-white text-gray-600">&gt;</button>
+                    <button
+                      type="button"
+                      onClick={() => setScanPage(pagedScanPagination?.totalPages ?? scanPage)}
+                      className="px-2 h-8 rounded-md border border-gray-200 bg-white text-gray-600 text-sm"
+                    >{pagedScanPagination?.totalPages ?? "..."}</button>
+                    <button
+                      type="button"
+                      onClick={() => setScanPage((p) => p + 1)}
+                      className="w-8 h-8 rounded-md border border-gray-200 bg-white text-gray-600"
+                      disabled={pagedScanPagination ? scanPage >= pagedScanPagination.totalPages : false}
+                    >&gt;</button>
                     <span className="ml-3 text-xs text-gray-500">Go to Page</span>
-                    <input className="w-14 h-8 rounded-md border border-gray-200 px-2 text-sm" defaultValue="" />
-                    <button type="button" className="h-8 px-3 rounded-md border border-blue-500 bg-white text-blue-600 text-sm font-medium">Go</button>
+                    <input id="shop-floor-goto-page" className="w-14 h-8 rounded-md border border-gray-200 px-2 text-sm" defaultValue="" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const el = document.getElementById("shop-floor-goto-page") as HTMLInputElement | null;
+                        if (!el) return;
+                        const v = Number(el.value);
+                        if (!Number.isFinite(v) || v < 1) return;
+                        setScanPage(Math.min(v, pagedScanPagination?.totalPages ?? v));
+                      }}
+                      className="h-8 px-3 rounded-md border border-blue-500 bg-white text-blue-600 text-sm font-medium"
+                    >Go</button>
                   </div>
                 </div>
               </div> : emptyState("No scan events", "Belum ada scan event yang dikirim dari endpoint shop-floor.")}
@@ -1313,6 +1368,8 @@ export default function ShopFloor() {
                           <div className="text-gray-900">{line.operator.shiftState}</div>
                           <div className="text-gray-500">Next Process:</div>
                           <div className="text-gray-900">{line.operator.nextProcess}</div>
+                          <div className="text-gray-500">Scanned By:</div>
+                          <div className="text-gray-900">{line.operator.scannedBy || "—"}</div>
                           <div className="text-gray-500">Cycle Time:</div>
                           <div className="text-gray-900">{line.operator.cycleTime}</div>
                         </div>

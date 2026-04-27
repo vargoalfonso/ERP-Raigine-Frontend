@@ -50,6 +50,22 @@ const getNumber = (value: unknown): number | undefined => {
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 
+const parsePagination = (response: unknown): ApiResponse<unknown>["pagination"] | undefined => {
+  if (!isRecord(response)) return undefined;
+
+  const direct = isRecord(response.pagination) ? response.pagination : undefined;
+  const nested = isRecord(response.data) && isRecord(response.data.pagination) ? response.data.pagination : undefined;
+  const source = direct ?? nested;
+  if (!source) return undefined;
+
+  return {
+    total: getNumber(source.total) ?? 0,
+    page: getNumber(source.page) ?? 1,
+    perPage: getNumber(source.perPage ?? source.limit) ?? 20,
+    totalPages: getNumber(source.totalPages) ?? 1,
+  };
+};
+
 const normalizeShopFloorLiveProductionSummaryItem = (item: unknown): ShopFloorLiveProductionSummaryItem => {
   const record = getRecord(item);
   const machine = getRecord(record?.machine);
@@ -73,6 +89,7 @@ const normalizeShopFloorLiveProductionSummaryItem = (item: unknown): ShopFloorLi
       production_line: getText(machine?.production_line ?? machine?.name),
       status: runtimeStatus,
       runtime_status: runtimeStatus,
+      scanned_by: getText(machine?.scanned_by),
     },
     production: {
       uniq_code: getText(production?.uniq_code ?? production?.current_uniq),
@@ -85,6 +102,7 @@ const normalizeShopFloorLiveProductionSummaryItem = (item: unknown): ShopFloorLi
       wo_status: woStatus,
       last_scan_type: getText(production?.last_scan_type),
       current_uniq: getText(production?.current_uniq ?? production?.uniq_code),
+      scanned_by: getText(production?.scanned_by),
     },
     progress: {
       percent: progressPercent,
@@ -257,6 +275,7 @@ export type ShopFloorLiveProductionSummaryItem = {
     production_line?: string;
     status?: string;
     runtime_status?: string;
+    scanned_by?: string;
   };
   production?: {
     uniq_code?: string;
@@ -269,6 +288,7 @@ export type ShopFloorLiveProductionSummaryItem = {
     wo_status?: string;
     process_name?: string;
     last_scan_type?: string;
+    scanned_by?: string;
   };
   progress?: {
     percent?: number;
@@ -638,13 +658,17 @@ export const shopFloorApiSlice = apiSlice.injectEndpoints({
       transformResponse: (response: unknown) => ok(parseArrayResponse<ShopFloorProductionIssue>(response)),
     }),
 
-    getShopFloorScanEvents: builder.query<ApiResponse<ShopFloorScanEvent[]>, void>({
-      query: () => ({
-        url: "/shop-floor/scan-events",
-        method: "GET",
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) => ok(parseArrayResponse<ShopFloorScanEvent>(response)),
+    getShopFloorScanEvents: builder.query<ApiResponse<ShopFloorScanEvent[]>, { page?: number; limit?: number } | void>({
+      query: (arg) => {
+        const params = isRecord(arg) ? (arg as { page?: number; limit?: number }) : {};
+        return {
+          url: "/shop-floor/scan-events",
+          method: "GET",
+          params,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        };
+      },
+      transformResponse: (response: unknown) => ok(parseArrayResponse<ShopFloorScanEvent>(response), "OK", parsePagination(response)),
     }),
 
     getShopFloorMachineDetail: builder.query<ApiResponse<ShopFloorMachineDetail>, string>({

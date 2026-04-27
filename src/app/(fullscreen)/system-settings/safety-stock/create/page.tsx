@@ -14,6 +14,7 @@ import {
   useCreateSafetyStockBulkMutation,
   useCreateSafetyStockMutation,
 } from "@/lib/api/system-settings/api";
+import { useGetInventoryListQuery } from "@/lib/api/inventory/api";
 
 type Entry = {
   id: string;
@@ -30,12 +31,7 @@ const TYPE_OPTIONS = [
   { label: "Finished Goods", value: "finished_goods" },
 ];
 
-const UNIQ_OPTIONS = [
-  { label: "ITEM001", value: "ITEM001" },
-  { label: "ITEM002", value: "ITEM002" },
-  { label: "ITEM003", value: "ITEM003" },
-  { label: "EMA-LV7-001", value: "EMA-LV7-001" },
-];
+
 
 const CALCULATION_OPTIONS = [
   { label: "Days", value: "days" },
@@ -62,6 +58,36 @@ export default function SafetyStockCreatePage() {
 
   const [type, setType] = useState<string | undefined>(undefined);
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
+
+  const inventoryType = useMemo<"raw-materials" | "indirect-materials" | "subcon-materials" | undefined>(() => {
+    switch (type) {
+      case "raw_material":
+        return "raw-materials";
+      case "indirect_material":
+        return "indirect-materials";
+      case "subcon":
+        return "subcon-materials";
+      default:
+        return undefined;
+    }
+  }, [type]);
+
+  const { data: inventoryListResp } = useGetInventoryListQuery(
+    inventoryType ? { type: inventoryType, page: 1, limit: 1000 } : ({} as any),
+    { skip: !inventoryType }
+  );
+
+  const uniqOptions = useMemo(() => {
+    const items = inventoryListResp?.data ?? [];
+    return items
+      .map((r) => {
+        const uniq = (r as any)?.uniq_code ?? (r as any)?.uniq ?? (r as any)?.item_name ?? undefined;
+        if (!uniq) return null;
+        const part = (r as any)?.part_name ?? (r as any)?.part_number ?? (r as any)?.item_name ?? "";
+        return { label: part ? `${uniq} — ${part}` : String(uniq), value: String(uniq) };
+      })
+      .filter(Boolean) as { label: string; value: string }[];
+  }, [inventoryListResp]);
 
   const completeCount = useMemo(() => entries.filter((e) => e.created).length, [entries]);
 
@@ -228,8 +254,9 @@ export default function SafetyStockCreatePage() {
                       <Select
                         value={e.uniq}
                         onChange={(v) => updateEntry(e.id, { uniq: v, created: false })}
-                        placeholder="Select Uniq"
-                        options={UNIQ_OPTIONS}
+                        placeholder={inventoryType ? "Select Uniq" : "Select Type first"}
+                        options={uniqOptions}
+                        disabled={!inventoryType}
                       />
                     </div>
 
