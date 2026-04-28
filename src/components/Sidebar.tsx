@@ -265,22 +265,10 @@ const menuItems: MenuItem[] = [
     icon: MdReceiptLong,
     children: [
       {
-        id: "po-raw-material",
-        label: "PO - Raw Material",
+        id: "po-procurement",
+        label: "PO - Procurement",
         icon: MdReceiptLong,
-        href: "/po-procurement?tab=raw",
-      },
-      {
-        id: "po-indirect",
-        label: "PO - Indirect",
-        icon: MdReceiptLong,
-        href: "/po-procurement?tab=indirect",
-      },
-      {
-        id: "po-subcon",
-        label: "PO - Sub Con",
-        icon: MdReceiptLong,
-        href: "/po-procurement?tab=subcon",
+        href: "/po-procurement",
       },
       // {
       //   id: "dn-raw-material",
