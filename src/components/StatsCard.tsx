@@ -7,6 +7,7 @@ interface StatsCardProps {
   subtitle?: string;
   change?: string;
   changeType?: "positive" | "negative";
+  className?: string;
 }
 
 export default function StatsCard({
@@ -18,9 +19,10 @@ export default function StatsCard({
   subtitle,
   change,
   changeType = "positive",
+  className = "",
 }: StatsCardProps) {
   return (
-    <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-100">
+    <div className={`bg-white rounded-lg shadow-sm p-6 border border-gray-100 ${className}`}>
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <div className="flex items-center justify-between gap-2 mb-2">
