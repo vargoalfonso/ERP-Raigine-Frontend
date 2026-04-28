@@ -147,10 +147,29 @@ export default function AddDepartmentPage() {
       const values = await form.validateFields();
 
       if (apiEnabled) {
+        // Resolve parentDepartment: allow free-text but try to map to existing department id
+        let resolvedParentId: string | null = null;
+        if (values.parentDepartment) {
+          const asString = String(values.parentDepartment).trim();
+          const matchById = departmentApiData.find((d) => String(d.id) === asString);
+          const matchByName = departmentApiData.find(
+            (d) => String(d.department_name).toLowerCase() === asString.toLowerCase()
+          );
+          if (matchById) resolvedParentId = matchById.id;
+          else if (matchByName) resolvedParentId = matchByName.id;
+        }
+
+        const desc = values.departmentDescription ? String(values.departmentDescription) : "";
+        const finalDescription = values.parentDepartment && !resolvedParentId
+          ? `${desc}${desc ? "\n" : ""}Parent department: ${String(values.parentDepartment)}`
+          : desc;
+
         await createDepartment({
           department_name: values.departmentName,
-          description: values.departmentDescription || null,
-          parent_department_id: values.parentDepartment || null,
+          description: finalDescription || null,
+          parent_department_id: resolvedParentId,
+          department_code: generatedCode,
+          status: "active",
         }).unwrap();
 
         message.success("Department created");
@@ -223,7 +242,7 @@ export default function AddDepartmentPage() {
 
           <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <Form.Item name="departmentCode" label="Department Code" rules={[{ required: true }]}>
+              <Form.Item name="departmentCode" label="Department Code">
                 <Input className="!rounded-lg" disabled placeholder="DEPT-006" />
               </Form.Item>
               <div className="-mt-3 text-xs text-gray-400">Auto-generated on save</div>
@@ -250,11 +269,9 @@ export default function AddDepartmentPage() {
             </Form.Item>
 
             <Form.Item name="parentDepartment" label="Parent Department">
-              <Select
+              <Input
                 className="!rounded-lg"
-                placeholder="Select parent"
-                allowClear
-                options={parentOptions}
+                placeholder="Enter parent department (free text) or existing name/ID"
               />
             </Form.Item>
           </div>

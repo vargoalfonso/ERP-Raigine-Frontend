@@ -335,9 +335,13 @@ export default function AddEmployeePage() {
               <Form.Item
                 name={apiEnabled ? "departmentId" : "department"}
                 label="Department"
-                rules={[{ required: true, message: "Select department" }]}
               >
-                <Select className="!rounded-lg" placeholder="Select department" options={departmentOptions} />
+                <Select
+                  className="!rounded-lg"
+                  placeholder="Select department (optional)"
+                  options={departmentOptions}
+                  allowClear
+                />
               </Form.Item>
 
               {apiEnabled ? (

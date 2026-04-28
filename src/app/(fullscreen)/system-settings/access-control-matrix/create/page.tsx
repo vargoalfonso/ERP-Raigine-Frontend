@@ -77,6 +77,15 @@ export default function AddUserAccessControlPage() {
     }, {});
   }, [apiEnabled, employeesData]);
 
+  const employeeDepartmentById = useMemo(() => {
+    if (!apiEnabled) return {} as Record<string, string>;
+    return (employeesData ?? []).reduce<Record<string, string>>((acc, employee) => {
+      const key = String(employee.employee_id ?? employee.id);
+      if (employee.department_id != null) acc[key] = String(employee.department_id);
+      return acc;
+    }, {});
+  }, [apiEnabled, employeesData]);
+
   const completeCount = useMemo(() => {
     return entries.reduce((count, entry) => {
       const isComplete =
@@ -199,8 +208,9 @@ export default function AddUserAccessControlPage() {
                   onFormReady={(form) => forms.set(entry.key, form)}
                   employeeOptions={employeeOptions}
                   departmentOptions={departmentOptions}
-                  roleOptions={roleOptions}
-                  employeeNameById={employeeNameById}
+                    roleOptions={roleOptions}
+                    employeeNameById={employeeNameById}
+                    employeeDepartmentById={employeeDepartmentById}
                 />
               </div>
             </Card>
@@ -249,6 +259,7 @@ function UserEntryForm({
   departmentOptions,
   roleOptions,
   employeeNameById,
+  employeeDepartmentById,
 }: {
   entry: UserAccessEntry;
   onChange: (patch: Partial<UserAccessEntry>) => void;
@@ -257,6 +268,7 @@ function UserEntryForm({
   departmentOptions: { label: string; value: string }[];
   roleOptions: { label: string; value: string }[];
   employeeNameById: Record<string, string>;
+  employeeDepartmentById: Record<string, string>;
 }) {
   const [form] = Form.useForm();
   const selectedEmployeeId = Form.useWatch("employeeId", form);
@@ -267,14 +279,26 @@ function UserEntryForm({
 
   React.useEffect(() => {
     if (!selectedEmployeeId) return;
-    const employeeName = employeeNameById[String(selectedEmployeeId)];
-    if (!employeeName) return;
-    const currentName = form.getFieldValue("fullName");
-    if (!currentName || currentName !== employeeName) {
-      form.setFieldsValue({ fullName: employeeName });
-      onChange({ fullName: employeeName });
+    const key = String(selectedEmployeeId);
+    const employeeName = employeeNameById[key];
+    if (employeeName) {
+      const currentName = form.getFieldValue("fullName");
+      if (!currentName || currentName !== employeeName) {
+        form.setFieldsValue({ fullName: employeeName });
+        onChange({ fullName: employeeName });
+      }
     }
-  }, [selectedEmployeeId, employeeNameById, form, onChange]);
+
+    const employeeDept = employeeDepartmentById[key];
+    if (employeeDept) {
+      const currentDept = form.getFieldValue("departmentId");
+      if (!currentDept || String(currentDept) !== String(employeeDept)) {
+        form.setFieldsValue({ departmentId: String(employeeDept) });
+        onChange({ departmentId: String(employeeDept) });
+      }
+    }
+  }, [selectedEmployeeId, employeeNameById, employeeDepartmentById, form, onChange]);
+
 
   return (
     <Form
