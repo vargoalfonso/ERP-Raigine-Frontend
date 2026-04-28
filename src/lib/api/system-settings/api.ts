@@ -166,6 +166,8 @@ export type CreateDepartmentRequest = {
   department_name: string;
   description?: string | null;
   parent_department_id?: string | null;
+  department_code?: string | null;
+  status?: string | null;
 };
 
 export type CreateAccessControlMatrixRequest = {
