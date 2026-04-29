@@ -354,12 +354,13 @@ export default function ApprovalManagerPage() {
     item: ApprovalManagerItem,
     action: "approve" | "reject"
   ): string | null => {
+    // FIX: Use reference_id first (session id), not instance_id
     const id =
-      (typeof item.instance_id === "number" && item.instance_id > 0
-        ? item.instance_id
-        : undefined) ??
       (typeof item.reference_id === "number" && item.reference_id > 0
         ? item.reference_id
+        : undefined) ??
+      (typeof item.instance_id === "number" && item.instance_id > 0
+        ? item.instance_id
         : undefined);
 
     if (!id) return null;
@@ -396,6 +397,7 @@ export default function ApprovalManagerPage() {
     try {
       await submitDecision({
         approval_url: approvalUrl,
+        reference_id: item.reference_id,  // Pass reference_id for correct URL building
         action,
         remarks: nextRemarks,
         module_kind: getModuleKind(item),
