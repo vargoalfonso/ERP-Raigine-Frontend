@@ -96,7 +96,7 @@ import {
 } from "@/lib/api/system-settings/api";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
-import { constant } from "lodash";
+import MachineSettingsPanel from "@/components/system-settings/MachineSettingsPanel";
 
 type StatusType = "Active" | "Inactive";
 
@@ -5918,10 +5918,10 @@ export default function SystemSettingsPage() {
         </Card>
 
         <div className="lg:col-span-8 space-y-4">
-          <Card
-            className="rounded-2xl shadow-sm"
-            styles={{ body: { padding: 0 } }}
-          >
+          {selectedModuleId === "machine" ? (
+            <MachineSettingsPanel />
+          ) : (
+          <Card className="rounded-2xl shadow-sm" styles={{ body: { padding: 0 } }}>
             <div className="bg-blue-50 rounded-t-2xl px-5 py-4 border-b">
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
@@ -6206,6 +6206,7 @@ export default function SystemSettingsPage() {
               </div>
             </div>
           </Card>
+          )}
         </div>
       </div>
     </div>

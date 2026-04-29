@@ -9,6 +9,7 @@ import {
   Checkbox,
   Form,
   Input,
+  Select,
   Typography,
   message,
 } from "antd";
@@ -19,6 +20,7 @@ import {
   useGetCustomerByIdQuery,
   useUpdateCustomerMutation,
 } from "@/lib/api/customers/api";
+import { BANK_SELECT_OPTIONS } from "@/lib/constants/banks";
 
 type EditCustomerForm = {
   customerId?: string;
@@ -245,7 +247,13 @@ export default function EditCustomerPage() {
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Form.Item label="Bank Account" name="bankAccount">
-                  <Input className="!rounded-lg" placeholder="Enter bank name (e.g., Bank Mandiri)" />
+                  <Select
+                    className="!rounded-lg"
+                    showSearch
+                    placeholder="Select bank"
+                    options={BANK_SELECT_OPTIONS}
+                    optionFilterProp="label"
+                  />
                 </Form.Item>
 
                 <Form.Item label="Bank Account Number" name="bankAccountNumber">

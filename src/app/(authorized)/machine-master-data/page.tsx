@@ -37,6 +37,7 @@ import {
   useGetMachinesQuery,
   useUpdateMachineMutation,
 } from "@/lib/api/machines/api";
+import { useGetMachineParametersQuery } from "@/lib/api/machine-parameters/api";
 import { useGetProcessesQuery } from "@/lib/api/system-settings/api";
 
 type MachineStatus = "Active" | "Maintenance";
@@ -119,6 +120,10 @@ export default function MachineMasterDataPage() {
   const { data: apiMachines = [] } = useGetMachinesQuery(undefined, {
     skip: !apiEnabled,
   });
+  const { data: machineParameters } = useGetMachineParametersQuery(
+    { page: 1, limit: 100 },
+    { skip: !apiEnabled },
+  );
   const { data: processes = [] } = useGetProcessesQuery(undefined, {
     skip: !apiEnabled,
   });
@@ -247,6 +252,20 @@ export default function MachineMasterDataPage() {
       })
       .filter((option) => Boolean(option.value) && Boolean(option.label));
   }, [apiEnabled, processes]);
+
+  const machineNameOptions = useMemo(() => {
+    if (!apiEnabled) {
+      return mockRows.map((row) => ({ label: row.machineName, value: row.machineName }));
+    }
+
+    return (machineParameters?.items ?? [])
+      .map((machine) => {
+        const name = String(machine.machine_name ?? "").trim();
+        if (!name) return null;
+        return { label: name, value: name };
+      })
+      .filter((option): option is { label: string; value: string } => Boolean(option));
+  }, [apiEnabled, machineParameters?.items, mockRows]);
 
   const columns: ColumnsType<MachineRow> = [
     {
@@ -804,9 +823,12 @@ export default function MachineMasterDataPage() {
               label="Machine Name"
               rules={[{ required: true, message: "Required" }]}
             >
-              <Input
-                className="!rounded-lg"
-                placeholder="e.g Press Machine A1"
+              <Select
+                className="w-full"
+                options={machineNameOptions}
+                placeholder="Select machine name"
+                showSearch
+                optionFilterProp="label"
               />
             </Form.Item>
             <Form.Item
@@ -910,7 +932,13 @@ export default function MachineMasterDataPage() {
               label="Machine Name"
               rules={[{ required: true, message: "Required" }]}
             >
-              <Input className="!rounded-lg" />
+              <Select
+                className="w-full"
+                options={machineNameOptions}
+                placeholder="Select machine name"
+                showSearch
+                optionFilterProp="label"
+              />
             </Form.Item>
             <Form.Item
               name="machineNumber"

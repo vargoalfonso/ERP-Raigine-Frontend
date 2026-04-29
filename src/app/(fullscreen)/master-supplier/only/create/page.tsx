@@ -20,6 +20,7 @@ import {
   useGetNextSupplierCodeQuery,
 } from "@/lib/api/suppliers/api";
 import { getApiErrorMessage } from "@/lib/api/error";
+import { BANK_SELECT_OPTIONS } from "@/lib/constants/banks";
 
 type SupplierStatus = "Active" | "Inactive";
 
@@ -84,7 +85,7 @@ export default function CreateSupplierOnlyPage() {
   }, [form, nextCode]);
 
   const backToList = () => {
-    router.push("/master-supplier-only");
+    router.push("/master-supplier");
   };
 
   const onSave = async () => {
@@ -280,13 +281,9 @@ export default function CreateSupplierOnlyPage() {
                 <Select
                   className="!rounded-lg"
                   placeholder="Select bank"
-                  options={[
-                    { label: "BCA", value: "BCA" },
-                    { label: "Mandiri", value: "Mandiri" },
-                    { label: "BRI", value: "BRI" },
-                    { label: "BNI", value: "BNI" },
-                    { label: "Other", value: "Other" },
-                  ]}
+                  options={BANK_SELECT_OPTIONS}
+                  showSearch
+                  optionFilterProp="label"
                 />
               </Form.Item>
 
