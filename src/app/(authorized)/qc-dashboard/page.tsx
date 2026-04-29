@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Button,
-  Collapse,
   DatePicker,
   Form,
   Input,
@@ -35,7 +34,7 @@ import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
   type CreateQcDashboardReportRequest,
-  type QcReportFormOptionRecord,
+  type ManualReferenceOptionItem,
   type QcReportLookupType,
   type QcDashboardBySource,
   type QcDashboardDefectItem,
@@ -49,8 +48,7 @@ import {
   useGetQcDashboardOverviewQuery,
   useGetQcDashboardProductReturnQcQuery,
   useGetQcDashboardProductionQcQuery,
-  useGetQcReportFormDetailQuery,
-  useGetQcReportFormOptionsQuery,
+  useGetManualReferenceOptionsQuery,
 } from "@/lib/api/qc-dashboard/api";
 
 type QcTabId = "production" | "incoming" | "product_return" | "defects";
@@ -62,49 +60,39 @@ type PaginationState = Record<QcTabId, { page: number; limit: number }>;
 type ManualReportFormValues = {
   qc_type: "production" | "incoming" | "product_return";
   report_date: Dayjs;
-  record_id?: string;
   reference_number: string;
   uniq_code: string;
   number_of_item_check: number;
-  issue?: string;
+  issue_reason_code?: string;
+  issue_reason_text?: string;
   number_of_defect?: number;
   number_of_scrap?: number;
-  number_of_product_return?: number;
   status: string;
-  remarks?: string;
 };
 
-const QC_TYPE_TO_LOOKUP: Record<ManualReportFormValues["qc_type"], QcReportLookupType> = {
-  production: "production_qc",
-  incoming: "incoming_qc",
-  product_return: "product_return_qc",
-};
-
-const DEFAULT_ISSUE_OPTIONS = [
-  { label: "Scratch", value: "scratch" },
-  { label: "Dent", value: "dent" },
-  { label: "Dimension NG", value: "dimension_ng" },
-  { label: "Color NG", value: "color_ng" },
-  { label: "Mixed Part", value: "mixed_part" },
-  { label: "Other", value: "other" },
-];
-
-const getRecordId = (record: QcReportFormOptionRecord | undefined): string | undefined => {
-  if (!record) return undefined;
-  if (record.return_id != null && String(record.return_id).trim()) return String(record.return_id).trim();
-  if (record.qc_task_id != null) return String(record.qc_task_id);
-  return undefined;
-};
-
-const getReferenceLabel = (qcType: ManualReportFormValues["qc_type"] | undefined) => {
+const getReferenceLabel = (
+  qcType: ManualReportFormValues["qc_type"] | undefined,
+) => {
   if (qcType === "production") return "WO Number";
-  if (qcType === "incoming") return "PO / DN Number";
-  if (qcType === "product_return") return "DN Number";
+  if (qcType === "incoming") return "DN / PO Number";
+  if (qcType === "product_return") return "PR / DN Number";
   return "WO/PO/DN Number";
 };
 
+const getReferencePlaceholder = (
+  qcType: ManualReportFormValues["qc_type"] | undefined,
+) => {
+  if (qcType === "production") return "Search WO Number...";
+  if (qcType === "incoming") return "Search DN / PO Number...";
+  if (qcType === "product_return") return "Search PR / DN Number...";
+  return "Search...";
+};
+
 const formatNumber = (value: unknown) => {
-  const numeric = typeof value === "number" && Number.isFinite(value) ? value : Number(value ?? 0);
+  const numeric =
+    typeof value === "number" && Number.isFinite(value)
+      ? value
+      : Number(value ?? 0);
   if (!Number.isFinite(numeric)) return "0";
   return new Intl.NumberFormat("en-US").format(numeric);
 };
@@ -112,14 +100,20 @@ const formatNumber = (value: unknown) => {
 const formatDate = (value?: string | null) => {
   const raw = String(value ?? "").trim();
   if (!raw) return "-";
-  if (raw.length >= 10 && raw[4] === "-" && raw[7] === "-") return raw.slice(0, 10);
+  if (raw.length >= 10 && raw[4] === "-" && raw[7] === "-")
+    return raw.slice(0, 10);
   return raw;
 };
 
 const statusColor = (status: string) => {
   const normalized = status.toLowerCase();
   if (normalized.includes("pass")) return "green";
-  if (normalized.includes("fail") || normalized.includes("reject") || normalized.includes("not_pass")) return "red";
+  if (
+    normalized.includes("fail") ||
+    normalized.includes("reject") ||
+    normalized.includes("not_pass")
+  )
+    return "red";
   return "gold";
 };
 
@@ -129,7 +123,11 @@ const toCsvValue = (value: unknown) => {
   return `"${escaped}"`;
 };
 
-const downloadCsv = (filename: string, headers: string[], rows: Array<Record<string, unknown>>) => {
+const downloadCsv = (
+  filename: string,
+  headers: string[],
+  rows: Array<Record<string, unknown>>,
+) => {
   const lines: string[] = [];
   lines.push(headers.map(toCsvValue).join(","));
   for (const row of rows) {
@@ -161,134 +159,106 @@ export default function QcDashboardPage() {
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
-  const overviewQuery = useGetQcDashboardOverviewQuery(undefined, { skip: !apiEnabled });
-  const productionQuery = useGetQcDashboardProductionQcQuery(pagination.production, {
-    skip: !apiEnabled || activeTab !== "production",
+  const overviewQuery = useGetQcDashboardOverviewQuery(undefined, {
+    skip: !apiEnabled,
   });
+  const productionQuery = useGetQcDashboardProductionQcQuery(
+    pagination.production,
+    {
+      skip: !apiEnabled || activeTab !== "production",
+    },
+  );
   const incomingQuery = useGetQcDashboardIncomingQcQuery(pagination.incoming, {
     skip: !apiEnabled || activeTab !== "incoming",
   });
   const defectsQuery = useGetQcDashboardDefectsQuery(pagination.defects, {
     skip: !apiEnabled || activeTab !== "defects",
   });
-  const productReturnQuery = useGetQcDashboardProductReturnQcQuery(pagination.product_return, {
-    skip: !apiEnabled || activeTab !== "product_return",
-  });
+  const productReturnQuery = useGetQcDashboardProductReturnQcQuery(
+    pagination.product_return,
+    {
+      skip: !apiEnabled || activeTab !== "product_return",
+    },
+  );
 
-  const [createQcReport, createQcReportState] = useCreateQcDashboardReportMutation();
+  const [createQcReport, createQcReportState] =
+    useCreateQcDashboardReportMutation();
   const selectedQcType = Form.useWatch("qc_type", manualForm);
   const selectedReferenceNumber = Form.useWatch("reference_number", manualForm);
-  const selectedLookupType = selectedQcType ? QC_TYPE_TO_LOOKUP[selectedQcType] : undefined;
 
-  const formOptionsQuery = useGetQcReportFormOptionsQuery(
-    { qc_type: selectedLookupType ?? "production_qc" },
-    { skip: !apiEnabled || !isManualOpen || !selectedLookupType }
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchKeyword);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchKeyword]);
+
+  const formOptionsQuery = useGetManualReferenceOptionsQuery(
+    {
+      qc_type: selectedQcType ?? "production",
+      q: debouncedSearch,
+      limit: 20,
+    },
+    { skip: !apiEnabled || !isManualOpen },
   );
 
-  const selectedRecord = useMemo(() => {
-    const records = formOptionsQuery.data?.data.records ?? [];
+  const selectedItem = useMemo(() => {
+    const items = formOptionsQuery.data?.data?.items ?? [];
     const selected = String(selectedReferenceNumber ?? "").trim();
     if (!selected) return undefined;
-    return records.find((record) => {
-      const candidates = [
-        record.wo_po_dn_number,
-        record.po_number,
-        record.dn_number,
-        record.previous_dn_number,
-      ]
-        .map((value) => String(value ?? "").trim())
-        .filter(Boolean);
-      return candidates.includes(selected);
-    });
-  }, [formOptionsQuery.data?.data.records, selectedReferenceNumber]);
-
-  const selectedRecordId = getRecordId(selectedRecord);
-
-  const formDetailQuery = useGetQcReportFormDetailQuery(
-    {
-      qc_type: selectedLookupType ?? "production_qc",
-      record_id: selectedRecordId ?? "",
-    },
-    { skip: !apiEnabled || !isManualOpen || !selectedLookupType || !selectedRecordId }
-  );
-
-  const referenceOptions = useMemo(() => {
-    const direct = formOptionsQuery.data?.data.wo_po_dn_options ?? [];
-    if (direct.length) return direct;
-    const records = formOptionsQuery.data?.data.records ?? [];
-    return records
-      .map((record) => {
-        const label =
-          record.wo_po_dn_number ??
-          record.po_number ??
-          record.dn_number ??
-          record.previous_dn_number ??
-          "";
-        const text = String(label ?? "").trim();
-        return text ? { label: text, value: text } : null;
-      })
-      .filter((item): item is { label: string; value: string } => Boolean(item));
-  }, [formOptionsQuery.data?.data.records, formOptionsQuery.data?.data.wo_po_dn_options]);
-
-  const issueOptions = useMemo(() => {
-    const options = formDetailQuery.data?.data.issue_options ?? [];
-    if (options.length) {
-      return options.map((option) => ({
-        label: option.label || option.name || option.value,
-        value: option.value,
-      }));
-    }
-    return DEFAULT_ISSUE_OPTIONS;
-  }, [formDetailQuery.data?.data.issue_options]);
+    return items.find((item) =>
+      [item.reference_number, item.secondary_reference, item.uniq_code]
+        .map((v) => String(v ?? "").trim())
+        .filter(Boolean)
+        .includes(selected),
+    );
+  }, [formOptionsQuery.data?.data?.items, selectedReferenceNumber]);
 
   useEffect(() => {
     if (!isManualOpen) return;
     manualForm.setFieldsValue({
       reference_number: undefined,
-      record_id: undefined,
       uniq_code: undefined,
-      issue: undefined,
-      remarks: undefined,
+      number_of_item_check: 0,
+      number_of_defect: 0,
+      number_of_scrap: 0,
+      issue_reason_code: undefined,
+      issue_reason_text: undefined,
     });
   }, [manualForm, isManualOpen, selectedQcType]);
 
   useEffect(() => {
-    if (!selectedRecord) return;
+    if (!selectedItem) return;
     manualForm.setFieldsValue({
-      record_id: selectedRecordId,
-      uniq_code: selectedRecord?.uniq ? String(selectedRecord.uniq) : undefined,
+      uniq_code: selectedItem.uniq_code || undefined,
     });
-  }, [manualForm, selectedRecord, selectedRecordId]);
-
-  useEffect(() => {
-    const detail = formDetailQuery.data?.data;
-    if (!detail) return;
-    manualForm.setFieldsValue({
-      uniq_code: detail.uniq ?? manualForm.getFieldValue("uniq_code"),
-      issue: detail.issue ?? manualForm.getFieldValue("issue"),
-      report_date: detail.report_date ? dayjs(detail.report_date) : manualForm.getFieldValue("report_date"),
-      number_of_item_check: detail.number_of_item_check ?? manualForm.getFieldValue("number_of_item_check") ?? 0,
-      number_of_defect: detail.number_of_defect ?? manualForm.getFieldValue("number_of_defect") ?? 0,
-      number_of_scrap: detail.number_of_scrap ?? manualForm.getFieldValue("number_of_scrap") ?? 0,
-      number_of_product_return:
-        detail.number_of_product_return ?? manualForm.getFieldValue("number_of_product_return") ?? 0,
-      status: detail.status ?? manualForm.getFieldValue("status") ?? "failed",
-      remarks: detail.remarks ?? manualForm.getFieldValue("remarks"),
-    });
-  }, [formDetailQuery.data?.data, manualForm]);
+  }, [manualForm, selectedItem]);
 
   const overview = overviewQuery.data?.data;
   const cards = overview?.cards;
   const implementationNote = String(overview?.implementation_note ?? "").trim();
 
-  const bySourceRows = useMemo((): Array<QcDashboardBySource & { key: string }> => {
+  const bySourceRows = useMemo((): Array<
+    QcDashboardBySource & { key: string }
+  > => {
     const rows = overview?.by_source ?? [];
-    return rows.map((row, index) => ({ ...row, key: `${row.defect_source}-${index}` }));
+    return rows.map((row, index) => ({
+      ...row,
+      key: `${row.defect_source}-${index}`,
+    }));
   }, [overview?.by_source]);
 
-  const topIssueRows = useMemo((): Array<QcDashboardTopIssue & { key: string }> => {
+  const topIssueRows = useMemo((): Array<
+    QcDashboardTopIssue & { key: string }
+  > => {
     const rows = overview?.top_issues ?? [];
-    return rows.map((row, index) => ({ ...row, key: `${row.reason_code}-${index}` }));
+    return rows.map((row, index) => ({
+      ...row,
+      key: `${row.reason_code}-${index}`,
+    }));
   }, [overview?.top_issues]);
 
   const activeTable = useMemo(() => {
@@ -297,11 +267,17 @@ export default function QcDashboardPage() {
     if (activeTab === "defects") return defectsQuery;
     if (activeTab === "production") return productionQuery;
     return null;
-  }, [activeTab, defectsQuery, incomingQuery, productReturnQuery, productionQuery]);
+  }, [
+    activeTab,
+    defectsQuery,
+    incomingQuery,
+    productReturnQuery,
+    productionQuery,
+  ]);
 
   const tableLoading = Boolean(activeTable?.isFetching);
   const tableError = activeTable?.error;
-  const tableRows = ((activeTable?.data?.data ?? []) as unknown[]) ?? [];
+  const tableRows = (activeTable?.data?.data as unknown[]) ?? [];
   const tablePagination = activeTable?.data?.pagination;
 
   const openManual = () => {
@@ -317,7 +293,6 @@ export default function QcDashboardPage() {
       number_of_item_check: 0,
       number_of_defect: 0,
       number_of_scrap: 0,
-      number_of_product_return: 0,
     });
     setIsManualOpen(true);
   };
@@ -335,35 +310,27 @@ export default function QcDashboardPage() {
       return;
     }
 
-    if (!values.record_id && !selectedRecordId) {
-      message.error("Select WO / PO / DN number first");
+    if (!selectedItem && !values.reference_number) {
+      message.error("Please select a reference number from the list");
       return;
     }
 
-    const detail = formDetailQuery.data?.data;
     const payload: CreateQcDashboardReportRequest = {
-      qc_type: QC_TYPE_TO_LOOKUP[values.qc_type],
-      record_id: values.record_id ?? selectedRecordId ?? "",
+      qc_type: values.qc_type,
       report_date: values.report_date.format("YYYY-MM-DD"),
-      wo_po_dn_number: String(values.reference_number ?? "").trim(),
-      reference_type: detail?.reference_type,
-      uniq: String(values.uniq_code ?? "").trim(),
-      supplier_name: detail?.supplier_name,
-      part_number: detail?.part_number,
-      part_name: detail?.part_name,
-      number_of_item_check: Number(values.number_of_item_check ?? 0),
-      issue: values.issue ? String(values.issue).trim() : undefined,
-      number_of_defect: values.number_of_defect != null ? Number(values.number_of_defect ?? 0) : undefined,
-      number_of_scrap: values.number_of_scrap != null ? Number(values.number_of_scrap ?? 0) : undefined,
-      number_of_product_return:
-        values.number_of_product_return != null ? Number(values.number_of_product_return ?? 0) : undefined,
-      status: String(values.status ?? "").trim(),
-      remarks: values.remarks ? String(values.remarks).trim() : undefined,
+      reference_number: values.reference_number || "",
+      uniq_code: values.uniq_code || "",
+      number_of_item_check: values.number_of_item_check,
+      issue_reason_code: values.issue_reason_code || undefined,
+      issue_reason_text: values.issue_reason_text || undefined,
+      number_of_defect: values.number_of_defect ?? undefined,
+      number_of_scrap: values.number_of_scrap ?? undefined,
+      status: values.status,
     };
 
     try {
       await createQcReport(payload).unwrap();
-      message.success("QC report created");
+      message.success("QC report created successfully");
       closeManual();
       overviewQuery.refetch();
       if (activeTab === "production") productionQuery.refetch();
@@ -377,14 +344,42 @@ export default function QcDashboardPage() {
 
   const productionColumns = useMemo<ColumnsType<QcDashboardProductionQcItem>>(
     () => [
-      { title: "Report Date", dataIndex: "report_date", key: "report_date", render: (v) => formatDate(String(v ?? "")) },
+      {
+        title: "Report Date",
+        dataIndex: "report_date",
+        key: "report_date",
+        render: (v) => formatDate(String(v ?? "")),
+      },
       { title: "WO Number", dataIndex: "wo_number", key: "wo_number" },
       { title: "UNIQ", dataIndex: "uniq_code", key: "uniq_code" },
       { title: "Kanban", dataIndex: "kanban_number", key: "kanban_number" },
-      { title: "Checked", dataIndex: "items_checked", key: "items_checked", align: "right", render: (v) => formatNumber(v) },
-      { title: "Issue", dataIndex: "issue_label", key: "issue_label", render: (v) => (v ? String(v) : "-") },
-      { title: "Defect", dataIndex: "qty_defect", key: "qty_defect", align: "right", render: (v) => formatNumber(v) },
-      { title: "Scrap", dataIndex: "qty_scrap", key: "qty_scrap", align: "right", render: (v) => formatNumber(v) },
+      {
+        title: "Checked",
+        dataIndex: "items_checked",
+        key: "items_checked",
+        align: "right",
+        render: (v) => formatNumber(v),
+      },
+      {
+        title: "Issue",
+        dataIndex: "issue_label",
+        key: "issue_label",
+        render: (v) => (v ? String(v) : "-"),
+      },
+      {
+        title: "Defect",
+        dataIndex: "qty_defect",
+        key: "qty_defect",
+        align: "right",
+        render: (v) => formatNumber(v),
+      },
+      {
+        title: "Scrap",
+        dataIndex: "qty_scrap",
+        key: "qty_scrap",
+        align: "right",
+        render: (v) => formatNumber(v),
+      },
       {
         title: "Quality %",
         dataIndex: "quality_rate_percent",
@@ -397,23 +392,53 @@ export default function QcDashboardPage() {
         dataIndex: "status",
         key: "status",
         fixed: "right",
-        render: (v) => <Tag color={statusColor(String(v ?? ""))}>{String(v ?? "-")}</Tag>,
+        render: (v) => (
+          <Tag color={statusColor(String(v ?? ""))}>{String(v ?? "-")}</Tag>
+        ),
       },
     ],
-    []
+    [],
   );
 
   const incomingColumns = useMemo<ColumnsType<QcDashboardIncomingQcItem>>(
     () => [
-      { title: "Report Date", dataIndex: "report_date", key: "report_date", render: (v) => formatDate(String(v ?? "")) },
+      {
+        title: "Report Date",
+        dataIndex: "report_date",
+        key: "report_date",
+        render: (v) => formatDate(String(v ?? "")),
+      },
       { title: "DN Number", dataIndex: "dn_number", key: "dn_number" },
       { title: "PO Number", dataIndex: "po_number", key: "po_number" },
       { title: "Supplier", dataIndex: "supplier_name", key: "supplier_name" },
       { title: "UNIQ", dataIndex: "uniq_code", key: "uniq_code" },
-      { title: "Checked", dataIndex: "items_checked", key: "items_checked", align: "right", render: (v) => formatNumber(v) },
-      { title: "Issue", dataIndex: "issue_label", key: "issue_label", render: (v) => (v ? String(v) : "-") },
-      { title: "Defect", dataIndex: "qty_defect", key: "qty_defect", align: "right", render: (v) => formatNumber(v) },
-      { title: "Scrap", dataIndex: "qty_scrap", key: "qty_scrap", align: "right", render: (v) => formatNumber(v) },
+      {
+        title: "Checked",
+        dataIndex: "items_checked",
+        key: "items_checked",
+        align: "right",
+        render: (v) => formatNumber(v),
+      },
+      {
+        title: "Issue",
+        dataIndex: "issue_label",
+        key: "issue_label",
+        render: (v) => (v ? String(v) : "-"),
+      },
+      {
+        title: "Defect",
+        dataIndex: "qty_defect",
+        key: "qty_defect",
+        align: "right",
+        render: (v) => formatNumber(v),
+      },
+      {
+        title: "Scrap",
+        dataIndex: "qty_scrap",
+        key: "qty_scrap",
+        align: "right",
+        render: (v) => formatNumber(v),
+      },
       {
         title: "Quality %",
         dataIndex: "quality_rate_percent",
@@ -426,24 +451,71 @@ export default function QcDashboardPage() {
         dataIndex: "status",
         key: "status",
         fixed: "right",
-        render: (v) => <Tag color={statusColor(String(v ?? ""))}>{String(v ?? "-")}</Tag>,
+        render: (v) => (
+          <Tag color={statusColor(String(v ?? ""))}>{String(v ?? "-")}</Tag>
+        ),
       },
     ],
-    []
+    [],
   );
 
-  const productReturnColumns = useMemo<ColumnsType<QcDashboardProductReturnQcItem>>(
+  const productReturnColumns = useMemo<
+    ColumnsType<QcDashboardProductReturnQcItem>
+  >(
     () => [
-      { title: "Report Date", dataIndex: "report_date", key: "report_date", render: (v) => formatDate(String(v ?? "")) },
-      { title: "Product Return", dataIndex: "product_return_number", key: "product_return_number" },
+      {
+        title: "Report Date",
+        dataIndex: "report_date",
+        key: "report_date",
+        render: (v) => formatDate(String(v ?? "")),
+      },
+      {
+        title: "Product Return",
+        dataIndex: "product_return_number",
+        key: "product_return_number",
+      },
       { title: "DN Number", dataIndex: "dn_number", key: "dn_number" },
-      { title: "Partner Type", dataIndex: "partner_type", key: "partner_type", render: (v) => (v ? String(v) : "-") },
+      {
+        title: "Partner Type",
+        dataIndex: "partner_type",
+        key: "partner_type",
+        render: (v) => (v ? String(v) : "-"),
+      },
       { title: "Partner", dataIndex: "partner_name", key: "partner_name" },
-      { title: "Checked", dataIndex: "items_checked", key: "items_checked", align: "right", render: (v) => formatNumber(v) },
-      { title: "Issue", dataIndex: "issue_label", key: "issue_label", render: (v) => (v ? String(v) : "-") },
-      { title: "Rework", dataIndex: "qty_rework", key: "qty_rework", align: "right", render: (v) => formatNumber(v) },
-      { title: "Defect", dataIndex: "qty_defect", key: "qty_defect", align: "right", render: (v) => formatNumber(v) },
-      { title: "Scrap", dataIndex: "qty_scrap", key: "qty_scrap", align: "right", render: (v) => formatNumber(v) },
+      {
+        title: "Checked",
+        dataIndex: "items_checked",
+        key: "items_checked",
+        align: "right",
+        render: (v) => formatNumber(v),
+      },
+      {
+        title: "Issue",
+        dataIndex: "issue_label",
+        key: "issue_label",
+        render: (v) => (v ? String(v) : "-"),
+      },
+      {
+        title: "Rework",
+        dataIndex: "qty_rework",
+        key: "qty_rework",
+        align: "right",
+        render: (v) => formatNumber(v),
+      },
+      {
+        title: "Defect",
+        dataIndex: "qty_defect",
+        key: "qty_defect",
+        align: "right",
+        render: (v) => formatNumber(v),
+      },
+      {
+        title: "Scrap",
+        dataIndex: "qty_scrap",
+        key: "qty_scrap",
+        align: "right",
+        render: (v) => formatNumber(v),
+      },
       {
         title: "Quality %",
         dataIndex: "quality_rate_percent",
@@ -456,39 +528,71 @@ export default function QcDashboardPage() {
         dataIndex: "status",
         key: "status",
         fixed: "right",
-        render: (v) => <Tag color={statusColor(String(v ?? ""))}>{String(v ?? "-")}</Tag>,
+        render: (v) => (
+          <Tag color={statusColor(String(v ?? ""))}>{String(v ?? "-")}</Tag>
+        ),
       },
     ],
-    []
+    [],
   );
 
   const defectColumns = useMemo<ColumnsType<QcDashboardDefectItem>>(
     () => [
-      { title: "Report Date", dataIndex: "report_date", key: "report_date", render: (v) => formatDate(String(v ?? "")) },
+      {
+        title: "Report Date",
+        dataIndex: "report_date",
+        key: "report_date",
+        render: (v) => formatDate(String(v ?? "")),
+      },
       { title: "Source", dataIndex: "defect_source", key: "defect_source" },
       { title: "Kanban/PL", dataIndex: "kanban_pl", key: "kanban_pl" },
       { title: "UNIQ", dataIndex: "uniq_code", key: "uniq_code" },
       { title: "Product", dataIndex: "product_name", key: "product_name" },
       { title: "Reason", dataIndex: "reason_text", key: "reason_text" },
-      { title: "Defect", dataIndex: "qty_defect", key: "qty_defect", align: "right", render: (v) => formatNumber(v) },
-      { title: "Scrap", dataIndex: "qty_scrap", key: "qty_scrap", align: "right", render: (v) => formatNumber(v) },
+      {
+        title: "Defect",
+        dataIndex: "qty_defect",
+        key: "qty_defect",
+        align: "right",
+        render: (v) => formatNumber(v),
+      },
+      {
+        title: "Scrap",
+        dataIndex: "qty_scrap",
+        key: "qty_scrap",
+        align: "right",
+        render: (v) => formatNumber(v),
+      },
       {
         title: "Repairable",
         dataIndex: "is_repairable",
         key: "is_repairable",
-        render: (v) => <Tag color={v ? "blue" : "default"}>{v ? "Yes" : "No"}</Tag>,
+        render: (v) => (
+          <Tag color={v ? "blue" : "default"}>{v ? "Yes" : "No"}</Tag>
+        ),
       },
-      { title: "Rework Status", dataIndex: "wo_rework_status", key: "wo_rework_status" },
+      {
+        title: "Rework Status",
+        dataIndex: "wo_rework_status",
+        key: "wo_rework_status",
+      },
     ],
-    []
+    [],
   );
 
   const columns = useMemo(() => {
     if (activeTab === "incoming") return incomingColumns as ColumnsType<object>;
-    if (activeTab === "product_return") return productReturnColumns as ColumnsType<object>;
+    if (activeTab === "product_return")
+      return productReturnColumns as ColumnsType<object>;
     if (activeTab === "defects") return defectColumns as ColumnsType<object>;
     return productionColumns as ColumnsType<object>;
-  }, [activeTab, defectColumns, incomingColumns, productReturnColumns, productionColumns]);
+  }, [
+    activeTab,
+    defectColumns,
+    incomingColumns,
+    productReturnColumns,
+    productionColumns,
+  ]);
 
   const filteredRows = useMemo(() => {
     const keyword = searchText.trim().toLowerCase();
@@ -496,28 +600,51 @@ export default function QcDashboardPage() {
     const matchesKeyword = (row: any) => {
       if (!keyword) return true;
       if (activeTab === "production") {
-        return [row.wo_number, row.uniq_code, row.kanban_number, row.issue_label]
+        return [
+          row.wo_number,
+          row.uniq_code,
+          row.kanban_number,
+          row.issue_label,
+        ]
           .filter(Boolean)
           .join(" ")
           .toLowerCase()
           .includes(keyword);
       }
       if (activeTab === "incoming") {
-        return [row.dn_number, row.po_number, row.supplier_name, row.uniq_code, row.issue_label]
+        return [
+          row.dn_number,
+          row.po_number,
+          row.supplier_name,
+          row.uniq_code,
+          row.issue_label,
+        ]
           .filter(Boolean)
           .join(" ")
           .toLowerCase()
           .includes(keyword);
       }
       if (activeTab === "product_return") {
-        return [row.product_return_number, row.dn_number, row.partner_type, row.partner_name, row.issue_label]
+        return [
+          row.product_return_number,
+          row.dn_number,
+          row.partner_type,
+          row.partner_name,
+          row.issue_label,
+        ]
           .filter(Boolean)
           .join(" ")
           .toLowerCase()
           .includes(keyword);
       }
       if (activeTab === "defects") {
-        return [row.defect_source, row.kanban_pl, row.uniq_code, row.product_name, row.reason_text]
+        return [
+          row.defect_source,
+          row.kanban_pl,
+          row.uniq_code,
+          row.product_name,
+          row.reason_text,
+        ]
           .filter(Boolean)
           .join(" ")
           .toLowerCase()
@@ -532,7 +659,9 @@ export default function QcDashboardPage() {
       return status.includes(statusFilter);
     };
 
-    return (tableRows as any[]).filter((row) => matchesKeyword(row) && matchesStatus(row));
+    return (tableRows as any[]).filter(
+      (row) => matchesKeyword(row) && matchesStatus(row),
+    );
   }, [activeTab, searchText, statusFilter, tableRows]);
 
   const onExport = () => {
@@ -551,7 +680,11 @@ export default function QcDashboardPage() {
         "quality_rate_percent",
         "status",
       ];
-      downloadCsv(`production-qc-${timestamp}.csv`, headers, filteredRows as any);
+      downloadCsv(
+        `production-qc-${timestamp}.csv`,
+        headers,
+        filteredRows as any,
+      );
       return;
     }
     if (activeTab === "incoming") {
@@ -586,7 +719,11 @@ export default function QcDashboardPage() {
         "quality_rate_percent",
         "status",
       ];
-      downloadCsv(`product-return-qc-${timestamp}.csv`, headers, filteredRows as any);
+      downloadCsv(
+        `product-return-qc-${timestamp}.csv`,
+        headers,
+        filteredRows as any,
+      );
       return;
     }
     const headers = [
@@ -621,9 +758,12 @@ export default function QcDashboardPage() {
       <div className="mb-6 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="text-base font-semibold text-gray-900">QC Dashboard</div>
+            <div className="text-base font-semibold text-gray-900">
+              QC Dashboard
+            </div>
             <div className="text-sm text-gray-500">
-              Quality Control monitoring for production, incoming materials, product returns, and defect tracking
+              Quality Control monitoring for production, incoming materials,
+              product returns, and defect tracking
             </div>
           </div>
 
@@ -649,7 +789,9 @@ export default function QcDashboardPage() {
           icon={<FileTextOutlined className="text-xl" />}
           bgColor="bg-blue-50"
           textColor="text-blue-600"
-          subtitle={overview?.as_of ? `As of ${formatDate(overview.as_of)}` : undefined}
+          subtitle={
+            overview?.as_of ? `As of ${formatDate(overview.as_of)}` : undefined
+          }
         />
         <StatsCard
           title="Total Defects"
@@ -807,7 +949,10 @@ export default function QcDashboardPage() {
             <Alert
               type="error"
               showIcon
-              message={getApiErrorMessage(tableError, "Failed to load QC reports")}
+              message={getApiErrorMessage(
+                tableError,
+                "Failed to load QC reports",
+              )}
               className="mb-4"
             />
           ) : null}
@@ -818,7 +963,13 @@ export default function QcDashboardPage() {
             loading={tableLoading}
             rowKey={(row) => {
               const r = row as any;
-              return String(r.qc_log_id ?? r.product_return_id ?? r.defect_id ?? r.id ?? "row");
+              return String(
+                r.qc_log_id ??
+                  r.product_return_id ??
+                  r.defect_id ??
+                  r.id ??
+                  "row",
+              );
             }}
             scroll={{ x: 1200 }}
             pagination={{
@@ -827,7 +978,8 @@ export default function QcDashboardPage() {
               total: tablePagination?.total ?? 0,
               showSizeChanger: true,
               pageSizeOptions: ["10", "20", "50", "100"],
-              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+              showTotal: (total, range) =>
+                `${range[0]}-${range[1]} of ${total} items`,
               onChange: (page, pageSize) => {
                 const tab = activeTab;
                 setPagination((prev) => ({
@@ -861,17 +1013,23 @@ export default function QcDashboardPage() {
         confirmLoading={createQcReportState.isLoading}
         width={720}
         destroyOnHidden
-        title={<div className="text-lg font-semibold text-gray-900">Create QC Report</div>}
-      >
+        title={
+          <div className="text-lg font-semibold text-gray-900">
+            Create QC Report
+          </div>
+        }>
         <Form<ManualReportFormValues>
           form={manualForm}
           layout="vertical"
           requiredMark={false}
           preserve={false}
-          className="pt-2"
-        >
+          className="pt-2">
           <div className="grid grid-cols-1 gap-x-4 md:grid-cols-2">
-            <Form.Item label="QC Type" name="qc_type" rules={[{ required: true, message: "Select QC type" }]}>
+            <Form.Item
+              label="QC Type"
+              name="qc_type"
+              initialValue="production"
+              rules={[{ required: true, message: "Select QC type" }]}>
               <Segmented
                 options={[
                   { label: "Production", value: "production" },
@@ -881,37 +1039,101 @@ export default function QcDashboardPage() {
               />
             </Form.Item>
 
-            <Form.Item label="Report Date" name="report_date" rules={[{ required: true, message: "Select report date" }]}>
+            <Form.Item
+              label="Report Date"
+              name="report_date"
+              rules={[{ required: true, message: "Select report date" }]}>
               <DatePicker className="w-full" format="YYYY-MM-DD" />
             </Form.Item>
 
-            <Form.Item label={getReferenceLabel(selectedQcType)} name="reference_number" rules={[{ required: true, message: "Select reference number" }]}> 
+            <Form.Item
+              label={getReferenceLabel(selectedQcType)}
+              name="reference_number"
+              rules={[
+                {
+                  required: true,
+                  message: "Select or search reference number",
+                },
+              ]}
+              className="md:col-span-2">
               <Select
                 showSearch
-                placeholder="Select from master list"
-                options={referenceOptions}
+                placeholder={getReferencePlaceholder(selectedQcType)}
+                onSearch={(value) => {
+                  setSearchKeyword(value);
+                }}
+                onChange={(value, option) => {
+                  const item = (option as any)?.record;
+                  if (item) {
+                    manualForm.setFieldsValue({
+                      reference_number: value,
+                      uniq_code: item.uniq_code || "",
+                    });
+                  }
+                }}
+                onClear={() => {
+                  setSearchKeyword("");
+                  manualForm.setFieldsValue({
+                    reference_number: undefined,
+                    uniq_code: undefined,
+                  });
+                }}
                 loading={formOptionsQuery.isFetching}
-                filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+                filterOption={(input, option) => {
+                  const item = (option as any)?.record;
+                  const searchText = input.toLowerCase();
+                  return (
+                    (item?.reference_number?.toLowerCase() ?? "").includes(
+                      searchText,
+                    ) ||
+                    (item?.uniq_code?.toLowerCase() ?? "").includes(
+                      searchText,
+                    ) ||
+                    (item?.part_name?.toLowerCase() ?? "").includes(searchText)
+                  );
+                }}
+                notFoundContent={
+                  formOptionsQuery.isFetching
+                    ? "Loading..."
+                    : "No results found"
+                }
+                allowClear
+                options={formOptionsQuery.data?.data?.items?.map(
+                  (item: ManualReferenceOptionItem) => ({
+                    value: item.reference_number,
+                    label: item.reference_number,
+                    record: item,
+                  }),
+                )}
               />
             </Form.Item>
 
-            <Form.Item name="record_id" hidden>
-              <Input />
-            </Form.Item>
-
-            <Form.Item label="UNIQ Code" name="uniq_code" rules={[{ required: true, message: "UNIQ will be filled automatically" }]}> 
-              <Input placeholder="Auto-filled from selected number" disabled />
+            <Form.Item
+              label="UNIQ Code"
+              name="uniq_code"
+              rules={[
+                {
+                  required: true,
+                  message: "UNIQ will be filled automatically",
+                },
+              ]}>
+              <Input
+                placeholder="Auto-filled from selected reference"
+                disabled
+              />
             </Form.Item>
 
             <Form.Item
               label="Items Checked"
               name="number_of_item_check"
-              rules={[{ required: true, message: "Enter items checked" }]}
-            >
+              rules={[{ required: true, message: "Enter items checked" }]}>
               <InputNumber className="w-full" min={0} />
             </Form.Item>
 
-            <Form.Item label="Status" name="status" rules={[{ required: true, message: "Select status" }]}>
+            <Form.Item
+              label="Status"
+              name="status"
+              rules={[{ required: true, message: "Select status" }]}>
               <Segmented
                 options={[
                   { label: "Passed", value: "passed" },
@@ -921,14 +1143,12 @@ export default function QcDashboardPage() {
               />
             </Form.Item>
 
-            <Form.Item label="Issue" name="issue">
-              <Select
-                showSearch
-                placeholder="Select issue"
-                options={issueOptions}
-                loading={formDetailQuery.isFetching}
-                filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
-              />
+            <Form.Item label="Issue Reason Code" name="issue_reason_code">
+              <Input placeholder="e.g., SURFACE_DEFECT" />
+            </Form.Item>
+
+            <Form.Item label="Issue Reason Text" name="issue_reason_text">
+              <Input placeholder="e.g., Scratch, Dent, etc." />
             </Form.Item>
 
             <Form.Item label="Number of Defect" name="number_of_defect">
@@ -938,14 +1158,6 @@ export default function QcDashboardPage() {
             <Form.Item label="Number of Scrap" name="number_of_scrap">
               <InputNumber className="w-full" min={0} />
             </Form.Item>
-
-            <Form.Item label="Number of Product Return" name="number_of_product_return">
-              <InputNumber className="w-full" min={0} />
-            </Form.Item>
-
-            {/* <Form.Item label="Remarks" name="remarks" className="md:col-span-2">
-              <Input.TextArea rows={3} placeholder="Additional QC remarks" />
-            </Form.Item> */}
           </div>
         </Form>
       </Modal>
