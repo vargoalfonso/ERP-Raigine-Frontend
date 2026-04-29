@@ -4,6 +4,8 @@ import React, { useMemo, useState } from "react";
 import { Button, Card, Input, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import { useCreateTypeParameterMutation } from "@/lib/api/system-settings/api";
+import { apiBaseUrl } from "@/lib/api/instance";
 
 type StatusType = "Active" | "Inactive";
 
@@ -58,7 +60,11 @@ export default function TypeParametersCreatePage() {
     setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
   };
 
-  const onSave = () => {
+  const [createTypeParameter, createState] = useCreateTypeParameterMutation();
+
+  const apiEnabled = Boolean(apiBaseUrl);
+
+  const onSave = async () => {
     for (const e of entries) {
       const err = validateEntry(e);
       if (err) {
@@ -67,8 +73,28 @@ export default function TypeParametersCreatePage() {
       }
     }
 
-    message.success("WIP Type saved");
-    router.push("/system-settings");
+    if (!apiEnabled) {
+      message.success("WIP Type saved (local)");
+      router.push("/system-settings");
+      return;
+    }
+
+    try {
+      for (const e of entries) {
+        await createTypeParameter({
+          type_code: String(e.typeCode ?? "").trim(),
+          type_name: String(e.typeName ?? "").trim(),
+          description: String(e.description ?? "").trim(),
+          status: e.status === "Active" ? "active" : "inactive",
+        }).unwrap();
+      }
+
+      message.success("Type Parameter(s) saved");
+      router.push("/system-settings");
+    } catch (err) {
+      console.error(err);
+      message.error("Failed to save Type Parameter(s)");
+    }
   };
 
   return (

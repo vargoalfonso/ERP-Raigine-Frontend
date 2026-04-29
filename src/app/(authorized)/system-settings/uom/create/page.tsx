@@ -4,6 +4,8 @@ import React, { useMemo, useState } from "react";
 import { Button, Card, Input, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import { useCreateUomMutation } from "@/lib/api/system-settings/api";
+import { apiBaseUrl } from "@/lib/api/instance";
 
 type StatusType = "Active" | "Inactive";
 
@@ -35,8 +37,10 @@ function makeEntry(idx: number): Entry {
   };
 }
 
-export default function UomGlobalCreatePage() {
+export default function UomCreatePage() {
   const router = useRouter();
+  const useApi = Boolean(apiBaseUrl);
+  const [createUom, createUomState] = useCreateUomMutation();
 
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
 
@@ -61,7 +65,7 @@ export default function UomGlobalCreatePage() {
     setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
   };
 
-  const onSave = () => {
+  const onSave = async () => {
     for (const e of entries) {
       const err = validateEntry(e);
       if (err) {
@@ -70,8 +74,27 @@ export default function UomGlobalCreatePage() {
       }
     }
 
-    message.success("UoM parameter saved");
-    router.push("/system-settings");
+    if (!useApi) {
+      message.success("UoM parameter saved (local)");
+      router.push("/system-settings");
+      return;
+    }
+
+    try {
+      for (const e of entries) {
+        await createUom({
+          code: e.typeCode || "",
+          name: e.typeName || "",
+          category: e.category || "Quantity",
+          status: e.status === "Active" ? "active" : "inactive",
+        }).unwrap();
+      }
+      message.success("UoM parameter(s) saved");
+      router.push("/system-settings");
+    } catch (err) {
+      message.error("Failed to save UoM parameter(s)");
+      console.error(err);
+    }
   };
 
   return (
@@ -89,7 +112,7 @@ export default function UomGlobalCreatePage() {
 
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
+              <Button type="primary" icon={<SaveOutlined />} loading={createUomState.isLoading} onClick={onSave}>
                 Save Parameter
               </Button>
             </div>
@@ -110,16 +133,10 @@ export default function UomGlobalCreatePage() {
             <Card key={e.id} className="rounded-2xl" bodyStyle={{ padding: 24 }}>
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="text-base font-semibold text-gray-900">
-                    Add New Parameter #{idx + 1}
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    Configure Parameter for Global Unit of Measurement
-                  </div>
+                  <div className="text-base font-semibold text-gray-900">Add New Parameter #{idx + 1}</div>
+                  <div className="text-sm text-gray-500">Configure Parameter for Global Unit of Measurement</div>
                 </div>
-                <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">
-                  Entry {idx + 1}
-                </Tag>
+                <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">Entry {idx + 1}</Tag>
               </div>
 
               <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -173,9 +190,7 @@ export default function UomGlobalCreatePage() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-base font-semibold text-gray-900">Summary</div>
-                <div className="text-sm text-gray-500">
-                  {entries.length} Parameter ready to be saved
-                </div>
+                <div className="text-sm text-gray-500">{entries.length} Parameter ready to be saved</div>
               </div>
               <div className="flex items-center gap-10">
                 <div className="text-right">

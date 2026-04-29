@@ -626,6 +626,13 @@ const PURCHASE_ORDER_STATUS_OPTIONS = [
   { label: "Inactive", value: "Inactive" },
 ];
 
+const SAFETY_STOCK_PARAMETER_OPTIONS = [
+  { label: "Using PRL/working days * days (C)", value: "Using PRL/working days * days (C)" },
+  { label: "Using PRL/working days * percentage (C)", value: "Using PRL/working days * percentage (C)" },
+  { label: "Demand Forecasting result for each Uniq", value: "Demand Forecasting result for each Uniq" },
+  { label: "Using PRL/working days * machine pattern", value: "Using PRL/working days * machine pattern" },
+];
+
 type ApprovalWorkflowFormValues = {
   menuAction: string;
   level1Role: string;
@@ -925,6 +932,8 @@ export default function SystemSettingsPage() {
   const [kanbanEditMode, setKanbanEditMode] = useState<"create" | "edit">("edit");
   const [kanbanForm] = Form.useForm<KanbanFormValues>();
 
+
+
   const [globalWorkingDaysEditOpen, setGlobalWorkingDaysEditOpen] = useState(false);
   const [globalWorkingDaysEditingRow, setGlobalWorkingDaysEditingRow] =
     useState<GlobalWorkingDaysRow | null>(null);
@@ -1027,6 +1036,28 @@ export default function SystemSettingsPage() {
     }
     return map;
   }, [rolesApiData]);
+
+  const departmentOptions = useMemo(
+    () =>
+      (departmentsApiData ?? [])
+        .map((department) => ({
+          label: String(department.department_name ?? department.id),
+          value: String(department.id),
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [departmentsApiData]
+  );
+
+  const roleOptions = useMemo(
+    () =>
+      (rolesApiData ?? [])
+        .map((role) => ({
+          label: String(role.name ?? role.id),
+          value: String(role.id),
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [rolesApiData]
+  );
 
   const formatInventoryTypeLabel = (value: string) =>
     value
@@ -1134,6 +1165,15 @@ export default function SystemSettingsPage() {
         value: x.uniq,
       }));
   }, [bomTreeApiData]);
+
+  const selectedKanbanUniq = Form.useWatch("productCode", kanbanForm);
+
+  useEffect(() => {
+    if (!selectedKanbanUniq) return;
+    const opt = bomUniqOptions.find((o) => o.value === selectedKanbanUniq);
+    const name = opt && String(opt.label).includes("—") ? String(opt.label).split("—")[1].trim() : String(opt?.label ?? selectedKanbanUniq);
+    kanbanForm.setFieldsValue({ productName: name });
+  }, [selectedKanbanUniq, bomUniqOptions, kanbanForm]);
 
   const filteredRoles = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1415,7 +1455,7 @@ export default function SystemSettingsPage() {
     setSafetyEditingRow(null);
     safetyForm.resetFields();
     safetyForm.setFieldsValue({
-      parameter: "PRL/Working days * days",
+      parameter: SAFETY_STOCK_PARAMETER_OPTIONS[0]?.value,
       constanta: 7,
       status: "Active",
     });
@@ -1432,8 +1472,8 @@ export default function SystemSettingsPage() {
     form.setFieldsValue({
       name: row.name,
       empId: row.empId,
-      department: row.department,
-      role: row.role,
+      department: row.departmentId ?? row.department,
+      role: row.roleId ?? row.role,
       team: row.team,
       permissions: row.permissions.join(", "),
       status: row.status,
@@ -1454,7 +1494,7 @@ export default function SystemSettingsPage() {
     setSafetyEditingRow(row);
     safetyForm.setFieldsValue({
       inventoryType: row.inventoryType,
-      parameter: row.itemUniqCode,
+      parameter: row.parameter,
       constanta: row.constanta,
       status: row.status,
     });
@@ -1462,11 +1502,8 @@ export default function SystemSettingsPage() {
   };
 
   const openCreateTypeParameter = () => {
-    setTypeParameterEditMode("create");
-    setTypeParameterEditingRow(null);
-    typeParameterForm.resetFields();
-    typeParameterForm.setFieldsValue({ status: "Active" });
-    setTypeParameterEditOpen(true);
+    // open dedicated page for creating type parameter
+    router.push("/system-settings/type-parameters/create");
   };
 
   const openEditTypeParameter = (row: TypeParameterRow) => {
@@ -1482,13 +1519,8 @@ export default function SystemSettingsPage() {
   };
 
   const openCreateUom = () => {
-    setUomEditMode("create");
-    setUomEditingRow(null);
-    uomForm.resetFields();
-    uomForm.setFieldsValue({
-      status: "Active",
-    });
-    setUomEditOpen(true);
+    // open create page instead of side drawer
+    router.push("/system-settings/uom/create");
   };
 
   const openEditUom = (row: UomRow) => {
@@ -1733,11 +1765,15 @@ export default function SystemSettingsPage() {
       const values = await form.validateFields();
 
       if (apiEnabled) {
+        const departmentValue = String(values.department ?? "").trim();
+        const roleValue = String(values.role ?? "").trim();
         const departmentId =
-          departmentNameToId.get(String(values.department ?? "").trim().toLowerCase()) ??
+          departmentOptions.find((option) => option.value === departmentValue)?.value ??
+          departmentNameToId.get(departmentValue.toLowerCase()) ??
           editingRow?.departmentId;
         const roleId =
-          roleNameToId.get(String(values.role ?? "").trim().toLowerCase()) ??
+          roleOptions.find((option) => option.value === roleValue)?.value ??
+          roleNameToId.get(roleValue.toLowerCase()) ??
           editingRow?.roleId;
 
         if (!departmentId) throw new Error("Department name must match existing department");
@@ -1771,18 +1807,21 @@ export default function SystemSettingsPage() {
             : (editingRow?.id ?? `EMP-${String(values.empId || rows.length + 1)}`),
         name: String(values.name ?? ""),
         empId: String(values.empId ?? ""),
-        department: String(values.department ?? ""),
+        department:
+          departmentIdToName.get(String(values.department ?? "")) ??
+          String(values.department ?? editingRow?.department ?? ""),
         departmentId:
+          departmentOptions.find((option) => option.value === String(values.department ?? ""))?.value ??
           departmentNameToId.get(String(values.department ?? "").trim().toLowerCase()) ??
           editingRow?.departmentId,
-        role: String(values.role ?? ""),
+        role:
+          roleIdToName.get(String(values.role ?? "")) ??
+          String(values.role ?? editingRow?.role ?? ""),
         roleId:
+          roleOptions.find((option) => option.value === String(values.role ?? ""))?.value ??
           roleNameToId.get(String(values.role ?? "").trim().toLowerCase()) ?? editingRow?.roleId,
-        team: String(values.team ?? ""),
-        permissions: String(values.permissions ?? "")
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean),
+        team: editingRow?.team ?? "",
+        permissions: editingRow?.permissions ?? [],
         lastLogin: editingRow?.lastLogin ?? "-",
         status: values.status,
       };
@@ -1805,10 +1844,11 @@ export default function SystemSettingsPage() {
       const values = await safetyForm.validateFields();
       const inventoryTypeLabel = String(values.inventoryType ?? "").trim();
       const inventoryTypeValue = inventoryTypeLabel.toLowerCase().replace(/[\s-]+/g, "_");
+      const calculationType = String(values.parameter ?? "").trim();
       const payload = {
         inventory_type: inventoryTypeValue,
-        item_uniq_code: String(values.parameter ?? "").trim(),
-        calculation_type: "PRL/Working days * days",
+        item_uniq_code: String(safetyEditingRow?.itemUniqCode ?? "").trim(),
+        calculation_type: calculationType,
         constanta: Number(values.constanta ?? 0),
         status: toBackendStatus(values.status),
       };
@@ -1833,8 +1873,8 @@ export default function SystemSettingsPage() {
             ? `SS-${String(safetyRows.length + 1).padStart(3, "0")}`
             : (safetyEditingRow?.id ?? `SS-${String(safetyRows.length + 1).padStart(3, "0")}`),
         inventoryType: inventoryTypeLabel,
-        itemUniqCode: String(values.parameter ?? ""),
-        parameter: "PRL/Working days * days",
+        itemUniqCode: String(safetyEditingRow?.itemUniqCode ?? ""),
+        parameter: calculationType,
         constanta: Number(values.constanta ?? 0),
         status: values.status,
         createdAt: safetyEditingRow?.createdAt,
@@ -3951,33 +3991,48 @@ export default function SystemSettingsPage() {
         }
       >
         <Form form={form} layout="vertical">
-          <Form.Item label="Name" name="name" rules={[{ required: true }]}>
-            <Input placeholder="Full name" />
-          </Form.Item>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Form.Item label="Full Name" name="name" rules={[{ required: true }]}>
+              <Input placeholder="Full name" disabled={editMode === "edit"} />
+            </Form.Item>
 
-          <Form.Item label="EMP ID" name="empId" rules={[{ required: true }]}>
-            <Input placeholder="EMP-001" />
-          </Form.Item>
+            <Form.Item label="Employee ID" name="empId" rules={[{ required: true }]}>
+              <Input placeholder="EMP-001" disabled={editMode === "edit"} />
+            </Form.Item>
 
-          <Form.Item label="Department" name="department" rules={[{ required: true }]}>
-            <Input placeholder="Department" />
-          </Form.Item>
+            <Form.Item label="Department" name="department" rules={[{ required: true }]}>
+              {apiEnabled ? (
+                <Select
+                  placeholder="Select department"
+                  options={departmentOptions}
+                  disabled={editMode === "edit"}
+                  showSearch
+                  optionFilterProp="label"
+                  filterOption={(input, option) =>
+                    String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                  }
+                />
+              ) : (
+                <Input placeholder="Department" disabled={editMode === "edit"} />
+              )}
+            </Form.Item>
 
-          <Form.Item label="Role" name="role" rules={[{ required: true }]}>
-            <Input placeholder="Role" />
-          </Form.Item>
-
-          <Form.Item label="Team" name="team" rules={[{ required: true }]}>
-            <Input placeholder="Team" />
-          </Form.Item>
-
-          <Form.Item
-            label="Permissions"
-            name="permissions"
-            rules={[{ required: true, message: "Enter at least one permission" }]}
-          >
-            <Input placeholder="Comma separated (e.g., Inventory, Stock Opname)" />
-          </Form.Item>
+            <Form.Item label="Role" name="role" rules={[{ required: true }]}>
+              {apiEnabled ? (
+                <Select
+                  placeholder="Select role"
+                  options={roleOptions}
+                  showSearch
+                  optionFilterProp="label"
+                  filterOption={(input, option) =>
+                    String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                  }
+                />
+              ) : (
+                <Input placeholder="Role" />
+              )}
+            </Form.Item>
+          </div>
 
           <Form.Item label="Status" name="status" rules={[{ required: true }]}>
             <Select
@@ -4024,7 +4079,15 @@ export default function SystemSettingsPage() {
           </Form.Item>
 
           <Form.Item label="Parameter" name="parameter" rules={[{ required: true }]}>
-            <Input placeholder="ITEM001" />
+            <Select
+              placeholder="Select Type"
+              options={SAFETY_STOCK_PARAMETER_OPTIONS}
+              showSearch
+              optionFilterProp="label"
+              filterOption={(input, option) =>
+                String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+              }
+            />
           </Form.Item>
 
           <Form.Item
