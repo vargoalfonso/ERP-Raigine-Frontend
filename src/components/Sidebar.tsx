@@ -133,7 +133,7 @@ const menuItems: MenuItem[] = [
         children: [
           {
             id: "master-supplier",
-            label: "Master Supplier",
+            label: "Master List",
             icon: MdGroup,
             href: "/master-supplier",
           },
@@ -145,12 +145,12 @@ const menuItems: MenuItem[] = [
           },
         ],
       },
-      {
-        id: "master-supplier-only",
-        label: "Supplier Only",
-        icon: MdGroup,
-        href: "/master-supplier-only",
-      },
+      // {
+      //   id: "master-supplier-only",
+      //   label: "Supplier Only",
+      //   icon: MdGroup,
+      //   href: "/master-supplier-only",
+      // },
       
     ],
   },
@@ -347,11 +347,30 @@ export default function Sidebar() {
 
 function SidebarContent() {
   const [isExpanded, setIsExpanded] = useState(true);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
+    "master-supplier-group": true,
+  });
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const toggleSidebar = () => {
     setIsExpanded(!isExpanded);
+  };
+
+  const isGroupActive = (item: MenuItem): boolean => {
+    if (item.href) {
+      if (pathname === item.href) return true;
+      if (pathname.startsWith(`${item.href}/`)) return true;
+    }
+
+    return Boolean(item.children?.some((child) => isGroupActive(child)));
+  };
+
+  const toggleGroup = (itemId: string) => {
+    setExpandedGroups((prev) => ({
+      ...prev,
+      [itemId]: !prev[itemId],
+    }));
   };
 
   const renderMenuItem = (item: MenuItem, level: number = 0) => {
@@ -381,20 +400,30 @@ function SidebarContent() {
       }
 
       // Nested groups (e.g., Master Supplier -> Performance Management)
+      const isOpen = expandedGroups[item.id] ?? isGroupActive(item);
+
       return (
         <div key={item.id} className="mb-2">
-          <div
+          <button
+            type="button"
+            onClick={() => toggleGroup(item.id)}
             className={`flex items-center ${
               isExpanded ? "justify-start space-x-4" : "justify-center"
-            } px-3 py-2 mb-1 text-gray-800`}
+            } w-full px-3 py-2 mb-1 text-gray-800 hover:bg-blue-50 rounded-md transition-colors duration-200`}
           >
             <Icon className="w-5 h-5 flex-shrink-0 text-gray-700" />
             {isExpanded && (
               <span className="text-sm font-medium text-gray-800 flex-1">{item.label}</span>
             )}
-            {isExpanded && <MdChevronRight className="w-4 h-4 text-gray-400" />}
-          </div>
-          <div className={isExpanded ? "ml-6" : "ml-0"}>
+            {isExpanded && (
+              <MdChevronRight
+                className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${
+                  isOpen ? "rotate-90" : "rotate-0"
+                }`}
+              />
+            )}
+          </button>
+          <div className={`${isExpanded ? "ml-6" : "ml-0"} ${isOpen ? "block" : "hidden"}`}>
             {item.children?.map((child) => renderMenuItem(child, level + 1))}
           </div>
         </div>

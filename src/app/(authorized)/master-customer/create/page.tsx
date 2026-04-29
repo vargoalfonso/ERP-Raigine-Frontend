@@ -8,6 +8,7 @@ import {
   Checkbox,
   Form,
   Input,
+  Select,
   Typography,
   message,
 } from "antd";
@@ -15,6 +16,7 @@ import { ArrowLeftOutlined, SaveOutlined } from "@ant-design/icons";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useCreateCustomerMutation } from "@/lib/api/customers/api";
+import { BANK_SELECT_OPTIONS } from "@/lib/constants/banks";
 
 type CreateCustomerForm = {
   customerId?: string;
@@ -202,7 +204,13 @@ export default function CreateCustomerPage() {
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Form.Item label="Bank Account" name="bankAccount">
-                  <Input className="!rounded-lg" placeholder="Enter bank name (e.g., Bank Mandiri)" />
+                  <Select
+                    className="!rounded-lg"
+                    showSearch
+                    placeholder="Select bank"
+                    options={BANK_SELECT_OPTIONS}
+                    optionFilterProp="label"
+                  />
                 </Form.Item>
 
                 <Form.Item label="Bank Account Number" name="bankAccountNumber">

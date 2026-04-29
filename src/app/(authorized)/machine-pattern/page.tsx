@@ -33,7 +33,7 @@ import {
   useGetMachinePatternSummaryQuery,
   useUpdateMachinePatternMutation,
 } from "@/lib/api/machine-patterns/api";
-import { useGetMachinesQuery } from "@/lib/api/machines/api";
+import { useGetMachineParametersQuery } from "@/lib/api/machine-parameters/api";
 
 type MovementType = "Fast Moving" | "Slow Moving" | "Normal";
 type StatusType = "Active" | "Inactive";
@@ -131,18 +131,20 @@ export default function MachinePatternPage() {
 
   const { data: patternList } = useGetMachinePatternsQuery({ page: 1, limit: 20 }, { skip: !apiEnabled });
   const { data: summary } = useGetMachinePatternSummaryQuery(undefined, { skip: !apiEnabled });
-  const { data: machines = [] } = useGetMachinesQuery(undefined, { skip: !apiEnabled });
+  const { data: machineParameters } = useGetMachineParametersQuery({ page: 1, limit: 100 }, { skip: !apiEnabled });
   const { data: bomTreeData } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
   const [createMachinePattern, createState] = useCreateMachinePatternMutation();
   const [updateMachinePattern, updateState] = useUpdateMachinePatternMutation();
   const [deleteMachinePattern, deleteState] = useDeleteMachinePatternMutation();
+
+  const machines = machineParameters?.items ?? [];
 
   const machineNameById = useMemo(() => {
     const result = new Map<number, string>();
     for (const machine of machines) {
       const id = Number(machine.id ?? 0);
       if (!Number.isFinite(id)) continue;
-      const label = String(machine.machine_name ?? machine.machine_number ?? id);
+      const label = String(machine.machine_name ?? id);
       result.set(id, label);
     }
     return result;
@@ -153,9 +155,9 @@ export default function MachinePatternPage() {
       machines
         .map((machine) => {
           const id = Number(machine.id ?? 0);
-          const name = String(machine.machine_name ?? machine.machine_number ?? "").trim();
+          const name = String(machine.machine_name ?? "").trim();
           if (!Number.isFinite(id) || !name) return null;
-          return { label: `${machine.machine_number ?? id} — ${name}`, value: id };
+          return { label: name, value: id };
         })
         .filter((option): option is { label: string; value: number } => Boolean(option)),
     [machines],

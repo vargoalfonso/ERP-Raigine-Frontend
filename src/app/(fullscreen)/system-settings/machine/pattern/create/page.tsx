@@ -7,8 +7,8 @@ import { useRouter } from "next/navigation";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetMachineParametersQuery } from "@/lib/api/machine-parameters/api";
 import { useCreateMachinePatternMutation } from "@/lib/api/machine-patterns/api";
-import { useGetMachinesQuery } from "@/lib/api/machines/api";
 
 type MovementType = "Fast Moving" | "Slow Moving" | "Normal";
 type StatusType = "Active" | "Inactive";
@@ -53,9 +53,11 @@ export default function MachinePatternCreatePage() {
   const apiEnabled = Boolean(apiBaseUrl);
 
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
-  const { data: machines = [] } = useGetMachinesQuery(undefined, { skip: !apiEnabled });
+  const { data: machineParameters } = useGetMachineParametersQuery({ page: 1, limit: 100 }, { skip: !apiEnabled });
   const { data: bomTreeData } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
   const [createMachinePattern, createState] = useCreateMachinePatternMutation();
+
+  const machines = machineParameters?.items ?? [];
 
   const completeCount = useMemo(() => entries.filter((entry) => entry.created).length, [entries]);
 
@@ -85,9 +87,9 @@ export default function MachinePatternCreatePage() {
       machines
         .map((machine) => {
           const id = Number(machine.id ?? 0);
-          const name = String(machine.machine_name ?? machine.machine_number ?? "").trim();
+          const name = String(machine.machine_name ?? "").trim();
           if (!Number.isFinite(id) || !name) return null;
-          return { label: `${machine.machine_number ?? id} — ${name}`, value: id };
+          return { label: name, value: id };
         })
         .filter((option): option is { label: string; value: number } => Boolean(option)),
     [machines]
