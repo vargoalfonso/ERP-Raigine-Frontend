@@ -90,7 +90,27 @@ type RiskAssessmentRow = {
   status: "Monitoring" | "Action Needed";
 };
 
-type PrlStatus = "Active" | "Inactive";
+type PrlStatus = string;
+
+const normalizePrlStatus = (value: unknown): PrlStatus => {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return "-";
+
+  const lowerCased = normalized.toLowerCase().replace(/[_-]+/g, " ");
+  return lowerCased.replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const getPrlStatusColor = (value: PrlStatus) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+
+  if (!normalized || normalized === "-") return "default";
+  if (["active", "approved", "complete", "completed", "done"].includes(normalized)) return "blue";
+  if (["inactive", "cancelled", "canceled", "rejected", "closed"].includes(normalized)) return "default";
+  if (["pending", "draft", "waiting", "in progress", "processing", "monitoring"].includes(normalized)) return "gold";
+  if (["urgent", "overdue", "failed", "error", "action needed"].includes(normalized)) return "red";
+
+  return "default";
+};
 
 type ForecastRow = {
   key: string;
@@ -299,7 +319,7 @@ export default function PrlManagementPage() {
     return list.map((r) => {
       const customerName = r.customer?.customer_name ?? r.customer_name ?? (r.customer_uuid ? `Customer #${r.customer_uuid}` : "-");
       const uniq = r.uniq_code ?? r.item_uniq_code ?? "-";
-      const normalizedStatus = String(r.status ?? "active").toLowerCase() === "inactive" ? "Inactive" : "Active";
+      const normalizedStatus = normalizePrlStatus(r.status ?? r.approval_status);
 
       return {
         key: r.id,
@@ -699,7 +719,7 @@ export default function PrlManagementPage() {
       key: "status",
       width: 100,
       render: (v: PrlStatus) => (
-        <Tag color={v === "Active" ? "blue" : "default"} className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+        <Tag color={getPrlStatusColor(v)} className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
           {v}
         </Tag>
       ),

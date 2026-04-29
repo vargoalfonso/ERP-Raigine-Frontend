@@ -40,20 +40,22 @@ import {
   type QcDashboardBySource,
   type QcDashboardDefectItem,
   type QcDashboardIncomingQcItem,
+  type QcDashboardProductReturnQcItem,
   type QcDashboardProductionQcItem,
   type QcDashboardTopIssue,
   useCreateQcDashboardReportMutation,
   useGetQcDashboardDefectsQuery,
   useGetQcDashboardIncomingQcQuery,
   useGetQcDashboardOverviewQuery,
+  useGetQcDashboardProductReturnQcQuery,
   useGetQcDashboardProductionQcQuery,
   useGetQcReportFormDetailQuery,
   useGetQcReportFormOptionsQuery,
 } from "@/lib/api/qc-dashboard/api";
 
-type QcTabId = "production" | "incoming" | "defects";
+type QcTabId = "production" | "incoming" | "product_return" | "defects";
 
-type UiTabId = QcTabId | "product_return";
+type UiTabId = QcTabId;
 
 type PaginationState = Record<QcTabId, { page: number; limit: number }>;
 
@@ -152,6 +154,7 @@ export default function QcDashboardPage() {
   const [pagination, setPagination] = useState<PaginationState>({
     production: { page: 1, limit: 20 },
     incoming: { page: 1, limit: 20 },
+    product_return: { page: 1, limit: 20 },
     defects: { page: 1, limit: 20 },
   });
   const [isManualOpen, setIsManualOpen] = useState(false);
@@ -167,6 +170,9 @@ export default function QcDashboardPage() {
   });
   const defectsQuery = useGetQcDashboardDefectsQuery(pagination.defects, {
     skip: !apiEnabled || activeTab !== "defects",
+  });
+  const productReturnQuery = useGetQcDashboardProductReturnQcQuery(pagination.product_return, {
+    skip: !apiEnabled || activeTab !== "product_return",
   });
 
   const [createQcReport, createQcReportState] = useCreateQcDashboardReportMutation();
@@ -287,10 +293,11 @@ export default function QcDashboardPage() {
 
   const activeTable = useMemo(() => {
     if (activeTab === "incoming") return incomingQuery;
+    if (activeTab === "product_return") return productReturnQuery;
     if (activeTab === "defects") return defectsQuery;
     if (activeTab === "production") return productionQuery;
     return null;
-  }, [activeTab, defectsQuery, incomingQuery, productionQuery]);
+  }, [activeTab, defectsQuery, incomingQuery, productReturnQuery, productionQuery]);
 
   const tableLoading = Boolean(activeTable?.isFetching);
   const tableError = activeTable?.error;
@@ -361,6 +368,7 @@ export default function QcDashboardPage() {
       overviewQuery.refetch();
       if (activeTab === "production") productionQuery.refetch();
       if (activeTab === "incoming") incomingQuery.refetch();
+      if (activeTab === "product_return") productReturnQuery.refetch();
       if (activeTab === "defects") defectsQuery.refetch();
     } catch (error) {
       message.error(getApiErrorMessage(error, "Failed to create QC report"));
@@ -424,6 +432,36 @@ export default function QcDashboardPage() {
     []
   );
 
+  const productReturnColumns = useMemo<ColumnsType<QcDashboardProductReturnQcItem>>(
+    () => [
+      { title: "Report Date", dataIndex: "report_date", key: "report_date", render: (v) => formatDate(String(v ?? "")) },
+      { title: "Product Return", dataIndex: "product_return_number", key: "product_return_number" },
+      { title: "DN Number", dataIndex: "dn_number", key: "dn_number" },
+      { title: "Partner Type", dataIndex: "partner_type", key: "partner_type", render: (v) => (v ? String(v) : "-") },
+      { title: "Partner", dataIndex: "partner_name", key: "partner_name" },
+      { title: "Checked", dataIndex: "items_checked", key: "items_checked", align: "right", render: (v) => formatNumber(v) },
+      { title: "Issue", dataIndex: "issue_label", key: "issue_label", render: (v) => (v ? String(v) : "-") },
+      { title: "Rework", dataIndex: "qty_rework", key: "qty_rework", align: "right", render: (v) => formatNumber(v) },
+      { title: "Defect", dataIndex: "qty_defect", key: "qty_defect", align: "right", render: (v) => formatNumber(v) },
+      { title: "Scrap", dataIndex: "qty_scrap", key: "qty_scrap", align: "right", render: (v) => formatNumber(v) },
+      {
+        title: "Quality %",
+        dataIndex: "quality_rate_percent",
+        key: "quality_rate_percent",
+        align: "right",
+        render: (v) => `${formatNumber(v)}%`,
+      },
+      {
+        title: "Status",
+        dataIndex: "status",
+        key: "status",
+        fixed: "right",
+        render: (v) => <Tag color={statusColor(String(v ?? ""))}>{String(v ?? "-")}</Tag>,
+      },
+    ],
+    []
+  );
+
   const defectColumns = useMemo<ColumnsType<QcDashboardDefectItem>>(
     () => [
       { title: "Report Date", dataIndex: "report_date", key: "report_date", render: (v) => formatDate(String(v ?? "")) },
@@ -447,9 +485,10 @@ export default function QcDashboardPage() {
 
   const columns = useMemo(() => {
     if (activeTab === "incoming") return incomingColumns as ColumnsType<object>;
+    if (activeTab === "product_return") return productReturnColumns as ColumnsType<object>;
     if (activeTab === "defects") return defectColumns as ColumnsType<object>;
     return productionColumns as ColumnsType<object>;
-  }, [activeTab, defectColumns, incomingColumns, productionColumns]);
+  }, [activeTab, defectColumns, incomingColumns, productReturnColumns, productionColumns]);
 
   const filteredRows = useMemo(() => {
     const keyword = searchText.trim().toLowerCase();
@@ -465,6 +504,13 @@ export default function QcDashboardPage() {
       }
       if (activeTab === "incoming") {
         return [row.dn_number, row.po_number, row.supplier_name, row.uniq_code, row.issue_label]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(keyword);
+      }
+      if (activeTab === "product_return") {
+        return [row.product_return_number, row.dn_number, row.partner_type, row.partner_name, row.issue_label]
           .filter(Boolean)
           .join(" ")
           .toLowerCase()
@@ -486,15 +532,10 @@ export default function QcDashboardPage() {
       return status.includes(statusFilter);
     };
 
-    if (activeTab === "product_return") return [];
     return (tableRows as any[]).filter((row) => matchesKeyword(row) && matchesStatus(row));
   }, [activeTab, searchText, statusFilter, tableRows]);
 
   const onExport = () => {
-    if (activeTab === "product_return") {
-      message.info("Product Return export is not available yet");
-      return;
-    }
     const timestamp = dayjs().format("YYYYMMDD-HHmmss");
 
     if (activeTab === "production") {
@@ -528,6 +569,24 @@ export default function QcDashboardPage() {
         "status",
       ];
       downloadCsv(`incoming-qc-${timestamp}.csv`, headers, filteredRows as any);
+      return;
+    }
+    if (activeTab === "product_return") {
+      const headers = [
+        "report_date",
+        "product_return_number",
+        "dn_number",
+        "partner_type",
+        "partner_name",
+        "items_checked",
+        "issue_label",
+        "qty_rework",
+        "qty_defect",
+        "qty_scrap",
+        "quality_rate_percent",
+        "status",
+      ];
+      downloadCsv(`product-return-qc-${timestamp}.csv`, headers, filteredRows as any);
       return;
     }
     const headers = [
@@ -625,7 +684,7 @@ export default function QcDashboardPage() {
         />
       ) : null}
 
-      <div className="mb-6">
+      {/* <div className="mb-6">
         <Collapse
           size="small"
           items={[
@@ -690,7 +749,7 @@ export default function QcDashboardPage() {
             },
           ]}
         />
-      </div>
+      </div> */}
 
       <div className="rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="px-5 pt-5">
@@ -732,8 +791,9 @@ export default function QcDashboardPage() {
                   { label: "Passed", value: "pass" },
                   { label: "Not Passed", value: "not_pass" },
                   { label: "Failed", value: "fail" },
+                  { label: "Pending", value: "pending" },
                 ]}
-                disabled={activeTab === "defects" || activeTab === "product_return"}
+                disabled={activeTab === "defects"}
               />
               <Button icon={<DownloadOutlined />} onClick={onExport}>
                 Export
@@ -743,14 +803,6 @@ export default function QcDashboardPage() {
         </div>
 
         <div className="px-5 pb-5">
-          {activeTab === "product_return" ? (
-            <Alert
-              type="info"
-              showIcon
-              message="Product Return is not implemented yet (no backend endpoint provided)."
-            />
-          ) : null}
-
           {tableError ? (
             <Alert
               type="error"
@@ -763,39 +815,35 @@ export default function QcDashboardPage() {
           <Table
             columns={columns}
             dataSource={filteredRows as object[]}
-            loading={activeTab === "product_return" ? false : tableLoading}
+            loading={tableLoading}
             rowKey={(row) => {
               const r = row as any;
-              return String(r.qc_log_id ?? r.defect_id ?? r.id ?? "row");
+              return String(r.qc_log_id ?? r.product_return_id ?? r.defect_id ?? r.id ?? "row");
             }}
             scroll={{ x: 1200 }}
-            pagination={
-              activeTab === "product_return"
-                ? false
-                : {
-                    current: tablePagination?.page ?? pagination[activeTab as QcTabId].page,
-                    pageSize: tablePagination?.perPage ?? pagination[activeTab as QcTabId].limit,
-                    total: tablePagination?.total ?? 0,
-                    showSizeChanger: true,
-                    pageSizeOptions: ["10", "20", "50", "100"],
-                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
-                    onChange: (page, pageSize) => {
-                      const tab = activeTab as QcTabId;
-                      setPagination((prev) => ({
-                        ...prev,
-                        [tab]: { page, limit: pageSize ?? prev[tab].limit },
-                      }));
-                    },
-                    onShowSizeChange: (_current, size) => {
-                      const tab = activeTab as QcTabId;
-                      setPagination((prev) => ({
-                        ...prev,
-                        [tab]: { page: 1, limit: size },
-                      }));
-                    },
-                  }
-            }
-            locale={{ emptyText: activeTab === "product_return" ? "Coming soon" : "No records" }}
+            pagination={{
+              current: tablePagination?.page ?? pagination[activeTab].page,
+              pageSize: tablePagination?.perPage ?? pagination[activeTab].limit,
+              total: tablePagination?.total ?? 0,
+              showSizeChanger: true,
+              pageSizeOptions: ["10", "20", "50", "100"],
+              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+              onChange: (page, pageSize) => {
+                const tab = activeTab;
+                setPagination((prev) => ({
+                  ...prev,
+                  [tab]: { page, limit: pageSize ?? prev[tab].limit },
+                }));
+              },
+              onShowSizeChange: (_current, size) => {
+                const tab = activeTab;
+                setPagination((prev) => ({
+                  ...prev,
+                  [tab]: { page: 1, limit: size },
+                }));
+              },
+            }}
+            locale={{ emptyText: "No records" }}
             className="overflow-hidden rounded-xl"
           />
 

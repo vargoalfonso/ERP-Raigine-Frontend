@@ -133,6 +133,23 @@ export type QcDashboardDefectItem = {
   rework_qc_task_id: number | null;
 };
 
+export type QcDashboardProductReturnQcItem = {
+  qc_log_id: number;
+  product_return_id: number;
+  report_date: string;
+  product_return_number: string;
+  dn_number: string;
+  partner_type: string;
+  partner_name: string;
+  items_checked: number;
+  issue_label: string | null;
+  qty_rework: number;
+  qty_defect: number;
+  qty_scrap: number;
+  quality_rate_percent: number;
+  status: string;
+};
+
 export type QcDashboardPaginatedRequest = { limit: number; page: number };
 
 export type CreateQcDashboardManualReportRequest = {
@@ -527,6 +544,23 @@ export const qcDashboardApiSlice = apiSlice
         providesTags: [{ type: TAG, id: "DEFECTS_V2" }],
       }),
 
+      getQcDashboardProductReturnQc: builder.query<ApiResponse<QcDashboardProductReturnQcItem[]>, QcDashboardPaginatedRequest>({
+        query: ({ limit, page }) => ({
+          url: "/qc-dashboard/product-return-qc",
+          method: "GET",
+          params: { limit, page },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown, _meta, arg) => {
+          const payload = unwrapBackendData<unknown>(response);
+          const root = isRecord(payload) ? payload : {};
+          const items = Array.isArray(root.items) ? (root.items as QcDashboardProductReturnQcItem[]) : [];
+          const pagination = toApiPagination(root.pagination, arg, items.length);
+          return ok(items, "OK", pagination);
+        },
+        providesTags: [{ type: TAG, id: "PRODUCT_RETURN_V2" }],
+      }),
+
       createQcDashboardManualReport: builder.mutation<ApiResponse<unknown>, CreateQcDashboardManualReportRequest>({
         query: (body) => ({
           url: "/qc-dashboard/reports/manual",
@@ -540,6 +574,7 @@ export const qcDashboardApiSlice = apiSlice
           { type: TAG, id: "PRODUCTION_V2" },
           { type: TAG, id: "INCOMING_V2" },
           { type: TAG, id: "DEFECTS_V2" },
+          { type: TAG, id: "PRODUCT_RETURN_V2" },
         ],
       }),
 
@@ -666,6 +701,7 @@ export const {
   useGetQcDashboardProductionQcQuery,
   useGetQcDashboardIncomingQcQuery,
   useGetQcDashboardDefectsQuery,
+  useGetQcDashboardProductReturnQcQuery,
   useCreateQcDashboardManualReportMutation,
   useGetProductionQcReportsQuery,
   useGetIncomingQcReportsQuery,
