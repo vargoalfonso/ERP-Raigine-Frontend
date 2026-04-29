@@ -1,17 +1,15 @@
 "use client";
 
-import React, { Suspense, useEffect, useMemo } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { Button, Card, Form, InputNumber, Select, Tag, message } from "antd";
-import {
-  InfoCircleOutlined,
-  LeftOutlined,
-  SaveOutlined,
-} from "@ant-design/icons";
+import { LeftOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
+
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+
 import {
   useCreateStockdaysMutation,
   useGetStockdaysByIdQuery,
@@ -20,135 +18,182 @@ import {
 
 type FormValues = {
   inventoryType?: string;
-  itemUniq?: string;
+  itemCode?: string;
   calculationType?: string;
   constanta?: number;
-  stockDays?: number;
 };
 
-const toUiStatus = (value: unknown): "Active" | "Inactive" =>
-  String(value ?? "active").toLowerCase().includes("inact") ? "Inactive" : "Active";
-
-const toBackendStatus = (value: unknown): string =>
-  String(value ?? "active").toLowerCase().includes("inact") ? "inactive" : "active";
+type EntryType = {
+  inventoryType: string;
+  itemCode: string;
+  calculationType: string;
+  constanta?: number;
+};
 
 export default function StockdaysCreatePage() {
   return (
     <Suspense fallback={null}>
-      <StockdaysCreatePageContent />
+      <PageContent />
     </Suspense>
   );
 }
 
-function StockdaysCreatePageContent() {
+function PageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const apiEnabled = Boolean(apiBaseUrl);
+
   const [form] = Form.useForm<FormValues>();
-  const [createStockdays, createState] = useCreateStockdaysMutation();
-  const [updateStockdays, updateState] = useUpdateStockdaysMutation();
+  const [entries, setEntries] = useState<EntryType[]>([]);
+
+  const apiEnabled = Boolean(apiBaseUrl);
 
   const id = searchParams.get("id") ?? "";
   const mode = (searchParams.get("mode") ?? "create").toLowerCase();
+
   const isEditMode = mode === "edit";
   const isDetailMode = mode === "detail" || mode === "view";
   const isReadOnly = isDetailMode;
 
-  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
-  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
-  const uniqOptions = useMemo(
-    () =>
-      bomIndex.options.map((option) => ({
-        label: bomIndex.partNameByUniq[option.value]
-          ? `${option.value} — ${bomIndex.partNameByUniq[option.value]}`
-          : option.value,
-        value: option.value,
-      })),
-    [bomIndex.options, bomIndex.partNameByUniq]
+  const [createStockdays, createState] = useCreateStockdaysMutation();
+  const [updateStockdays, updateState] = useUpdateStockdaysMutation();
+
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
+    skip: !apiEnabled,
+  });
+
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomTreeRes?.data ?? []),
+    [bomTreeRes?.data]
   );
 
-  const stockdaysDetailQuery = useGetStockdaysByIdQuery(id, {
+  const uniqOptions = useMemo(
+    () =>
+      bomIndex.options.map((item) => ({
+        value: item.value,
+        label: bomIndex.partNameByUniq[item.value]
+          ? `${item.value} - ${bomIndex.partNameByUniq[item.value]}`
+          : item.value,
+      })),
+    [bomIndex]
+  );
+
+  const detailQuery = useGetStockdaysByIdQuery(id, {
     skip: !apiEnabled || !id,
   });
 
   useEffect(() => {
-    if (!id) {
-      form.setFieldsValue({});
-      return;
-    }
+    if (!detailQuery.data || !id) return;
 
-    const detail = stockdaysDetailQuery.data;
-    if (!detail) return;
+    const item = detailQuery.data;
 
     form.setFieldsValue({
-      inventoryType: String(detail.inventory_type ?? "raw_material"),
-      itemUniq: String(detail.item_uniq_code ?? ""),
-      calculationType: String(detail.calculation_type ?? "a"),
-      stockDays: Number(detail.stock_days ?? 0),
+      inventoryType: item.inventory_type,
+      itemCode: item.item_code,
+      calculationType: item.calculation_type,
+      constanta: item.constanta,
     });
-  }, [form, id, stockdaysDetailQuery.data]);
+  }, [detailQuery.data, form, id]);
 
-  const [entries, setEntries] = React.useState<FormValues[]>([{ }]);
+  const handleAdd = async () => {
+    try {
+      const values = await form.validateFields();
 
-  const addEntryToList = async (values: FormValues) => {
-    setEntries((prev) => [...prev, values]);
+      const duplicate = entries.find(
+        (x) =>
+          x.inventoryType === values.inventoryType &&
+          x.itemCode === values.itemCode
+      );
+
+      if (duplicate) {
+        message.warning("Type + Uniq already added");
+        return;
+      }
+
+      setEntries((prev) => [
+        ...prev,
+        {
+          inventoryType: values.inventoryType!,
+          itemCode: values.itemCode!,
+          calculationType: values.calculationType!,
+          constanta: values.constanta,
+        },
+      ]);
+
+      form.resetFields(["itemCode", "calculationType", "constanta"]);
+
+      message.success("Parameter added");
+    } catch {}
   };
 
-  const onSave = async () => {
+  const handleSave = async () => {
     try {
-      // collect entries from UI state and submit each to API
-      // validate each entry
-      for (const e of entries) {
-        if (!e.inventoryType || !e.itemUniq || !e.calculationType) {
-          message.error("Please complete all parameter entries before saving");
-          return;
-        }
+      if (entries.length === 0 && !isEditMode) {
+        message.error("Please add minimum one parameter");
+        return;
       }
 
-      if (apiEnabled) {
-        for (const e of entries) {
-          const payload = {
-            inventory_type: String(e.inventoryType),
-            item_uniq_code: String(e.itemUniq),
-            stock_days: Number(e.stockDays ?? 0),
+      if (isEditMode && id) {
+        const values = await form.validateFields();
+
+        await updateStockdays({
+          id,
+          body: {
+            inventory_type: values.inventoryType,
+            item_code: values.itemCode,
+            calculation_type: values.calculationType,
+            constanta: values.constanta,
             status: "active",
-            calculation_type: String(e.calculationType ?? "a"),
-          };
-          await createStockdays(payload).unwrap();
-        }
-        message.success("Stockdays parameters created");
-      } else {
-        message.success("Stockdays parameters saved locally");
+          },
+        }).unwrap();
+
+        message.success("Stockdays updated");
+        router.push("/system-settings");
+        return;
       }
 
+      for (const item of entries) {
+        await createStockdays({
+          inventory_type: item.inventoryType,
+          item_code: item.itemCode,
+          calculation_type: item.calculationType,
+          constanta: item.constanta,
+          status: "active",
+        }).unwrap();
+      }
+
+      message.success("Stockdays created");
       router.push("/system-settings");
     } catch (error) {
-      if (error && typeof error === "object" && "errorFields" in error) return;
-      message.error(getApiErrorMessage(error, "Failed to save stockdays"));
+      message.error(getApiErrorMessage(error, "Failed save stockdays"));
     }
   };
 
   return (
     <div className="min-h-screen bg-[#EEF5FF]">
-      <div className="bg-white border-b border-gray-200">
+      <div className="bg-white border-b">
         <div className="px-6 py-4">
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex justify-between items-center">
             <button
-              className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+              className="flex items-center gap-2 text-sm text-gray-600"
               onClick={() => router.push("/system-settings")}
             >
               <LeftOutlined />
-              <span>Back to System Parameters</span>
+              Back to System Parameters
             </button>
 
-            <div className="flex items-center gap-2">
-              <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
+            <div className="flex gap-2">
+              <Button onClick={() => router.push("/system-settings")}>
+                Cancel
+              </Button>
+
               {!isReadOnly && (
                 <Button
                   type="primary"
                   icon={<SaveOutlined />}
-                  onClick={onSave}
-                  loading={createState.isLoading || updateState.isLoading}
+                  loading={
+                    createState.isLoading || updateState.isLoading
+                  }
+                  onClick={handleSave}
                 >
                   {isEditMode ? "Update Parameter" : "Save Parameter"}
                 </Button>
@@ -156,84 +201,158 @@ function StockdaysCreatePageContent() {
             </div>
           </div>
 
-          <div className="mt-2">
-            <div className="text-xl font-semibold text-gray-900">
-              {isReadOnly ? "Stockdays Detail" : isEditMode ? "Edit Stockdays Parameter" : "Add Parameter for Stockdays Option"}
-            </div>
-            <div className="text-sm text-gray-500">
-              Configure stock days and safety stock from BOM item code
-            </div>
+          <div className="mt-3">
+            <h1 className="text-2xl font-semibold">
+              Add Parameter for Stockdays Option
+            </h1>
+
+            <p className="text-gray-500 text-sm">
+              Create Stockdays • {entries.length} entry
+            </p>
           </div>
         </div>
       </div>
 
-      <div className="px-6 py-6">
-        <div className="max-w-5xl mx-auto">
-          <Card className="rounded-2xl" bodyStyle={{ padding: 24 }} loading={Boolean(id) && stockdaysDetailQuery.isFetching}>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                  <div className="text-base font-semibold text-gray-900">Stockdays Parameter</div>
-                  <div className="text-sm text-gray-500">Item code is sourced from BOM UNIQ code</div>
+      <div className="p-6">
+        <div className="max-w-6xl mx-auto space-y-6">
+          <Card>
+            <Form
+              form={form}
+              layout="vertical"
+              requiredMark={false}
+            >
+              <div className="flex justify-between">
+                <div>
+                  <h3 className="font-semibold text-lg">
+                    Step 1: Select Type
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    Select Type before create Stockdays
+                  </p>
+                </div>
+
+                <Tag color="blue">Required</Tag>
               </div>
-              <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">
-                Required
-              </Tag>
-            </div>
 
-              <div className="space-y-6 mt-5">
-                <Card type="inner" title="Step 1: Select Type">
-                  <Form form={form} layout="vertical" requiredMark={false}>
-                    <Form.Item name="inventoryType" label="Type" rules={[{ required: true, message: "Select Type" }] }>
-                      <Select placeholder="Select Type" options={[{ label: "Raw Material", value: "raw_material" }, { label: "Finished Goods", value: "finished_goods" }]} disabled={isReadOnly} />
-                    </Form.Item>
-                  </Form>
-                </Card>
+              <Form.Item
+                label="Type"
+                name="inventoryType"
+                rules={[{ required: true }]}
+                className="mt-5"
+              >
+                <Select
+                  placeholder="Select Type"
+                  disabled={isReadOnly}
+                  options={[
+                    {
+                      label: "Raw Material",
+                      value: "raw_material",
+                    },
+                    {
+                      label: "Finished Goods",
+                      value: "finished_goods",
+                    },
+                  ]}
+                />
+              </Form.Item>
 
-                <Card type="inner" title="Step 2: Input Data">
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                    <Form.Item name="itemUniq" label="Uniq" rules={[{ required: true, message: "Select Uniq" }] }>
-                      <Select placeholder="Select Uniq" options={uniqOptions} showSearch optionFilterProp="label" disabled={isReadOnly} />
-                    </Form.Item>
-
-                    <Form.Item name="calculationType" label="Calculation Type" rules={[{ required: true }] }>
-                      <Select placeholder="Select Calculation Type" disabled={isReadOnly} options={[{ label: "Stockdays - PRL = Stock / (PRL/Working days)", value: "a" }, { label: "Stockdays - DailyUsage = Stock / Daily Usage (Data history)", value: "b" }]} />
-                    </Form.Item>
-
-                    <Form.Item name="constanta" label="Constanta">
-                      <InputNumber className="w-full" min={0} placeholder="Input Constanta" disabled={isReadOnly} />
-                    </Form.Item>
+              <div className="mt-8">
+                <div className="flex justify-between">
+                  <div>
+                    <h3 className="font-semibold text-lg">
+                      Step 2: Input Data
+                    </h3>
+                    <p className="text-sm text-gray-500">
+                      Input Data for each Items
+                    </p>
                   </div>
 
-                  <div className="mt-4">
-                    <Button type="primary" onClick={async () => {
-                      try {
-                        const vals = await form.validateFields();
-                        await addEntryToList(vals as FormValues);
-                        message.success("Parameter added");
-                        form.resetFields(["itemUniq","calculationType","constanta","stockDays"]);
-                      } catch (err) {
-                        // validation handled by antd
-                      }
-                    }}>
+                  <Tag color="blue">
+                    Entry {entries.length + 1}
+                  </Tag>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mt-5">
+                  <Form.Item
+                    label="Uniq"
+                    name="itemCode"
+                    rules={[{ required: true }]}
+                  >
+                    <Select
+                      placeholder="Select Uniq"
+                      showSearch
+                      optionFilterProp="label"
+                      options={uniqOptions}
+                    />
+                  </Form.Item>
+
+                  <Form.Item
+                    label="Calculation Type"
+                    name="calculationType"
+                    rules={[{ required: true }]}
+                  >
+                    <Select
+                      options={[
+                        {
+                          label:
+                            "Stockdays - PRL = Stock / (PRL / Working Days)",
+                          value: "days",
+                        },
+                        {
+                          label:
+                            "Stockdays - Daily Usage",
+                          value: "percentage",
+                        },
+                      ]}
+                    />
+                  </Form.Item>
+
+                  <Form.Item
+                    label="Constanta"
+                    name="constanta"
+                  >
+                    <InputNumber
+                      className="w-full"
+                      min={0}
+                    />
+                  </Form.Item>
+
+                  <div className="flex items-end">
+                    <Button
+                      type="primary"
+                      block
+                      onClick={handleAdd}
+                    >
                       + Create Stock days
                     </Button>
                   </div>
-                </Card>
-
-                <div className="flex justify-center">
-                  <Button onClick={() => setEntries((p) => [...p, {}])}>+ Add Another Parameter</Button>
                 </div>
+              </div>
+            </Form>
+          </Card>
 
-                <Card title="Summary">
-                  <div className="flex justify-between items-center">
-                    <div className="text-sm text-gray-500">{entries.length} Parameter ready to be saved</div>
-                    <div className="text-right">
-                      <div className="text-lg font-semibold">{entries.length}</div>
-                      <div className="text-xs text-gray-500">Entries</div>
+          <Card title="Summary">
+            <div className="space-y-2">
+              {entries.map((item, index) => (
+                <div
+                  key={index}
+                  className="border rounded p-3 flex justify-between"
+                >
+                  <div>
+                    <div>{item.itemCode}</div>
+                    <div className="text-xs text-gray-500">
+                      {item.inventoryType} - {item.calculationType}
                     </div>
                   </div>
-                </Card>
+
+                  <div>{item.constanta ?? 0}</div>
+                </div>
+              ))}
+
+              <div className="text-sm text-gray-500">
+                {entries.length} Parameter ready to be saved
               </div>
+            </div>
           </Card>
         </div>
       </div>
