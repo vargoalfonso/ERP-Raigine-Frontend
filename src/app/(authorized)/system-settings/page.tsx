@@ -96,6 +96,7 @@ import {
 } from "@/lib/api/system-settings/api";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
+import { constant } from "lodash";
 
 type StatusType = "Active" | "Inactive";
 
@@ -132,10 +133,11 @@ type SafetyStockRow = {
 };
 
 type StockdaysRow = {
-  id: string;
-  itemUniqCode: string;
-  stockDays: number;
+  id: number;
+  inventoryType: string;
+  itemCode: string;
   calculationType?: string;
+  constanta: number;
   status: StatusType;
 };
 
@@ -338,7 +340,7 @@ const modules: ModuleItem[] = [
     iconTextClass: "text-indigo-700",
   },
   // Keep a realistic count like the screenshot
-  
+
   {
     id: "process",
     name: "Process",
@@ -408,11 +410,36 @@ const initialRows: ParameterRow[] = [
 ];
 
 const initialRoleRows: RoleRow[] = [
-  { id: "ROLE-001", roleName: "Management", numberOfPeople: 10, lastUpdated: "1/15/2024" },
-  { id: "ROLE-002", roleName: "Production Manager", numberOfPeople: 20, lastUpdated: "1/15/2024" },
-  { id: "ROLE-003", roleName: "Production Staff", numberOfPeople: 200, lastUpdated: "1/15/2024" },
-  { id: "ROLE-004", roleName: "Sales", numberOfPeople: 150, lastUpdated: "1/15/2024" },
-  { id: "ROLE-005", roleName: "Finance", numberOfPeople: 8, lastUpdated: "1/15/2024" },
+  {
+    id: "ROLE-001",
+    roleName: "Management",
+    numberOfPeople: 10,
+    lastUpdated: "1/15/2024",
+  },
+  {
+    id: "ROLE-002",
+    roleName: "Production Manager",
+    numberOfPeople: 20,
+    lastUpdated: "1/15/2024",
+  },
+  {
+    id: "ROLE-003",
+    roleName: "Production Staff",
+    numberOfPeople: 200,
+    lastUpdated: "1/15/2024",
+  },
+  {
+    id: "ROLE-004",
+    roleName: "Sales",
+    numberOfPeople: 150,
+    lastUpdated: "1/15/2024",
+  },
+  {
+    id: "ROLE-005",
+    roleName: "Finance",
+    numberOfPeople: 8,
+    lastUpdated: "1/15/2024",
+  },
 ];
 
 // const initialSafetyStockRows: SafetyStockRow[] = [
@@ -448,18 +475,20 @@ const initialRoleRows: RoleRow[] = [
 
 const initialStockdaysRows: StockdaysRow[] = [
   {
-    id: "SDP-001",
-    itemUniqCode: "ITEM001",
-    stockDays: 30,
-    calculationType: "a",
+    id: 1,
+    inventoryType: "raw_material",
+    itemCode: "ITEM001",
+    calculationType: "days",
+    constanta: 30,
     status: "Inactive",
   },
   {
-    id: "SDP-002",
-    itemUniqCode: "ITEM002",
-    stockDays: 45,
-    calculationType: "b",
-    status: "Active",
+    id: 2,
+    inventoryType: "raw_material",
+    itemCode: "ITEM002",
+    calculationType: "percentase",
+    constanta: 30,
+    status: "Inactive",
   },
 ];
 
@@ -474,9 +503,27 @@ const initialTypeParameterRows: TypeParameterRow[] = [
 ];
 
 const initialUomRows: UomRow[] = [
-  { id: "UOM-PCS", code: "PCS", name: "Pieces", category: "Count", status: "Active" },
-  { id: "UOM-KG", code: "KG", name: "Kilogram", category: "Weight", status: "Active" },
-  { id: "UOM-M", code: "M", name: "Meter", category: "Length", status: "Active" },
+  {
+    id: "UOM-PCS",
+    code: "PCS",
+    name: "Pieces",
+    category: "Count",
+    status: "Active",
+  },
+  {
+    id: "UOM-KG",
+    code: "KG",
+    name: "Kilogram",
+    category: "Weight",
+    status: "Active",
+  },
+  {
+    id: "UOM-M",
+    code: "M",
+    name: "Meter",
+    category: "Length",
+    status: "Active",
+  },
 ];
 
 const initialPurchaseOrderRows: PurchaseOrderRow[] = [
@@ -663,10 +710,22 @@ const PURCHASE_ORDER_STATUS_OPTIONS = [
 ];
 
 const SAFETY_STOCK_PARAMETER_OPTIONS = [
-  { label: "Using PRL/working days * days (C)", value: "Using PRL/working days * days (C)" },
-  { label: "Using PRL/working days * percentage (C)", value: "Using PRL/working days * percentage (C)" },
-  { label: "Demand Forecasting result for each Uniq", value: "Demand Forecasting result for each Uniq" },
-  { label: "Using PRL/working days * machine pattern", value: "Using PRL/working days * machine pattern" },
+  {
+    label: "Using PRL/working days * days (C)",
+    value: "Using PRL/working days * days (C)",
+  },
+  {
+    label: "Using PRL/working days * percentage (C)",
+    value: "Using PRL/working days * percentage (C)",
+  },
+  {
+    label: "Demand Forecasting result for each Uniq",
+    value: "Demand Forecasting result for each Uniq",
+  },
+  {
+    label: "Using PRL/working days * machine pattern",
+    value: "Using PRL/working days * machine pattern",
+  },
 ];
 
 type ApprovalWorkflowFormValues = {
@@ -727,31 +786,46 @@ export default function SystemSettingsPage() {
 
   const CURRENT_YEAR = new Date().getFullYear();
 
-  const PERIOD_OPTIONS = MONTH_NAMES.map((m) => ({ label: `${m} ${CURRENT_YEAR}`, value: `${m} ${CURRENT_YEAR}` }));
+  const PERIOD_OPTIONS = MONTH_NAMES.map((m) => ({
+    label: `${m} ${CURRENT_YEAR}`,
+    value: `${m} ${CURRENT_YEAR}`,
+  }));
 
   const router = useRouter();
 
   const apiEnabled = Boolean(apiBaseUrl);
   const [selectedModuleId, setSelectedModuleId] = useState<string>(
-    "access-control-matrix"
+    "access-control-matrix",
   );
-  const shouldLoadAccessControl = apiEnabled && selectedModuleId === "access-control-matrix";
-  const shouldLoadRoles = apiEnabled && (selectedModuleId === "access-control-matrix" || selectedModuleId === "roles" || selectedModuleId === "approval-workflow");
-  const shouldLoadDepartments = apiEnabled && selectedModuleId === "access-control-matrix";
-  const shouldLoadSafetyStock = apiEnabled && selectedModuleId === "safety-stock";
+  const shouldLoadAccessControl =
+    apiEnabled && selectedModuleId === "access-control-matrix";
+  const shouldLoadRoles =
+    apiEnabled &&
+    (selectedModuleId === "access-control-matrix" ||
+      selectedModuleId === "roles" ||
+      selectedModuleId === "approval-workflow");
+  const shouldLoadDepartments =
+    apiEnabled && selectedModuleId === "access-control-matrix";
+  const shouldLoadSafetyStock =
+    apiEnabled && selectedModuleId === "safety-stock";
   const shouldLoadStockdays = apiEnabled && selectedModuleId === "stockdays";
   const shouldLoadTypeParameters = apiEnabled && selectedModuleId === "type-parameters";
   const shouldLoadScrapTypes = apiEnabled && selectedModuleId === "scrap";
   const shouldLoadMachinePatterns = apiEnabled && selectedModuleId === "machine";
   const shouldLoadMachineMaster = apiEnabled && selectedModuleId === "machine";
   const shouldLoadProcesses = apiEnabled && selectedModuleId === "process";
-  const shouldLoadGlobalParameters = apiEnabled && selectedModuleId === "global";
-  const shouldLoadSuppliers = apiEnabled && selectedModuleId === "purchase-order";
+  const shouldLoadGlobalParameters =
+    apiEnabled && selectedModuleId === "global";
+  const shouldLoadSuppliers =
+    apiEnabled && selectedModuleId === "purchase-order";
   const shouldLoadUoms = apiEnabled && selectedModuleId === "uom-global";
   const shouldLoadKanban = apiEnabled && selectedModuleId === "kanban";
   const shouldLoadPoSplit = apiEnabled && selectedModuleId === "purchase-order";
-  const shouldLoadApprovalWorkflows = apiEnabled && selectedModuleId === "approval-workflow";
-  const shouldLoadBomTree = apiEnabled && (selectedModuleId === "safety-stock" || selectedModuleId === "kanban");
+  const shouldLoadApprovalWorkflows =
+    apiEnabled && selectedModuleId === "approval-workflow";
+  const shouldLoadBomTree =
+    apiEnabled &&
+    (selectedModuleId === "safety-stock" || selectedModuleId === "kanban");
 
   const toBackendStatus = (s: StatusType): string =>
     s === "Inactive" ? "inactive" : "active";
@@ -761,23 +835,36 @@ export default function SystemSettingsPage() {
     return raw.includes("inact") ? "Inactive" : "Active";
   };
 
-  const { data: rolesApiData } = useGetRolesQuery(undefined, { skip: !shouldLoadRoles });
-  const { data: departmentsApiData } = useGetDepartmentsQuery(undefined, { skip: !shouldLoadDepartments });
-  const { data: accessControlApiData } = useGetAccessControlMatrixQuery(undefined, { skip: !shouldLoadAccessControl });
+  const { data: rolesApiData } = useGetRolesQuery(undefined, {
+    skip: !shouldLoadRoles,
+  });
+  const { data: departmentsApiData } = useGetDepartmentsQuery(undefined, {
+    skip: !shouldLoadDepartments,
+  });
+  const { data: accessControlApiData } = useGetAccessControlMatrixQuery(
+    undefined,
+    { skip: !shouldLoadAccessControl },
+  );
   const [createAccessControl] = useCreateAccessControlMatrixMutation();
   const [updateAccessControl] = useUpdateAccessControlMatrixMutation();
   const [deleteAccessControl] = useDeleteAccessControlMatrixMutation();
   const [deleteRole] = useDeleteRoleMutation();
-  const { data: safetyStockApiData } = useGetSafetyStockQuery(undefined, { skip: !shouldLoadSafetyStock });
+  const { data: safetyStockApiData } = useGetSafetyStockQuery(undefined, {
+    skip: !shouldLoadSafetyStock,
+  });
   const [createSafetyStock] = useCreateSafetyStockMutation();
   const [updateSafetyStock] = useUpdateSafetyStockMutation();
   const [deleteSafetyStock] = useDeleteSafetyStockMutation();
-  const { data: stockdaysApiData } = useGetStockdaysQuery(undefined, { skip: !shouldLoadStockdays });
+  const { data: stockdaysApiData } = useGetStockdaysQuery(undefined, {
+    skip: !shouldLoadStockdays,
+  });
   const [createStockdays] = useCreateStockdaysMutation();
   const [updateStockdays] = useUpdateStockdaysMutation();
   const [deleteStockdays] = useDeleteStockdaysMutation();
 
-  const { data: typeParametersApiData } = useGetTypeParametersQuery(undefined, { skip: !shouldLoadTypeParameters });
+  const { data: typeParametersApiData } = useGetTypeParametersQuery(undefined, {
+    skip: !shouldLoadTypeParameters,
+  });
   const [createTypeParameter] = useCreateTypeParameterMutation();
   const [updateTypeParameter] = useUpdateTypeParameterMutation();
   const [deleteTypeParameter] = useDeleteTypeParameterMutation();
@@ -787,44 +874,62 @@ export default function SystemSettingsPage() {
   const [deleteMachinePattern] = useDeleteMachinePatternMutation();
   const { data: machinesApiData = [] } = useGetMachinesQuery(undefined, { skip: !shouldLoadMachineMaster });
 
-  const { data: processesApiData } = useGetProcessesQuery(undefined, { skip: !shouldLoadProcesses });
+  const { data: processesApiData } = useGetProcessesQuery(undefined, {
+    skip: !shouldLoadProcesses,
+  });
   const [createProcess] = useCreateProcessMutation();
   const [updateProcess] = useUpdateProcessMutation();
   const [deleteProcess] = useDeleteProcessMutation();
 
-  const { data: globalParametersApiData } = useGetGlobalWorkingDaysQuery(undefined, { skip: !shouldLoadGlobalParameters });
+  const { data: globalParametersApiData } = useGetGlobalWorkingDaysQuery(
+    undefined,
+    { skip: !shouldLoadGlobalParameters },
+  );
   const [createGlobalWorkingDays] = useCreateGlobalWorkingDaysMutation();
   const [updateGlobalWorkingDays] = useUpdateGlobalWorkingDaysMutation();
   const [deleteGlobalWorkingDays] = useDeleteGlobalWorkingDaysMutation();
-  const { data: suppliersApiData } = useListSuppliersQuery(undefined, { skip: !shouldLoadSuppliers });
+  const { data: suppliersApiData } = useListSuppliersQuery(undefined, {
+    skip: !shouldLoadSuppliers,
+  });
 
-  const { data: uomsApiData } = useGetUomsQuery(undefined, { skip: !shouldLoadUoms });
+  const { data: uomsApiData } = useGetUomsQuery(undefined, {
+    skip: !shouldLoadUoms,
+  });
   const [createUom] = useCreateUomMutation();
   const [updateUom] = useUpdateUomMutation();
   const [deleteUom] = useDeleteUomMutation();
 
-  const { data: kanbanApiData } = useGetKanbanStandardsQuery(undefined, { skip: !shouldLoadKanban });
+  const { data: kanbanApiData } = useGetKanbanStandardsQuery(undefined, {
+    skip: !shouldLoadKanban,
+  });
   const [createKanbanStandard] = useCreateKanbanStandardMutation();
   const [updateKanbanStandard] = useUpdateKanbanStandardMutation();
   const [deleteKanbanStandard] = useDeleteKanbanStandardMutation();
-  const { data: poSplitApiData } = useGetPoSplitSettingsQuery(undefined, { skip: !shouldLoadPoSplit });
+  const { data: poSplitApiData } = useGetPoSplitSettingsQuery(undefined, {
+    skip: !shouldLoadPoSplit,
+  });
   const [createPoSplit] = useCreatePoSplitMutation();
   const [updatePoSplit] = useUpdatePoSplitMutation();
   const [deletePoSplit] = useDeletePoSplitMutation();
-  const { data: approvalWorkflowApiData } = useGetApprovalWorkflowsQuery(undefined, { skip: !shouldLoadApprovalWorkflows });
+  const { data: approvalWorkflowApiData } = useGetApprovalWorkflowsQuery(
+    undefined,
+    { skip: !shouldLoadApprovalWorkflows },
+  );
   const [createApprovalWorkflow] = useCreateApprovalWorkflowMutation();
   const [updateApprovalWorkflow] = useUpdateApprovalWorkflowMutation();
   const [deleteApprovalWorkflow] = useDeleteApprovalWorkflowMutation();
 
-  const { data: bomTreeApiData } = useGetBomTreeQuery(undefined, { skip: !shouldLoadBomTree });
+  const { data: bomTreeApiData } = useGetBomTreeQuery(undefined, {
+    skip: !shouldLoadBomTree,
+  });
   const selectedModule = useMemo(
     () => modules.find((m) => m.id === selectedModuleId) ?? modules[0],
-    [selectedModuleId]
+    [selectedModuleId],
   );
 
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<"All Types" | StatusType>(
-    "All Types"
+    "All Types",
   );
 
   const [rows, setRows] = useState<ParameterRow[]>(initialRows);
@@ -836,75 +941,100 @@ export default function SystemSettingsPage() {
   );
   const [scrapRows, setScrapRows] = useState<ScrapTypeRow[]>([]);
   const [uomRows, setUomRows] = useState<UomRow[]>(initialUomRows);
-  const [purchaseOrderRows, setPurchaseOrderRows] = useState<PurchaseOrderRow[]>(
-    initialPurchaseOrderRows
-  );
-  const [approvalWorkflowRows, setApprovalWorkflowRows] = useState<ApprovalWorkflowRow[]>(
-    []
-  );
+  const [purchaseOrderRows, setPurchaseOrderRows] = useState<
+    PurchaseOrderRow[]
+  >(initialPurchaseOrderRows);
+  const [approvalWorkflowRows, setApprovalWorkflowRows] = useState<
+    ApprovalWorkflowRow[]
+  >([]);
   const [kanbanRows, setKanbanRows] = useState<KanbanRow[]>(initialKanbanRows);
-  const [globalWorkingDaysRows, setGlobalWorkingDaysRows] = useState<GlobalWorkingDaysRow[]>(
-    initialGlobalWorkingDaysRows
-  );
-  const [processRows, setProcessRows] = useState<ProcessRow[]>(initialProcessRows);
-  const [machinePatternRows, setMachinePatternRows] = useState<MachinePatternRow[]>(
-    initialMachinePatternRows
-  );
+  const [globalWorkingDaysRows, setGlobalWorkingDaysRows] = useState<
+    GlobalWorkingDaysRow[]
+  >(initialGlobalWorkingDaysRows);
+  const [processRows, setProcessRows] =
+    useState<ProcessRow[]>(initialProcessRows);
+  const [machinePatternRows, setMachinePatternRows] = useState<
+    MachinePatternRow[]
+  >(initialMachinePatternRows);
 
-  const [machineTab, setMachineTab] = useState<"pattern" | "fast-slow">("pattern");
+  const [machineTab, setMachineTab] = useState<"pattern" | "fast-slow">(
+    "pattern",
+  );
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailRow, setDetailRow] = useState<ParameterRow | null>(null);
 
   const [safetyDetailOpen, setSafetyDetailOpen] = useState(false);
-  const [safetyDetailRow, setSafetyDetailRow] = useState<SafetyStockRow | null>(null);
-  const { data: safetyStockDetailApiData } = useGetSafetyStockByIdQuery(safetyDetailRow?.id ?? "", {
-    skip: !apiEnabled || !safetyDetailOpen || !safetyDetailRow?.id,
-  });
+  const [safetyDetailRow, setSafetyDetailRow] = useState<SafetyStockRow | null>(
+    null,
+  );
+  const { data: safetyStockDetailApiData } = useGetSafetyStockByIdQuery(
+    safetyDetailRow?.id ?? "",
+    {
+      skip: !apiEnabled || !safetyDetailOpen || !safetyDetailRow?.id,
+    },
+  );
 
   const [typeParameterDetailOpen, setTypeParameterDetailOpen] = useState(false);
-  const [typeParameterDetailRow, setTypeParameterDetailRow] = useState<TypeParameterRow | null>(
-    null
-  );
+  const [typeParameterDetailRow, setTypeParameterDetailRow] =
+    useState<TypeParameterRow | null>(null);
 
   const [uomDetailOpen, setUomDetailOpen] = useState(false);
   const [uomDetailRow, setUomDetailRow] = useState<UomRow | null>(null);
 
   const [purchaseOrderDetailOpen, setPurchaseOrderDetailOpen] = useState(false);
-  const [purchaseOrderDetailRow, setPurchaseOrderDetailRow] = useState<PurchaseOrderRow | null>(
-    null
+  const [purchaseOrderDetailRow, setPurchaseOrderDetailRow] =
+    useState<PurchaseOrderRow | null>(null);
+  const { data: poSplitDetailApiData } = useGetPoSplitSettingByIdQuery(
+    purchaseOrderDetailRow?.id ?? "",
+    {
+      skip:
+        !apiEnabled || !purchaseOrderDetailOpen || !purchaseOrderDetailRow?.id,
+    },
   );
-  const { data: poSplitDetailApiData } = useGetPoSplitSettingByIdQuery(purchaseOrderDetailRow?.id ?? "", {
-    skip: !apiEnabled || !purchaseOrderDetailOpen || !purchaseOrderDetailRow?.id,
-  });
 
-  const [approvalWorkflowDetailOpen, setApprovalWorkflowDetailOpen] = useState(false);
-  const [approvalWorkflowDetailRow, setApprovalWorkflowDetailRow] = useState<ApprovalWorkflowRow | null>(
-    null
-  );
-  const { data: approvalWorkflowDetailApiData } = useGetApprovalWorkflowByIdQuery(
-    approvalWorkflowDetailRow?.id ?? "",
-    { skip: !apiEnabled || !approvalWorkflowDetailOpen || !approvalWorkflowDetailRow?.id }
-  );
+  const [approvalWorkflowDetailOpen, setApprovalWorkflowDetailOpen] =
+    useState(false);
+  const [approvalWorkflowDetailRow, setApprovalWorkflowDetailRow] =
+    useState<ApprovalWorkflowRow | null>(null);
+  const { data: approvalWorkflowDetailApiData } =
+    useGetApprovalWorkflowByIdQuery(approvalWorkflowDetailRow?.id ?? "", {
+      skip:
+        !apiEnabled ||
+        !approvalWorkflowDetailOpen ||
+        !approvalWorkflowDetailRow?.id,
+    });
 
   const [kanbanDetailOpen, setKanbanDetailOpen] = useState(false);
-  const [kanbanDetailRow, setKanbanDetailRow] = useState<KanbanRow | null>(null);
-
-  const [globalWorkingDaysDetailOpen, setGlobalWorkingDaysDetailOpen] = useState(false);
-  const [globalWorkingDaysDetailRow, setGlobalWorkingDaysDetailRow] =
-    useState<GlobalWorkingDaysRow | null>(null);
-  const { data: globalParameterDetailApiData } = useGetGlobalWorkingDaysByIdQuery(
-    globalWorkingDaysDetailRow?.id ?? "",
-    { skip: !apiEnabled || !globalWorkingDaysDetailOpen || !globalWorkingDaysDetailRow?.id }
+  const [kanbanDetailRow, setKanbanDetailRow] = useState<KanbanRow | null>(
+    null,
   );
 
-  const [processDetailOpen, setProcessDetailOpen] = useState(false);
-  const [processDetailRow, setProcessDetailRow] = useState<ProcessRow | null>(null);
-  const { data: processDetailApiData } = useGetProcessByIdQuery(processDetailRow?.id ?? "", {
-    skip: !apiEnabled || !processDetailOpen || !processDetailRow?.id,
-  });
+  const [globalWorkingDaysDetailOpen, setGlobalWorkingDaysDetailOpen] =
+    useState(false);
+  const [globalWorkingDaysDetailRow, setGlobalWorkingDaysDetailRow] =
+    useState<GlobalWorkingDaysRow | null>(null);
+  const { data: globalParameterDetailApiData } =
+    useGetGlobalWorkingDaysByIdQuery(globalWorkingDaysDetailRow?.id ?? "", {
+      skip:
+        !apiEnabled ||
+        !globalWorkingDaysDetailOpen ||
+        !globalWorkingDaysDetailRow?.id,
+    });
 
-  const [machinePatternDetailOpen, setMachinePatternDetailOpen] = useState(false);
+  const [processDetailOpen, setProcessDetailOpen] = useState(false);
+  const [processDetailRow, setProcessDetailRow] = useState<ProcessRow | null>(
+    null,
+  );
+  const { data: processDetailApiData } = useGetProcessByIdQuery(
+    processDetailRow?.id ?? "",
+    {
+      skip: !apiEnabled || !processDetailOpen || !processDetailRow?.id,
+    },
+  );
+
+  const [machinePatternDetailOpen, setMachinePatternDetailOpen] =
+    useState(false);
   const [machinePatternDetailRow, setMachinePatternDetailRow] =
     useState<MachinePatternRow | null>(null);
 
@@ -914,17 +1044,19 @@ export default function SystemSettingsPage() {
   const [form] = Form.useForm<ParameterFormValues>();
 
   const [safetyEditOpen, setSafetyEditOpen] = useState(false);
-  const [safetyEditingRow, setSafetyEditingRow] = useState<SafetyStockRow | null>(null);
-  const [safetyEditMode, setSafetyEditMode] = useState<"create" | "edit">("edit");
+  const [safetyEditingRow, setSafetyEditingRow] =
+    useState<SafetyStockRow | null>(null);
+  const [safetyEditMode, setSafetyEditMode] = useState<"create" | "edit">(
+    "edit",
+  );
   const [safetyForm] = Form.useForm<SafetyStockFormValues>();
 
   const [typeParameterEditOpen, setTypeParameterEditOpen] = useState(false);
-  const [typeParameterEditingRow, setTypeParameterEditingRow] = useState<TypeParameterRow | null>(
-    null
-  );
-  const [typeParameterEditMode, setTypeParameterEditMode] = useState<"create" | "edit">(
-    "edit"
-  );
+  const [typeParameterEditingRow, setTypeParameterEditingRow] =
+    useState<TypeParameterRow | null>(null);
+  const [typeParameterEditMode, setTypeParameterEditMode] = useState<
+    "create" | "edit"
+  >("edit");
   const [typeParameterForm] = Form.useForm<TypeParameterFormValues>();
 
   const [uomEditOpen, setUomEditOpen] = useState(false);
@@ -933,24 +1065,31 @@ export default function SystemSettingsPage() {
   const [uomForm] = Form.useForm<UomFormValues>();
 
   const [purchaseOrderEditOpen, setPurchaseOrderEditOpen] = useState(false);
-  const [purchaseOrderEditingRow, setPurchaseOrderEditingRow] = useState<PurchaseOrderRow | null>(
-    null
-  );
-  const [purchaseOrderEditMode, setPurchaseOrderEditMode] = useState<"create" | "edit">(
-    "edit"
-  );
+  const [purchaseOrderEditingRow, setPurchaseOrderEditingRow] =
+    useState<PurchaseOrderRow | null>(null);
+  const [purchaseOrderEditMode, setPurchaseOrderEditMode] = useState<
+    "create" | "edit"
+  >("edit");
   const [purchaseOrderForm] = Form.useForm<PurchaseOrderFormValues>();
-  const purchaseOrderSplitRule = Form.useWatch("splitRule", purchaseOrderForm) ?? "percentage";
-  const purchaseOrderMaterialType = Form.useWatch("materialType", purchaseOrderForm) ?? "raw_material";
-  const purchaseOrderStatus = Form.useWatch("status", purchaseOrderForm) ?? "Active";
+  const purchaseOrderSplitRule =
+    Form.useWatch("splitRule", purchaseOrderForm) ?? "percentage";
+  const purchaseOrderMaterialType =
+    Form.useWatch("materialType", purchaseOrderForm) ?? "raw_material";
+  const purchaseOrderStatus =
+    Form.useWatch("status", purchaseOrderForm) ?? "Active";
   const purchaseOrderVendor = Form.useWatch("vendor", purchaseOrderForm) ?? "";
-  const purchaseOrderDescription = Form.useWatch("description", purchaseOrderForm) ?? "";
-  const purchaseOrderMinOrderQty = Form.useWatch("minOrderQty", purchaseOrderForm) ?? 0;
-  const purchaseOrderMaxSplitLines = Form.useWatch("maxSplitLines", purchaseOrderForm) ?? 0;
+  const purchaseOrderDescription =
+    Form.useWatch("description", purchaseOrderForm) ?? "";
+  const purchaseOrderMinOrderQty =
+    Form.useWatch("minOrderQty", purchaseOrderForm) ?? 0;
+  const purchaseOrderMaxSplitLines =
+    Form.useWatch("maxSplitLines", purchaseOrderForm) ?? 0;
   const purchaseOrderPo1Pct = Form.useWatch("po1Pct", purchaseOrderForm) ?? 0;
   const purchaseOrderPo2Pct = Form.useWatch("po2Pct", purchaseOrderForm) ?? 0;
-  const purchaseOrderPctTotal = Number(purchaseOrderPo1Pct || 0) + Number(purchaseOrderPo2Pct || 0);
-  const purchaseOrderIsHistory = String(purchaseOrderSplitRule).toLowerCase() === "history";
+  const purchaseOrderPctTotal =
+    Number(purchaseOrderPo1Pct || 0) + Number(purchaseOrderPo2Pct || 0);
+  const purchaseOrderIsHistory =
+    String(purchaseOrderSplitRule).toLowerCase() === "history";
   const purchaseOrderVendorOptions = useMemo(
     () =>
       (suppliersApiData ?? [])
@@ -960,44 +1099,51 @@ export default function SystemSettingsPage() {
         }))
         .filter((option) => option.value.trim())
         .sort((a, b) => a.label.localeCompare(b.label)),
-    [suppliersApiData]
+    [suppliersApiData],
   );
 
-  const [approvalWorkflowEditOpen, setApprovalWorkflowEditOpen] = useState(false);
-  const [approvalWorkflowEditingRow, setApprovalWorkflowEditingRow] = useState<ApprovalWorkflowRow | null>(
-    null
-  );
-  const [approvalWorkflowEditMode, setApprovalWorkflowEditMode] = useState<"create" | "edit">(
-    "edit"
-  );
+  const [approvalWorkflowEditOpen, setApprovalWorkflowEditOpen] =
+    useState(false);
+  const [approvalWorkflowEditingRow, setApprovalWorkflowEditingRow] =
+    useState<ApprovalWorkflowRow | null>(null);
+  const [approvalWorkflowEditMode, setApprovalWorkflowEditMode] = useState<
+    "create" | "edit"
+  >("edit");
   const [approvalWorkflowForm] = Form.useForm<ApprovalWorkflowFormValues>();
 
   const [kanbanEditOpen, setKanbanEditOpen] = useState(false);
-  const [kanbanEditingRow, setKanbanEditingRow] = useState<KanbanRow | null>(null);
-  const [kanbanEditMode, setKanbanEditMode] = useState<"create" | "edit">("edit");
+  const [kanbanEditingRow, setKanbanEditingRow] = useState<KanbanRow | null>(
+    null,
+  );
+  const [kanbanEditMode, setKanbanEditMode] = useState<"create" | "edit">(
+    "edit",
+  );
   const [kanbanForm] = Form.useForm<KanbanFormValues>();
 
-
-
-  const [globalWorkingDaysEditOpen, setGlobalWorkingDaysEditOpen] = useState(false);
+  const [globalWorkingDaysEditOpen, setGlobalWorkingDaysEditOpen] =
+    useState(false);
   const [globalWorkingDaysEditingRow, setGlobalWorkingDaysEditingRow] =
     useState<GlobalWorkingDaysRow | null>(null);
-  const [globalWorkingDaysEditMode, setGlobalWorkingDaysEditMode] = useState<"create" | "edit">(
-    "edit"
-  );
+  const [globalWorkingDaysEditMode, setGlobalWorkingDaysEditMode] = useState<
+    "create" | "edit"
+  >("edit");
   const [globalWorkingDaysForm] = Form.useForm<GlobalWorkingDaysFormValues>();
 
   const [processEditOpen, setProcessEditOpen] = useState(false);
-  const [processEditingRow, setProcessEditingRow] = useState<ProcessRow | null>(null);
-  const [processEditMode, setProcessEditMode] = useState<"create" | "edit">("edit");
+  const [processEditingRow, setProcessEditingRow] = useState<ProcessRow | null>(
+    null,
+  );
+  const [processEditMode, setProcessEditMode] = useState<"create" | "edit">(
+    "edit",
+  );
   const [processForm] = Form.useForm<ProcessFormValues>();
 
   const [machinePatternEditOpen, setMachinePatternEditOpen] = useState(false);
   const [machinePatternEditingRow, setMachinePatternEditingRow] =
     useState<MachinePatternRow | null>(null);
-  const [machinePatternEditMode, setMachinePatternEditMode] = useState<"create" | "edit">(
-    "edit"
-  );
+  const [machinePatternEditMode, setMachinePatternEditMode] = useState<
+    "create" | "edit"
+  >("edit");
   const [machinePatternForm] = Form.useForm<MachinePatternFormValues>();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -1007,10 +1153,12 @@ export default function SystemSettingsPage() {
   const [roleDeletingRow, setRoleDeletingRow] = useState<RoleRow | null>(null);
 
   const [safetyDeleteOpen, setSafetyDeleteOpen] = useState(false);
-  const [safetyDeletingRow, setSafetyDeletingRow] = useState<SafetyStockRow | null>(null);
+  const [safetyDeletingRow, setSafetyDeletingRow] =
+    useState<SafetyStockRow | null>(null);
 
   const [stockdaysDeleteOpen, setStockdaysDeleteOpen] = useState(false);
-  const [stockdaysDeletingRow, setStockdaysDeletingRow] = useState<StockdaysRow | null>(null);
+  const [stockdaysDeletingRow, setStockdaysDeletingRow] =
+    useState<StockdaysRow | null>(null);
 
   const [typeParameterDeleteOpen, setTypeParameterDeleteOpen] = useState(false);
   const [typeParameterDeletingRow, setTypeParameterDeletingRow] = useState<TypeParameterRow | null>(
@@ -1023,33 +1171,39 @@ export default function SystemSettingsPage() {
   const [uomDeletingRow, setUomDeletingRow] = useState<UomRow | null>(null);
 
   const [purchaseOrderDeleteOpen, setPurchaseOrderDeleteOpen] = useState(false);
-  const [purchaseOrderDeletingRow, setPurchaseOrderDeletingRow] = useState<PurchaseOrderRow | null>(
-    null
-  );
+  const [purchaseOrderDeletingRow, setPurchaseOrderDeletingRow] =
+    useState<PurchaseOrderRow | null>(null);
 
-  const [approvalWorkflowDeleteOpen, setApprovalWorkflowDeleteOpen] = useState(false);
-  const [approvalWorkflowDeletingRow, setApprovalWorkflowDeletingRow] = useState<ApprovalWorkflowRow | null>(
-    null
-  );
+  const [approvalWorkflowDeleteOpen, setApprovalWorkflowDeleteOpen] =
+    useState(false);
+  const [approvalWorkflowDeletingRow, setApprovalWorkflowDeletingRow] =
+    useState<ApprovalWorkflowRow | null>(null);
 
   const [kanbanDeleteOpen, setKanbanDeleteOpen] = useState(false);
-  const [kanbanDeletingRow, setKanbanDeletingRow] = useState<KanbanRow | null>(null);
+  const [kanbanDeletingRow, setKanbanDeletingRow] = useState<KanbanRow | null>(
+    null,
+  );
 
-  const [globalWorkingDaysDeleteOpen, setGlobalWorkingDaysDeleteOpen] = useState(false);
+  const [globalWorkingDaysDeleteOpen, setGlobalWorkingDaysDeleteOpen] =
+    useState(false);
   const [globalWorkingDaysDeletingRow, setGlobalWorkingDaysDeletingRow] =
     useState<GlobalWorkingDaysRow | null>(null);
 
   const [processDeleteOpen, setProcessDeleteOpen] = useState(false);
-  const [processDeletingRow, setProcessDeletingRow] = useState<ProcessRow | null>(null);
+  const [processDeletingRow, setProcessDeletingRow] =
+    useState<ProcessRow | null>(null);
 
-  const [machinePatternDeleteOpen, setMachinePatternDeleteOpen] = useState(false);
+  const [machinePatternDeleteOpen, setMachinePatternDeleteOpen] =
+    useState(false);
   const [machinePatternDeletingRow, setMachinePatternDeletingRow] =
     useState<MachinePatternRow | null>(null);
 
   const departmentNameToId = useMemo(() => {
     const map = new Map<string, string>();
     for (const department of departmentsApiData ?? []) {
-      const name = String(department.department_name ?? "").trim().toLowerCase();
+      const name = String(department.department_name ?? "")
+        .trim()
+        .toLowerCase();
       if (name) map.set(name, String(department.id));
     }
     return map;
@@ -1059,7 +1213,10 @@ export default function SystemSettingsPage() {
     const map = new Map<string, string>();
     for (const department of departmentsApiData ?? []) {
       if (department.id != null) {
-        map.set(String(department.id), String(department.department_name ?? department.id));
+        map.set(
+          String(department.id),
+          String(department.department_name ?? department.id),
+        );
       }
     }
     return map;
@@ -1068,7 +1225,9 @@ export default function SystemSettingsPage() {
   const roleNameToId = useMemo(() => {
     const map = new Map<string, string>();
     for (const role of rolesApiData ?? []) {
-      const name = String(role.name ?? "").trim().toLowerCase();
+      const name = String(role.name ?? "")
+        .trim()
+        .toLowerCase();
       if (name) map.set(name, String(role.id));
     }
     return map;
@@ -1092,7 +1251,7 @@ export default function SystemSettingsPage() {
           value: String(department.id),
         }))
         .sort((a, b) => a.label.localeCompare(b.label)),
-    [departmentsApiData]
+    [departmentsApiData],
   );
 
   const roleOptions = useMemo(
@@ -1103,7 +1262,7 @@ export default function SystemSettingsPage() {
           value: String(role.id),
         }))
         .sort((a, b) => a.label.localeCompare(b.label)),
-    [rolesApiData]
+    [rolesApiData],
   );
 
   const formatInventoryTypeLabel = (value: string) =>
@@ -1121,17 +1280,21 @@ export default function SystemSettingsPage() {
       .filter((record) => Boolean(record?.id))
       .map((record) => {
         const departmentId =
-          record.department_id == null ? undefined : String(record.department_id);
-        const roleId = record.role_id == null ? undefined : String(record.role_id);
+          record.department_id == null
+            ? undefined
+            : String(record.department_id);
+        const roleId =
+          record.role_id == null ? undefined : String(record.role_id);
         return {
           id: String(record.id),
           name: String(record.full_name ?? "-"),
           empId: String(record.employee_id ?? "-"),
           department: record.department
             ? String(record.department)
-            : departmentIdToName.get(String(departmentId ?? "")) ?? String(record.department_id ?? "-"),
+            : (departmentIdToName.get(String(departmentId ?? "")) ??
+              String(record.department_id ?? "-")),
           departmentId,
-          role: roleId ? roleIdToName.get(roleId) ?? roleId : "-",
+          role: roleId ? (roleIdToName.get(roleId) ?? roleId) : "-",
           roleId,
           team: "-",
           permissions: [],
@@ -1139,12 +1302,20 @@ export default function SystemSettingsPage() {
           status: fromBackendStatus(record.status),
         };
       });
-  }, [accessControlApiData, apiEnabled, departmentIdToName, roleIdToName, rows]);
+  }, [
+    accessControlApiData,
+    apiEnabled,
+    departmentIdToName,
+    roleIdToName,
+    rows,
+  ]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rowsView
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) =>
+        typeFilter === "All Types" ? true : r.status === typeFilter,
+      )
       .filter((r) => {
         if (!q) return true;
         return [r.name, r.empId, r.department, r.role]
@@ -1176,7 +1347,8 @@ export default function SystemSettingsPage() {
       .filter((k) => Boolean(k?.id))
       .map((k) => {
         const statusRaw = String(k.status ?? "Active").toLowerCase();
-        const status: StatusType = statusRaw === "inactive" ? "Inactive" : "Active";
+        const status: StatusType =
+          statusRaw === "inactive" ? "Inactive" : "Active";
         return {
           id: k.id,
           productName: k.item_name,
@@ -1196,7 +1368,11 @@ export default function SystemSettingsPage() {
       for (const n of nodes) {
         const uniq = String(n?.uniq_code ?? "").trim();
         if (uniq) {
-          uniqMap.set(uniq, { uniq, partName: typeof n?.part_name === "string" ? n.part_name : undefined });
+          uniqMap.set(uniq, {
+            uniq,
+            partName:
+              typeof n?.part_name === "string" ? n.part_name : undefined,
+          });
         }
         if (Array.isArray(n?.children) && n.children.length) walk(n.children);
       }
@@ -1218,7 +1394,10 @@ export default function SystemSettingsPage() {
   useEffect(() => {
     if (!selectedKanbanUniq) return;
     const opt = bomUniqOptions.find((o) => o.value === selectedKanbanUniq);
-    const name = opt && String(opt.label).includes("—") ? String(opt.label).split("—")[1].trim() : String(opt?.label ?? selectedKanbanUniq);
+    const name =
+      opt && String(opt.label).includes("—")
+        ? String(opt.label).split("—")[1].trim()
+        : String(opt?.label ?? selectedKanbanUniq);
     kanbanForm.setFieldsValue({ productName: name });
   }, [selectedKanbanUniq, bomUniqOptions, kanbanForm]);
 
@@ -1226,7 +1405,10 @@ export default function SystemSettingsPage() {
     const q = query.trim().toLowerCase();
     if (!q) return roleRowsView;
     return roleRowsView.filter((r) =>
-      [r.roleName, String(r.numberOfPeople), r.lastUpdated].join(" ").toLowerCase().includes(q)
+      [r.roleName, String(r.numberOfPeople), r.lastUpdated]
+        .join(" ")
+        .toLowerCase()
+        .includes(q),
     );
   }, [query, roleRowsView]);
 
@@ -1236,7 +1418,9 @@ export default function SystemSettingsPage() {
       .filter((record) => Boolean(record?.id))
       .map((record) => ({
         id: String(record.id),
-        inventoryType: formatInventoryTypeLabel(String(record.inventory_type ?? "")),
+        inventoryType: formatInventoryTypeLabel(
+          String(record.inventory_type ?? ""),
+        ),
         itemUniqCode: String(record.item_uniq_code ?? ""),
         parameter: String(record.calculation_type ?? ""),
         constanta: Number(record.constanta ?? 0),
@@ -1244,7 +1428,6 @@ export default function SystemSettingsPage() {
         createdAt: record.created_at,
         updatedAt: record.updated_at,
       }));
-
   }, [apiEnabled, safetyRows, safetyStockApiData]);
 
   const uomRowsView = useMemo<UomRow[]>(() => {
@@ -1367,7 +1550,9 @@ export default function SystemSettingsPage() {
   const filteredSafety = useMemo(() => {
     const q = query.trim().toLowerCase();
     return safetyRowsView
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) =>
+        typeFilter === "All Types" ? true : r.status === typeFilter,
+      )
       .filter((r) => {
         if (!q) return true;
         return [r.inventoryType, r.itemUniqCode, r.parameter]
@@ -1379,24 +1564,30 @@ export default function SystemSettingsPage() {
 
   const stockdaysRowsView = useMemo<StockdaysRow[]>(() => {
     if (!apiEnabled || !stockdaysApiData) return stockdaysRows;
+
     return stockdaysApiData
       .filter((record) => Boolean(record?.id))
-      .map((record) => ({
-        id: String(record.id),
-        itemUniqCode: String(record.item_uniq_code ?? ""),
-        stockDays: Number(record.stock_days ?? 0),
-        calculationType: String(record.calculation_type ?? ""),
-        status: fromBackendStatus(record.status),
-      }));
+      .map(
+        (record): StockdaysRow => ({
+          id: Number(record.id), // fix number
+          inventoryType: String(record.inventory_type ?? ""),
+          itemCode: String(record.item_code ?? ""),
+          calculationType: String(record.calculation_type ?? ""),
+          constanta: Number(record.constanta ?? 0),
+          status: fromBackendStatus(record.status),
+        }),
+      );
   }, [apiEnabled, stockdaysApiData, stockdaysRows]);
 
   const filteredStockdays = useMemo(() => {
     const q = query.trim().toLowerCase();
     return stockdaysRowsView
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) =>
+        typeFilter === "All Types" ? true : r.status === typeFilter,
+      )
       .filter((r) => {
         if (!q) return true;
-        return [r.itemUniqCode, String(r.stockDays), String(r.calculationType)]
+        return [r.itemCode, String(r.constanta), String(r.calculationType)]
           .join(" ")
           .toLowerCase()
           .includes(q);
@@ -1406,7 +1597,9 @@ export default function SystemSettingsPage() {
   const filteredTypeParameters = useMemo(() => {
     const q = query.trim().toLowerCase();
     return typeParameterRowsView
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) =>
+        typeFilter === "All Types" ? true : r.status === typeFilter,
+      )
       .filter((r) => {
         if (!q) return true;
         return [r.typeCode, r.typeName, r.description]
@@ -1429,7 +1622,9 @@ export default function SystemSettingsPage() {
   const filteredUom = useMemo(() => {
     const q = query.trim().toLowerCase();
     return uomRowsView
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) =>
+        typeFilter === "All Types" ? true : r.status === typeFilter,
+      )
       .filter((r) => {
         if (!q) return true;
         return [r.code, r.name, r.category ?? ""]
@@ -1441,25 +1636,30 @@ export default function SystemSettingsPage() {
 
   const filteredPurchaseOrder = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const source = apiEnabled && poSplitApiData
-      ? poSplitApiData
-          .filter((record) => Boolean(record?.id))
-          .map((record) => ({
-            id: String(record.id),
-            materialType: String(record.budget_type ?? ""),
-            po1Pct: Number(record.po1_pct ?? 0),
-            po2Pct: Number(record.po2_pct ?? 0),
-            description: record.description ? String(record.description) : undefined,
-            minOrderQty: Number(record.min_order_qty ?? 0),
-            maxSplitLines: Number(record.max_split_lines ?? 0),
-            splitRule: String(record.split_rule ?? ""),
-            poSplitSum: Number(record.po_split_sum ?? 0),
-            status: fromBackendStatus(record.status),
-          }))
-      : purchaseOrderRows;
+    const source =
+      apiEnabled && poSplitApiData
+        ? poSplitApiData
+            .filter((record) => Boolean(record?.id))
+            .map((record) => ({
+              id: String(record.id),
+              materialType: String(record.budget_type ?? ""),
+              po1Pct: Number(record.po1_pct ?? 0),
+              po2Pct: Number(record.po2_pct ?? 0),
+              description: record.description
+                ? String(record.description)
+                : undefined,
+              minOrderQty: Number(record.min_order_qty ?? 0),
+              maxSplitLines: Number(record.max_split_lines ?? 0),
+              splitRule: String(record.split_rule ?? ""),
+              poSplitSum: Number(record.po_split_sum ?? 0),
+              status: fromBackendStatus(record.status),
+            }))
+        : purchaseOrderRows;
 
     return source
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) =>
+        typeFilter === "All Types" ? true : r.status === typeFilter,
+      )
       .filter((r) => {
         if (!q) return true;
         return [r.materialType, r.splitRule, r.description ?? ""]
@@ -1471,22 +1671,25 @@ export default function SystemSettingsPage() {
 
   const filteredApprovalWorkflow = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const source = apiEnabled && approvalWorkflowApiData
-      ? approvalWorkflowApiData
-          .filter((record) => Boolean(record?.id))
-          .map((record) => ({
-            id: String(record.id),
-            menuAction: String(record.action_name ?? ""),
-            level1Role: String(record.level_1_role ?? ""),
-            level2Role: String(record.level_2_role ?? ""),
-            level3Role: String(record.level_3_role ?? ""),
-            level4Role: String(record.level_4_role ?? ""),
-            status: fromBackendStatus(record.status),
-          }))
-      : approvalWorkflowRows;
+    const source =
+      apiEnabled && approvalWorkflowApiData
+        ? approvalWorkflowApiData
+            .filter((record) => Boolean(record?.id))
+            .map((record) => ({
+              id: String(record.id),
+              menuAction: String(record.action_name ?? ""),
+              level1Role: String(record.level_1_role ?? ""),
+              level2Role: String(record.level_2_role ?? ""),
+              level3Role: String(record.level_3_role ?? ""),
+              level4Role: String(record.level_4_role ?? ""),
+              status: fromBackendStatus(record.status),
+            }))
+        : approvalWorkflowRows;
 
     return source
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) =>
+        typeFilter === "All Types" ? true : r.status === typeFilter,
+      )
       .filter((r) => {
         if (!q) return true;
         return [
@@ -1500,12 +1703,20 @@ export default function SystemSettingsPage() {
           .toLowerCase()
           .includes(q);
       });
-  }, [apiEnabled, approvalWorkflowApiData, approvalWorkflowRows, query, typeFilter]);
+  }, [
+    apiEnabled,
+    approvalWorkflowApiData,
+    approvalWorkflowRows,
+    query,
+    typeFilter,
+  ]);
 
   const filteredKanban = useMemo(() => {
     const q = query.trim().toLowerCase();
     return kanbanRowsView
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) =>
+        typeFilter === "All Types" ? true : r.status === typeFilter,
+      )
       .filter((r) => {
         if (!q) return true;
         return [r.productName, r.productCode]
@@ -1518,17 +1729,24 @@ export default function SystemSettingsPage() {
   const filteredGlobalWorkingDays = useMemo(() => {
     const q = query.trim().toLowerCase();
     return globalWorkingDaysRowsView
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) =>
+        typeFilter === "All Types" ? true : r.status === typeFilter,
+      )
       .filter((r) => {
-      if (!q) return true;
-      return [r.period, r.parameterGroup ?? ""].join(" ").toLowerCase().includes(q);
-    });
+        if (!q) return true;
+        return [r.period, r.parameterGroup ?? ""]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
+      });
   }, [globalWorkingDaysRowsView, query, typeFilter]);
 
   const filteredProcess = useMemo(() => {
     const q = query.trim().toLowerCase();
     return processRowsView
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) =>
+        typeFilter === "All Types" ? true : r.status === typeFilter,
+      )
       .filter((r) => {
         if (!q) return true;
         return [r.processCode, r.processName, r.category]
@@ -1603,8 +1821,8 @@ export default function SystemSettingsPage() {
   const openEditRole = (row: RoleRow) => {
     router.push(
       `/system-settings/roles/create?mode=edit&id=${encodeURIComponent(
-        row.id
-      )}&name=${encodeURIComponent(row.roleName)}`
+        row.id,
+      )}&name=${encodeURIComponent(row.roleName)}`,
     );
   };
 
@@ -1887,7 +2105,8 @@ export default function SystemSettingsPage() {
         const departmentValue = String(values.department ?? "").trim();
         const roleValue = String(values.role ?? "").trim();
         const departmentId =
-          departmentOptions.find((option) => option.value === departmentValue)?.value ??
+          departmentOptions.find((option) => option.value === departmentValue)
+            ?.value ??
           departmentNameToId.get(departmentValue.toLowerCase()) ??
           editingRow?.departmentId;
         const roleId =
@@ -1895,7 +2114,8 @@ export default function SystemSettingsPage() {
           roleNameToId.get(roleValue.toLowerCase()) ??
           editingRow?.roleId;
 
-        if (!departmentId) throw new Error("Department name must match existing department");
+        if (!departmentId)
+          throw new Error("Department name must match existing department");
         if (!roleId) throw new Error("Role name must match existing role");
 
         const payload = {
@@ -1908,7 +2128,10 @@ export default function SystemSettingsPage() {
 
         if (editMode === "edit") {
           if (!editingRow?.id) throw new Error("Missing access control id");
-          await updateAccessControl({ id: editingRow.id, body: payload }).unwrap();
+          await updateAccessControl({
+            id: editingRow.id,
+            body: payload,
+          }).unwrap();
           message.success("Access control updated");
         } else {
           await createAccessControl(payload).unwrap();
@@ -1923,22 +2146,36 @@ export default function SystemSettingsPage() {
         id:
           editMode === "create"
             ? `EMP-${String(values.empId || rows.length + 1)}`
-            : (editingRow?.id ?? `EMP-${String(values.empId || rows.length + 1)}`),
+            : (editingRow?.id ??
+              `EMP-${String(values.empId || rows.length + 1)}`),
         name: String(values.name ?? ""),
         empId: String(values.empId ?? ""),
         department:
           departmentIdToName.get(String(values.department ?? "")) ??
           String(values.department ?? editingRow?.department ?? ""),
         departmentId:
-          departmentOptions.find((option) => option.value === String(values.department ?? ""))?.value ??
-          departmentNameToId.get(String(values.department ?? "").trim().toLowerCase()) ??
+          departmentOptions.find(
+            (option) => option.value === String(values.department ?? ""),
+          )?.value ??
+          departmentNameToId.get(
+            String(values.department ?? "")
+              .trim()
+              .toLowerCase(),
+          ) ??
           editingRow?.departmentId,
         role:
           roleIdToName.get(String(values.role ?? "")) ??
           String(values.role ?? editingRow?.role ?? ""),
         roleId:
-          roleOptions.find((option) => option.value === String(values.role ?? ""))?.value ??
-          roleNameToId.get(String(values.role ?? "").trim().toLowerCase()) ?? editingRow?.roleId,
+          roleOptions.find(
+            (option) => option.value === String(values.role ?? ""),
+          )?.value ??
+          roleNameToId.get(
+            String(values.role ?? "")
+              .trim()
+              .toLowerCase(),
+          ) ??
+          editingRow?.roleId,
         team: editingRow?.team ?? "",
         permissions: editingRow?.permissions ?? [],
         lastLogin: editingRow?.lastLogin ?? "-",
@@ -1948,7 +2185,9 @@ export default function SystemSettingsPage() {
       if (editMode === "create") {
         setRows((prev) => [next, ...prev]);
       } else {
-        setRows((prev) => prev.map((r) => (r.id === editingRow?.id ? next : r)));
+        setRows((prev) =>
+          prev.map((r) => (r.id === editingRow?.id ? next : r)),
+        );
       }
 
       closeEdit();
@@ -1962,7 +2201,9 @@ export default function SystemSettingsPage() {
     try {
       const values = await safetyForm.validateFields();
       const inventoryTypeLabel = String(values.inventoryType ?? "").trim();
-      const inventoryTypeValue = inventoryTypeLabel.toLowerCase().replace(/[\s-]+/g, "_");
+      const inventoryTypeValue = inventoryTypeLabel
+        .toLowerCase()
+        .replace(/[\s-]+/g, "_");
       const calculationType = String(values.parameter ?? "").trim();
       const payload = {
         inventory_type: inventoryTypeValue,
@@ -1975,7 +2216,10 @@ export default function SystemSettingsPage() {
       if (apiEnabled) {
         if (safetyEditMode === "edit") {
           if (!safetyEditingRow?.id) throw new Error("Missing safety stock id");
-          await updateSafetyStock({ id: safetyEditingRow.id, body: payload }).unwrap();
+          await updateSafetyStock({
+            id: safetyEditingRow.id,
+            body: payload,
+          }).unwrap();
           message.success("Safety stock updated");
         } else {
           await createSafetyStock(payload).unwrap();
@@ -1990,7 +2234,8 @@ export default function SystemSettingsPage() {
         id:
           safetyEditMode === "create"
             ? `SS-${String(safetyRows.length + 1).padStart(3, "0")}`
-            : (safetyEditingRow?.id ?? `SS-${String(safetyRows.length + 1).padStart(3, "0")}`),
+            : (safetyEditingRow?.id ??
+              `SS-${String(safetyRows.length + 1).padStart(3, "0")}`),
         inventoryType: inventoryTypeLabel,
         itemUniqCode: String(safetyEditingRow?.itemUniqCode ?? ""),
         parameter: calculationType,
@@ -2026,8 +2271,12 @@ export default function SystemSettingsPage() {
         };
 
         if (typeParameterEditMode === "edit") {
-          if (!typeParameterEditingRow?.id) throw new Error("Missing type parameter id");
-          await updateTypeParameter({ id: typeParameterEditingRow.id, body: payload }).unwrap();
+          if (!typeParameterEditingRow?.id)
+            throw new Error("Missing type parameter id");
+          await updateTypeParameter({
+            id: typeParameterEditingRow.id,
+            body: payload,
+          }).unwrap();
           message.success("Type parameter updated");
         } else {
           await createTypeParameter(payload).unwrap();
@@ -2043,7 +2292,7 @@ export default function SystemSettingsPage() {
           typeParameterEditMode === "create"
             ? `TP-${String(typeParameterRows.length + 1).padStart(3, "0")}`
             : (typeParameterEditingRow?.id ??
-                `TP-${String(typeParameterRows.length + 1).padStart(3, "0")}`),
+              `TP-${String(typeParameterRows.length + 1).padStart(3, "0")}`),
         typeCode: values.typeCode,
         typeName: values.typeName,
         description: values.description,
@@ -2053,7 +2302,9 @@ export default function SystemSettingsPage() {
       if (typeParameterEditMode === "create") {
         setTypeParameterRows((prev) => [next, ...prev]);
       } else {
-        setTypeParameterRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+        setTypeParameterRows((prev) =>
+          prev.map((r) => (r.id === next.id ? next : r)),
+        );
       }
 
       closeTypeParameterEdit();
@@ -2099,7 +2350,7 @@ export default function SystemSettingsPage() {
           uomEditMode === "create"
             ? `UOM-${String(values.code || "NEW").toUpperCase()}`
             : (uomEditingRow?.id ??
-                `UOM-${String(values.code || "NEW").toUpperCase()}`),
+              `UOM-${String(values.code || "NEW").toUpperCase()}`),
         code: String(values.code || "").toUpperCase(),
         name: String(values.name || ""),
         category: values.category ? String(values.category) : undefined,
@@ -2123,7 +2374,9 @@ export default function SystemSettingsPage() {
       const values = await purchaseOrderForm.validateFields();
 
       if (apiEnabled) {
-        const vendorValue = String(values.vendor ?? values.description ?? "").trim();
+        const vendorValue = String(
+          values.vendor ?? values.description ?? "",
+        ).trim();
         const payload = {
           budget_type: String(values.materialType ?? "").trim(),
           po1_pct: Number(values.po1Pct ?? 0),
@@ -2139,8 +2392,12 @@ export default function SystemSettingsPage() {
           await createPoSplit(payload).unwrap();
           message.success("PO split setting created");
         } else {
-          if (!purchaseOrderEditingRow?.id) throw new Error("Missing PO split id");
-          await updatePoSplit({ id: purchaseOrderEditingRow.id, body: payload }).unwrap();
+          if (!purchaseOrderEditingRow?.id)
+            throw new Error("Missing PO split id");
+          await updatePoSplit({
+            id: purchaseOrderEditingRow.id,
+            body: payload,
+          }).unwrap();
           message.success("PO split setting updated");
         }
 
@@ -2153,7 +2410,7 @@ export default function SystemSettingsPage() {
           purchaseOrderEditMode === "create"
             ? `PO-${String(purchaseOrderRows.length + 1).padStart(3, "0")}`
             : (purchaseOrderEditingRow?.id ??
-                `PO-${String(purchaseOrderRows.length + 1).padStart(3, "0")}`),
+              `PO-${String(purchaseOrderRows.length + 1).padStart(3, "0")}`),
         materialType: values.materialType,
         po1Pct: Number(values.po1Pct ?? 0),
         po2Pct: Number(values.po2Pct ?? 0),
@@ -2168,7 +2425,9 @@ export default function SystemSettingsPage() {
       if (purchaseOrderEditMode === "create") {
         setPurchaseOrderRows((prev) => [next, ...prev]);
       } else {
-        setPurchaseOrderRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+        setPurchaseOrderRows((prev) =>
+          prev.map((r) => (r.id === next.id ? next : r)),
+        );
       }
 
       closePurchaseOrderEdit();
@@ -2185,10 +2444,18 @@ export default function SystemSettingsPage() {
       if (apiEnabled) {
         const payload = {
           action_name: String(values.menuAction ?? "").trim(),
-          level_1_role: values.level1Role ? String(values.level1Role).trim() : null,
-          level_2_role: values.level2Role ? String(values.level2Role).trim() : null,
-          level_3_role: values.level3Role ? String(values.level3Role).trim() : null,
-          level_4_role: values.level4Role ? String(values.level4Role).trim() : null,
+          level_1_role: values.level1Role
+            ? String(values.level1Role).trim()
+            : null,
+          level_2_role: values.level2Role
+            ? String(values.level2Role).trim()
+            : null,
+          level_3_role: values.level3Role
+            ? String(values.level3Role).trim()
+            : null,
+          level_4_role: values.level4Role
+            ? String(values.level4Role).trim()
+            : null,
           status: toBackendStatus(values.status),
         };
 
@@ -2196,8 +2463,12 @@ export default function SystemSettingsPage() {
           await createApprovalWorkflow(payload).unwrap();
           message.success("Approval workflow created");
         } else {
-          if (!approvalWorkflowEditingRow?.id) throw new Error("Missing approval workflow id");
-          await updateApprovalWorkflow({ id: approvalWorkflowEditingRow.id, body: payload }).unwrap();
+          if (!approvalWorkflowEditingRow?.id)
+            throw new Error("Missing approval workflow id");
+          await updateApprovalWorkflow({
+            id: approvalWorkflowEditingRow.id,
+            body: payload,
+          }).unwrap();
           message.success("Approval workflow updated");
         }
 
@@ -2210,7 +2481,7 @@ export default function SystemSettingsPage() {
           approvalWorkflowEditMode === "create"
             ? `AW-${String(approvalWorkflowRows.length + 1).padStart(3, "0")}`
             : (approvalWorkflowEditingRow?.id ??
-                `AW-${String(approvalWorkflowRows.length + 1).padStart(3, "0")}`),
+              `AW-${String(approvalWorkflowRows.length + 1).padStart(3, "0")}`),
         menuAction: values.menuAction,
         level1Role: values.level1Role,
         level2Role: values.level2Role,
@@ -2222,13 +2493,17 @@ export default function SystemSettingsPage() {
       if (approvalWorkflowEditMode === "create") {
         setApprovalWorkflowRows((prev) => [next, ...prev]);
       } else {
-        setApprovalWorkflowRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+        setApprovalWorkflowRows((prev) =>
+          prev.map((r) => (r.id === next.id ? next : r)),
+        );
       }
 
       closeApprovalWorkflowEdit();
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error(getApiErrorMessage(err, "Failed to save approval workflow"));
+      message.error(
+        getApiErrorMessage(err, "Failed to save approval workflow"),
+      );
     }
   };
 
@@ -2250,7 +2525,10 @@ export default function SystemSettingsPage() {
           message.success("Kanban standard created");
         } else {
           if (!kanbanEditingRow?.id) throw new Error("Missing kanban id");
-          await updateKanbanStandard({ id: kanbanEditingRow.id, body: payload }).unwrap();
+          await updateKanbanStandard({
+            id: kanbanEditingRow.id,
+            body: payload,
+          }).unwrap();
           message.success("Kanban standard updated");
         }
 
@@ -2262,7 +2540,8 @@ export default function SystemSettingsPage() {
         id:
           kanbanEditMode === "create"
             ? `KB-${String(kanbanRows.length + 1).padStart(3, "0")}`
-            : (kanbanEditingRow?.id ?? `KB-${String(kanbanRows.length + 1).padStart(3, "0")}`),
+            : (kanbanEditingRow?.id ??
+              `KB-${String(kanbanRows.length + 1).padStart(3, "0")}`),
         productName: values.productName,
         productCode: values.productCode,
         kanbanQty: Number(values.kanbanQty ?? 0),
@@ -2300,8 +2579,12 @@ export default function SystemSettingsPage() {
         };
 
         if (globalWorkingDaysEditMode === "edit") {
-          if (!globalWorkingDaysEditingRow?.id) throw new Error("Missing global parameter id");
-          await updateGlobalWorkingDays({ id: globalWorkingDaysEditingRow.id, body: payload }).unwrap();
+          if (!globalWorkingDaysEditingRow?.id)
+            throw new Error("Missing global parameter id");
+          await updateGlobalWorkingDays({
+            id: globalWorkingDaysEditingRow.id,
+            body: payload,
+          }).unwrap();
           message.success("Global parameter updated");
         } else {
           await createGlobalWorkingDays(payload).unwrap();
@@ -2319,7 +2602,7 @@ export default function SystemSettingsPage() {
           globalWorkingDaysEditMode === "create"
             ? `GWD-${String(globalWorkingDaysRows.length + 1).padStart(3, "0")}`
             : (globalWorkingDaysEditingRow?.id ??
-                `GWD-${String(globalWorkingDaysRows.length + 1).padStart(3, "0")}`),
+              `GWD-${String(globalWorkingDaysRows.length + 1).padStart(3, "0")}`),
         parameterGroup: values.parameterGroup,
         period: values.period,
         workingDays: Number(values.workingDays ?? 0),
@@ -2333,13 +2616,17 @@ export default function SystemSettingsPage() {
       if (globalWorkingDaysEditMode === "create") {
         setGlobalWorkingDaysRows((prev) => [next, ...prev]);
       } else {
-        setGlobalWorkingDaysRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+        setGlobalWorkingDaysRows((prev) =>
+          prev.map((r) => (r.id === next.id ? next : r)),
+        );
       }
 
       closeGlobalWorkingDaysEdit();
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error(getApiErrorMessage(err, "Failed to save global parameters"));
+      message.error(
+        getApiErrorMessage(err, "Failed to save global parameters"),
+      );
     }
   };
 
@@ -2381,7 +2668,7 @@ export default function SystemSettingsPage() {
           processEditMode === "create"
             ? `PROC-${String(processRows.length + 1).padStart(3, "0")}`
             : (processEditingRow?.id ??
-                `PROC-${String(processRows.length + 1).padStart(3, "0")}`),
+              `PROC-${String(processRows.length + 1).padStart(3, "0")}`),
         processCode: values.processCode,
         processName: values.processName,
         category: values.category,
@@ -2392,7 +2679,9 @@ export default function SystemSettingsPage() {
       if (processEditMode === "create") {
         setProcessRows((prev) => [next, ...prev]);
       } else {
-        setProcessRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+        setProcessRows((prev) =>
+          prev.map((r) => (r.id === next.id ? next : r)),
+        );
       }
 
       closeProcessEdit();
@@ -2429,7 +2718,9 @@ export default function SystemSettingsPage() {
     if (machinePatternEditMode === "create") {
       setMachinePatternRows((prev) => [next, ...prev]);
     } else {
-      setMachinePatternRows((prev) => prev.map((r) => (r.id === next.id ? next : r)));
+      setMachinePatternRows((prev) =>
+        prev.map((r) => (r.id === next.id ? next : r)),
+      );
     }
 
     closeMachinePatternEdit();
@@ -2488,8 +2779,8 @@ export default function SystemSettingsPage() {
   const openRoleDetail = (row: RoleRow) => {
     router.push(
       `/system-settings/roles/create?mode=detail&id=${encodeURIComponent(
-        row.id
-      )}&name=${encodeURIComponent(row.roleName)}`
+        row.id,
+      )}&name=${encodeURIComponent(row.roleName)}`,
     );
   };
 
@@ -2543,7 +2834,6 @@ export default function SystemSettingsPage() {
     setMachinePatternDetailRow(null);
   };
 
-
   const openDelete = (row: ParameterRow) => {
     setDeletingRow(row);
     setDeleteOpen(true);
@@ -2555,11 +2845,15 @@ export default function SystemSettingsPage() {
   };
 
   const openStockdaysDetail = (row: StockdaysRow) => {
-    router.push(`/system-settings/stockdays/create?mode=detail&id=${encodeURIComponent(row.id)}`);
+    router.push(
+      `/system-settings/stockdays/create?mode=detail&id=${encodeURIComponent(row.id)}`,
+    );
   };
 
   const openEditStockdays = (row: StockdaysRow) => {
-    router.push(`/system-settings/stockdays/create?mode=edit&id=${encodeURIComponent(row.id)}`);
+    router.push(
+      `/system-settings/stockdays/create?mode=edit&id=${encodeURIComponent(row.id)}`,
+    );
   };
 
   const openStockdaysDelete = (row: StockdaysRow) => {
@@ -2727,7 +3021,9 @@ export default function SystemSettingsPage() {
         await deleteSafetyStock(safetyDeletingRow.id).unwrap();
         message.success("Safety stock deleted");
       } else {
-        setSafetyRows((prev) => prev.filter((r) => r.id !== safetyDeletingRow.id));
+        setSafetyRows((prev) =>
+          prev.filter((r) => r.id !== safetyDeletingRow.id),
+        );
       }
       closeSafetyDelete();
     } catch (err) {
@@ -2737,13 +3033,18 @@ export default function SystemSettingsPage() {
 
   const confirmStockdaysDelete = async () => {
     if (!stockdaysDeletingRow) return;
+
     try {
       if (apiEnabled) {
-        await deleteStockdays(stockdaysDeletingRow.id).unwrap();
+        await deleteStockdays(String(stockdaysDeletingRow.id)).unwrap();
+
         message.success("Stockdays deleted");
       } else {
-        setStockdaysRows((prev) => prev.filter((r) => r.id !== stockdaysDeletingRow.id));
+        setStockdaysRows((prev) =>
+          prev.filter((r) => r.id !== stockdaysDeletingRow.id),
+        );
       }
+
       closeStockdaysDelete();
     } catch (err) {
       message.error(getApiErrorMessage(err, "Failed to delete stockdays"));
@@ -2757,7 +3058,9 @@ export default function SystemSettingsPage() {
         await deleteTypeParameter(typeParameterDeletingRow.id).unwrap();
         message.success("Type parameter deleted");
       } else {
-        setTypeParameterRows((prev) => prev.filter((r) => r.id !== typeParameterDeletingRow.id));
+        setTypeParameterRows((prev) =>
+          prev.filter((r) => r.id !== typeParameterDeletingRow.id),
+        );
       }
       closeTypeParameterDelete();
     } catch (err) {
@@ -2802,11 +3105,15 @@ export default function SystemSettingsPage() {
         await deletePoSplit(purchaseOrderDeletingRow.id).unwrap();
         message.success("PO split setting deleted");
       } else {
-        setPurchaseOrderRows((prev) => prev.filter((r) => r.id !== purchaseOrderDeletingRow.id));
+        setPurchaseOrderRows((prev) =>
+          prev.filter((r) => r.id !== purchaseOrderDeletingRow.id),
+        );
       }
       closePurchaseOrderDelete();
     } catch (err) {
-      message.error(getApiErrorMessage(err, "Failed to delete PO split setting"));
+      message.error(
+        getApiErrorMessage(err, "Failed to delete PO split setting"),
+      );
     }
   };
 
@@ -2817,11 +3124,15 @@ export default function SystemSettingsPage() {
         await deleteApprovalWorkflow(approvalWorkflowDeletingRow.id).unwrap();
         message.success("Approval workflow deleted");
       } else {
-        setApprovalWorkflowRows((prev) => prev.filter((r) => r.id !== approvalWorkflowDeletingRow.id));
+        setApprovalWorkflowRows((prev) =>
+          prev.filter((r) => r.id !== approvalWorkflowDeletingRow.id),
+        );
       }
       closeApprovalWorkflowDelete();
     } catch (err) {
-      message.error(getApiErrorMessage(err, "Failed to delete approval workflow"));
+      message.error(
+        getApiErrorMessage(err, "Failed to delete approval workflow"),
+      );
     }
   };
 
@@ -2832,11 +3143,15 @@ export default function SystemSettingsPage() {
         await deleteKanbanStandard(kanbanDeletingRow.id).unwrap();
         message.success("Kanban standard deleted");
       } else {
-        setKanbanRows((prev) => prev.filter((r) => r.id !== kanbanDeletingRow.id));
+        setKanbanRows((prev) =>
+          prev.filter((r) => r.id !== kanbanDeletingRow.id),
+        );
       }
       closeKanbanDelete();
     } catch (err) {
-      message.error(getApiErrorMessage(err, "Failed to delete kanban standard"));
+      message.error(
+        getApiErrorMessage(err, "Failed to delete kanban standard"),
+      );
     }
   };
 
@@ -2848,12 +3163,14 @@ export default function SystemSettingsPage() {
         message.success("Global parameter deleted");
       } else {
         setGlobalWorkingDaysRows((prev) =>
-          prev.filter((r) => r.id !== globalWorkingDaysDeletingRow.id)
+          prev.filter((r) => r.id !== globalWorkingDaysDeletingRow.id),
         );
       }
       closeGlobalWorkingDaysDelete();
     } catch (err) {
-      message.error(getApiErrorMessage(err, "Failed to delete global parameters"));
+      message.error(
+        getApiErrorMessage(err, "Failed to delete global parameters"),
+      );
     }
   };
 
@@ -2864,7 +3181,9 @@ export default function SystemSettingsPage() {
         await deleteProcess(processDeletingRow.id).unwrap();
         message.success("Process deleted");
       } else {
-        setProcessRows((prev) => prev.filter((r) => r.id !== processDeletingRow.id));
+        setProcessRows((prev) =>
+          prev.filter((r) => r.id !== processDeletingRow.id),
+        );
       }
       closeProcessDelete();
     } catch (err) {
@@ -2925,7 +3244,9 @@ export default function SystemSettingsPage() {
                 {p}
               </Tag>
             ))}
-            {restCount > 0 && <Tag className="bg-gray-50">+{restCount} more</Tag>}
+            {restCount > 0 && (
+              <Tag className="bg-gray-50">+{restCount} more</Tag>
+            )}
           </div>
         );
       },
@@ -2955,9 +3276,22 @@ export default function SystemSettingsPage() {
       fixed: "right",
       render: (_: unknown, r: ParameterRow) => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openDetail(r)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEdit(r)} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openDelete(r)} />
+          <Button
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => openDetail(r)}
+          />
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => openEdit(r)}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => openDelete(r)}
+          />
         </div>
       ),
     },
@@ -2990,9 +3324,22 @@ export default function SystemSettingsPage() {
       fixed: "right",
       render: (_: unknown, r: RoleRow) => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openRoleDetail(r)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditRole(r)} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openRoleDelete(r)} />
+          <Button
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => openRoleDetail(r)}
+          />
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => openEditRole(r)}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => openRoleDelete(r)}
+          />
         </div>
       ),
     },
@@ -3004,7 +3351,9 @@ export default function SystemSettingsPage() {
       dataIndex: "inventoryType",
       key: "inventoryType",
       width: 210,
-      render: (v: string) => <div className="font-medium text-gray-900">{v}</div>,
+      render: (v: string) => (
+        <div className="font-medium text-gray-900">{v}</div>
+      ),
     },
     {
       title: "Parameter",
@@ -3046,9 +3395,22 @@ export default function SystemSettingsPage() {
       fixed: "right",
       render: (_: unknown, r: SafetyStockRow) => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openSafetyDetail(r)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditSafety(r)} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openSafetyDelete(r)} />
+          <Button
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => openSafetyDetail(r)}
+          />
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => openEditSafety(r)}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => openSafetyDelete(r)}
+          />
         </div>
       ),
     },
@@ -3056,29 +3418,44 @@ export default function SystemSettingsPage() {
 
   const stockdaysColumns: ColumnsType<StockdaysRow> = [
     {
-      title: "Item Code",
-      dataIndex: "itemUniqCode",
-      key: "itemUniqCode",
+      title: "Inventory Type",
+      dataIndex: "inventoryType",
+      key: "inventoryType",
       width: 220,
-      render: (v: string) => <div className="font-medium text-gray-900">{v}</div>,
+      render: (v: string) => (
+        <div className="font-medium text-gray-900">
+          {v?.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+        </div>
+      ),
     },
     {
-      title: "Stock Days",
-      dataIndex: "stockDays",
-      key: "stockDays",
-      width: 140,
-      render: (v: number) => <div className="text-gray-700">{v}</div>,
+      title: "Item Code",
+      dataIndex: "itemCode",
+      key: "itemCode",
+      width: 220,
+      render: (v: string) => <div className="text-gray-700">{v}</div>,
     },
     {
       title: "Calculation Type",
       dataIndex: "calculationType",
       key: "calculationType",
-      width: 260,
+      width: 300,
       render: (v: string) => (
         <div className="text-sm text-gray-700">
-          {v === "a" ? "Stockdays - PRL = Stock / (PRL/Working days)" : v === "b" ? "Stockdays - DailyUsage = Stock / Daily Usage (Data history)" : v}
+          {v === "days"
+            ? "Stockdays - PRL = Stock / (PRL / Working Days)"
+            : v === "percentage"
+              ? "Stockdays - Daily Usage (History)"
+              : v}
         </div>
       ),
+    },
+    {
+      title: "Constanta",
+      dataIndex: "constanta",
+      key: "constanta",
+      width: 140,
+      render: (v: number) => <div className="text-gray-700">{v}</div>,
     },
     {
       title: "Status",
@@ -3090,6 +3467,7 @@ export default function SystemSettingsPage() {
           s === "Active"
             ? "bg-blue-50 text-blue-700 border-blue-100"
             : "bg-red-50 text-red-700 border-red-100";
+
         return (
           <Tag className={`rounded-full px-3 py-0.5 border ${cls}`}>{s}</Tag>
         );
@@ -3098,13 +3476,26 @@ export default function SystemSettingsPage() {
     {
       title: "Actions",
       key: "actions",
-      width: 120,
+      width: 140,
       fixed: "right",
       render: (_: unknown, r: StockdaysRow) => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openStockdaysDetail(r)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditStockdays(r)} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openStockdaysDelete(r)} />
+          <Button
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => openStockdaysDetail(r)}
+          />
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => openEditStockdays(r)}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => openStockdaysDelete(r)}
+          />
         </div>
       ),
     },
@@ -3116,7 +3507,9 @@ export default function SystemSettingsPage() {
       dataIndex: "typeCode",
       key: "typeCode",
       width: 120,
-      render: (v: string) => <div className="font-medium text-gray-900">{v}</div>,
+      render: (v: string) => (
+        <div className="font-medium text-gray-900">{v}</div>
+      ),
     },
     {
       title: "Type Name",
@@ -3231,7 +3624,9 @@ export default function SystemSettingsPage() {
       dataIndex: "code",
       key: "code",
       width: 90,
-      render: (v: string) => <div className="font-medium text-gray-900">{v}</div>,
+      render: (v: string) => (
+        <div className="font-medium text-gray-900">{v}</div>
+      ),
     },
     {
       title: "Name",
@@ -3269,9 +3664,22 @@ export default function SystemSettingsPage() {
       fixed: "right",
       render: (_: unknown, r: UomRow) => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openUomDetail(r)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditUom(r)} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openUomDelete(r)} />
+          <Button
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => openUomDetail(r)}
+          />
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => openEditUom(r)}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => openUomDelete(r)}
+          />
         </div>
       ),
     },
@@ -3283,14 +3691,18 @@ export default function SystemSettingsPage() {
       dataIndex: "materialType",
       key: "materialType",
       width: 160,
-      render: (v: string) => <div className="font-medium text-gray-900">{v}</div>,
+      render: (v: string) => (
+        <div className="font-medium text-gray-900">{v}</div>
+      ),
     },
     {
       title: "PO Split",
       key: "poSplit",
       width: 150,
       render: (_: unknown, r: PurchaseOrderRow) => (
-        <div className="text-gray-700">{r.po1Pct}% / {r.po2Pct}%</div>
+        <div className="text-gray-700">
+          {r.po1Pct}% / {r.po2Pct}%
+        </div>
       ),
     },
     {
@@ -3298,7 +3710,9 @@ export default function SystemSettingsPage() {
       dataIndex: "minOrderQty",
       key: "minOrderQty",
       width: 140,
-      render: (v: number) => <div className="text-gray-900">{v.toLocaleString("en-US")}</div>,
+      render: (v: number) => (
+        <div className="text-gray-900">{v.toLocaleString("en-US")}</div>
+      ),
     },
     {
       title: "Max Split Lines",
@@ -3334,8 +3748,16 @@ export default function SystemSettingsPage() {
       fixed: "right",
       render: (_: unknown, r: PurchaseOrderRow) => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openPurchaseOrderDetail(r)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditPurchaseOrder(r)} />
+          <Button
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => openPurchaseOrderDetail(r)}
+          />
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => openEditPurchaseOrder(r)}
+          />
           <Button
             type="text"
             danger
@@ -3353,7 +3775,9 @@ export default function SystemSettingsPage() {
       dataIndex: "menuAction",
       key: "menuAction",
       width: 200,
-      render: (v: string) => <div className="font-medium text-gray-900">{v}</div>,
+      render: (v: string) => (
+        <div className="font-medium text-gray-900">{v}</div>
+      ),
     },
     {
       title: "Level 1 Role",
@@ -3399,8 +3823,16 @@ export default function SystemSettingsPage() {
       fixed: "right",
       render: (_: unknown, r: ApprovalWorkflowRow) => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openApprovalWorkflowDetail(r)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditApprovalWorkflow(r)} />
+          <Button
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => openApprovalWorkflowDetail(r)}
+          />
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => openEditApprovalWorkflow(r)}
+          />
           <Button
             type="text"
             danger
@@ -3465,9 +3897,22 @@ export default function SystemSettingsPage() {
       fixed: "right",
       render: (_: unknown, r: KanbanRow) => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openKanbanDetail(r)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditKanban(r)} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openKanbanDelete(r)} />
+          <Button
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => openKanbanDetail(r)}
+          />
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => openEditKanban(r)}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => openKanbanDelete(r)}
+          />
         </div>
       ),
     },
@@ -3516,8 +3961,16 @@ export default function SystemSettingsPage() {
       fixed: "right",
       render: (_: unknown, r: GlobalWorkingDaysRow) => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openGlobalWorkingDaysDetail(r)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditGlobalWorkingDays(r)} />
+          <Button
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => openGlobalWorkingDaysDetail(r)}
+          />
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => openEditGlobalWorkingDays(r)}
+          />
           <Button
             type="text"
             danger
@@ -3575,9 +4028,22 @@ export default function SystemSettingsPage() {
       fixed: "right",
       render: (_: unknown, r: ProcessRow) => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openProcessDetail(r)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditProcess(r)} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openProcessDelete(r)} />
+          <Button
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => openProcessDetail(r)}
+          />
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => openEditProcess(r)}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => openProcessDelete(r)}
+          />
         </div>
       ),
     },
@@ -3652,7 +4118,8 @@ export default function SystemSettingsPage() {
         onCancel={closeDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{deletingRow?.empId}</span>.
+          This will remove{" "}
+          <span className="font-semibold">{deletingRow?.empId}</span>.
         </div>
       </Modal>
 
@@ -3666,7 +4133,8 @@ export default function SystemSettingsPage() {
         onCancel={closeRoleDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{roleDeletingRow?.roleName}</span>.
+          This will remove{" "}
+          <span className="font-semibold">{roleDeletingRow?.roleName}</span>.
         </div>
       </Modal>
 
@@ -3680,7 +4148,11 @@ export default function SystemSettingsPage() {
         onCancel={closeSafetyDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{safetyDeletingRow?.inventoryType}</span>.
+          This will remove{" "}
+          <span className="font-semibold">
+            {safetyDeletingRow?.inventoryType}
+          </span>
+          .
         </div>
       </Modal>
 
@@ -3694,7 +4166,11 @@ export default function SystemSettingsPage() {
         onCancel={closeStockdaysDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{stockdaysDeletingRow?.itemUniqCode}</span>.
+          This will remove{" "}
+          <span className="font-semibold">
+            {stockdaysDeletingRow?.itemCode}
+          </span>
+          .
         </div>
       </Modal>
 
@@ -3736,7 +4212,8 @@ export default function SystemSettingsPage() {
         onCancel={closeUomDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{uomDeletingRow?.code}</span>.
+          This will remove{" "}
+          <span className="font-semibold">{uomDeletingRow?.code}</span>.
         </div>
       </Modal>
 
@@ -3750,7 +4227,11 @@ export default function SystemSettingsPage() {
         onCancel={closePurchaseOrderDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{purchaseOrderDeletingRow?.materialType}</span>.
+          This will remove{" "}
+          <span className="font-semibold">
+            {purchaseOrderDeletingRow?.materialType}
+          </span>
+          .
         </div>
       </Modal>
 
@@ -3764,7 +4245,11 @@ export default function SystemSettingsPage() {
         onCancel={closeApprovalWorkflowDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{approvalWorkflowDeletingRow?.menuAction}</span>.
+          This will remove{" "}
+          <span className="font-semibold">
+            {approvalWorkflowDeletingRow?.menuAction}
+          </span>
+          .
         </div>
       </Modal>
 
@@ -3778,7 +4263,11 @@ export default function SystemSettingsPage() {
         onCancel={closeKanbanDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{kanbanDeletingRow?.productName}</span>.
+          This will remove{" "}
+          <span className="font-semibold">
+            {kanbanDeletingRow?.productName}
+          </span>
+          .
         </div>
       </Modal>
 
@@ -3792,7 +4281,11 @@ export default function SystemSettingsPage() {
         onCancel={closeGlobalWorkingDaysDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{globalWorkingDaysDeletingRow?.period}</span>.
+          This will remove{" "}
+          <span className="font-semibold">
+            {globalWorkingDaysDeletingRow?.period}
+          </span>
+          .
         </div>
       </Modal>
 
@@ -3806,7 +4299,11 @@ export default function SystemSettingsPage() {
         onCancel={closeProcessDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{processDeletingRow?.processName}</span>.
+          This will remove{" "}
+          <span className="font-semibold">
+            {processDeletingRow?.processName}
+          </span>
+          .
         </div>
       </Modal>
 
@@ -3842,11 +4339,15 @@ export default function SystemSettingsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs text-gray-500">Department</div>
-                <div className="font-medium text-gray-900">{detailRow.department}</div>
+                <div className="font-medium text-gray-900">
+                  {detailRow.department}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Role</div>
-                <div className="font-medium text-gray-900">{detailRow.role}</div>
+                <div className="font-medium text-gray-900">
+                  {detailRow.role}
+                </div>
               </div>
             </div>
             <div>
@@ -3877,33 +4378,42 @@ export default function SystemSettingsPage() {
               <div className="text-xs text-gray-500">Inventory Type</div>
               <div className="font-medium text-gray-900">
                 {safetyStockDetailApiData?.inventory_type
-                  ? formatInventoryTypeLabel(String(safetyStockDetailApiData.inventory_type))
+                  ? formatInventoryTypeLabel(
+                      String(safetyStockDetailApiData.inventory_type),
+                    )
                   : safetyDetailRow.inventoryType}
               </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">UNIQ Code</div>
               <div className="font-medium text-gray-900">
-                {safetyStockDetailApiData?.item_uniq_code || safetyDetailRow.itemUniqCode}
+                {safetyStockDetailApiData?.item_uniq_code ||
+                  safetyDetailRow.itemUniqCode}
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs text-gray-500">Constanta</div>
                 <div className="font-medium text-gray-900">
-                  {Number(safetyStockDetailApiData?.constanta ?? safetyDetailRow.constanta)}
+                  {Number(
+                    safetyStockDetailApiData?.constanta ??
+                      safetyDetailRow.constanta,
+                  )}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Status</div>
                 <div className="font-medium text-gray-900">
-                  {safetyStockDetailApiData ? fromBackendStatus(safetyStockDetailApiData.status) : safetyDetailRow.status}
+                  {safetyStockDetailApiData
+                    ? fromBackendStatus(safetyStockDetailApiData.status)
+                    : safetyDetailRow.status}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Calculation Type</div>
                 <div className="font-medium text-gray-900">
-                  {safetyStockDetailApiData?.calculation_type || safetyDetailRow.parameter}
+                  {safetyStockDetailApiData?.calculation_type ||
+                    safetyDetailRow.parameter}
                 </div>
               </div>
             </div>
@@ -3923,19 +4433,27 @@ export default function SystemSettingsPage() {
           <div className="space-y-3">
             <div>
               <div className="text-xs text-gray-500">Type Code</div>
-              <div className="font-medium text-gray-900">{typeParameterDetailRow.typeCode}</div>
+              <div className="font-medium text-gray-900">
+                {typeParameterDetailRow.typeCode}
+              </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Type Name</div>
-              <div className="font-medium text-gray-900">{typeParameterDetailRow.typeName}</div>
+              <div className="font-medium text-gray-900">
+                {typeParameterDetailRow.typeName}
+              </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Description</div>
-              <div className="font-medium text-gray-900">{typeParameterDetailRow.description}</div>
+              <div className="font-medium text-gray-900">
+                {typeParameterDetailRow.description}
+              </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Status</div>
-              <div className="font-medium text-gray-900">{typeParameterDetailRow.status}</div>
+              <div className="font-medium text-gray-900">
+                {typeParameterDetailRow.status}
+              </div>
             </div>
           </div>
         )}
@@ -3953,19 +4471,27 @@ export default function SystemSettingsPage() {
           <div className="space-y-3">
             <div>
               <div className="text-xs text-gray-500">Code</div>
-              <div className="font-medium text-gray-900">{uomDetailRow.code}</div>
+              <div className="font-medium text-gray-900">
+                {uomDetailRow.code}
+              </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Name</div>
-              <div className="font-medium text-gray-900">{uomDetailRow.name}</div>
+              <div className="font-medium text-gray-900">
+                {uomDetailRow.name}
+              </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Category</div>
-              <div className="font-medium text-gray-900">{uomDetailRow.category || "-"}</div>
+              <div className="font-medium text-gray-900">
+                {uomDetailRow.category || "-"}
+              </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Status</div>
-              <div className="font-medium text-gray-900">{uomDetailRow.status}</div>
+              <div className="font-medium text-gray-900">
+                {uomDetailRow.status}
+              </div>
             </div>
           </div>
         )}
@@ -3983,39 +4509,73 @@ export default function SystemSettingsPage() {
           <div className="space-y-3">
             <div>
               <div className="text-xs text-gray-500">Material Type</div>
-              <div className="font-medium text-gray-900">{poSplitDetailApiData?.budget_type || purchaseOrderDetailRow.materialType}</div>
+              <div className="font-medium text-gray-900">
+                {poSplitDetailApiData?.budget_type ||
+                  purchaseOrderDetailRow.materialType}
+              </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs text-gray-500">PO 1 Percentage</div>
-                <div className="font-medium text-gray-900">{Number(poSplitDetailApiData?.po1_pct ?? purchaseOrderDetailRow.po1Pct)}%</div>
+                <div className="font-medium text-gray-900">
+                  {Number(
+                    poSplitDetailApiData?.po1_pct ??
+                      purchaseOrderDetailRow.po1Pct,
+                  )}
+                  %
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">PO 2 Percentage</div>
-                <div className="font-medium text-gray-900">{Number(poSplitDetailApiData?.po2_pct ?? purchaseOrderDetailRow.po2Pct)}%</div>
+                <div className="font-medium text-gray-900">
+                  {Number(
+                    poSplitDetailApiData?.po2_pct ??
+                      purchaseOrderDetailRow.po2Pct,
+                  )}
+                  %
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Min Order Qty</div>
                 <div className="font-medium text-gray-900">
-                  {Number(poSplitDetailApiData?.min_order_qty ?? purchaseOrderDetailRow.minOrderQty).toLocaleString("en-US")}
+                  {Number(
+                    poSplitDetailApiData?.min_order_qty ??
+                      purchaseOrderDetailRow.minOrderQty,
+                  ).toLocaleString("en-US")}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Max Split Lines</div>
-                <div className="font-medium text-gray-900">{Number(poSplitDetailApiData?.max_split_lines ?? purchaseOrderDetailRow.maxSplitLines)}</div>
+                <div className="font-medium text-gray-900">
+                  {Number(
+                    poSplitDetailApiData?.max_split_lines ??
+                      purchaseOrderDetailRow.maxSplitLines,
+                  )}
+                </div>
               </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Split Rule</div>
-              <div className="font-medium text-gray-900">{poSplitDetailApiData?.split_rule || purchaseOrderDetailRow.splitRule}</div>
+              <div className="font-medium text-gray-900">
+                {poSplitDetailApiData?.split_rule ||
+                  purchaseOrderDetailRow.splitRule}
+              </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Description</div>
-              <div className="font-medium text-gray-900">{poSplitDetailApiData?.description || purchaseOrderDetailRow.description || "-"}</div>
+              <div className="font-medium text-gray-900">
+                {poSplitDetailApiData?.description ||
+                  purchaseOrderDetailRow.description ||
+                  "-"}
+              </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Status</div>
-              <div className="font-medium text-gray-900">{poSplitDetailApiData ? fromBackendStatus(poSplitDetailApiData.status) : purchaseOrderDetailRow.status}</div>
+              <div className="font-medium text-gray-900">
+                {poSplitDetailApiData
+                  ? fromBackendStatus(poSplitDetailApiData.status)
+                  : purchaseOrderDetailRow.status}
+              </div>
             </div>
           </div>
         )}
@@ -4033,29 +4593,48 @@ export default function SystemSettingsPage() {
           <div className="space-y-3">
             <div>
               <div className="text-xs text-gray-500">Menu/Action</div>
-              <div className="font-medium text-gray-900">{approvalWorkflowDetailApiData?.action_name || approvalWorkflowDetailRow.menuAction}</div>
+              <div className="font-medium text-gray-900">
+                {approvalWorkflowDetailApiData?.action_name ||
+                  approvalWorkflowDetailRow.menuAction}
+              </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs text-gray-500">Level 1 Role</div>
-                <div className="font-medium text-gray-900">{approvalWorkflowDetailApiData?.level_1_role || approvalWorkflowDetailRow.level1Role}</div>
+                <div className="font-medium text-gray-900">
+                  {approvalWorkflowDetailApiData?.level_1_role ||
+                    approvalWorkflowDetailRow.level1Role}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Level 2 Role</div>
-                <div className="font-medium text-gray-900">{approvalWorkflowDetailApiData?.level_2_role || approvalWorkflowDetailRow.level2Role}</div>
+                <div className="font-medium text-gray-900">
+                  {approvalWorkflowDetailApiData?.level_2_role ||
+                    approvalWorkflowDetailRow.level2Role}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Level 3 Role</div>
-                <div className="font-medium text-gray-900">{approvalWorkflowDetailApiData?.level_3_role || approvalWorkflowDetailRow.level3Role}</div>
+                <div className="font-medium text-gray-900">
+                  {approvalWorkflowDetailApiData?.level_3_role ||
+                    approvalWorkflowDetailRow.level3Role}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Level 4 Role</div>
-                <div className="font-medium text-gray-900">{approvalWorkflowDetailApiData?.level_4_role || approvalWorkflowDetailRow.level4Role}</div>
+                <div className="font-medium text-gray-900">
+                  {approvalWorkflowDetailApiData?.level_4_role ||
+                    approvalWorkflowDetailRow.level4Role}
+                </div>
               </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Status</div>
-              <div className="font-medium text-gray-900">{approvalWorkflowDetailApiData ? fromBackendStatus(approvalWorkflowDetailApiData.status) : approvalWorkflowDetailRow.status}</div>
+              <div className="font-medium text-gray-900">
+                {approvalWorkflowDetailApiData
+                  ? fromBackendStatus(approvalWorkflowDetailApiData.status)
+                  : approvalWorkflowDetailRow.status}
+              </div>
             </div>
           </div>
         )}
@@ -4073,25 +4652,37 @@ export default function SystemSettingsPage() {
           <div className="space-y-3">
             <div>
               <div className="text-xs text-gray-500">Product</div>
-              <div className="font-medium text-gray-900">{kanbanDetailRow.productName}</div>
-              <div className="text-xs text-gray-500">{kanbanDetailRow.productCode}</div>
+              <div className="font-medium text-gray-900">
+                {kanbanDetailRow.productName}
+              </div>
+              <div className="text-xs text-gray-500">
+                {kanbanDetailRow.productCode}
+              </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs text-gray-500">Kanban Qty</div>
-                <div className="font-medium text-gray-900">{kanbanDetailRow.kanbanQty} units</div>
+                <div className="font-medium text-gray-900">
+                  {kanbanDetailRow.kanbanQty} units
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Status</div>
-                <div className="font-medium text-gray-900">{kanbanDetailRow.status}</div>
+                <div className="font-medium text-gray-900">
+                  {kanbanDetailRow.status}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Min Stock</div>
-                <div className="font-medium text-gray-900">{kanbanDetailRow.minStock} units</div>
+                <div className="font-medium text-gray-900">
+                  {kanbanDetailRow.minStock} units
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Max Stock</div>
-                <div className="font-medium text-gray-900">{kanbanDetailRow.maxStock} units</div>
+                <div className="font-medium text-gray-900">
+                  {kanbanDetailRow.maxStock} units
+                </div>
               </div>
             </div>
           </div>
@@ -4111,31 +4702,47 @@ export default function SystemSettingsPage() {
             <div>
               <div className="text-xs text-gray-500">Parameter Group</div>
               <div className="font-medium text-gray-900">
-                {globalParameterDetailApiData?.parameter_group || globalWorkingDaysDetailRow.parameterGroup || "-"}
+                {globalParameterDetailApiData?.parameter_group ||
+                  globalWorkingDaysDetailRow.parameterGroup ||
+                  "-"}
               </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Period</div>
-              <div className="font-medium text-gray-900">{globalParameterDetailApiData?.period || globalWorkingDaysDetailRow.period}</div>
+              <div className="font-medium text-gray-900">
+                {globalParameterDetailApiData?.period ||
+                  globalWorkingDaysDetailRow.period}
+              </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs text-gray-500">Working Days</div>
                 <div className="font-medium text-gray-900">
-                  {Number(globalParameterDetailApiData?.working_days ?? globalWorkingDaysDetailRow.workingDays)} days
+                  {Number(
+                    globalParameterDetailApiData?.working_days ??
+                      globalWorkingDaysDetailRow.workingDays,
+                  )}{" "}
+                  days
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Status</div>
                 <div className="font-medium text-gray-900">
-                  {globalParameterDetailApiData ? fromBackendStatus(globalParameterDetailApiData.status) : globalWorkingDaysDetailRow.status}
+                  {globalParameterDetailApiData
+                    ? fromBackendStatus(globalParameterDetailApiData.status)
+                    : globalWorkingDaysDetailRow.status}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Created Date</div>
                 <div className="font-medium text-gray-900">
-                  {globalParameterDetailApiData?.updated_at || globalParameterDetailApiData?.created_at
-                    ? new Date(globalParameterDetailApiData.updated_at || globalParameterDetailApiData.created_at || "").toLocaleDateString("en-US")
+                  {globalParameterDetailApiData?.updated_at ||
+                  globalParameterDetailApiData?.created_at
+                    ? new Date(
+                        globalParameterDetailApiData.updated_at ||
+                          globalParameterDetailApiData.created_at ||
+                          "",
+                      ).toLocaleDateString("en-US")
                     : globalWorkingDaysDetailRow.createdDate}
                 </div>
               </div>
@@ -4157,24 +4764,38 @@ export default function SystemSettingsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs text-gray-500">Process Code</div>
-                <div className="font-medium text-gray-900">{processDetailApiData?.process_code || processDetailRow.processCode}</div>
+                <div className="font-medium text-gray-900">
+                  {processDetailApiData?.process_code ||
+                    processDetailRow.processCode}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Sequence</div>
-                <div className="font-medium text-gray-900">{Number(processDetailApiData?.sequence ?? processDetailRow.sequence)}</div>
+                <div className="font-medium text-gray-900">
+                  {Number(
+                    processDetailApiData?.sequence ?? processDetailRow.sequence,
+                  )}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Process Name</div>
-                <div className="font-medium text-gray-900">{processDetailApiData?.process_name || processDetailRow.processName}</div>
+                <div className="font-medium text-gray-900">
+                  {processDetailApiData?.process_name ||
+                    processDetailRow.processName}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Category</div>
-                <div className="font-medium text-gray-900">{processDetailApiData?.category || processDetailRow.category}</div>
+                <div className="font-medium text-gray-900">
+                  {processDetailApiData?.category || processDetailRow.category}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Status</div>
                 <div className="font-medium text-gray-900">
-                  {processDetailApiData ? fromBackendStatus(processDetailApiData.status) : processDetailRow.status}
+                  {processDetailApiData
+                    ? fromBackendStatus(processDetailApiData.status)
+                    : processDetailRow.status}
                 </div>
               </div>
             </div>
@@ -4227,7 +4848,9 @@ export default function SystemSettingsPage() {
               </div>
               <div>
                 <div className="text-xs text-gray-500">Status</div>
-                <div className="font-medium text-gray-900">{machinePatternDetailRow.status}</div>
+                <div className="font-medium text-gray-900">
+                  {machinePatternDetailRow.status}
+                </div>
               </div>
             </div>
           </div>
@@ -4251,15 +4874,27 @@ export default function SystemSettingsPage() {
       >
         <Form form={form} layout="vertical">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Form.Item label="Full Name" name="name" rules={[{ required: true }]}>
+            <Form.Item
+              label="Full Name"
+              name="name"
+              rules={[{ required: true }]}
+            >
               <Input placeholder="Full name" disabled={editMode === "edit"} />
             </Form.Item>
 
-            <Form.Item label="Employee ID" name="empId" rules={[{ required: true }]}>
+            <Form.Item
+              label="Employee ID"
+              name="empId"
+              rules={[{ required: true }]}
+            >
               <Input placeholder="EMP-001" disabled={editMode === "edit"} />
             </Form.Item>
 
-            <Form.Item label="Department" name="department" rules={[{ required: true }]}>
+            <Form.Item
+              label="Department"
+              name="department"
+              rules={[{ required: true }]}
+            >
               {apiEnabled ? (
                 <Select
                   placeholder="Select department"
@@ -4268,11 +4903,16 @@ export default function SystemSettingsPage() {
                   showSearch
                   optionFilterProp="label"
                   filterOption={(input, option) =>
-                    String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                    String(option?.label ?? "")
+                      .toLowerCase()
+                      .includes(input.toLowerCase())
                   }
                 />
               ) : (
-                <Input placeholder="Department" disabled={editMode === "edit"} />
+                <Input
+                  placeholder="Department"
+                  disabled={editMode === "edit"}
+                />
               )}
             </Form.Item>
 
@@ -4284,7 +4924,9 @@ export default function SystemSettingsPage() {
                   showSearch
                   optionFilterProp="label"
                   filterOption={(input, option) =>
-                    String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                    String(option?.label ?? "")
+                      .toLowerCase()
+                      .includes(input.toLowerCase())
                   }
                 />
               ) : (
@@ -4330,21 +4972,30 @@ export default function SystemSettingsPage() {
               placeholder="Select inventory type"
               options={[
                 { label: "Raw Material", value: "Raw Material" },
-                { label: "Indirect Raw Material", value: "Indirect Raw Material" },
+                {
+                  label: "Indirect Raw Material",
+                  value: "Indirect Raw Material",
+                },
                 { label: "SubCon", value: "SubCon" },
                 { label: "Finished Goods", value: "Finished Goods" },
               ]}
             />
           </Form.Item>
 
-          <Form.Item label="Parameter" name="parameter" rules={[{ required: true }]}>
+          <Form.Item
+            label="Parameter"
+            name="parameter"
+            rules={[{ required: true }]}
+          >
             <Select
               placeholder="Select Type"
               options={SAFETY_STOCK_PARAMETER_OPTIONS}
               showSearch
               optionFilterProp="label"
               filterOption={(input, option) =>
-                String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                String(option?.label ?? "")
+                  .toLowerCase()
+                  .includes(input.toLowerCase())
               }
             />
           </Form.Item>
@@ -4385,15 +5036,27 @@ export default function SystemSettingsPage() {
         }
       >
         <Form form={typeParameterForm} layout="vertical">
-          <Form.Item label="Type Code" name="typeCode" rules={[{ required: true }]}>
+          <Form.Item
+            label="Type Code"
+            name="typeCode"
+            rules={[{ required: true }]}
+          >
             <Input placeholder="WIP-A" />
           </Form.Item>
 
-          <Form.Item label="Type Name" name="typeName" rules={[{ required: true }]}>
+          <Form.Item
+            label="Type Name"
+            name="typeName"
+            rules={[{ required: true }]}
+          >
             <Input placeholder="Semi-Finished Product A" />
           </Form.Item>
 
-          <Form.Item label="Description" name="description" rules={[{ required: true }]}>
+          <Form.Item
+            label="Description"
+            name="description"
+            rules={[{ required: true }]}
+          >
             <Input placeholder="After pressing process" />
           </Form.Item>
 
@@ -4433,7 +5096,11 @@ export default function SystemSettingsPage() {
             <Input placeholder="Pieces" />
           </Form.Item>
 
-          <Form.Item label="Category" name="category" rules={[{ required: true }]}>
+          <Form.Item
+            label="Category"
+            name="category"
+            rules={[{ required: true }]}
+          >
             <Input placeholder="Count" />
           </Form.Item>
 
@@ -4450,7 +5117,11 @@ export default function SystemSettingsPage() {
       </Drawer>
 
       <Modal
-        title={purchaseOrderEditMode === "create" ? "Add Parameter" : "Edit Parameter"}
+        title={
+          purchaseOrderEditMode === "create"
+            ? "Add Parameter"
+            : "Edit Parameter"
+        }
         open={purchaseOrderEditOpen}
         onCancel={closePurchaseOrderEdit}
         width={940}
@@ -4467,82 +5138,165 @@ export default function SystemSettingsPage() {
                   <SettingOutlined />
                 </div>
                 <div>
-                  <div className="text-[22px] font-semibold text-gray-900">System Parameters</div>
-                  <div className="text-sm text-gray-500">Comprehensive ERP parameter management and configuration</div>
+                  <div className="text-[22px] font-semibold text-gray-900">
+                    System Parameters
+                  </div>
+                  <div className="text-sm text-gray-500">
+                    Comprehensive ERP parameter management and configuration
+                  </div>
                 </div>
               </div>
-              <Button type="primary" className="rounded-lg px-4">19 Configuration Modules</Button>
+              <Button type="primary" className="rounded-lg px-4">
+                19 Configuration Modules
+              </Button>
             </div>
           </div>
 
           <div className="flex items-start justify-between gap-4">
             <div>
-              <div className="text-[28px] font-semibold leading-tight text-gray-900">PO - Split Settings</div>
-              <div className="mt-1 text-sm text-gray-500">Configure purchase order split settings</div>
+              <div className="text-[28px] font-semibold leading-tight text-gray-900">
+                PO - Split Settings
+              </div>
+              <div className="mt-1 text-sm text-gray-500">
+                Configure purchase order split settings
+              </div>
             </div>
-            <Button type="primary" className="rounded-lg" icon={<PlusOutlined />}>Add Parameter</Button>
+            <Button
+              type="primary"
+              className="rounded-lg"
+              icon={<PlusOutlined />}
+            >
+              Add Parameter
+            </Button>
           </div>
 
-          <Form form={purchaseOrderForm} layout="vertical" requiredMark={false} colon={false}>
+          <Form
+            form={purchaseOrderForm}
+            layout="vertical"
+            requiredMark={false}
+            colon={false}
+          >
             <Form.Item name="splitRule" hidden>
               <Input />
             </Form.Item>
 
             <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-              <div className="text-lg font-semibold text-gray-900">Purchase Order Split Method</div>
+              <div className="text-lg font-semibold text-gray-900">
+                Purchase Order Split Method
+              </div>
               <div className="mt-1 text-sm text-gray-500">
-                Choose how to split purchase orders between PO1 and PO2. Total must equal 100% of Purchase Request.
+                Choose how to split purchase orders between PO1 and PO2. Total
+                must equal 100% of Purchase Request.
               </div>
 
               <div className="mt-5 space-y-4">
                 <button
                   type="button"
                   className={`w-full rounded-2xl border p-4 text-left transition ${!purchaseOrderIsHistory ? "border-blue-500 bg-blue-50/50 shadow-[0_0_0_1px_rgba(59,130,246,0.16)]" : "border-gray-200 bg-white"}`}
-                  onClick={() => purchaseOrderForm.setFieldsValue({ splitRule: "percentage" })}
+                  onClick={() =>
+                    purchaseOrderForm.setFieldsValue({
+                      splitRule: "percentage",
+                    })
+                  }
                 >
                   <div className="flex items-start gap-3">
                     <div className="mt-1 flex h-4 w-4 items-center justify-center rounded-full border border-blue-500">
-                      <div className={`h-2 w-2 rounded-full ${!purchaseOrderIsHistory ? "bg-blue-600" : "bg-transparent"}`} />
+                      <div
+                        className={`h-2 w-2 rounded-full ${!purchaseOrderIsHistory ? "bg-blue-600" : "bg-transparent"}`}
+                      />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="text-[17px] font-semibold text-gray-900">Option 1: PO based on Percentage</div>
-                      <div className="mt-1 text-sm text-gray-500">Applied for all UNIQ. Set fixed percentage split between PO1 and PO2.</div>
+                      <div className="text-[17px] font-semibold text-gray-900">
+                        Option 1: PO based on Percentage
+                      </div>
+                      <div className="mt-1 text-sm text-gray-500">
+                        Applied for all UNIQ. Set fixed percentage split between
+                        PO1 and PO2.
+                      </div>
 
                       {!purchaseOrderIsHistory ? (
                         <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-4">
                           <div className="rounded-xl border border-blue-200 bg-[#f5f9ff] px-4 py-3 text-sm text-blue-700">
                             <div className="font-semibold">Information:</div>
-                            <div className="mt-1">You can fill the percentage at menu PO Budget. Total percentage must equal 100%.</div>
+                            <div className="mt-1">
+                              You can fill the percentage at menu PO Budget.
+                              Total percentage must equal 100%.
+                            </div>
                           </div>
 
                           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
                             <Form.Item
-                              label={<span className="text-sm font-medium text-gray-700">PO 1 Percentage <span className="text-red-500">*</span></span>}
+                              label={
+                                <span className="text-sm font-medium text-gray-700">
+                                  PO 1 Percentage{" "}
+                                  <span className="text-red-500">*</span>
+                                </span>
+                              }
                               name="po1Pct"
-                              rules={[{ required: true, message: "PO 1 Percentage is required" }]}
+                              rules={[
+                                {
+                                  required: true,
+                                  message: "PO 1 Percentage is required",
+                                },
+                              ]}
                             >
-                              <InputNumber className="w-full" size="large" min={0} max={100} addonAfter="%" />
+                              <InputNumber
+                                className="w-full"
+                                size="large"
+                                min={0}
+                                max={100}
+                                addonAfter="%"
+                              />
                             </Form.Item>
 
                             <Form.Item
-                              label={<span className="text-sm font-medium text-gray-700">PO 2 Percentage <span className="text-red-500">*</span></span>}
+                              label={
+                                <span className="text-sm font-medium text-gray-700">
+                                  PO 2 Percentage{" "}
+                                  <span className="text-red-500">*</span>
+                                </span>
+                              }
                               name="po2Pct"
-                              rules={[{ required: true, message: "PO 2 Percentage is required" }]}
+                              rules={[
+                                {
+                                  required: true,
+                                  message: "PO 2 Percentage is required",
+                                },
+                              ]}
                             >
-                              <InputNumber className="w-full" size="large" min={0} max={100} addonAfter="%" />
+                              <InputNumber
+                                className="w-full"
+                                size="large"
+                                min={0}
+                                max={100}
+                                addonAfter="%"
+                              />
                             </Form.Item>
 
                             <div>
-                              <div className="mb-2 text-sm font-medium text-gray-700">Total Percentage</div>
-                              <div className={`flex h-10 items-center rounded-lg border px-4 text-lg font-semibold ${purchaseOrderPctTotal === 100 ? "border-emerald-400 bg-emerald-50 text-emerald-600" : "border-amber-300 bg-amber-50 text-amber-600"}`}>
+                              <div className="mb-2 text-sm font-medium text-gray-700">
+                                Total Percentage
+                              </div>
+                              <div
+                                className={`flex h-10 items-center rounded-lg border px-4 text-lg font-semibold ${purchaseOrderPctTotal === 100 ? "border-emerald-400 bg-emerald-50 text-emerald-600" : "border-amber-300 bg-amber-50 text-amber-600"}`}
+                              >
                                 {purchaseOrderPctTotal}%
                               </div>
                             </div>
                           </div>
 
                           <div className="mt-2 rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
-                            <div><span className="font-semibold text-gray-700">Logic:</span> If percentage is created, then number of PR will be divided based on PO 1 and PO 2 percentage.</div>
-                            <div className="mt-2">Example: If PR = 1000 pcs, PO1 (50%) = 500 pcs, PO2 (50%) = 500 pcs</div>
+                            <div>
+                              <span className="font-semibold text-gray-700">
+                                Logic:
+                              </span>{" "}
+                              If percentage is created, then number of PR will
+                              be divided based on PO 1 and PO 2 percentage.
+                            </div>
+                            <div className="mt-2">
+                              Example: If PR = 1000 pcs, PO1 (50%) = 500 pcs,
+                              PO2 (50%) = 500 pcs
+                            </div>
                           </div>
                         </div>
                       ) : null}
@@ -4553,25 +5307,46 @@ export default function SystemSettingsPage() {
                 <button
                   type="button"
                   className={`w-full rounded-2xl border p-4 text-left transition ${purchaseOrderIsHistory ? "border-fuchsia-400 bg-fuchsia-50/40 shadow-[0_0_0_1px_rgba(217,70,239,0.14)]" : "border-gray-200 bg-white"}`}
-                  onClick={() => purchaseOrderForm.setFieldsValue({ splitRule: "history" })}
+                  onClick={() =>
+                    purchaseOrderForm.setFieldsValue({ splitRule: "history" })
+                  }
                 >
                   <div className="flex items-start gap-3">
-                    <div className={`mt-1 flex h-4 w-4 items-center justify-center rounded-full border ${purchaseOrderIsHistory ? "border-blue-500" : "border-gray-400"}`}>
-                      <div className={`h-2 w-2 rounded-full ${purchaseOrderIsHistory ? "bg-blue-600" : "bg-transparent"}`} />
+                    <div
+                      className={`mt-1 flex h-4 w-4 items-center justify-center rounded-full border ${purchaseOrderIsHistory ? "border-blue-500" : "border-gray-400"}`}
+                    >
+                      <div
+                        className={`h-2 w-2 rounded-full ${purchaseOrderIsHistory ? "bg-blue-600" : "bg-transparent"}`}
+                      />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="text-[17px] font-semibold text-gray-900">Option 2: PO based on History Forecasting</div>
-                      <div className="mt-1 text-sm text-gray-500">Can be applied per UNIQ. Based on historical delivery data from specific date ranges.</div>
+                      <div className="text-[17px] font-semibold text-gray-900">
+                        Option 2: PO based on History Forecasting
+                      </div>
+                      <div className="mt-1 text-sm text-gray-500">
+                        Can be applied per UNIQ. Based on historical delivery
+                        data from specific date ranges.
+                      </div>
 
                       {purchaseOrderIsHistory ? (
                         <div className="mt-4 rounded-2xl border border-fuchsia-200 bg-white p-4">
                           <div className="rounded-xl border border-fuchsia-100 bg-fuchsia-50 px-4 py-3 text-sm text-fuchsia-700">
                             <div className="font-semibold">Information:</div>
-                            <div className="mt-1">Set date ranges for historical delivery analysis. System will calculate optimal split based on historical data.</div>
+                            <div className="mt-1">
+                              Set date ranges for historical delivery analysis.
+                              System will calculate optimal split based on
+                              historical data.
+                            </div>
                           </div>
 
                           <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
-                            <div><span className="font-semibold text-gray-700">Logic:</span> System analyzes historical delivery data to determine optimal split ratios for PO1 and PO2.</div>
+                            <div>
+                              <span className="font-semibold text-gray-700">
+                                Logic:
+                              </span>{" "}
+                              System analyzes historical delivery data to
+                              determine optimal split ratios for PO1 and PO2.
+                            </div>
                           </div>
                         </div>
                       ) : null}
@@ -4582,15 +5357,28 @@ export default function SystemSettingsPage() {
 
               <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Form.Item
-                  label={<span className="text-sm font-medium text-gray-700">Material Type <span className="text-red-500">*</span></span>}
+                  label={
+                    <span className="text-sm font-medium text-gray-700">
+                      Material Type <span className="text-red-500">*</span>
+                    </span>
+                  }
                   name="materialType"
-                  rules={[{ required: true, message: "Material Type is required" }]}
+                  rules={[
+                    { required: true, message: "Material Type is required" },
+                  ]}
                 >
-                  <Select size="large" options={PURCHASE_ORDER_MATERIAL_OPTIONS} />
+                  <Select
+                    size="large"
+                    options={PURCHASE_ORDER_MATERIAL_OPTIONS}
+                  />
                 </Form.Item>
 
                 <Form.Item
-                  label={<span className="text-sm font-medium text-gray-700">Vendor <span className="text-red-500">*</span></span>}
+                  label={
+                    <span className="text-sm font-medium text-gray-700">
+                      Vendor <span className="text-red-500">*</span>
+                    </span>
+                  }
                   name="vendor"
                   rules={[{ required: true, message: "Vendor is required" }]}
                 >
@@ -4600,21 +5388,34 @@ export default function SystemSettingsPage() {
                     options={purchaseOrderVendorOptions}
                     showSearch
                     filterOption={(input, option) =>
-                      String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                      String(option?.label ?? "")
+                        .toLowerCase()
+                        .includes(input.toLowerCase())
                     }
                   />
                 </Form.Item>
 
                 <Form.Item
-                  label={<span className="text-sm font-medium text-gray-700">Status <span className="text-red-500">*</span></span>}
+                  label={
+                    <span className="text-sm font-medium text-gray-700">
+                      Status <span className="text-red-500">*</span>
+                    </span>
+                  }
                   name="status"
                   rules={[{ required: true, message: "Status is required" }]}
                 >
-                  <Select size="large" options={PURCHASE_ORDER_STATUS_OPTIONS} />
+                  <Select
+                    size="large"
+                    options={PURCHASE_ORDER_STATUS_OPTIONS}
+                  />
                 </Form.Item>
 
                 <Form.Item
-                  label={<span className="text-sm font-medium text-gray-700">Description</span>}
+                  label={
+                    <span className="text-sm font-medium text-gray-700">
+                      Description
+                    </span>
+                  }
                   name="description"
                   className="md:col-span-2"
                 >
@@ -4622,68 +5423,113 @@ export default function SystemSettingsPage() {
                 </Form.Item>
 
                 <Form.Item
-                  label={<span className="text-sm font-medium text-gray-700">Min Order Qty <span className="text-red-500">*</span></span>}
+                  label={
+                    <span className="text-sm font-medium text-gray-700">
+                      Min Order Qty <span className="text-red-500">*</span>
+                    </span>
+                  }
                   name="minOrderQty"
-                  rules={[{ required: true, message: "Min Order Qty is required" }]}
+                  rules={[
+                    { required: true, message: "Min Order Qty is required" },
+                  ]}
                 >
                   <InputNumber className="w-full" size="large" min={0} />
                 </Form.Item>
 
                 <Form.Item
-                  label={<span className="text-sm font-medium text-gray-700">Max Split Lines <span className="text-red-500">*</span></span>}
+                  label={
+                    <span className="text-sm font-medium text-gray-700">
+                      Max Split Lines <span className="text-red-500">*</span>
+                    </span>
+                  }
                   name="maxSplitLines"
-                  rules={[{ required: true, message: "Max Split Lines is required" }]}
+                  rules={[
+                    { required: true, message: "Max Split Lines is required" },
+                  ]}
                 >
                   <InputNumber className="w-full" size="large" min={1} />
                 </Form.Item>
               </div>
 
               <div className="mt-5 flex items-center justify-end gap-3 border-t border-gray-100 pt-4">
-                <Button className="rounded-lg" onClick={resetPurchaseOrderEdit}>Reset to Default</Button>
-                <Button type="primary" className="rounded-lg" onClick={savePurchaseOrderEdit}>Save Configuration</Button>
+                <Button className="rounded-lg" onClick={resetPurchaseOrderEdit}>
+                  Reset to Default
+                </Button>
+                <Button
+                  type="primary"
+                  className="rounded-lg"
+                  onClick={savePurchaseOrderEdit}
+                >
+                  Save Configuration
+                </Button>
               </div>
             </div>
 
             <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-              <div className="text-lg font-semibold text-gray-900">Configuration Summary</div>
+              <div className="text-lg font-semibold text-gray-900">
+                Configuration Summary
+              </div>
               <div className="mt-5 space-y-3 text-sm">
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-gray-500">Selected Method:</span>
                   <span className="inline-flex rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
-                    {purchaseOrderIsHistory ? "History Forecasting" : "Percentage Based"}
+                    {purchaseOrderIsHistory
+                      ? "History Forecasting"
+                      : "Percentage Based"}
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-gray-500">PO 1 Percentage:</span>
-                  <span className="font-semibold text-gray-900">{Number(purchaseOrderPo1Pct || 0)}%</span>
+                  <span className="font-semibold text-gray-900">
+                    {Number(purchaseOrderPo1Pct || 0)}%
+                  </span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-gray-500">PO 2 Percentage:</span>
-                  <span className="font-semibold text-gray-900">{Number(purchaseOrderPo2Pct || 0)}%</span>
+                  <span className="font-semibold text-gray-900">
+                    {Number(purchaseOrderPo2Pct || 0)}%
+                  </span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-gray-500">Material Type:</span>
-                  <span className="font-semibold text-gray-900">{PURCHASE_ORDER_MATERIAL_OPTIONS.find((option) => option.value === purchaseOrderMaterialType)?.label ?? purchaseOrderMaterialType}</span>
+                  <span className="font-semibold text-gray-900">
+                    {PURCHASE_ORDER_MATERIAL_OPTIONS.find(
+                      (option) => option.value === purchaseOrderMaterialType,
+                    )?.label ?? purchaseOrderMaterialType}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-gray-500">Status:</span>
-                  <span className="font-semibold text-gray-900">{purchaseOrderStatus}</span>
+                  <span className="font-semibold text-gray-900">
+                    {purchaseOrderStatus}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-gray-500">Min / Max Split:</span>
-                  <span className="font-semibold text-gray-900">{Number(purchaseOrderMinOrderQty || 0)} / {Number(purchaseOrderMaxSplitLines || 0)}</span>
+                  <span className="font-semibold text-gray-900">
+                    {Number(purchaseOrderMinOrderQty || 0)} /{" "}
+                    {Number(purchaseOrderMaxSplitLines || 0)}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-gray-500">Vendor:</span>
-                  <span className="max-w-[55%] truncate text-right font-semibold text-gray-900">{purchaseOrderVendor || "-"}</span>
+                  <span className="max-w-[55%] truncate text-right font-semibold text-gray-900">
+                    {purchaseOrderVendor || "-"}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-gray-500">Description:</span>
-                  <span className="max-w-[55%] truncate text-right font-medium text-gray-900">{purchaseOrderDescription || "-"}</span>
+                  <span className="max-w-[55%] truncate text-right font-medium text-gray-900">
+                    {purchaseOrderDescription || "-"}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-gray-500">Total:</span>
-                  <span className={`font-semibold ${purchaseOrderPctTotal === 100 ? "text-emerald-600" : "text-amber-600"}`}>{purchaseOrderPctTotal}%</span>
+                  <span
+                    className={`font-semibold ${purchaseOrderPctTotal === 100 ? "text-emerald-600" : "text-amber-600"}`}
+                  >
+                    {purchaseOrderPctTotal}%
+                  </span>
                 </div>
               </div>
             </div>
@@ -4708,35 +5554,47 @@ export default function SystemSettingsPage() {
         }
       >
         <Form form={approvalWorkflowForm} layout="vertical">
-          <Form.Item label="Menu/Action" name="menuAction" rules={[{ required: true }]}>
+          <Form.Item
+            label="Menu/Action"
+            name="menuAction"
+            rules={[{ required: true }]}
+          >
             <Input placeholder="Approve Work Order" />
           </Form.Item>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Form.Item label="Level 1 Role" name="level1Role">
               <Select
-                options={(shouldLoadRoles ? (rolesApiData ?? []) : []).map((r) => ({ label: String(r.name), value: String(r.name) }))}
+                options={(shouldLoadRoles ? (rolesApiData ?? []) : []).map(
+                  (r) => ({ label: String(r.name), value: String(r.name) }),
+                )}
                 allowClear
               />
             </Form.Item>
 
             <Form.Item label="Level 2 Role" name="level2Role">
               <Select
-                options={(shouldLoadRoles ? (rolesApiData ?? []) : []).map((r) => ({ label: String(r.name), value: String(r.name) }))}
+                options={(shouldLoadRoles ? (rolesApiData ?? []) : []).map(
+                  (r) => ({ label: String(r.name), value: String(r.name) }),
+                )}
                 allowClear
               />
             </Form.Item>
 
             <Form.Item label="Level 3 Role" name="level3Role">
               <Select
-                options={(shouldLoadRoles ? (rolesApiData ?? []) : []).map((r) => ({ label: String(r.name), value: String(r.name) }))}
+                options={(shouldLoadRoles ? (rolesApiData ?? []) : []).map(
+                  (r) => ({ label: String(r.name), value: String(r.name) }),
+                )}
                 allowClear
               />
             </Form.Item>
 
             <Form.Item label="Level 4 Role" name="level4Role">
               <Select
-                options={(shouldLoadRoles ? (rolesApiData ?? []) : []).map((r) => ({ label: String(r.name), value: String(r.name) }))}
+                options={(shouldLoadRoles ? (rolesApiData ?? []) : []).map(
+                  (r) => ({ label: String(r.name), value: String(r.name) }),
+                )}
                 allowClear
               />
             </Form.Item>
@@ -4772,30 +5630,52 @@ export default function SystemSettingsPage() {
       >
         <Form form={kanbanForm} layout="vertical">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Form.Item label="Product Name" name="productName" rules={[{ required: true }]}>
+            <Form.Item
+              label="Product Name"
+              name="productName"
+              rules={[{ required: true }]}
+            >
               <Input placeholder="Bracket Assembly" />
             </Form.Item>
-            <Form.Item label="Product Code" name="productCode" rules={[{ required: true }]}>
+            <Form.Item
+              label="Product Code"
+              name="productCode"
+              rules={[{ required: true }]}
+            >
               <Select
                 showSearch
                 placeholder="Select BOM UNIQ"
                 options={bomUniqOptions}
                 optionFilterProp="label"
                 filterOption={(input, opt) =>
-                  String(opt?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                  String(opt?.label ?? "")
+                    .toLowerCase()
+                    .includes(input.toLowerCase())
                 }
               />
             </Form.Item>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <Form.Item label="Kanban Qty" name="kanbanQty" rules={[{ required: true }]}>
+            <Form.Item
+              label="Kanban Qty"
+              name="kanbanQty"
+              rules={[{ required: true }]}
+            >
               <InputNumber className="w-full" min={0} placeholder="50" />
             </Form.Item>
-            <Form.Item label="Min Stock" name="minStock" rules={[{ required: true }]}>
+            <Form.Item
+              label="Min Stock"
+              name="minStock"
+              rules={[{ required: true }]}
+            >
               <InputNumber className="w-full" min={0} placeholder="100" />
             </Form.Item>
-            <Form.Item label="Max Stock" name="maxStock" rules={[{ required: true }]}>
+            <Form.Item
+              label="Max Stock"
+              name="maxStock"
+              rules={[{ required: true }]}
+            >
               <InputNumber className="w-full" min={0} placeholder="500" />
             </Form.Item>
           </div>
@@ -4813,7 +5693,11 @@ export default function SystemSettingsPage() {
       </Drawer>
 
       <Drawer
-        title={globalWorkingDaysEditMode === "create" ? "Add Global Parameter" : "Edit Global Parameter"}
+        title={
+          globalWorkingDaysEditMode === "create"
+            ? "Add Global Parameter"
+            : "Edit Global Parameter"
+        }
         placement="right"
         open={globalWorkingDaysEditOpen}
         onClose={closeGlobalWorkingDaysEdit}
@@ -4835,13 +5719,19 @@ export default function SystemSettingsPage() {
           <Form.Item label="Period" name="period" rules={[{ required: true }]}>
             <Select
               placeholder="Select period"
-              options={PERIOD_OPTIONS as unknown as { label: string; value: string }[]}
+              options={
+                PERIOD_OPTIONS as unknown as { label: string; value: string }[]
+              }
               className="w-full"
               showSearch
               optionFilterProp="label"
             />
           </Form.Item>
-          <Form.Item label="Working Days" name="workingDays" rules={[{ required: true }]}>
+          <Form.Item
+            label="Working Days"
+            name="workingDays"
+            rules={[{ required: true }]}
+          >
             <Input className="w-full" placeholder="22" />
           </Form.Item>
           <Form.Item label="Status" name="status" rules={[{ required: true }]}>
@@ -4874,20 +5764,42 @@ export default function SystemSettingsPage() {
       >
         <Form form={processForm} layout="vertical">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Form.Item label="Process Code" name="processCode" rules={[{ required: true }]}>
-              <Input placeholder="PRC001" disabled={processEditMode === "edit" && apiEnabled} />
+            <Form.Item
+              label="Process Code"
+              name="processCode"
+              rules={[{ required: true }]}
+            >
+              <Input
+                placeholder="PRC001"
+                disabled={processEditMode === "edit" && apiEnabled}
+              />
             </Form.Item>
-            <Form.Item label="Sequence" name="sequence" rules={[{ required: true }]}>
+            <Form.Item
+              label="Sequence"
+              name="sequence"
+              rules={[{ required: true }]}
+            >
               <InputNumber className="w-full" min={1} placeholder="1" />
             </Form.Item>
           </div>
 
-          <Form.Item label="Process Name" name="processName" rules={[{ required: true }]}>
+          <Form.Item
+            label="Process Name"
+            name="processName"
+            rules={[{ required: true }]}
+          >
             <Input placeholder="Procurement" />
           </Form.Item>
 
-          <Form.Item label="Category" name="category" rules={[{ required: true }]}>
-            <Input placeholder="purchase" disabled={processEditMode === "edit" && apiEnabled} />
+          <Form.Item
+            label="Category"
+            name="category"
+            rules={[{ required: true }]}
+          >
+            <Input
+              placeholder="purchase"
+              disabled={processEditMode === "edit" && apiEnabled}
+            />
           </Form.Item>
 
           <Form.Item label="Status" name="status" rules={[{ required: true }]}>
@@ -4919,15 +5831,27 @@ export default function SystemSettingsPage() {
         }
       >
         <Form form={machinePatternForm} layout="vertical">
-          <Form.Item label="Pattern Name" name="patternName" rules={[{ required: true }]}>
+          <Form.Item
+            label="Pattern Name"
+            name="patternName"
+            rules={[{ required: true }]}
+          >
             <Input placeholder="Standard Production" />
           </Form.Item>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Form.Item label="Machine Count" name="machineCount" rules={[{ required: true }]}>
+            <Form.Item
+              label="Machine Count"
+              name="machineCount"
+              rules={[{ required: true }]}
+            >
               <InputNumber className="w-full" min={0} placeholder="10" />
             </Form.Item>
-            <Form.Item label="Operating Hours" name="operatingHours" rules={[{ required: true }]}>
+            <Form.Item
+              label="Operating Hours"
+              name="operatingHours"
+              rules={[{ required: true }]}
+            >
               <InputNumber className="w-full" min={0} placeholder="8" />
             </Form.Item>
           </div>
@@ -4944,11 +5868,15 @@ export default function SystemSettingsPage() {
         </Form>
       </Drawer>
 
-
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <Card className="lg:col-span-4 rounded-2xl shadow-sm" styles={{ body: { padding: 0 } }}>
+        <Card
+          className="lg:col-span-4 rounded-2xl shadow-sm"
+          styles={{ body: { padding: 0 } }}
+        >
           <div className="p-4 border-b">
-            <div className="font-semibold text-gray-900">Configuration Modules</div>
+            <div className="font-semibold text-gray-900">
+              Configuration Modules
+            </div>
           </div>
           <div className="p-2 max-h-[620px] overflow-y-auto">
             {modules.map((m) => {
@@ -4979,7 +5907,9 @@ export default function SystemSettingsPage() {
                     {m.icon}
                   </div>
                   <div className="flex-1">
-                    <div className="text-sm font-medium text-gray-900">{m.name}</div>
+                    <div className="text-sm font-medium text-gray-900">
+                      {m.name}
+                    </div>
                   </div>
                 </button>
               );
@@ -4988,16 +5918,24 @@ export default function SystemSettingsPage() {
         </Card>
 
         <div className="lg:col-span-8 space-y-4">
-          <Card className="rounded-2xl shadow-sm" styles={{ body: { padding: 0 } }}>
+          <Card
+            className="rounded-2xl shadow-sm"
+            styles={{ body: { padding: 0 } }}
+          >
             <div className="bg-blue-50 rounded-t-2xl px-5 py-4 border-b">
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
-                  <div className="text-lg font-semibold text-gray-900">System Parameters</div>
+                  <div className="text-lg font-semibold text-gray-900">
+                    System Parameters
+                  </div>
                   <div className="text-sm text-gray-500">
                     Comprehensive ERP parameter management and configuration
                   </div>
                 </div>
-                <Button className="bg-blue-100 text-blue-700 border-blue-100" icon={<InfoCircleOutlined />}>
+                <Button
+                  className="bg-blue-100 text-blue-700 border-blue-100"
+                  icon={<InfoCircleOutlined />}
+                >
                   {modules.length} Configuration Modules
                 </Button>
               </div>
@@ -5072,7 +6010,7 @@ export default function SystemSettingsPage() {
                               ? machineTab === "fast-slow"
                                 ? "Machine - Fast/Slow"
                                 : "Machine - Pattern"
-                        : selectedModule.name}
+                              : selectedModule.name}
                   </div>
                   <div className="text-sm text-gray-500">
                     {selectedModuleId === "purchase-order"
@@ -5085,7 +6023,7 @@ export default function SystemSettingsPage() {
                             ? "Configure Process for Work In Progress"
                             : selectedModuleId === "machine"
                               ? "Define machine pattern configurations"
-                      : selectedModule.description}
+                              : selectedModule.description}
                   </div>
                 </div>
                 <Button
@@ -5093,7 +6031,9 @@ export default function SystemSettingsPage() {
                   icon={<PlusOutlined />}
                   onClick={() => {
                     if (selectedModuleId === "access-control-matrix") {
-                      router.push("/system-settings/access-control-matrix/create");
+                      router.push(
+                        "/system-settings/access-control-matrix/create",
+                      );
                       return;
                     }
                     if (selectedModuleId === "roles") {
@@ -5129,7 +6069,9 @@ export default function SystemSettingsPage() {
                       return;
                     }
                     if (selectedModuleId === "kanban") {
-                      router.push("/system-settings/kanban/parameter/create-fullscreen");
+                      router.push(
+                        "/system-settings/kanban/parameter/create-fullscreen",
+                      );
                       return;
                     }
                     if (selectedModuleId === "global") {
@@ -5245,7 +6187,9 @@ export default function SystemSettingsPage() {
                 ) : selectedModuleId === "machine" ? (
                   <Table<MachinePatternRow>
                     columns={machinePatternColumns}
-                    dataSource={machineTab === "pattern" ? filteredMachinePattern : []}
+                    dataSource={
+                      machineTab === "pattern" ? filteredMachinePattern : []
+                    }
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}

@@ -20,7 +20,7 @@ const ROUTES = {
   uom: "/unit-measurement",
   typeParameter: "/type-parameter",
   safetyStock: "/safety-stock",
-  stockdays: "/api/stockdays",
+  stockdays: "/stockdays",
   poSplit: "/po-split-setting",
 } as const;
 
@@ -51,7 +51,9 @@ const normalizeObjectResponse = <T>(response: unknown): T | null => {
   return response && typeof response === "object" ? (response as T) : null;
 };
 
-const normalizeGlobalWorkingDaysRecord = (record: unknown): GlobalWorkingDaysRecord | null => {
+const normalizeGlobalWorkingDaysRecord = (
+  record: unknown,
+): GlobalWorkingDaysRecord | null => {
   if (!record || typeof record !== "object") return null;
   const raw = record as Record<string, unknown>;
 
@@ -67,7 +69,8 @@ const normalizeGlobalWorkingDaysRecord = (record: unknown): GlobalWorkingDaysRec
 
   return {
     id: String(id),
-    parameter_group: parameterGroup == null ? undefined : String(parameterGroup),
+    parameter_group:
+      parameterGroup == null ? undefined : String(parameterGroup),
     period: period == null ? "" : String(period),
     working_days:
       typeof workingDays === "number"
@@ -79,11 +82,15 @@ const normalizeGlobalWorkingDaysRecord = (record: unknown): GlobalWorkingDaysRec
   };
 };
 
-const normalizeGlobalWorkingDaysPayload = (body: CreateGlobalWorkingDaysRequest) => ({
+const normalizeGlobalWorkingDaysPayload = (
+  body: CreateGlobalWorkingDaysRequest,
+) => ({
   parameter_group: String(body.parameter_group ?? "").trim(),
   period: String(body.period ?? "").trim(),
   working_days: Number(body.working_days ?? 0),
-  status: String(body.status ?? "active").trim().toLowerCase(),
+  status: String(body.status ?? "active")
+    .trim()
+    .toLowerCase(),
 });
 
 // Backends are inconsistent: some use "Active"/"Inactive", others "active"/"inactive".
@@ -91,7 +98,9 @@ export type StatusType = string;
 
 export type RolePermissions = Record<string, Record<string, boolean>>;
 
-const normalizeRolePermissions = (role: unknown): RolePermissions | undefined => {
+const normalizeRolePermissions = (
+  role: unknown,
+): RolePermissions | undefined => {
   if (!role || typeof role !== "object") return undefined;
   const rec = role as Record<string, unknown>;
   const perms = rec.permissions ?? rec.Permissions;
@@ -211,7 +220,9 @@ export type ApprovalWorkflowRecord = {
   updated_at?: string;
 };
 
-const normalizeApprovalWorkflowRecord = (record: unknown): ApprovalWorkflowRecord | null => {
+const normalizeApprovalWorkflowRecord = (
+  record: unknown,
+): ApprovalWorkflowRecord | null => {
   if (!record || typeof record !== "object") return null;
   const raw = record as Record<string, unknown>;
 
@@ -226,9 +237,24 @@ const normalizeApprovalWorkflowRecord = (record: unknown): ApprovalWorkflowRecor
     level_3_role: String(raw.level_3_role ?? raw.Level3Role ?? ""),
     level_4_role: String(raw.level_4_role ?? raw.Level4Role ?? ""),
     status: String(raw.status ?? raw.Status ?? "active"),
-    created_by: raw.created_by == null ? raw.CreatedBy == null ? undefined : String(raw.CreatedBy) : String(raw.created_by),
-    created_at: raw.created_at == null ? raw.CreatedAt == null ? undefined : String(raw.CreatedAt) : String(raw.created_at),
-    updated_at: raw.updated_at == null ? raw.UpdatedAt == null ? undefined : String(raw.UpdatedAt) : String(raw.updated_at),
+    created_by:
+      raw.created_by == null
+        ? raw.CreatedBy == null
+          ? undefined
+          : String(raw.CreatedBy)
+        : String(raw.created_by),
+    created_at:
+      raw.created_at == null
+        ? raw.CreatedAt == null
+          ? undefined
+          : String(raw.CreatedAt)
+        : String(raw.created_at),
+    updated_at:
+      raw.updated_at == null
+        ? raw.UpdatedAt == null
+          ? undefined
+          : String(raw.UpdatedAt)
+        : String(raw.updated_at),
   };
 };
 
@@ -324,7 +350,9 @@ export type UomRecord = {
 };
 
 const normalizeUomPayload = (body: CreateUomRequest) => ({
-  code: String(body.code ?? body.unit_code ?? "").trim().toUpperCase(),
+  code: String(body.code ?? body.unit_code ?? "")
+    .trim()
+    .toUpperCase(),
   name: String(body.name ?? body.unit_name ?? "").trim(),
   category: String(body.category ?? body.description ?? "").trim(),
   status: String(body.status ?? "active").toLowerCase(),
@@ -411,19 +439,19 @@ export type SafetyStockRecord = {
 
 export type CreateStockdaysRequest = {
   inventory_type: string;
-  item_uniq_code: string;
-  stock_days: number;
+  item_code: string;
+  calculation_type: string;
+  constanta?: number;
   status?: StatusType;
-  calculation_type?: string;
 };
 
 export type StockdaysRecord = {
   id: string;
   inventory_type: string;
-  item_uniq_code: string;
-  stock_days: number;
-  status?: string;
-  calculation_type?: string;
+  item_code: string;
+  calculation_type: string;
+  constanta?: number;
+  status?: StatusType;
   created_at?: string;
   updated_at?: string;
 };
@@ -457,7 +485,10 @@ export type PoSplitRecord = {
 export const systemSettingsSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     // Role
-    createRole: builder.mutation<{ id: string; message?: string }, CreateRoleRequest>({
+    createRole: builder.mutation<
+      { id: string; message?: string },
+      CreateRoleRequest
+    >({
       query: (body) => ({
         url: `${ROUTES.role}`,
         method: "POST",
@@ -467,7 +498,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       invalidatesTags: [{ type: "SystemSettingsRoles", id: "LIST" }],
     }),
 
-    updateRole: builder.mutation<{ message?: string; data?: RoleRecord }, { id: string; body: Partial<CreateRoleRequest> }>({
+    updateRole: builder.mutation<
+      { message?: string; data?: RoleRecord },
+      { id: string; body: Partial<CreateRoleRequest> }
+    >({
       query: ({ id, body }) => ({
         url: `${ROUTES.role}/${id}`,
         method: "PUT",
@@ -538,7 +572,8 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => normalizeArrayResponse<DepartmentRecord>(response),
+      transformResponse: (response: unknown) =>
+        normalizeArrayResponse<DepartmentRecord>(response),
       providesTags: (result) =>
         result
           ? [
@@ -546,12 +581,18 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
               ...result
                 .map((d) => d?.id)
                 .filter((id): id is string => Boolean(id))
-                .map((id) => ({ type: "SystemSettingsDepartments" as const, id })),
+                .map((id) => ({
+                  type: "SystemSettingsDepartments" as const,
+                  id,
+                })),
             ]
           : [{ type: "SystemSettingsDepartments", id: "LIST" }],
     }),
 
-    createDepartment: builder.mutation<{ message?: string; data?: DepartmentRecord }, CreateDepartmentRequest>({
+    createDepartment: builder.mutation<
+      { message?: string; data?: DepartmentRecord },
+      CreateDepartmentRequest
+    >({
       query: (body) => ({
         url: `${ROUTES.department}`,
         method: "POST",
@@ -561,7 +602,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       invalidatesTags: [{ type: "SystemSettingsDepartments", id: "LIST" }],
     }),
 
-    updateDepartment: builder.mutation<{ message?: string; data?: DepartmentRecord }, { id: string; body: Partial<CreateDepartmentRequest> }>({
+    updateDepartment: builder.mutation<
+      { message?: string; data?: DepartmentRecord },
+      { id: string; body: Partial<CreateDepartmentRequest> }
+    >({
       query: ({ id, body }) => ({
         url: `${ROUTES.department}/${id}`,
         method: "PUT",
@@ -574,7 +618,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       ],
     }),
 
-    deleteDepartment: builder.mutation<{ message?: string; id?: string }, string>({
+    deleteDepartment: builder.mutation<
+      { message?: string; id?: string },
+      string
+    >({
       query: (id) => ({
         url: `${ROUTES.department}/${id}`,
         method: "DELETE",
@@ -592,8 +639,11 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => normalizeObjectResponse<DepartmentRecord>(response),
-      providesTags: (_res, _err, id) => [{ type: "SystemSettingsDepartments", id }],
+      transformResponse: (response: unknown) =>
+        normalizeObjectResponse<DepartmentRecord>(response),
+      providesTags: (_res, _err, id) => [
+        { type: "SystemSettingsDepartments", id },
+      ],
     }),
 
     getEmployees: builder.query<EmployeeRecord[], void>({
@@ -602,7 +652,8 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => normalizeArrayResponse<EmployeeRecord>(response),
+      transformResponse: (response: unknown) =>
+        normalizeArrayResponse<EmployeeRecord>(response),
     }),
 
     getEmployeeById: builder.query<EmployeeRecord | null, string>({
@@ -611,10 +662,14 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => normalizeObjectResponse<EmployeeRecord>(response),
+      transformResponse: (response: unknown) =>
+        normalizeObjectResponse<EmployeeRecord>(response),
     }),
 
-    createEmployee: builder.mutation<{ message?: string; data?: EmployeeRecord }, CreateEmployeeRequest>({
+    createEmployee: builder.mutation<
+      { message?: string; data?: EmployeeRecord },
+      CreateEmployeeRequest
+    >({
       query: (body) => ({
         url: `${ROUTES.employee}`,
         method: "POST",
@@ -623,7 +678,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
     }),
 
-    updateEmployee: builder.mutation<{ message?: string; data?: EmployeeRecord }, { id: string; body: Partial<CreateEmployeeRequest> }>({
+    updateEmployee: builder.mutation<
+      { message?: string; data?: EmployeeRecord },
+      { id: string; body: Partial<CreateEmployeeRequest> }
+    >({
       query: ({ id, body }) => ({
         url: `${ROUTES.employee}/${id}`,
         method: "PUT",
@@ -632,13 +690,15 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
     }),
 
-    deleteEmployee: builder.mutation<{ message?: string; id?: string }, string>({
-      query: (id) => ({
-        url: `${ROUTES.employee}/${id}`,
-        method: "DELETE",
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-    }),
+    deleteEmployee: builder.mutation<{ message?: string; id?: string }, string>(
+      {
+        query: (id) => ({
+          url: `${ROUTES.employee}/${id}`,
+          method: "DELETE",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+      },
+    ),
 
     // Access control matrix (list)
     getAccessControlMatrix: builder.query<AccessControlMatrixRecord[], void>({
@@ -656,19 +716,28 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
               ...result
                 .map((record) => record?.id)
                 .filter((id): id is string => Boolean(id))
-                .map((id) => ({ type: "SystemSettingsAccessControl" as const, id })),
+                .map((id) => ({
+                  type: "SystemSettingsAccessControl" as const,
+                  id,
+                })),
             ]
           : [{ type: "SystemSettingsAccessControl", id: "LIST" }],
     }),
 
-    getAccessControlMatrixById: builder.query<AccessControlMatrixRecord | null, string>({
+    getAccessControlMatrixById: builder.query<
+      AccessControlMatrixRecord | null,
+      string
+    >({
       query: (id) => ({
         url: `${ROUTES.accessControlMatrix}/${encodeURIComponent(id)}`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => normalizeObjectResponse<AccessControlMatrixRecord>(response),
-      providesTags: (_res, _err, id) => [{ type: "SystemSettingsAccessControl", id }],
+      transformResponse: (response: unknown) =>
+        normalizeObjectResponse<AccessControlMatrixRecord>(response),
+      providesTags: (_res, _err, id) => [
+        { type: "SystemSettingsAccessControl", id },
+      ],
     }),
 
     // Access control matrix
@@ -701,7 +770,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       ],
     }),
 
-    deleteAccessControlMatrix: builder.mutation<{ message?: string; id?: string }, string>({
+    deleteAccessControlMatrix: builder.mutation<
+      { message?: string; id?: string },
+      string
+    >({
       query: (id) => ({
         url: `${ROUTES.accessControlMatrix}/${id}`,
         method: "DELETE",
@@ -743,7 +815,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       ],
     }),
 
-    deleteApprovalWorkflow: builder.mutation<{ message?: string; id?: string }, string>({
+    deleteApprovalWorkflow: builder.mutation<
+      { message?: string; id?: string },
+      string
+    >({
       query: (id) => ({
         url: `${ROUTES.approvalWorkflow}/${id}`,
         method: "DELETE",
@@ -772,20 +847,30 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
               ...result
                 .map((record) => record?.id)
                 .filter((id): id is string => Boolean(id))
-                .map((id) => ({ type: "SystemSettingsApprovalWorkflow" as const, id })),
+                .map((id) => ({
+                  type: "SystemSettingsApprovalWorkflow" as const,
+                  id,
+                })),
             ]
           : [{ type: "SystemSettingsApprovalWorkflow", id: "LIST" }],
     }),
 
-    getApprovalWorkflowById: builder.query<ApprovalWorkflowRecord | null, string>({
+    getApprovalWorkflowById: builder.query<
+      ApprovalWorkflowRecord | null,
+      string
+    >({
       query: (id) => ({
         url: `${ROUTES.approvalWorkflow}/${encodeURIComponent(id)}`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) =>
-        normalizeApprovalWorkflowRecord(normalizeObjectResponse<unknown>(response) ?? response),
-      providesTags: (_res, _err, id) => [{ type: "SystemSettingsApprovalWorkflow", id }],
+        normalizeApprovalWorkflowRecord(
+          normalizeObjectResponse<unknown>(response) ?? response,
+        ),
+      providesTags: (_res, _err, id) => [
+        { type: "SystemSettingsApprovalWorkflow", id },
+      ],
     }),
 
     // Global working days
@@ -801,7 +886,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
       transformResponse: (response: unknown) => ({
         message: "OK",
-        data: normalizeGlobalWorkingDaysRecord(normalizeObjectResponse<unknown>(response) ?? response) ?? undefined,
+        data:
+          normalizeGlobalWorkingDaysRecord(
+            normalizeObjectResponse<unknown>(response) ?? response,
+          ) ?? undefined,
       }),
       invalidatesTags: [{ type: "SystemSettingsGlobalParameters", id: "LIST" }],
     }),
@@ -823,7 +911,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
       transformResponse: (response: unknown) => ({
         message: "OK",
-        data: normalizeGlobalWorkingDaysRecord(normalizeObjectResponse<unknown>(response) ?? response) ?? undefined,
+        data:
+          normalizeGlobalWorkingDaysRecord(
+            normalizeObjectResponse<unknown>(response) ?? response,
+          ) ?? undefined,
       }),
       invalidatesTags: (_res, _err, arg) => [
         { type: "SystemSettingsGlobalParameters", id: "LIST" },
@@ -831,7 +922,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       ],
     }),
 
-    deleteGlobalWorkingDays: builder.mutation<{ message?: string; id?: string }, string>({
+    deleteGlobalWorkingDays: builder.mutation<
+      { message?: string; id?: string },
+      string
+    >({
       query: (id) => ({
         url: `${ROUTES.globalWorkingDays}/${id}`,
         method: "DELETE",
@@ -854,23 +948,37 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
           .map((item) => normalizeGlobalWorkingDaysRecord(item))
           .filter((item): item is GlobalWorkingDaysRecord => Boolean(item)),
       providesTags: (result) => {
-        const base = [{ type: "SystemSettingsGlobalParameters" as const, id: "LIST" }];
+        const base = [
+          { type: "SystemSettingsGlobalParameters" as const, id: "LIST" },
+        ];
         const ids = (result ?? [])
           .map((r) => r?.id)
           .filter((id): id is string => typeof id === "string" && Boolean(id));
-        return base.concat(ids.map((id) => ({ type: "SystemSettingsGlobalParameters" as const, id })));
+        return base.concat(
+          ids.map((id) => ({
+            type: "SystemSettingsGlobalParameters" as const,
+            id,
+          })),
+        );
       },
     }),
 
-    getGlobalWorkingDaysById: builder.query<GlobalWorkingDaysRecord | null, string>({
+    getGlobalWorkingDaysById: builder.query<
+      GlobalWorkingDaysRecord | null,
+      string
+    >({
       query: (id) => ({
         url: `${ROUTES.globalWorkingDays}/${id}`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) =>
-        normalizeGlobalWorkingDaysRecord(normalizeObjectResponse<unknown>(response) ?? response),
-      providesTags: (_res, _err, id) => [{ type: "SystemSettingsGlobalParameters", id }],
+        normalizeGlobalWorkingDaysRecord(
+          normalizeObjectResponse<unknown>(response) ?? response,
+        ),
+      providesTags: (_res, _err, id) => [
+        { type: "SystemSettingsGlobalParameters", id },
+      ],
     }),
 
     // Kanban standards
@@ -903,7 +1011,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       ],
     }),
 
-    deleteKanbanStandard: builder.mutation<{ message?: string; id?: string }, string>({
+    deleteKanbanStandard: builder.mutation<
+      { message?: string; id?: string },
+      string
+    >({
       query: (id) => ({
         url: `${ROUTES.kanban}/${id}`,
         method: "DELETE",
@@ -941,7 +1052,8 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => normalizeObjectResponse<KanbanStandardRecord>(response),
+      transformResponse: (response: unknown) =>
+        normalizeObjectResponse<KanbanStandardRecord>(response),
       providesTags: (_res, _err, id) => [{ type: "SystemSettingsKanban", id }],
     }),
 
@@ -970,7 +1082,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       }),
     }),
 
-    deleteMachinePattern: builder.mutation<{ message?: string; id?: string }, string>({
+    deleteMachinePattern: builder.mutation<
+      { message?: string; id?: string },
+      string
+    >({
       query: (id) => ({
         url: `${ROUTES.machinePattern}/${id}`,
         method: "DELETE",
@@ -989,7 +1104,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
     }),
 
     // Process
-    createProcess: builder.mutation<{ message?: string; data?: ProcessRecord }, CreateProcessRequest>({
+    createProcess: builder.mutation<
+      { message?: string; data?: ProcessRecord },
+      CreateProcessRequest
+    >({
       query: (body) => ({
         url: `${ROUTES.process}`,
         method: "POST",
@@ -1051,7 +1169,9 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         const ids = (result ?? [])
           .map((r) => r?.id)
           .filter((id): id is string => typeof id === "string" && Boolean(id));
-        return base.concat(ids.map((id) => ({ type: "SystemSettingsProcess" as const, id })));
+        return base.concat(
+          ids.map((id) => ({ type: "SystemSettingsProcess" as const, id })),
+        );
       },
     }),
 
@@ -1061,12 +1181,16 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => normalizeObjectResponse<ProcessRecord>(response),
+      transformResponse: (response: unknown) =>
+        normalizeObjectResponse<ProcessRecord>(response),
       providesTags: (_res, _err, id) => [{ type: "SystemSettingsProcess", id }],
     }),
 
     // UoM
-    createUom: builder.mutation<{ message?: string; data?: UomRecord }, CreateUomRequest>({
+    createUom: builder.mutation<
+      { message?: string; data?: UomRecord },
+      CreateUomRequest
+    >({
       query: (body) => ({
         url: `${ROUTES.uom}`,
         method: "POST",
@@ -1119,7 +1243,9 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         const ids = (result ?? [])
           .map((r) => r?.id)
           .filter((id): id is string => typeof id === "string" && Boolean(id));
-        return base.concat(ids.map((id) => ({ type: "SystemSettingsUom" as const, id })));
+        return base.concat(
+          ids.map((id) => ({ type: "SystemSettingsUom" as const, id })),
+        );
       },
     }),
 
@@ -1129,7 +1255,8 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => normalizeUomRecord(normalizeObjectResponse<unknown>(response)),
+      transformResponse: (response: unknown) =>
+        normalizeUomRecord(normalizeObjectResponse<unknown>(response)),
       providesTags: (_res, _err, id) => [{ type: "SystemSettingsUom", id }],
     }),
 
@@ -1163,7 +1290,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       ],
     }),
 
-    deleteTypeParameter: builder.mutation<{ message?: string; id?: string }, string>({
+    deleteTypeParameter: builder.mutation<
+      { message?: string; id?: string },
+      string
+    >({
       query: (id) => ({
         url: `${ROUTES.typeParameter}/${id}`,
         method: "DELETE",
@@ -1184,11 +1314,18 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       transformResponse: (response: unknown) =>
         normalizeArrayResponse<TypeParameterRecord>(response),
       providesTags: (result) => {
-        const base = [{ type: "SystemSettingsTypeParameter" as const, id: "LIST" }];
+        const base = [
+          { type: "SystemSettingsTypeParameter" as const, id: "LIST" },
+        ];
         const ids = (result ?? [])
           .map((r) => r?.id)
           .filter((id): id is string => typeof id === "string" && Boolean(id));
-        return base.concat(ids.map((id) => ({ type: "SystemSettingsTypeParameter" as const, id })));
+        return base.concat(
+          ids.map((id) => ({
+            type: "SystemSettingsTypeParameter" as const,
+            id,
+          })),
+        );
       },
     }),
 
@@ -1198,8 +1335,11 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => normalizeObjectResponse<TypeParameterRecord>(response),
-      providesTags: (_res, _err, id) => [{ type: "SystemSettingsTypeParameter", id }],
+      transformResponse: (response: unknown) =>
+        normalizeObjectResponse<TypeParameterRecord>(response),
+      providesTags: (_res, _err, id) => [
+        { type: "SystemSettingsTypeParameter", id },
+      ],
     }),
 
     // Safety stock
@@ -1245,7 +1385,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       ],
     }),
 
-    deleteSafetyStock: builder.mutation<{ message?: string; id?: string }, string>({
+    deleteSafetyStock: builder.mutation<
+      { message?: string; id?: string },
+      string
+    >({
       query: (id) => ({
         url: `${ROUTES.safetyStock}/${id}`,
         method: "DELETE",
@@ -1272,7 +1415,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
               ...result
                 .map((record) => record?.id)
                 .filter((id): id is string => Boolean(id))
-                .map((id) => ({ type: "SystemSettingsSafetyStock" as const, id })),
+                .map((id) => ({
+                  type: "SystemSettingsSafetyStock" as const,
+                  id,
+                })),
             ]
           : [{ type: "SystemSettingsSafetyStock", id: "LIST" }],
     }),
@@ -1283,11 +1429,17 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => normalizeObjectResponse<SafetyStockRecord>(response),
-      providesTags: (_res, _err, id) => [{ type: "SystemSettingsSafetyStock", id }],
+      transformResponse: (response: unknown) =>
+        normalizeObjectResponse<SafetyStockRecord>(response),
+      providesTags: (_res, _err, id) => [
+        { type: "SystemSettingsSafetyStock", id },
+      ],
     }),
 
-    calculateSafetyStock: builder.query<CalculateSafetyStockResponse | null, CalculateSafetyStockRequest>({
+    calculateSafetyStock: builder.query<
+      CalculateSafetyStockResponse | null,
+      CalculateSafetyStockRequest
+    >({
       query: ({ item_code, prl, po, working_days }) => ({
         url: `${ROUTES.safetyStock}/calculate`,
         method: "GET",
@@ -1299,7 +1451,8 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         },
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => normalizeObjectResponse<CalculateSafetyStockResponse>(response),
+      transformResponse: (response: unknown) =>
+        normalizeObjectResponse<CalculateSafetyStockResponse>(response),
     }),
 
     // Stockdays
@@ -1310,8 +1463,17 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       query: (body) => ({
         url: `${ROUTES.stockdays}`,
         method: "POST",
-        body,
-        meta: { useAuthorization: true, contentType: "application/json" },
+        body: {
+          inventory_type: body.inventory_type,
+          item_code: body.item_code,
+          calculation_type: body.calculation_type,
+          constanta: body.constanta,
+          status: body.status,
+        },
+        meta: {
+          useAuthorization: true,
+          contentType: "application/json",
+        },
       }),
       invalidatesTags: [{ type: "SystemSettingsStockdays", id: "LIST" }],
     }),
@@ -1323,8 +1485,17 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       query: ({ id, body }) => ({
         url: `${ROUTES.stockdays}/${id}`,
         method: "PUT",
-        body,
-        meta: { useAuthorization: true, contentType: "application/json" },
+        body: {
+          inventory_type: body.inventory_type,
+          item_code: body.item_code,
+          calculation_type: body.calculation_type,
+          constanta: body.constanta,
+          status: body.status,
+        },
+        meta: {
+          useAuthorization: true,
+          contentType: "application/json",
+        },
       }),
       invalidatesTags: (_res, _err, arg) => [
         { type: "SystemSettingsStockdays", id: "LIST" },
@@ -1332,11 +1503,17 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       ],
     }),
 
-    deleteStockdays: builder.mutation<{ message?: string; id?: string }, string>({
+    deleteStockdays: builder.mutation<
+      { message?: string; id?: string },
+      string
+    >({
       query: (id) => ({
         url: `${ROUTES.stockdays}/${id}`,
         method: "DELETE",
-        meta: { useAuthorization: true, contentType: "application/json" },
+        meta: {
+          useAuthorization: true,
+          contentType: "application/json",
+        },
       }),
       invalidatesTags: (_res, _err, id) => [
         { type: "SystemSettingsStockdays", id: "LIST" },
@@ -1348,7 +1525,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       query: () => ({
         url: `${ROUTES.stockdays}`,
         method: "GET",
-        meta: { useAuthorization: true, contentType: "application/json" },
+        meta: {
+          useAuthorization: true,
+          contentType: "application/json",
+        },
       }),
       transformResponse: (response: unknown) =>
         normalizeArrayResponse<StockdaysRecord>(response),
@@ -1359,7 +1539,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
               ...result
                 .map((r) => r?.id)
                 .filter((id): id is string => Boolean(id))
-                .map((id) => ({ type: "SystemSettingsStockdays" as const, id })),
+                .map((id) => ({
+                  type: "SystemSettingsStockdays" as const,
+                  id,
+                })),
             ]
           : [{ type: "SystemSettingsStockdays", id: "LIST" }],
     }),
@@ -1368,14 +1551,23 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       query: (id) => ({
         url: `${ROUTES.stockdays}/${encodeURIComponent(id)}`,
         method: "GET",
-        meta: { useAuthorization: true, contentType: "application/json" },
+        meta: {
+          useAuthorization: true,
+          contentType: "application/json",
+        },
       }),
-      transformResponse: (response: unknown) => normalizeObjectResponse<StockdaysRecord>(response),
-      providesTags: (_res, _err, id) => [{ type: "SystemSettingsStockdays", id }],
+      transformResponse: (response: unknown) =>
+        normalizeObjectResponse<StockdaysRecord>(response),
+      providesTags: (_res, _err, id) => [
+        { type: "SystemSettingsStockdays", id },
+      ],
     }),
 
     // PO split
-    createPoSplit: builder.mutation<{ message?: string; data?: PoSplitRecord }, CreatePoSplitRequest>({
+    createPoSplit: builder.mutation<
+      { message?: string; data?: PoSplitRecord },
+      CreatePoSplitRequest
+    >({
       query: (body) => ({
         url: `${ROUTES.poSplit}`,
         method: "POST",
@@ -1387,7 +1579,10 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
 
     updatePoSplit: builder.mutation<
       { message?: string; data?: PoSplitRecord },
-      { id: string; body: Partial<CreatePoSplitRequest> & { status?: StatusType } }
+      {
+        id: string;
+        body: Partial<CreatePoSplitRequest> & { status?: StatusType };
+      }
     >({
       query: ({ id, body }) => ({
         url: `${ROUTES.poSplit}/${id}`,
@@ -1439,7 +1634,8 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => normalizeObjectResponse<PoSplitRecord>(response),
+      transformResponse: (response: unknown) =>
+        normalizeObjectResponse<PoSplitRecord>(response),
       providesTags: (_res, _err, id) => [{ type: "SystemSettingsPoSplit", id }],
     }),
   }),
