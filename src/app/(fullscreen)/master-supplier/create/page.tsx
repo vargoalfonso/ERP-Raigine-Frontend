@@ -54,6 +54,7 @@ type FormValues = {
   pcs_per_kanban?: number;
   customer_cycle?: string;
   description?: string;
+  status?: string;
 };
 
 type BomOption = {
@@ -188,7 +189,11 @@ function MasterSupplierCreatePageContent() {
           return !status || status === "active";
         })
         .map((supplier) => {
-          const value = pickText(supplier.id);
+          const value = pickText(
+            supplier.supplier_uuid,
+            supplier.uuid,
+            supplier.id,
+          );
           const supplierName = pickText(supplier.supplier_name);
           const supplierCode = pickText(supplier.supplier_code);
           const label =
@@ -282,6 +287,7 @@ function MasterSupplierCreatePageContent() {
       pcs_per_kanban: Number(detailQuery.data.pcs_per_kanban ?? 0),
       customer_cycle: pickText(detailQuery.data.customer_cycle),
       description: pickText(detailQuery.data.description),
+      status: pickText(detailQuery.data.status) || "active",
     });
   }, [detailQuery.data, form]);
 
@@ -325,7 +331,7 @@ function MasterSupplierCreatePageContent() {
         weight: Number(values.weight ?? 0),
         pcs_per_kanban: Number(values.pcs_per_kanban ?? 0),
         customer_cycle: pickText(values.customer_cycle),
-        status: "active",
+        status: pickText(values.status) || pickText(detailQuery.data?.status) || "active",
         warehouse_uuid: pickText(values.warehouse_uuid) || undefined,
         warehouse_name: selectedWarehouse?.label,
         product_model: pickText(values.product_model) || undefined,
@@ -546,6 +552,14 @@ function MasterSupplierCreatePageContent() {
                   </Form.Item>
                   <Form.Item label="Description" name="description">
                     <Input placeholder="Optional description" />
+                  </Form.Item>
+                  <Form.Item label="Status" name="status" initialValue="active">
+                    <Select
+                      options={[
+                        { label: "Active", value: "active" },
+                        { label: "Inactive", value: "inactive" },
+                      ]}
+                    />
                   </Form.Item>
                 </div>
               </Form>

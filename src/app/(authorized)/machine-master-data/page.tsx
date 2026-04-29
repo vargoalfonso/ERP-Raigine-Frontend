@@ -1,7 +1,20 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Button, Input, Modal, Form, Select, Table, Tag, Upload, message, Tooltip, InputNumber, QRCode } from "antd";
+import {
+  Button,
+  Input,
+  Modal,
+  Form,
+  Select,
+  Table,
+  Tag,
+  Upload,
+  message,
+  Tooltip,
+  InputNumber,
+  QRCode,
+} from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   PlusOutlined,
@@ -20,7 +33,9 @@ import {
   getMachinePrintUrl,
   getMachineQrCodeUrl,
   useCreateMachineMutation,
+  useDeleteMachineMutation,
   useGetMachinesQuery,
+  useUpdateMachineMutation,
 } from "@/lib/api/machines/api";
 import { useGetProcessesQuery } from "@/lib/api/system-settings/api";
 
@@ -44,6 +59,7 @@ type MachineFormValues = {
   productionLine: string;
   processId: string;
   capacity: number;
+  status: MachineStatus;
 };
 
 const formatNumber = (n: number) => new Intl.NumberFormat("en-US").format(n);
@@ -107,13 +123,24 @@ export default function MachineMasterDataPage() {
     skip: !apiEnabled,
   });
   const [createMachine, createMachineState] = useCreateMachineMutation();
+  const [updateMachine, updateMachineState] = useUpdateMachineMutation();
+  const [deleteMachine, deleteMachineState] = useDeleteMachineMutation();
 
   const processNameById = useMemo(
     () =>
       new Map(
         processes
-          .map((process) => [String(process.id ?? ""), String(process.process_name ?? "")] as const)
-          .filter((entry): entry is readonly [string, string] => Boolean(entry[0]) && Boolean(entry[1])),
+          .map(
+            (process) =>
+              [
+                String(process.id ?? ""),
+                String(process.process_name ?? ""),
+              ] as const,
+          )
+          .filter(
+            (entry): entry is readonly [string, string] =>
+              Boolean(entry[0]) && Boolean(entry[1]),
+          ),
       ),
     [processes],
   );
@@ -124,7 +151,9 @@ export default function MachineMasterDataPage() {
     return apiMachines.map((machine, index) => {
       const processName =
         machine.process_name?.trim() ||
-        (machine.process_id ? processNameById.get(machine.process_id) : undefined) ||
+        (machine.process_id
+          ? processNameById.get(machine.process_id)
+          : undefined) ||
         "-";
       const rawStatus = String(machine.status ?? "Active").toLowerCase();
 
@@ -144,18 +173,25 @@ export default function MachineMasterDataPage() {
 
   const totalMachines = rows.length;
   const activeMachines = rows.filter((r) => r.status === "Active").length;
-  const maintenanceMachines = rows.filter((r) => r.status === "Maintenance").length;
+  const maintenanceMachines = rows.filter(
+    (r) => r.status === "Maintenance",
+  ).length;
   const totalCapacity = rows.reduce((acc, r) => acc + r.capacity, 0);
 
   const lineOptions = useMemo(() => {
     const uniq = Array.from(new Set(rows.map((r) => r.productionLine)));
-    return [{ label: "All Lines", value: "All Lines" }, ...uniq.map((l) => ({ label: l, value: l }))];
+    return [
+      { label: "All Lines", value: "All Lines" },
+      ...uniq.map((l) => ({ label: l, value: l })),
+    ];
   }, [rows]);
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows
-      .filter((r) => (lineFilter === "All Lines" ? true : r.productionLine === lineFilter))
+      .filter((r) =>
+        lineFilter === "All Lines" ? true : r.productionLine === lineFilter,
+      )
       .filter((r) => {
         if (!q) return true;
         return (
@@ -182,7 +218,7 @@ export default function MachineMasterDataPage() {
       { label: "Line C", value: "Line C" },
       { label: "Line D", value: "Line D" },
     ],
-    []
+    [],
   );
 
   const processOptions = useMemo(() => {
@@ -196,7 +232,9 @@ export default function MachineMasterDataPage() {
     }
 
     return processes
-      .filter((process) => String(process.status ?? "").toLowerCase() !== "inactive")
+      .filter(
+        (process) => String(process.status ?? "").toLowerCase() !== "inactive",
+      )
       .sort((a, b) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0))
       .map((process) => {
         const id = String(process.id ?? "").trim();
@@ -223,7 +261,9 @@ export default function MachineMasterDataPage() {
       dataIndex: "machineNumber",
       key: "machineNumber",
       width: 150,
-      render: (v: string) => <span className="text-blue-600 font-medium">{v}</span>,
+      render: (v: string) => (
+        <span className="text-blue-600 font-medium">{v}</span>
+      ),
     },
     {
       title: "Production Line",
@@ -243,7 +283,9 @@ export default function MachineMasterDataPage() {
       key: "capacity",
       width: 110,
       align: "right",
-      render: (v: number) => <span className="text-gray-800">{formatNumber(v)}</span>,
+      render: (v: number) => (
+        <span className="text-gray-800">{formatNumber(v)}</span>
+      ),
     },
     {
       title: "Status",
@@ -272,7 +314,11 @@ export default function MachineMasterDataPage() {
             icon={<QrcodeOutlined />}
             onClick={() => {
               if (apiEnabled && record.id) {
-                window.open(getMachineQrCodeUrl(record.id), "_blank", "noopener,noreferrer");
+                window.open(
+                  getMachineQrCodeUrl(record.id),
+                  "_blank",
+                  "noopener,noreferrer",
+                );
               }
               setBarcodeRow(record);
               setBarcodeOpen(true);
@@ -293,6 +339,7 @@ export default function MachineMasterDataPage() {
                   productionLine: record.productionLine,
                   processId: record.processId,
                   capacity: record.capacity,
+                  status: record.status,
                 });
                 setEditOpen(true);
               }}
@@ -305,19 +352,48 @@ export default function MachineMasterDataPage() {
               className="!rounded-lg"
               icon={<DeleteOutlined />}
               onClick={() => {
-                if (apiEnabled) {
-                  message.info("Delete machine belum dihubungkan ke API");
-                  return;
-                }
+                const closeDeleteFlow = () => {
+                  setAddOpen(false);
+                  setEditOpen(false);
+                  setActiveRow(null);
+                  form.resetFields();
+                };
+
                 Modal.confirm({
                   title: "Delete Machine?",
                   content: `Delete ${record.machineNumber}?`,
                   okText: "Delete",
-                  okButtonProps: { danger: true },
                   cancelText: "Cancel",
-                  onOk: () => {
-                    setMockRows((prev) => prev.filter((r) => r.key !== record.key));
-                    message.success("Machine deleted");
+                  okButtonProps: {
+                    danger: true,
+                  },
+
+                  // 🔥 AntD akan auto-close kalau promise resolve
+                  onOk: async () => {
+                    try {
+                      if (apiEnabled && record.id) {
+                        await deleteMachine(record.id).unwrap();
+                      } else {
+                        setMockRows((prev) =>
+                          prev.filter((r) => r.key !== record.key),
+                        );
+                      }
+
+                      message.success("Machine deleted");
+                      closeDeleteFlow();
+                    } catch (error) {
+                      message.error(
+                        getApiErrorMessage(error, "Failed to delete machine"),
+                      );
+
+                      // optional: tetap close walau error
+                      // kalau mau modal tetap terbuka, hapus baris ini
+                      return Promise.resolve();
+                    }
+                  },
+
+                  onCancel: () => {
+                    closeDeleteFlow();
                   },
                 });
               }}
@@ -328,20 +404,26 @@ export default function MachineMasterDataPage() {
     },
   ];
 
+
   const upsertMachine = async (mode: "add" | "edit") => {
     try {
       const values = await form.validateFields();
       const key = values.machineNumber.trim();
       if (!key) return;
 
-      if (!apiEnabled && mode === "add" && rows.some((r) => r.machineNumber.toLowerCase() === key.toLowerCase())) {
+      if (
+        !apiEnabled &&
+        mode === "add" &&
+        rows.some((r) => r.machineNumber.toLowerCase() === key.toLowerCase())
+      ) {
         message.error("Machine Number already exists");
         return;
       }
 
       const processName =
         processNameById.get(values.processId) ??
-        processOptions.find((option) => option.value === values.processId)?.label ??
+        processOptions.find((option) => option.value === values.processId)
+          ?.label ??
         "-";
 
       if (apiEnabled && mode === "add") {
@@ -353,9 +435,12 @@ export default function MachineMasterDataPage() {
             machine_name: values.machineName,
             machine_number: values.machineNumber,
             production_line: values.productionLine,
-            process_id: Number.isFinite(processIdParsed) ? processIdParsed : processIdText,
-            machine_capacity: typeof values.capacity === "number" ? values.capacity : null,
-            status: "Active",
+            process_id: Number.isFinite(processIdParsed)
+              ? processIdParsed
+              : processIdText,
+            machine_capacity:
+              typeof values.capacity === "number" ? values.capacity : null,
+            status: values.status,
           }).unwrap();
 
           setAddOpen(false);
@@ -369,8 +454,39 @@ export default function MachineMasterDataPage() {
       }
 
       if (apiEnabled && mode === "edit") {
-        message.info("Edit machine belum dihubungkan ke API");
-        return;
+        if (!activeRow?.id) {
+          message.error("Machine ID not found");
+          return;
+        }
+
+        try {
+          const processIdText = String(values.processId ?? "").trim();
+          const processIdParsed = Number(processIdText);
+
+          await updateMachine({
+            id: activeRow.id,
+            body: {
+              machine_number: values.machineNumber,
+              machine_name: values.machineName,
+              production_line: values.productionLine,
+              process_id: Number.isFinite(processIdParsed)
+                ? processIdParsed
+                : processIdText,
+              machine_capacity:
+                typeof values.capacity === "number" ? values.capacity : null,
+              status: values.status,
+            },
+          }).unwrap();
+
+          setEditOpen(false);
+          setActiveRow(null);
+          form.resetFields();
+          message.success("Machine updated");
+          return;
+        } catch (error) {
+          message.error(getApiErrorMessage(error, "Failed to update machine"));
+          return;
+        }
       }
 
       const next: MachineRow = {
@@ -382,7 +498,9 @@ export default function MachineMasterDataPage() {
         processId: values.processId,
         processName,
         capacity: values.capacity,
-        status: mode === "add" ? "Active" : (activeRow?.status ?? "Active"),
+        status:
+          values.status ??
+          (mode === "add" ? "Active" : (activeRow?.status ?? "Active")),
       };
 
       setMockRows((prev) => {
@@ -407,14 +525,24 @@ export default function MachineMasterDataPage() {
     if (!barcodeRow) return;
 
     if (apiEnabled && barcodeRow.id) {
-      window.open(getMachinePrintUrl(barcodeRow.id), "_blank", "noopener,noreferrer");
+      window.open(
+        getMachinePrintUrl(barcodeRow.id),
+        "_blank",
+        "noopener,noreferrer",
+      );
       return;
     }
 
-    const canvas = qrWrapperRef.current?.querySelector("canvas") as HTMLCanvasElement | null;
+    const canvas = qrWrapperRef.current?.querySelector(
+      "canvas",
+    ) as HTMLCanvasElement | null;
     const dataUrl = canvas?.toDataURL("image/png");
 
-    const w = window.open("", "_blank", "noopener,noreferrer,width=680,height=880");
+    const w = window.open(
+      "",
+      "_blank",
+      "noopener,noreferrer,width=680,height=880",
+    );
     if (!w) {
       message.error("Popup blocked. Please allow popups to print.");
       return;
@@ -504,13 +632,20 @@ export default function MachineMasterDataPage() {
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 mb-1">Machine Master Data</h1>
-              <p className="text-sm text-gray-500">Manage machine master list and generate machine information barcodes</p>
+              <h1 className="text-2xl font-bold text-gray-900 mb-1">
+                Machine Master Data
+              </h1>
+              <p className="text-sm text-gray-500">
+                Manage machine master list and generate machine information
+                barcodes
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <Upload
                 beforeUpload={(file) => {
-                  const ok = file.name.toLowerCase().endsWith(".xlsx") || file.name.toLowerCase().endsWith(".xls");
+                  const ok =
+                    file.name.toLowerCase().endsWith(".xlsx") ||
+                    file.name.toLowerCase().endsWith(".xls");
                   if (!ok) {
                     message.error("Please upload an Excel file (.xlsx/.xls)");
                     return Upload.LIST_IGNORE;
@@ -530,6 +665,7 @@ export default function MachineMasterDataPage() {
                 icon={<PlusOutlined />}
                 onClick={() => {
                   form.resetFields();
+                  form.setFieldsValue({ status: "Active" });
                   setAddOpen(true);
                 }}
                 loading={createMachineState.isLoading}
@@ -545,29 +681,45 @@ export default function MachineMasterDataPage() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
             <div>
-              <div className="text-xs font-semibold text-blue-600">Total Machines</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">{totalMachines}</div>
+              <div className="text-xs font-semibold text-blue-600">
+                Total Machines
+              </div>
+              <div className="text-2xl font-bold text-gray-900 mt-1">
+                {totalMachines}
+              </div>
             </div>
             <MdSettings className="text-blue-600" size="22" />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
             <div>
-              <div className="text-xs font-semibold text-green-600">Active Machines</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">{activeMachines}</div>
+              <div className="text-xs font-semibold text-green-600">
+                Active Machines
+              </div>
+              <div className="text-2xl font-bold text-gray-900 mt-1">
+                {activeMachines}
+              </div>
             </div>
             <MdBuild className="text-green-600" size="22" />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
             <div>
-              <div className="text-xs font-semibold text-orange-600">Maintenance</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">{maintenanceMachines}</div>
+              <div className="text-xs font-semibold text-orange-600">
+                Maintenance
+              </div>
+              <div className="text-2xl font-bold text-gray-900 mt-1">
+                {maintenanceMachines}
+              </div>
             </div>
             <MdSettings className="text-orange-600" size="22" />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
             <div>
-              <div className="text-xs font-semibold text-purple-600">Total Capacity</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">{formatNumber(totalCapacity)}</div>
+              <div className="text-xs font-semibold text-purple-600">
+                Total Capacity
+              </div>
+              <div className="text-2xl font-bold text-gray-900 mt-1">
+                {formatNumber(totalCapacity)}
+              </div>
             </div>
             <MdSettings className="text-purple-600" size="22" />
           </div>
@@ -586,8 +738,17 @@ export default function MachineMasterDataPage() {
           />
 
           <div className="flex items-center justify-end gap-2">
-            <Select value={lineFilter} onChange={setLineFilter} options={lineOptions} style={{ width: 160 }} />
-            <Button className="!rounded-lg" icon={<DownloadOutlined />} onClick={handleExport}>
+            <Select
+              value={lineFilter}
+              onChange={setLineFilter}
+              options={lineOptions}
+              style={{ width: 160 }}
+            />
+            <Button
+              className="!rounded-lg"
+              icon={<DownloadOutlined />}
+              onClick={handleExport}
+            >
               Export
             </Button>
           </div>
@@ -606,7 +767,9 @@ export default function MachineMasterDataPage() {
       </div>
 
       <Modal
-        title={<span className="text-sm font-semibold">Add Machine Master Data</span>}
+        title={
+          <span className="text-sm font-semibold">Add Machine Master Data</span>
+        }
         open={addOpen}
         onCancel={() => {
           setAddOpen(false);
@@ -623,7 +786,12 @@ export default function MachineMasterDataPage() {
             >
               Cancel
             </Button>
-            <Button type="primary" className="!rounded-lg" icon={<PlusOutlined />} onClick={() => upsertMachine("add")}>
+            <Button
+              type="primary"
+              className="!rounded-lg"
+              icon={<PlusOutlined />}
+              onClick={() => upsertMachine("add")}
+            >
               Add Machine
             </Button>
           </div>
@@ -631,16 +799,31 @@ export default function MachineMasterDataPage() {
       >
         <Form<MachineFormValues> form={form} layout="vertical">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Form.Item name="machineName" label="Machine Name" rules={[{ required: true, message: "Required" }]}>
-              <Input className="!rounded-lg" placeholder="e.g Press Machine A1" />
+            <Form.Item
+              name="machineName"
+              label="Machine Name"
+              rules={[{ required: true, message: "Required" }]}
+            >
+              <Input
+                className="!rounded-lg"
+                placeholder="e.g Press Machine A1"
+              />
             </Form.Item>
-            <Form.Item name="machineNumber" label="Machine Number" rules={[{ required: true, message: "Required" }]}>
+            <Form.Item
+              name="machineNumber"
+              label="Machine Number"
+              rules={[{ required: true, message: "Required" }]}
+            >
               <Input className="!rounded-lg" placeholder="e.g PM-A1-001" />
             </Form.Item>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Form.Item name="productionLine" label="Production Line" rules={[{ required: true, message: "Required" }]}>
+            <Form.Item
+              name="productionLine"
+              label="Production Line"
+              rules={[{ required: true, message: "Required" }]}
+            >
               <Select
                 options={productionLineOptions}
                 placeholder="Select production line"
@@ -649,7 +832,11 @@ export default function MachineMasterDataPage() {
                 optionFilterProp="label"
               />
             </Form.Item>
-            <Form.Item name="processId" label="Process Name" rules={[{ required: true, message: "Required" }]}> 
+            <Form.Item
+              name="processId"
+              label="Process Name"
+              rules={[{ required: true, message: "Required" }]}
+            >
               <Select
                 options={processOptions}
                 placeholder="Select process"
@@ -666,6 +853,21 @@ export default function MachineMasterDataPage() {
             rules={[{ required: true, message: "Required" }]}
           >
             <InputNumber min={0} className="w-full !rounded-lg" />
+          </Form.Item>
+
+          <Form.Item
+            name="status"
+            label="Status"
+            initialValue="Active"
+            rules={[{ required: true, message: "Required" }]}
+          >
+            <Select
+              options={[
+                { label: "Active", value: "Active" },
+                { label: "Maintenance", value: "Maintenance" },
+              ]}
+              className="w-full"
+            />
           </Form.Item>
         </Form>
       </Modal>
@@ -690,7 +892,12 @@ export default function MachineMasterDataPage() {
             >
               Cancel
             </Button>
-            <Button type="primary" className="!rounded-lg" onClick={() => upsertMachine("edit")}>
+            <Button
+              type="primary"
+              className="!rounded-lg"
+              onClick={() => upsertMachine("edit")}
+              loading={updateMachineState.isLoading}
+            >
               Save
             </Button>
           </div>
@@ -698,19 +905,35 @@ export default function MachineMasterDataPage() {
       >
         <Form<MachineFormValues> form={form} layout="vertical">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Form.Item name="machineName" label="Machine Name" rules={[{ required: true, message: "Required" }]}>
+            <Form.Item
+              name="machineName"
+              label="Machine Name"
+              rules={[{ required: true, message: "Required" }]}
+            >
               <Input className="!rounded-lg" />
             </Form.Item>
-            <Form.Item name="machineNumber" label="Machine Number" rules={[{ required: true, message: "Required" }]}>
+            <Form.Item
+              name="machineNumber"
+              label="Machine Number"
+              rules={[{ required: true, message: "Required" }]}
+            >
               <Input className="!rounded-lg" disabled />
             </Form.Item>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Form.Item name="productionLine" label="Production Line" rules={[{ required: true, message: "Required" }]}>
+            <Form.Item
+              name="productionLine"
+              label="Production Line"
+              rules={[{ required: true, message: "Required" }]}
+            >
               <Select options={productionLineOptions} className="w-full" />
             </Form.Item>
-            <Form.Item name="processId" label="Process Name" rules={[{ required: true, message: "Required" }]}> 
+            <Form.Item
+              name="processId"
+              label="Process Name"
+              rules={[{ required: true, message: "Required" }]}
+            >
               <Select options={processOptions} className="w-full" />
             </Form.Item>
           </div>
@@ -722,11 +945,29 @@ export default function MachineMasterDataPage() {
           >
             <InputNumber min={0} className="w-full !rounded-lg" />
           </Form.Item>
+
+          <Form.Item
+            name="status"
+            label="Status"
+            rules={[{ required: true, message: "Required" }]}
+          >
+            <Select
+              options={[
+                { label: "Active", value: "Active" },
+                { label: "Maintenance", value: "Maintenance" },
+              ]}
+              className="w-full"
+            />
+          </Form.Item>
         </Form>
       </Modal>
 
       <Modal
-        title={<span className="text-sm font-semibold">Machine Information Barcode</span>}
+        title={
+          <span className="text-sm font-semibold">
+            Machine Information Barcode
+          </span>
+        }
         open={barcodeOpen}
         onCancel={() => {
           setBarcodeOpen(false);
@@ -759,38 +1000,59 @@ export default function MachineMasterDataPage() {
         {barcodeRow ? (
           <div className="rounded-xl border border-gray-200 bg-white p-6">
             <div className="text-center">
-              <div className="text-lg font-extrabold tracking-wide text-gray-900">MACHINE INFORMATION</div>
-              <div className="text-xs text-gray-500 mt-1">{barcodeRow.machineNumber}</div>
+              <div className="text-lg font-extrabold tracking-wide text-gray-900">
+                MACHINE INFORMATION
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                {barcodeRow.machineNumber}
+              </div>
             </div>
 
             <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <div className="text-[11px] text-gray-500">Machine Name</div>
-                <div className="text-sm font-semibold text-gray-900">{barcodeRow.machineName}</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  {barcodeRow.machineName}
+                </div>
               </div>
               <div>
                 <div className="text-[11px] text-gray-500">Production Line</div>
-                <div className="text-sm font-semibold text-gray-900">{barcodeRow.productionLine}</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  {barcodeRow.productionLine}
+                </div>
               </div>
               <div>
                 <div className="text-[11px] text-gray-500">Process</div>
-                <div className="text-sm font-semibold text-gray-900">{barcodeRow.processName}</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  {barcodeRow.processName}
+                </div>
               </div>
               <div>
                 <div className="text-[11px] text-gray-500">Capacity</div>
-                <div className="text-sm font-semibold text-gray-900">{formatNumber(barcodeRow.capacity)} units/hour</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  {formatNumber(barcodeRow.capacity)} units/hour
+                </div>
               </div>
             </div>
 
             <div className="my-5 h-px bg-gray-200" />
 
             <div className="flex items-center justify-center">
-              <div ref={qrWrapperRef} className="rounded-lg border border-gray-200 p-3">
-                <QRCode value={barcodeRow.machineNumber} size={180} bordered={false} />
+              <div
+                ref={qrWrapperRef}
+                className="rounded-lg border border-gray-200 p-3"
+              >
+                <QRCode
+                  value={barcodeRow.machineNumber}
+                  size={180}
+                  bordered={false}
+                />
               </div>
             </div>
 
-            <div className="mt-3 text-center text-sm font-semibold text-gray-900">{barcodeRow.machineNumber}</div>
+            <div className="mt-3 text-center text-sm font-semibold text-gray-900">
+              {barcodeRow.machineNumber}
+            </div>
           </div>
         ) : (
           <div className="text-sm text-gray-500">No machine selected.</div>

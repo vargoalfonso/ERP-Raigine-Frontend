@@ -233,12 +233,12 @@ const menuItems: MenuItem[] = [
         icon: MdScience,
         href: "/sub-con-materials",
       },
-      {
-        id: "dn-management",
-        label: "DN Management",
-        icon: MdContentCopy,
-        href: "/dn-management",
-      },
+      // {
+      //   id: "dn-management",
+      //   label: "DN Management",
+      //   icon: MdContentCopy,
+      //   href: "/dn-management",
+      // },
       {
         id: "stock-opname",
         label: "Stock Opname",
@@ -266,9 +266,15 @@ const menuItems: MenuItem[] = [
     children: [
       {
         id: "po-procurement",
-        label: "PO - Procurement",
+        label: "Purchase Order",
         icon: MdReceiptLong,
         href: "/po-procurement",
+      },
+      {
+        id: "dn-management",
+        label: "DN Management",
+        icon: MdContentCopy,
+        href: "/dn-management",
       },
       // {
       //   id: "dn-raw-material",

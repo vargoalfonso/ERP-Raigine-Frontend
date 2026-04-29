@@ -90,7 +90,7 @@ export const generateHeaders = async ({
   return headers;
 };
 
-const rawApiBaseUrl = process.env.NEXT_PUBLIC_API_URL?.trim() ?? "";
+const rawApiBaseUrl = process.env.NEXT_PUBLIC_API_URL?.trim() || "/api/proxy";
 
 export const apiBaseUrl = rawApiBaseUrl.replace(/\/$/, "");
 

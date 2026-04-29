@@ -71,6 +71,8 @@ export type CreateMachineRequest = {
   status?: string;
 };
 
+export type UpdateMachineRequest = Partial<CreateMachineRequest>;
+
 const toMachineRecord = (raw: unknown): MachineRecord => {
   const record = isRecord(raw) ? raw : {};
   const nestedProcess = isRecord(record.process) ? record.process : undefined;
@@ -149,7 +151,37 @@ export const machinesApiSlice = apiSlice
           toMachineRecord(normalizeObjectResponse<unknown>(response) ?? response),
         invalidatesTags: [{ type: TAG, id: "LIST" }],
       }),
+      updateMachine: builder.mutation<MachineRecord, { id: string | number; body: UpdateMachineRequest }>({
+        query: ({ id, body }) => ({
+          url: `/machines/${encodeURIComponent(String(id))}`,
+          method: "PUT",
+          body,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) =>
+          toMachineRecord(normalizeObjectResponse<unknown>(response) ?? response),
+        invalidatesTags: (_result, _error, arg) => [
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: String(arg.id) },
+        ],
+      }),
+      deleteMachine: builder.mutation<{ success?: boolean; id?: string | number } | unknown, string | number>({
+        query: (id) => ({
+          url: `/machines/${encodeURIComponent(String(id))}`,
+          method: "DELETE",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        invalidatesTags: (_result, _error, id) => [
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: String(id) },
+        ],
+      }),
     }),
   });
 
-export const { useGetMachinesQuery, useCreateMachineMutation } = machinesApiSlice;
+export const {
+  useGetMachinesQuery,
+  useCreateMachineMutation,
+  useUpdateMachineMutation,
+  useDeleteMachineMutation,
+} = machinesApiSlice;

@@ -80,6 +80,7 @@ export type ProcurementDnItem = {
   qr?: string;
   order_qty?: number;
   date_incoming?: string;
+  qty_sent?: number;
   qty_stated?: number;
   qty_received?: number;
   weight_received?: number;
@@ -119,6 +120,28 @@ export type ProcurementDnRecord = {
   created_by?: string;
   created_at?: string;
   updated_at?: string;
+  supplier?: {
+    id?: string;
+    uuid?: string;
+    supplier_code?: string;
+    supplier_name?: string;
+    contact_person?: string;
+    contact_number?: string;
+    email_address?: string;
+    full_address?: string;
+    city?: string;
+    province?: string;
+    country?: string;
+    tax_id_npwp?: string;
+    bank_name?: string;
+    bank_account_number?: string;
+    bank_account_name?: string;
+    payment_terms?: string;
+    delivery_lead_time_days?: number;
+    status?: string;
+    created_at?: string;
+    updated_at?: string;
+  };
   items: ProcurementDnItem[];
 };
 
@@ -227,6 +250,30 @@ const toDnRecord = (raw: unknown): ProcurementDnRecord => {
     created_by: toText(record.created_by),
     created_at: toText(record.created_at),
     updated_at: toText(record.updated_at),
+    supplier: supplier
+      ? {
+          id: toText(supplier.id),
+          uuid: toText(supplier.uuid),
+          supplier_code: toText(supplier.supplier_code),
+          supplier_name: toText(supplier.supplier_name),
+          contact_person: toText(supplier.contact_person),
+          contact_number: toText(supplier.contact_number),
+          email_address: toText(supplier.email_address),
+          full_address: toText(supplier.full_address),
+          city: toText(supplier.city),
+          province: toText(supplier.province),
+          country: toText(supplier.country),
+          tax_id_npwp: toText(supplier.tax_id_npwp),
+          bank_name: toText(supplier.bank_name),
+          bank_account_number: toText(supplier.bank_account_number),
+          bank_account_name: toText(supplier.bank_account_name),
+          payment_terms: toText(supplier.payment_terms),
+          delivery_lead_time_days: toNumber(supplier.delivery_lead_time_days),
+          status: toText(supplier.status),
+          created_at: toText(supplier.created_at),
+          updated_at: toText(supplier.updated_at),
+        }
+      : undefined,
     items: Array.isArray(record.items) ? record.items.map(toDnItem) : [],
   };
 };

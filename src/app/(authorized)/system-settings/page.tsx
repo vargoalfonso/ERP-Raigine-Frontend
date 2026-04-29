@@ -34,6 +34,16 @@ import {
 } from "@ant-design/icons";
 
 import { getApiErrorMessage } from "@/lib/api/error";
+import { apiBaseUrl } from "@/lib/api/instance";
+import {
+  useDeleteMachinePatternMutation,
+  useGetMachinePatternsQuery,
+} from "@/lib/api/machine-patterns/api";
+import { useGetMachinesQuery } from "@/lib/api/machines/api";
+import {
+  useDeleteScrapTypeMutation,
+  useGetScrapTypesQuery,
+} from "@/lib/api/scrap-types/api";
 import {
   useCreateAccessControlMatrixMutation,
   useCreateApprovalWorkflowMutation,
@@ -137,6 +147,14 @@ type TypeParameterRow = {
   status: StatusType;
 };
 
+type ScrapTypeRow = {
+  id: string;
+  typeCode: string;
+  typeName: string;
+  description: string;
+  status: StatusType;
+};
+
 type UomRow = {
   id: string;
   code: string;
@@ -189,6 +207,15 @@ type ProcessRow = {
 
 type MachinePatternRow = {
   id: string;
+  uniqCode: string;
+  machineId: number;
+  machineName: string;
+  cycleTime: number;
+  patternValue: number;
+  workingDays: number;
+  movingType: string;
+  minOutput: number;
+  prlReference: number;
   patternName: string;
   machineCount: number;
   operatingHours: number;
@@ -524,9 +551,18 @@ const initialProcessRows: ProcessRow[] = [
 const initialMachinePatternRows: MachinePatternRow[] = [
   {
     id: "MP-001",
-    patternName: "Standard Production",
-    machineCount: 10,
-    operatingHours: 8,
+    uniqCode: "LV7-001",
+    machineId: 1,
+    machineName: "Press Machine A1",
+    cycleTime: 45,
+    patternValue: 2,
+    workingDays: 25,
+    movingType: "Fast Moving",
+    minOutput: 4000,
+    prlReference: 50000,
+    patternName: "LV7-001",
+    machineCount: 2,
+    operatingHours: 45,
     status: "Active",
   },
 ];
@@ -695,7 +731,7 @@ export default function SystemSettingsPage() {
 
   const router = useRouter();
 
-  const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
+  const apiEnabled = Boolean(apiBaseUrl);
   const [selectedModuleId, setSelectedModuleId] = useState<string>(
     "access-control-matrix"
   );
@@ -705,6 +741,9 @@ export default function SystemSettingsPage() {
   const shouldLoadSafetyStock = apiEnabled && selectedModuleId === "safety-stock";
   const shouldLoadStockdays = apiEnabled && selectedModuleId === "stockdays";
   const shouldLoadTypeParameters = apiEnabled && selectedModuleId === "type-parameters";
+  const shouldLoadScrapTypes = apiEnabled && selectedModuleId === "scrap";
+  const shouldLoadMachinePatterns = apiEnabled && selectedModuleId === "machine";
+  const shouldLoadMachineMaster = apiEnabled && selectedModuleId === "machine";
   const shouldLoadProcesses = apiEnabled && selectedModuleId === "process";
   const shouldLoadGlobalParameters = apiEnabled && selectedModuleId === "global";
   const shouldLoadSuppliers = apiEnabled && selectedModuleId === "purchase-order";
@@ -742,6 +781,11 @@ export default function SystemSettingsPage() {
   const [createTypeParameter] = useCreateTypeParameterMutation();
   const [updateTypeParameter] = useUpdateTypeParameterMutation();
   const [deleteTypeParameter] = useDeleteTypeParameterMutation();
+  const { data: scrapTypesApiData } = useGetScrapTypesQuery({ page: 1, limit: 20 }, { skip: !shouldLoadScrapTypes });
+  const [deleteScrapType] = useDeleteScrapTypeMutation();
+  const { data: machinePatternsApiData } = useGetMachinePatternsQuery({ page: 1, limit: 20 }, { skip: !shouldLoadMachinePatterns });
+  const [deleteMachinePattern] = useDeleteMachinePatternMutation();
+  const { data: machinesApiData = [] } = useGetMachinesQuery(undefined, { skip: !shouldLoadMachineMaster });
 
   const { data: processesApiData } = useGetProcessesQuery(undefined, { skip: !shouldLoadProcesses });
   const [createProcess] = useCreateProcessMutation();
@@ -790,6 +834,7 @@ export default function SystemSettingsPage() {
   const [typeParameterRows, setTypeParameterRows] = useState<TypeParameterRow[]>(
     initialTypeParameterRows
   );
+  const [scrapRows, setScrapRows] = useState<ScrapTypeRow[]>([]);
   const [uomRows, setUomRows] = useState<UomRow[]>(initialUomRows);
   const [purchaseOrderRows, setPurchaseOrderRows] = useState<PurchaseOrderRow[]>(
     initialPurchaseOrderRows
@@ -971,6 +1016,8 @@ export default function SystemSettingsPage() {
   const [typeParameterDeletingRow, setTypeParameterDeletingRow] = useState<TypeParameterRow | null>(
     null
   );
+  const [scrapDeleteOpen, setScrapDeleteOpen] = useState(false);
+  const [scrapDeletingRow, setScrapDeletingRow] = useState<ScrapTypeRow | null>(null);
 
   const [uomDeleteOpen, setUomDeleteOpen] = useState(false);
   const [uomDeletingRow, setUomDeletingRow] = useState<UomRow | null>(null);
@@ -1267,6 +1314,56 @@ export default function SystemSettingsPage() {
       }));
   }, [apiEnabled, typeParameterRows, typeParametersApiData]);
 
+  const scrapRowsView = useMemo<ScrapTypeRow[]>(() => {
+    if (!apiEnabled || !scrapTypesApiData) return scrapRows;
+    return (scrapTypesApiData.items ?? [])
+      .filter((record) => Boolean(record?.id))
+      .map((record) => ({
+        id: String(record.id),
+        typeCode: String(record.code ?? ""),
+        typeName: String(record.name ?? ""),
+        description: String(record.description ?? ""),
+        status: fromBackendStatus(record.status),
+      }));
+  }, [apiEnabled, scrapRows, scrapTypesApiData]);
+
+  const machinePatternRowsView = useMemo<MachinePatternRow[]>(() => {
+    if (!apiEnabled || !machinePatternsApiData) return machinePatternRows;
+
+    const machineNameById = new Map<number, string>(
+      machinesApiData.map((machine) => [
+        Number(machine.id ?? 0),
+        String(machine.machine_name ?? machine.machine_number ?? `Machine #${String(machine.id ?? "")}`),
+      ])
+    );
+
+    return (machinePatternsApiData.items ?? [])
+      .filter((record) => Boolean(record?.id))
+      .map((record) => {
+        const machineId = Number(record.machine_id ?? 0);
+        const uniqCode = String(record.uniq_code ?? "");
+        const cycleTime = Number(record.cycle_time ?? 0);
+        const patternValue = Number(record.pattern_value ?? 0);
+
+        return {
+          id: String(record.id),
+          uniqCode,
+          machineId,
+          machineName: machineNameById.get(machineId) ?? `Machine #${machineId}`,
+          cycleTime,
+          patternValue,
+          workingDays: Number(record.working_days ?? 0),
+          movingType: String(record.moving_type ?? "Normal"),
+          minOutput: Number(record.min_output ?? 0),
+          prlReference: Number(record.prl_reference ?? 0),
+          patternName: uniqCode,
+          machineCount: patternValue,
+          operatingHours: cycleTime,
+          status: fromBackendStatus(record.status),
+        };
+      });
+  }, [apiEnabled, machinePatternRows, machinePatternsApiData, machinesApiData]);
+
   const filteredSafety = useMemo(() => {
     const q = query.trim().toLowerCase();
     return safetyRowsView
@@ -1318,6 +1415,16 @@ export default function SystemSettingsPage() {
           .includes(q);
       });
   }, [query, typeFilter, typeParameterRowsView]);
+
+  const filteredScrap = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return scrapRowsView
+      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) => {
+        if (!q) return true;
+        return [r.typeCode, r.typeName, r.description].join(" ").toLowerCase().includes(q);
+      });
+  }, [query, scrapRowsView, typeFilter]);
 
   const filteredUom = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1433,13 +1540,25 @@ export default function SystemSettingsPage() {
 
   const filteredMachinePattern = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return machinePatternRows
+    return machinePatternRowsView
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
-        return r.patternName.toLowerCase().includes(q);
+        return [
+          r.uniqCode,
+          r.machineName,
+          String(r.cycleTime),
+          String(r.patternValue),
+          String(r.workingDays),
+          r.movingType,
+          String(r.minOutput),
+          String(r.prlReference),
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
       });
-  }, [query, machinePatternRows, typeFilter]);
+  }, [query, machinePatternRowsView, typeFilter]);
 
   const openCreate = () => {
     setEditMode("create");
@@ -2292,6 +2411,15 @@ export default function SystemSettingsPage() {
           ? `MP-${String(machinePatternRows.length + 1).padStart(3, "0")}`
           : (machinePatternEditingRow?.id ??
               `MP-${String(machinePatternRows.length + 1).padStart(3, "0")}`),
+      uniqCode: values.patternName,
+      machineId: machinePatternEditingRow?.machineId ?? 0,
+      machineName: machinePatternEditingRow?.machineName ?? "",
+      cycleTime: Number(values.operatingHours ?? 0),
+      patternValue: Number(values.machineCount ?? 0),
+      workingDays: machinePatternEditingRow?.workingDays ?? 0,
+      movingType: machinePatternEditingRow?.movingType ?? "Normal",
+      minOutput: machinePatternEditingRow?.minOutput ?? 0,
+      prlReference: machinePatternEditingRow?.prlReference ?? 0,
       patternName: values.patternName,
       machineCount: Number(values.machineCount ?? 0),
       operatingHours: Number(values.operatingHours ?? 0),
@@ -2444,6 +2572,19 @@ export default function SystemSettingsPage() {
     setTypeParameterDeleteOpen(true);
   };
 
+  const openScrapDetail = (row: ScrapTypeRow) => {
+    router.push(`/system-settings/scrap-type/create?mode=detail&id=${encodeURIComponent(row.id)}`);
+  };
+
+  const openScrapEdit = (row: ScrapTypeRow) => {
+    router.push(`/system-settings/scrap-type/create?mode=edit&id=${encodeURIComponent(row.id)}`);
+  };
+
+  const openScrapDelete = (row: ScrapTypeRow) => {
+    setScrapDeletingRow(row);
+    setScrapDeleteOpen(true);
+  };
+
   const openUomDelete = (row: UomRow) => {
     setUomDeletingRow(row);
     setUomDeleteOpen(true);
@@ -2507,6 +2648,11 @@ export default function SystemSettingsPage() {
   const closeTypeParameterDelete = () => {
     setTypeParameterDeleteOpen(false);
     setTypeParameterDeletingRow(null);
+  };
+
+  const closeScrapDelete = () => {
+    setScrapDeleteOpen(false);
+    setScrapDeletingRow(null);
   };
 
   const closeUomDelete = () => {
@@ -2619,6 +2765,21 @@ export default function SystemSettingsPage() {
     }
   };
 
+  const confirmScrapDelete = async () => {
+    if (!scrapDeletingRow) return;
+    try {
+      if (apiEnabled) {
+        await deleteScrapType(scrapDeletingRow.id).unwrap();
+        message.success("Scrap type deleted");
+      } else {
+        setScrapRows((prev) => prev.filter((r) => r.id !== scrapDeletingRow.id));
+      }
+      closeScrapDelete();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to delete scrap type"));
+    }
+  };
+
   const confirmUomDelete = async () => {
     if (!uomDeletingRow) return;
     try {
@@ -2711,10 +2872,19 @@ export default function SystemSettingsPage() {
     }
   };
 
-  const confirmMachinePatternDelete = () => {
+  const confirmMachinePatternDelete = async () => {
     if (!machinePatternDeletingRow) return;
-    setMachinePatternRows((prev) => prev.filter((r) => r.id !== machinePatternDeletingRow.id));
-    closeMachinePatternDelete();
+    try {
+      if (apiEnabled) {
+        await deleteMachinePattern(machinePatternDeletingRow.id).unwrap();
+        message.success("Machine pattern deleted");
+      } else {
+        setMachinePatternRows((prev) => prev.filter((r) => r.id !== machinePatternDeletingRow.id));
+      }
+      closeMachinePatternDelete();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to delete machine pattern"));
+    }
   };
 
   const columns: ColumnsType<ParameterRow> = [
@@ -3000,6 +3170,56 @@ export default function SystemSettingsPage() {
             icon={<DeleteOutlined />}
             onClick={() => openTypeParameterDelete(r)}
           />
+        </div>
+      ),
+    },
+  ];
+
+  const scrapColumns: ColumnsType<ScrapTypeRow> = [
+    {
+      title: "Type Code",
+      dataIndex: "typeCode",
+      key: "typeCode",
+      width: 120,
+      render: (v: string) => <div className="font-medium text-gray-900">{v}</div>,
+    },
+    {
+      title: "Type Name",
+      dataIndex: "typeName",
+      key: "typeName",
+      width: 220,
+      render: (v: string) => <div className="text-gray-900">{v}</div>,
+    },
+    {
+      title: "Description",
+      dataIndex: "description",
+      key: "description",
+      width: 240,
+      render: (v: string) => <div className="text-gray-700">{v}</div>,
+    },
+    {
+      title: "Status",
+      dataIndex: "status",
+      key: "status",
+      width: 120,
+      render: (s: StatusType) => {
+        const cls =
+          s === "Active"
+            ? "bg-blue-50 text-blue-700 border-blue-100"
+            : "bg-red-50 text-red-700 border-red-100";
+        return <Tag className={`rounded-full px-3 py-0.5 border ${cls}`}>{s}</Tag>;
+      },
+    },
+    {
+      title: "Actions",
+      key: "actions",
+      width: 120,
+      fixed: "right",
+      render: (_: unknown, r: ScrapTypeRow) => (
+        <div className="flex items-center gap-1">
+          <Button type="text" icon={<EyeOutlined />} onClick={() => openScrapDetail(r)} />
+          <Button type="text" icon={<EditOutlined />} onClick={() => openScrapEdit(r)} />
+          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openScrapDelete(r)} />
         </div>
       ),
     },
@@ -3365,29 +3585,37 @@ export default function SystemSettingsPage() {
 
   const machinePatternColumns: ColumnsType<MachinePatternRow> = [
     {
-      title: "Pattern Name",
-      dataIndex: "patternName",
-      key: "patternName",
+      title: "Uniq Code",
+      dataIndex: "uniqCode",
+      key: "uniqCode",
+      width: 140,
+      render: (value: string) => <span className="font-medium text-gray-900">{value}</span>,
+    },
+    {
+      title: "Machine Name",
+      dataIndex: "machineName",
+      key: "machineName",
       width: 220,
-      render: (v: string) => <span className="font-medium text-gray-900">{v}</span>,
     },
     {
-      title: "Machine Count",
-      dataIndex: "machineCount",
-      key: "machineCount",
-      width: 160,
-      render: (v: number) => (
-        <span className="inline-flex items-center justify-center min-w-20 px-2 py-0.5 text-xs border border-gray-200 rounded-md bg-white text-gray-700">
-          {v} machines
-        </span>
-      ),
+      title: "Cycle Time",
+      dataIndex: "cycleTime",
+      key: "cycleTime",
+      width: 120,
+      render: (value: number) => <span className="text-gray-700">{value}</span>,
     },
     {
-      title: "Operating Hours",
-      dataIndex: "operatingHours",
-      key: "operatingHours",
-      width: 160,
-      render: (v: number) => <span className="text-gray-700">{v} hours</span>,
+      title: "Pattern Value",
+      dataIndex: "patternValue",
+      key: "patternValue",
+      width: 130,
+      render: (value: number) => <span className="text-gray-700">{value}</span>,
+    },
+    {
+      title: "Working Days",
+      dataIndex: "workingDays",
+      key: "workingDays",
+      width: 130,
     },
     {
       title: "Status",
@@ -3395,7 +3623,7 @@ export default function SystemSettingsPage() {
       key: "status",
       width: 120,
       render: (s: StatusType) => (
-        <Tag className="bg-blue-50 text-blue-700 border-blue-100">{s}</Tag>
+        <Tag className={s === "Active" ? "bg-blue-50 text-blue-700 border-blue-100" : "bg-red-50 text-red-700 border-red-100"}>{s}</Tag>
       ),
     },
     {
@@ -3406,7 +3634,6 @@ export default function SystemSettingsPage() {
       render: (_: unknown, r: MachinePatternRow) => (
         <div className="flex items-center gap-1">
           <Button type="text" icon={<EyeOutlined />} onClick={() => openMachinePatternDetail(r)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditMachinePattern(r)} />
           <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openMachinePatternDelete(r)} />
         </div>
       ),
@@ -3482,6 +3709,20 @@ export default function SystemSettingsPage() {
       >
         <div className="text-gray-700">
           This will remove <span className="font-semibold">{typeParameterDeletingRow?.typeCode}</span>.
+        </div>
+      </Modal>
+
+      <Modal
+        title="Delete scrap type?"
+        open={scrapDeleteOpen}
+        okText="Delete"
+        okButtonProps={{ danger: true }}
+        cancelText="Cancel"
+        onOk={confirmScrapDelete}
+        onCancel={closeScrapDelete}
+      >
+        <div className="text-gray-700">
+          This will remove <span className="font-semibold">{scrapDeletingRow?.typeCode}</span>.
         </div>
       </Modal>
 
@@ -3579,7 +3820,7 @@ export default function SystemSettingsPage() {
         onCancel={closeMachinePatternDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{machinePatternDeletingRow?.patternName}</span>.
+          This will remove <span className="font-semibold">{machinePatternDeletingRow?.uniqCode}</span>.
         </div>
       </Modal>
 
@@ -3952,17 +4193,37 @@ export default function SystemSettingsPage() {
         {machinePatternDetailRow && (
           <div className="space-y-3">
             <div>
-              <div className="text-xs text-gray-500">Pattern Name</div>
-              <div className="font-medium text-gray-900">{machinePatternDetailRow.patternName}</div>
+              <div className="text-xs text-gray-500">Uniq Code</div>
+              <div className="font-medium text-gray-900">{machinePatternDetailRow.uniqCode}</div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <div className="text-xs text-gray-500">Machine Count</div>
-                <div className="font-medium text-gray-900">{machinePatternDetailRow.machineCount} machines</div>
+                <div className="text-xs text-gray-500">Machine Name</div>
+                <div className="font-medium text-gray-900">{machinePatternDetailRow.machineName}</div>
               </div>
               <div>
-                <div className="text-xs text-gray-500">Operating Hours</div>
-                <div className="font-medium text-gray-900">{machinePatternDetailRow.operatingHours} hours</div>
+                <div className="text-xs text-gray-500">Cycle Time</div>
+                <div className="font-medium text-gray-900">{machinePatternDetailRow.cycleTime}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">Pattern Value</div>
+                <div className="font-medium text-gray-900">{machinePatternDetailRow.patternValue}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">Working Days</div>
+                <div className="font-medium text-gray-900">{machinePatternDetailRow.workingDays}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">Moving Type</div>
+                <div className="font-medium text-gray-900">{machinePatternDetailRow.movingType}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">Min Output</div>
+                <div className="font-medium text-gray-900">{machinePatternDetailRow.minOutput}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">PRL Reference</div>
+                <div className="font-medium text-gray-900">{machinePatternDetailRow.prlReference}</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Status</div>
@@ -3972,8 +4233,6 @@ export default function SystemSettingsPage() {
           </div>
         )}
       </Modal>
-
-
       <Drawer
         title={editMode === "create" ? "Add Parameter" : "Edit"}
         placement="right"
@@ -4915,6 +5174,14 @@ export default function SystemSettingsPage() {
                   <Table<StockdaysRow>
                     columns={stockdaysColumns}
                     dataSource={filteredStockdays}
+                    rowKey="id"
+                    pagination={false}
+                    scroll={{ x: "max-content" }}
+                  />
+                ) : selectedModuleId === "scrap" ? (
+                  <Table<ScrapTypeRow>
+                    columns={scrapColumns}
+                    dataSource={filteredScrap}
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}

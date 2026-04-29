@@ -318,14 +318,6 @@ function UserEntryForm({
     >
       <div className="grid grid-cols-1 gap-x-5 gap-y-1 md:grid-cols-2">
         <Form.Item
-          label={<span className="text-sm font-medium text-gray-700">Full Name</span>}
-          name="fullName"
-          rules={[{ required: true, message: "Full Name is required" }]}
-        >
-          <Input size="large" className="rounded-xl" placeholder="Enter Full Name" />
-        </Form.Item>
-
-        <Form.Item
           label={<span className="text-sm font-medium text-gray-700">Employee ID</span>}
           name="employeeId"
           rules={[{ required: true, message: "Employee ID is required" }]}
@@ -343,6 +335,15 @@ function UserEntryForm({
             }
           />
         </Form.Item>
+        <Form.Item
+          label={<span className="text-sm font-medium text-gray-700">Full Name</span>}
+          name="fullName"
+          rules={[{ required: true, message: "Full Name is required" }]}
+        >
+          <Input size="large" className="rounded-xl" placeholder="Enter Full Name" />
+        </Form.Item>
+
+        
 
         <Form.Item
           label={<span className="text-sm font-medium text-gray-700">Department</span>}
