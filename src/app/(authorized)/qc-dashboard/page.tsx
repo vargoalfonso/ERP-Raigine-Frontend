@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Button,
@@ -34,17 +34,21 @@ import StatsCard from "@/components/StatsCard";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
-  type CreateQcDashboardManualReportRequest,
+  type CreateQcDashboardReportRequest,
+  type QcReportFormOptionRecord,
+  type QcReportLookupType,
   type QcDashboardBySource,
   type QcDashboardDefectItem,
   type QcDashboardIncomingQcItem,
   type QcDashboardProductionQcItem,
   type QcDashboardTopIssue,
-  useCreateQcDashboardManualReportMutation,
+  useCreateQcDashboardReportMutation,
   useGetQcDashboardDefectsQuery,
   useGetQcDashboardIncomingQcQuery,
   useGetQcDashboardOverviewQuery,
   useGetQcDashboardProductionQcQuery,
+  useGetQcReportFormDetailQuery,
+  useGetQcReportFormOptionsQuery,
 } from "@/lib/api/qc-dashboard/api";
 
 type QcTabId = "production" | "incoming" | "defects";
@@ -54,16 +58,47 @@ type UiTabId = QcTabId | "product_return";
 type PaginationState = Record<QcTabId, { page: number; limit: number }>;
 
 type ManualReportFormValues = {
-  qc_type: "production" | "incoming";
+  qc_type: "production" | "incoming" | "product_return";
   report_date: Dayjs;
+  record_id?: string;
   reference_number: string;
   uniq_code: string;
   number_of_item_check: number;
-  issue_reason_code?: string;
-  issue_reason_text?: string;
+  issue?: string;
   number_of_defect?: number;
   number_of_scrap?: number;
+  number_of_product_return?: number;
   status: string;
+  remarks?: string;
+};
+
+const QC_TYPE_TO_LOOKUP: Record<ManualReportFormValues["qc_type"], QcReportLookupType> = {
+  production: "production_qc",
+  incoming: "incoming_qc",
+  product_return: "product_return_qc",
+};
+
+const DEFAULT_ISSUE_OPTIONS = [
+  { label: "Scratch", value: "scratch" },
+  { label: "Dent", value: "dent" },
+  { label: "Dimension NG", value: "dimension_ng" },
+  { label: "Color NG", value: "color_ng" },
+  { label: "Mixed Part", value: "mixed_part" },
+  { label: "Other", value: "other" },
+];
+
+const getRecordId = (record: QcReportFormOptionRecord | undefined): string | undefined => {
+  if (!record) return undefined;
+  if (record.return_id != null && String(record.return_id).trim()) return String(record.return_id).trim();
+  if (record.qc_task_id != null) return String(record.qc_task_id);
+  return undefined;
+};
+
+const getReferenceLabel = (qcType: ManualReportFormValues["qc_type"] | undefined) => {
+  if (qcType === "production") return "WO Number";
+  if (qcType === "incoming") return "PO / DN Number";
+  if (qcType === "product_return") return "DN Number";
+  return "WO/PO/DN Number";
 };
 
 const formatNumber = (value: unknown) => {
@@ -134,7 +169,107 @@ export default function QcDashboardPage() {
     skip: !apiEnabled || activeTab !== "defects",
   });
 
-  const [createManualReport, createManualReportState] = useCreateQcDashboardManualReportMutation();
+  const [createQcReport, createQcReportState] = useCreateQcDashboardReportMutation();
+  const selectedQcType = Form.useWatch("qc_type", manualForm);
+  const selectedReferenceNumber = Form.useWatch("reference_number", manualForm);
+  const selectedLookupType = selectedQcType ? QC_TYPE_TO_LOOKUP[selectedQcType] : undefined;
+
+  const formOptionsQuery = useGetQcReportFormOptionsQuery(
+    { qc_type: selectedLookupType ?? "production_qc" },
+    { skip: !apiEnabled || !isManualOpen || !selectedLookupType }
+  );
+
+  const selectedRecord = useMemo(() => {
+    const records = formOptionsQuery.data?.data.records ?? [];
+    const selected = String(selectedReferenceNumber ?? "").trim();
+    if (!selected) return undefined;
+    return records.find((record) => {
+      const candidates = [
+        record.wo_po_dn_number,
+        record.po_number,
+        record.dn_number,
+        record.previous_dn_number,
+      ]
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean);
+      return candidates.includes(selected);
+    });
+  }, [formOptionsQuery.data?.data.records, selectedReferenceNumber]);
+
+  const selectedRecordId = getRecordId(selectedRecord);
+
+  const formDetailQuery = useGetQcReportFormDetailQuery(
+    {
+      qc_type: selectedLookupType ?? "production_qc",
+      record_id: selectedRecordId ?? "",
+    },
+    { skip: !apiEnabled || !isManualOpen || !selectedLookupType || !selectedRecordId }
+  );
+
+  const referenceOptions = useMemo(() => {
+    const direct = formOptionsQuery.data?.data.wo_po_dn_options ?? [];
+    if (direct.length) return direct;
+    const records = formOptionsQuery.data?.data.records ?? [];
+    return records
+      .map((record) => {
+        const label =
+          record.wo_po_dn_number ??
+          record.po_number ??
+          record.dn_number ??
+          record.previous_dn_number ??
+          "";
+        const text = String(label ?? "").trim();
+        return text ? { label: text, value: text } : null;
+      })
+      .filter((item): item is { label: string; value: string } => Boolean(item));
+  }, [formOptionsQuery.data?.data.records, formOptionsQuery.data?.data.wo_po_dn_options]);
+
+  const issueOptions = useMemo(() => {
+    const options = formDetailQuery.data?.data.issue_options ?? [];
+    if (options.length) {
+      return options.map((option) => ({
+        label: option.label || option.name || option.value,
+        value: option.value,
+      }));
+    }
+    return DEFAULT_ISSUE_OPTIONS;
+  }, [formDetailQuery.data?.data.issue_options]);
+
+  useEffect(() => {
+    if (!isManualOpen) return;
+    manualForm.setFieldsValue({
+      reference_number: undefined,
+      record_id: undefined,
+      uniq_code: undefined,
+      issue: undefined,
+      remarks: undefined,
+    });
+  }, [manualForm, isManualOpen, selectedQcType]);
+
+  useEffect(() => {
+    if (!selectedRecord) return;
+    manualForm.setFieldsValue({
+      record_id: selectedRecordId,
+      uniq_code: selectedRecord?.uniq ? String(selectedRecord.uniq) : undefined,
+    });
+  }, [manualForm, selectedRecord, selectedRecordId]);
+
+  useEffect(() => {
+    const detail = formDetailQuery.data?.data;
+    if (!detail) return;
+    manualForm.setFieldsValue({
+      uniq_code: detail.uniq ?? manualForm.getFieldValue("uniq_code"),
+      issue: detail.issue ?? manualForm.getFieldValue("issue"),
+      report_date: detail.report_date ? dayjs(detail.report_date) : manualForm.getFieldValue("report_date"),
+      number_of_item_check: detail.number_of_item_check ?? manualForm.getFieldValue("number_of_item_check") ?? 0,
+      number_of_defect: detail.number_of_defect ?? manualForm.getFieldValue("number_of_defect") ?? 0,
+      number_of_scrap: detail.number_of_scrap ?? manualForm.getFieldValue("number_of_scrap") ?? 0,
+      number_of_product_return:
+        detail.number_of_product_return ?? manualForm.getFieldValue("number_of_product_return") ?? 0,
+      status: detail.status ?? manualForm.getFieldValue("status") ?? "failed",
+      remarks: detail.remarks ?? manualForm.getFieldValue("remarks"),
+    });
+  }, [formDetailQuery.data?.data, manualForm]);
 
   const overview = overviewQuery.data?.data;
   const cards = overview?.cards;
@@ -164,12 +299,18 @@ export default function QcDashboardPage() {
 
   const openManual = () => {
     manualForm.setFieldsValue({
-      qc_type: activeTab === "incoming" ? "incoming" : "production",
+      qc_type:
+        activeTab === "incoming"
+          ? "incoming"
+          : activeTab === "product_return"
+            ? "product_return"
+            : "production",
       report_date: dayjs(),
       status: "failed",
       number_of_item_check: 0,
       number_of_defect: 0,
       number_of_scrap: 0,
+      number_of_product_return: 0,
     });
     setIsManualOpen(true);
   };
@@ -187,21 +328,34 @@ export default function QcDashboardPage() {
       return;
     }
 
-    const payload: CreateQcDashboardManualReportRequest = {
-      qc_type: values.qc_type,
+    if (!values.record_id && !selectedRecordId) {
+      message.error("Select WO / PO / DN number first");
+      return;
+    }
+
+    const detail = formDetailQuery.data?.data;
+    const payload: CreateQcDashboardReportRequest = {
+      qc_type: QC_TYPE_TO_LOOKUP[values.qc_type],
+      record_id: values.record_id ?? selectedRecordId ?? "",
       report_date: values.report_date.format("YYYY-MM-DD"),
-      reference_number: String(values.reference_number ?? "").trim(),
-      uniq_code: String(values.uniq_code ?? "").trim(),
+      wo_po_dn_number: String(values.reference_number ?? "").trim(),
+      reference_type: detail?.reference_type,
+      uniq: String(values.uniq_code ?? "").trim(),
+      supplier_name: detail?.supplier_name,
+      part_number: detail?.part_number,
+      part_name: detail?.part_name,
       number_of_item_check: Number(values.number_of_item_check ?? 0),
-      issue_reason_code: values.issue_reason_code ? String(values.issue_reason_code).trim() : undefined,
-      issue_reason_text: values.issue_reason_text ? String(values.issue_reason_text).trim() : undefined,
+      issue: values.issue ? String(values.issue).trim() : undefined,
       number_of_defect: values.number_of_defect != null ? Number(values.number_of_defect ?? 0) : undefined,
       number_of_scrap: values.number_of_scrap != null ? Number(values.number_of_scrap ?? 0) : undefined,
+      number_of_product_return:
+        values.number_of_product_return != null ? Number(values.number_of_product_return ?? 0) : undefined,
       status: String(values.status ?? "").trim(),
+      remarks: values.remarks ? String(values.remarks).trim() : undefined,
     };
 
     try {
-      await createManualReport(payload).unwrap();
+      await createQcReport(payload).unwrap();
       message.success("QC report created");
       closeManual();
       overviewQuery.refetch();
@@ -656,10 +810,10 @@ export default function QcDashboardPage() {
         onCancel={closeManual}
         onOk={submitManual}
         okText="Submit"
-        confirmLoading={createManualReportState.isLoading}
+        confirmLoading={createQcReportState.isLoading}
         width={720}
         destroyOnHidden
-        title={<div className="text-lg font-semibold text-gray-900">Create Manual QC Report</div>}
+        title={<div className="text-lg font-semibold text-gray-900">Create QC Report</div>}
       >
         <Form<ManualReportFormValues>
           form={manualForm}
@@ -674,6 +828,7 @@ export default function QcDashboardPage() {
                 options={[
                   { label: "Production", value: "production" },
                   { label: "Incoming", value: "incoming" },
+                  { label: "Product Return", value: "product_return" },
                 ]}
               />
             </Form.Item>
@@ -682,12 +837,22 @@ export default function QcDashboardPage() {
               <DatePicker className="w-full" format="YYYY-MM-DD" />
             </Form.Item>
 
-            <Form.Item label="Reference Number" name="reference_number" rules={[{ required: true, message: "Enter reference number" }]}>
-              <Input placeholder="WO-2026-000007 / PO / DN" />
+            <Form.Item label={getReferenceLabel(selectedQcType)} name="reference_number" rules={[{ required: true, message: "Select reference number" }]}> 
+              <Select
+                showSearch
+                placeholder="Select from master list"
+                options={referenceOptions}
+                loading={formOptionsQuery.isFetching}
+                filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+              />
             </Form.Item>
 
-            <Form.Item label="UNIQ Code" name="uniq_code" rules={[{ required: true, message: "Enter uniq code" }]}>
-              <Input placeholder="EMA-LV7-001" />
+            <Form.Item name="record_id" hidden>
+              <Input />
+            </Form.Item>
+
+            <Form.Item label="UNIQ Code" name="uniq_code" rules={[{ required: true, message: "UNIQ will be filled automatically" }]}> 
+              <Input placeholder="Auto-filled from selected number" disabled />
             </Form.Item>
 
             <Form.Item
@@ -708,12 +873,14 @@ export default function QcDashboardPage() {
               />
             </Form.Item>
 
-            <Form.Item label="Issue Reason Code" name="issue_reason_code">
-              <Input placeholder="SURFACE_DEFECT" />
-            </Form.Item>
-
-            <Form.Item label="Issue Reason Text" name="issue_reason_text">
-              <Input placeholder="Scratch" />
+            <Form.Item label="Issue" name="issue">
+              <Select
+                showSearch
+                placeholder="Select issue"
+                options={issueOptions}
+                loading={formDetailQuery.isFetching}
+                filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+              />
             </Form.Item>
 
             <Form.Item label="Number of Defect" name="number_of_defect">
@@ -723,6 +890,14 @@ export default function QcDashboardPage() {
             <Form.Item label="Number of Scrap" name="number_of_scrap">
               <InputNumber className="w-full" min={0} />
             </Form.Item>
+
+            <Form.Item label="Number of Product Return" name="number_of_product_return">
+              <InputNumber className="w-full" min={0} />
+            </Form.Item>
+
+            {/* <Form.Item label="Remarks" name="remarks" className="md:col-span-2">
+              <Input.TextArea rows={3} placeholder="Additional QC remarks" />
+            </Form.Item> */}
           </div>
         </Form>
       </Modal>

@@ -6,7 +6,9 @@ import { useRouter } from "next/navigation";
 import dayjs, { type Dayjs } from "dayjs";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { useGetInventoryListQuery } from "@/lib/api/inventory/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import {
   useCreateRmProcessingWorkOrderMutation,
 } from "@/lib/api/work-orders/api";
@@ -39,7 +41,58 @@ export default function CreateRmProcessingWoPage() {
     { type: "raw-materials", page: 1, limit: 200 },
     { skip: !apiEnabled }
   );
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
+    skip: !apiEnabled,
+  });
   const [createRmProcessingWorkOrder, createState] = useCreateRmProcessingWorkOrderMutation();
+  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
+
+  const applyUniqMapping = (value: string, fields?: { source?: boolean; target?: boolean }) => {
+    const uniq = String(value ?? "").trim();
+    if (!uniq) return;
+
+    const found = rmOptions.find((option) => option.value === uniq);
+    const mappedModel =
+      found?.model ??
+      bomIndex.modelByUniq[uniq] ??
+      bomIndex.assemblyCodeByUniq[uniq] ??
+      bomIndex.partNameByUniq[uniq];
+    const mappedGradeSize = found?.gradeSize ?? bomIndex.gradeSizeByUniq[uniq];
+    const mappedPartName = found?.partName ?? bomIndex.partNameByUniq[uniq];
+    const mappedPartNumber = found?.partNumber ?? bomIndex.partNumberByUniq[uniq];
+    const mappedUom = found?.unit ?? bomIndex.uomByUniq[uniq];
+
+    const currentValues = form.getFieldsValue();
+    const nextValues: Record<string, unknown> = {};
+
+    if (fields?.source) {
+      nextValues.sourceMaterialUniq = uniq;
+      nextValues.partName = mappedPartName ?? currentValues.partName;
+      nextValues.partNumber = mappedPartNumber ?? currentValues.partNumber;
+      nextValues.inputUom = mappedUom ?? currentValues.inputUom;
+    }
+
+    if (fields?.target) {
+      nextValues.targetMaterialUniq = uniq;
+      nextValues.outputUom = mappedUom ?? currentValues.outputUom;
+    }
+
+    if (mappedModel && !String(currentValues.model ?? "").trim()) {
+      nextValues.model = mappedModel;
+    } else if (mappedModel && fields?.source) {
+      nextValues.model = mappedModel;
+    }
+
+    if (mappedGradeSize && !String(currentValues.gradeSize ?? "").trim()) {
+      nextValues.gradeSize = mappedGradeSize;
+    } else if (mappedGradeSize && fields?.source) {
+      nextValues.gradeSize = mappedGradeSize;
+    }
+
+    if (Object.keys(nextValues).length) {
+      form.setFieldsValue(nextValues);
+    }
+  };
 
   const fallbackOptions: RmOption[] = useMemo(
     () => [
@@ -82,31 +135,69 @@ export default function CreateRmProcessingWoPage() {
 
   const rmOptions: RmOption[] = useMemo(() => {
     const inv = inventoryQuery.data?.data ?? [];
-    if (apiEnabled && inv.length) {
-      return inv
-        .filter((r) => (Number(r.stock_qty ?? 0) || 0) > 0 && String(r.uniq_code ?? "").trim())
-        .map((r) => {
-          const uniq = String(r.uniq_code ?? "").trim();
-          const partName = String(r.part_name ?? r.item_name ?? "-").trim() || "-";
-          const partNumber = String(r.part_number ?? "-").trim() || "-";
-          const unit = String(r.uom ?? "pcs").trim() || "pcs";
-          const stockQty = Number(r.stock_qty ?? 0) || 0;
-          return {
-            uniq,
-            name: partName === "-" ? uniq : partName,
-            partName,
-            partNumber,
-            model: undefined,
-            gradeSize: undefined,
-            unit,
-            label: `${uniq}${partName && partName !== "-" ? ` - ${partName}` : ""} (stock: ${stockQty} ${unit})`,
-            value: uniq,
-          };
-        })
-        .filter((o) => Boolean(o.value));
+    const fromInventory = apiEnabled && inv.length
+      ? inv
+          .filter((r) => (Number(r.stock_qty ?? 0) || 0) > 0 && String(r.uniq_code ?? "").trim())
+          .map((r) => {
+            const uniq = String(r.uniq_code ?? "").trim();
+            const partName = String(r.part_name ?? r.item_name ?? bomIndex.partNameByUniq[uniq] ?? "-").trim() || "-";
+            const partNumber = String(r.part_number ?? bomIndex.partNumberByUniq[uniq] ?? "-").trim() || "-";
+            const unit = String(r.uom ?? bomIndex.uomByUniq[uniq] ?? "pcs").trim() || "pcs";
+            const stockQty = Number(r.stock_qty ?? 0) || 0;
+            return {
+              uniq,
+              name: partName === "-" ? uniq : partName,
+              partName,
+              partNumber,
+              model: bomIndex.modelByUniq[uniq] ?? bomIndex.assemblyCodeByUniq[uniq] ?? undefined,
+              gradeSize: bomIndex.gradeSizeByUniq[uniq] ?? undefined,
+              unit,
+              label: `${uniq}${partName && partName !== "-" ? ` - ${partName}` : ""} (stock: ${stockQty} ${unit})`,
+              value: uniq,
+            };
+          })
+          .filter((o) => Boolean(o.value))
+      : [];
+
+    const fromBom = bomIndex.options.map((option) => ({
+      uniq: option.value,
+      name: bomIndex.partNameByUniq[option.value] || option.value,
+      partName: bomIndex.partNameByUniq[option.value] || "-",
+      partNumber: bomIndex.partNumberByUniq[option.value] || "-",
+      model: bomIndex.modelByUniq[option.value] || bomIndex.assemblyCodeByUniq[option.value] || undefined,
+      gradeSize: bomIndex.gradeSizeByUniq[option.value] || undefined,
+      unit: bomIndex.uomByUniq[option.value] || "pcs",
+      label: `${option.value}${bomIndex.partNameByUniq[option.value] ? ` - ${bomIndex.partNameByUniq[option.value]}` : ""}`,
+      value: option.value,
+    }));
+
+    const merged = [...fromInventory, ...fromBom];
+    const deduped = new Map<string, RmOption>();
+    for (const option of merged) {
+      if (!option.value) continue;
+      if (!deduped.has(option.value)) {
+        deduped.set(option.value, option);
+        continue;
+      }
+
+      const current = deduped.get(option.value)!;
+      deduped.set(option.value, {
+        ...current,
+        partName: current.partName !== "-" ? current.partName : option.partName,
+        partNumber: current.partNumber !== "-" ? current.partNumber : option.partNumber,
+        model: current.model ?? option.model,
+        gradeSize: current.gradeSize ?? option.gradeSize,
+        unit: current.unit ?? option.unit,
+        label: current.label || option.label,
+      });
     }
+
+    if (deduped.size) {
+      return Array.from(deduped.values());
+    }
+
     return fallbackOptions;
-  }, [apiEnabled, fallbackOptions, inventoryQuery.data]);
+  }, [apiEnabled, bomIndex, fallbackOptions, inventoryQuery.data]);
 
   const onSelectSourceRm = (value: string) => {
     const found = rmOptions.find((o) => o.value === value);
@@ -117,18 +208,20 @@ export default function CreateRmProcessingWoPage() {
     const nextValues: Record<string, unknown> = {
       partName: found.partName,
       partNumber: found.partNumber,
-      model: found.model,
-      gradeSize: found.gradeSize,
+      model: found.model ?? bomIndex.modelByUniq[value] ?? bomIndex.assemblyCodeByUniq[value],
+      gradeSize: found.gradeSize ?? bomIndex.gradeSizeByUniq[value],
       sourceMaterialUniq: value,
       inputUom: found.unit ?? form.getFieldValue("inputUom"),
     };
 
-    if (!currentTarget) {
-      nextValues.targetMaterialUniq = value;
-      nextValues.outputUom = found.unit ?? form.getFieldValue("outputUom");
+    if (currentTarget && String(currentTarget) === value) {
+      nextValues.targetMaterialUniq = undefined;
     }
 
+    nextValues.outputUom = found.unit ?? form.getFieldValue("outputUom");
+
     form.setFieldsValue(nextValues);
+    applyUniqMapping(value, { source: true });
   };
 
   const onCreate = async () => {
@@ -257,12 +350,28 @@ export default function CreateRmProcessingWoPage() {
               <Form.Item
                 name="targetMaterialUniq"
                 label="Target Material Uniq"
-                rules={[{ required: true, message: "Select target material uniq" }]}
+                rules={[
+                  { required: true, message: "Select target material uniq" },
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      if (!value || value !== getFieldValue("sourceMaterialUniq")) {
+                        return Promise.resolve();
+                      }
+                      return Promise.reject(new Error("Target UNIQ must be different from source UNIQ"));
+                    },
+                  }),
+                ]}
               >
                 <AutoComplete
                   className="!rounded-lg"
                   placeholder="e.g. EMA-LV7-001111"
                   options={rmOptions.map((o) => ({ label: o.label, value: o.value }))}
+                  onSelect={(value) => applyUniqMapping(String(value), { target: true })}
+                  onChange={(value) => {
+                    if (typeof value === "string" && value.trim()) {
+                      applyUniqMapping(value, { target: true });
+                    }
+                  }}
                   filterOption={(inputValue, option) =>
                     String(option?.label ?? "").toLowerCase().includes(inputValue.toLowerCase())
                   }

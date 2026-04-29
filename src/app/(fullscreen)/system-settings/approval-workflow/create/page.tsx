@@ -5,7 +5,7 @@ import { Button, Card, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { getApiErrorMessage } from "@/lib/api/error";
-import { useCreateApprovalWorkflowMutation } from "@/lib/api/system-settings/api";
+import { useCreateApprovalWorkflowMutation, useGetRolesQuery } from "@/lib/api/system-settings/api";
 import { getCurrentUserDisplayName } from "@/lib/utils/currentUser";
 
 type StatusType = "Active" | "Inactive";
@@ -28,16 +28,7 @@ const MENU_ACTION_OPTIONS = [
   { label: "Stock opname", value: "Stock opname" },
 ] as const;
 
-const ROLE_OPTIONS = [
-  { label: "Procurement Manager", value: "Procurement Manager" },
-  { label: "Finance Manager", value: "Finance Manager" },
-  { label: "Director", value: "Director" },
-  { label: "CEO", value: "CEO" },
-  { label: "Finance", value: "Finance" },
-  { label: "PPIC", value: "PPIC" },
-  { label: "IT", value: "IT" },
-  { label: "N/A", value: "N/A" },
-] as const;
+// ROLE_OPTIONS will be loaded from API at runtime
 
 const STATUS_OPTIONS = [
   { label: "Active", value: "Active" },
@@ -48,10 +39,10 @@ function makeEntry(idx: number): Entry {
   return {
     id: `entry-${idx}`,
     menuAction: idx === 1 ? undefined : undefined,
-    level1Role: idx === 1 ? "Procurement Manager" : undefined,
-    level2Role: idx === 1 ? "Finance Manager" : undefined,
-    level3Role: idx === 1 ? "Director" : undefined,
-    level4Role: idx === 1 ? "CEO" : undefined,
+    level1Role: idx === 1 ? "" : undefined,
+    level2Role: idx === 1 ? "" : undefined,
+    level3Role: idx === 1 ? "" : undefined,
+    level4Role: idx === 1 ? "" : undefined,
     status: idx === 1 ? "Active" : undefined,
     created: false,
   };
@@ -61,6 +52,7 @@ export default function ApprovalWorkflowCreatePage() {
   const router = useRouter();
   const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
   const [createApprovalWorkflow, createApprovalWorkflowState] = useCreateApprovalWorkflowMutation();
+  const { data: rolesData = [] } = useGetRolesQuery(undefined, { skip: !apiEnabled });
   const createdBy = getCurrentUserDisplayName();
 
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
@@ -76,10 +68,6 @@ export default function ApprovalWorkflowCreatePage() {
 
   const validateEntry = (e: Entry) => {
     if (!e.menuAction) return "Menu/Action is required";
-    if (!e.level1Role) return "Level 1 Role is required";
-    if (!e.level2Role) return "Level 2 Role is required";
-    if (!e.level3Role) return "Level 3 Role is required";
-    if (!e.level4Role) return "Level 4 Role is required";
     if (!e.status) return "Status is required";
     return null;
   };
@@ -99,17 +87,17 @@ export default function ApprovalWorkflowCreatePage() {
       }
 
       if (apiEnabled) {
-        for (const entry of entries) {
-          await createApprovalWorkflow({
-            action_name: String(entry.menuAction ?? "").trim(),
-            level_1_role: String(entry.level1Role ?? "").trim(),
-            level_2_role: String(entry.level2Role ?? "").trim(),
-            level_3_role: String(entry.level3Role ?? "").trim(),
-            level_4_role: String(entry.level4Role ?? "").trim(),
-            status: String(entry.status ?? "Active").toLowerCase(),
-            created_by: createdBy ?? undefined,
-          }).unwrap();
-        }
+            for (const entry of entries) {
+              await createApprovalWorkflow({
+                action_name: String(entry.menuAction ?? "").trim(),
+                level_1_role: entry.level1Role ? String(entry.level1Role).trim() : null,
+                level_2_role: entry.level2Role ? String(entry.level2Role).trim() : null,
+                level_3_role: entry.level3Role ? String(entry.level3Role).trim() : null,
+                level_4_role: entry.level4Role ? String(entry.level4Role).trim() : null,
+                status: String(entry.status ?? "Active").toLowerCase(),
+                created_by: createdBy ?? undefined,
+              }).unwrap();
+            }
       }
 
       message.success("Approval workflow saved");
@@ -190,7 +178,8 @@ export default function ApprovalWorkflowCreatePage() {
                       value={e.level1Role}
                       onChange={(v) => updateEntry(e.id, { level1Role: v, created: false })}
                       placeholder="Level 1 Role"
-                      options={ROLE_OPTIONS as unknown as { label: string; value: string }[]}
+                      options={(apiEnabled ? rolesData : []).map((r) => ({ label: String(r.name), value: String(r.name) }))}
+                      allowClear
                     />
                   </div>
 
@@ -200,7 +189,8 @@ export default function ApprovalWorkflowCreatePage() {
                       value={e.level2Role}
                       onChange={(v) => updateEntry(e.id, { level2Role: v, created: false })}
                       placeholder="Level 2 Role"
-                      options={ROLE_OPTIONS as unknown as { label: string; value: string }[]}
+                      options={(apiEnabled ? rolesData : []).map((r) => ({ label: String(r.name), value: String(r.name) }))}
+                      allowClear
                     />
                   </div>
 
@@ -210,7 +200,8 @@ export default function ApprovalWorkflowCreatePage() {
                       value={e.level3Role}
                       onChange={(v) => updateEntry(e.id, { level3Role: v, created: false })}
                       placeholder="Level 3 Role"
-                      options={ROLE_OPTIONS as unknown as { label: string; value: string }[]}
+                      options={(apiEnabled ? rolesData : []).map((r) => ({ label: String(r.name), value: String(r.name) }))}
+                      allowClear
                     />
                   </div>
 
@@ -220,7 +211,8 @@ export default function ApprovalWorkflowCreatePage() {
                       value={e.level4Role}
                       onChange={(v) => updateEntry(e.id, { level4Role: v, created: false })}
                       placeholder="Level 4 Role"
-                      options={ROLE_OPTIONS as unknown as { label: string; value: string }[]}
+                      options={(apiEnabled ? rolesData : []).map((r) => ({ label: String(r.name), value: String(r.name) }))}
+                      allowClear
                     />
                   </div>
                 </div>

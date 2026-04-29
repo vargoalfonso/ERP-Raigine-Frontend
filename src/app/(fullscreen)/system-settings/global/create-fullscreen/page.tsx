@@ -4,6 +4,7 @@ import React, { useMemo, useState } from "react";
 import { Button, Card, Input, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
+import { useCreateGlobalWorkingDaysMutation } from "@/lib/api/system-settings/api";
 
 type Entry = {
   id: string;
@@ -40,8 +41,9 @@ function makeEntry(idx: number): Entry {
   };
 }
 
-export default function GlobalWorkingDaysCreatePage() {
+export default function GlobalWorkingDaysCreateFullscreenPage() {
   const router = useRouter();
+  const [createGlobalWorkingDays, { isLoading }] = useCreateGlobalWorkingDaysMutation();
 
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
 
@@ -64,7 +66,7 @@ export default function GlobalWorkingDaysCreatePage() {
     setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
   };
 
-  const onSave = () => {
+  const onSave = async () => {
     for (const e of entries) {
       const err = validateEntry(e);
       if (err) {
@@ -73,8 +75,20 @@ export default function GlobalWorkingDaysCreatePage() {
       }
     }
 
-    message.success("Working days saved");
-    router.push("/system-settings");
+    try {
+      for (const e of entries) {
+        await createGlobalWorkingDays({
+          parameter_group: "planning",
+          period: String(e.period ?? ""),
+          working_days: Number(e.workingDays ?? 0),
+          status: "active",
+        }).unwrap();
+      }
+      message.success("Working days saved");
+      router.push("/system-settings");
+    } catch (err: any) {
+      message.error(err?.data?.message ?? err?.message ?? "Failed to save working days");
+    }
   };
 
   return (

@@ -31,7 +31,7 @@ type FormValues = {
 const WAREHOUSE_TYPE_OPTIONS = [
   { label: "Raw Material", value: "raw_material" },
   { label: "Finished Goods", value: "finished_goods" },
-  { label: "Indirect Material", value: "indirect_material" },
+  { label: "Indirect Material", value: "indirect_raw_material" },
   { label: "Subcon", value: "subcon" },
 ];
 const PLANT_OPTIONS = [

@@ -733,15 +733,20 @@ export default function PrlManagementPage() {
             danger
             icon={<DeleteOutlined />}
             onClick={() => {
-              Modal.confirm({
+              let confirmModal: any = null;
+              confirmModal = Modal.confirm({
                 title: "Delete PRL entry?",
                 content: `This will delete ${record.prlId}.`,
                 okText: "Delete",
                 okButtonProps: { danger: true },
                 cancelText: "Cancel",
+                onCancel: () => {
+                  confirmModal?.destroy();
+                },
                 onOk: async () => {
                   if (!apiEnabled) {
                     message.info("Delete is only available in API mode");
+                    confirmModal?.destroy();
                     return;
                   }
 
@@ -752,17 +757,19 @@ export default function PrlManagementPage() {
                     refetchDemandGapIfActive();
                   } catch (error) {
                     message.error(getApiErrorMessage(error, "Failed to delete PRL entry"));
+                  } finally {
+                    confirmModal?.destroy();
                   }
                 },
               });
             }}
           />
-          <Button
+          {/* <Button
             size="small"
             type="text"
             icon={<BarChartOutlined />}
             onClick={() => openAnalytics("overview")}
-          />
+          /> */}
         </div>
       ),
     },

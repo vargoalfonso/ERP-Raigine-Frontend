@@ -262,7 +262,7 @@ export default function MachineMasterDataPage() {
     {
       title: "Actions",
       key: "actions",
-      width: 220,
+      width: 120,
       fixed: "right",
       render: (_: unknown, record) => (
         <div className="flex items-center justify-end gap-2">

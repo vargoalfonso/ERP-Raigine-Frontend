@@ -190,10 +190,10 @@ export type AccessControlMatrixRecord = {
 
 export type CreateApprovalWorkflowRequest = {
   action_name: string;
-  level_1_role: string;
-  level_2_role: string;
-  level_3_role: string;
-  level_4_role: string;
+  level_1_role: string | null;
+  level_2_role: string | null;
+  level_3_role: string | null;
+  level_4_role: string | null;
   status?: StatusType;
   created_by?: string;
 };
@@ -201,10 +201,10 @@ export type CreateApprovalWorkflowRequest = {
 export type ApprovalWorkflowRecord = {
   id: string;
   action_name: string;
-  level_1_role: string;
-  level_2_role: string;
-  level_3_role: string;
-  level_4_role: string;
+  level_1_role: string | null;
+  level_2_role: string | null;
+  level_3_role: string | null;
+  level_4_role: string | null;
   status: StatusType;
   created_by?: string;
   created_at?: string;
@@ -410,18 +410,20 @@ export type SafetyStockRecord = {
 };
 
 export type CreateStockdaysRequest = {
-  item_code: string;
+  inventory_type: string;
+  item_uniq_code: string;
   stock_days: number;
-  safety_stock: number;
   status?: StatusType;
+  calculation_type?: string;
 };
 
 export type StockdaysRecord = {
   id: string;
-  item_code: string;
+  inventory_type: string;
+  item_uniq_code: string;
   stock_days: number;
-  safety_stock: number;
   status?: string;
+  calculation_type?: string;
   created_at?: string;
   updated_at?: string;
 };

@@ -16,7 +16,7 @@ type FormValues = {
   max_stock: number;
 };
 
-export default function KanbanCreatePage() {
+export default function KanbanParameterCreatePage() {
   const router = useRouter();
   const [form] = Form.useForm<FormValues>();
 
@@ -69,11 +69,11 @@ export default function KanbanCreatePage() {
         max_stock: Number(values.max_stock ?? 0),
       }).unwrap();
 
-      message.success("Kanban standard created");
+      message.success("Kanban parameter created");
       router.push("/system-settings");
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error(getApiErrorMessage(err, "Failed to create kanban standard"));
+      message.error(getApiErrorMessage(err, "Failed to create kanban parameter"));
     }
   };
 
@@ -83,12 +83,11 @@ export default function KanbanCreatePage() {
         <Card className="rounded-2xl shadow-sm" styles={{ body: { padding: 20 } }}>
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
-              <div className="text-2xl font-bold text-gray-900">Create Kanban Standard</div>
+              <div className="text-2xl font-bold text-gray-900">Create Kanban Parameter</div>
               <div className="text-sm text-gray-500">Select item UNIQ from registered BOMs</div>
             </div>
             <div className="flex items-center gap-2">
-              <Button className="!rounded-lg" onClick={() => router.push("/system-settings")}
-              >
+              <Button className="!rounded-lg" onClick={() => router.push("/system-settings")}>
                 Back
               </Button>
               <Button
@@ -114,32 +113,30 @@ export default function KanbanCreatePage() {
             }}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Form.Item name="item_name" label="Item Name" rules={[{ required: true }]}>
+              <Form.Item name="item_name" label="Item Name" rules={[{ required: true }]}> 
                 <Input className="!rounded-lg" placeholder="e.g. Bracket Assembly" />
               </Form.Item>
 
-              <Form.Item name="item_uniq_code" label="Item UNIQ Code" rules={[{ required: true }]}>
+              <Form.Item name="item_uniq_code" label="Item UNIQ Code" rules={[{ required: true }]}> 
                 <Select
                   showSearch
                   className="!rounded-lg"
                   placeholder="Select BOM UNIQ"
                   options={bomUniqOptions}
                   optionFilterProp="label"
-                  filterOption={(input, opt) =>
-                    String(opt?.label ?? "").toLowerCase().includes(input.toLowerCase())
-                  }
+                  filterOption={(input, opt) => String(opt?.label ?? "").toLowerCase().includes(input.toLowerCase())}
                 />
               </Form.Item>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Form.Item name="kanban_qty" label="Kanban Qty" rules={[{ required: true }]}>
+              <Form.Item name="kanban_qty" label="Kanban Qty" rules={[{ required: true }]}> 
                 <InputNumber className="w-full !rounded-lg" min={0} />
               </Form.Item>
-              <Form.Item name="min_stock" label="Min Stock" rules={[{ required: true }]}>
+              <Form.Item name="min_stock" label="Min Stock" rules={[{ required: true }]}> 
                 <InputNumber className="w-full !rounded-lg" min={0} />
               </Form.Item>
-              <Form.Item name="max_stock" label="Max Stock" rules={[{ required: true }]}>
+              <Form.Item name="max_stock" label="Max Stock" rules={[{ required: true }]}> 
                 <InputNumber className="w-full !rounded-lg" min={0} />
               </Form.Item>
             </div>

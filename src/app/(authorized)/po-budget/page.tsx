@@ -1744,7 +1744,7 @@ export default function PoBudgetPage() {
         ),
       },
     ],
-    [supplierOptions, uomOptions],
+    [bulkItems, supplierOptions, uomOptions],
   );
 
   return (

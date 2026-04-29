@@ -172,6 +172,16 @@ const uniqStatusTag = (s: UniqStatus) => {
   return <Tag color="default" className="!rounded-md">In Progress</Tag>;
 };
 
+const withQuery = (path: string, params: Record<string, string | number | undefined | null>) => {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.set(key, String(value));
+  });
+  const query = search.toString();
+  return query ? `${path}?${query}` : path;
+};
+
 const robotUserApprovalTag = (s: RobotUserApproval) => {
   if (s === "Approved (User)") return <Tag color="green" className="!rounded-md">Approved (User)</Tag>;
   if (s === "Rejected") return <Tag color="red" className="!rounded-md">Rejected</Tag>;
@@ -525,6 +535,44 @@ export default function WorkOrdersPage() {
     }
     return mockRmProcessingRows;
   }, [apiEnabled, mockRmProcessingRows, rmProcessingQuery.data, rmProcessingQuery.isError]);
+
+  const openPrintDetail = (url: string) => {
+    window.open(withQuery(url, { autoPrint: 1 }), "_blank", "noopener,noreferrer");
+  };
+
+  const buildBulkWoDetailUrl = (row: BulkWoRow) =>
+    withQuery(`/work-orders/bulk/detail/${encodeURIComponent(row.id)}`, {
+      woNumber: row.woNumber,
+      sourceDocumentType: row.sourceDocumentType,
+      sourceDocumentId: row.sourceDocumentId,
+      woType: row.woType,
+      status: row.status,
+      approvalStatus: row.approvalStatus,
+      createdDate: row.createdDate,
+      targetDate: row.targetDate,
+      totalItems: row.totalItems,
+    });
+
+  const buildRmProcessingDetailUrl = (row: RmProcessingRow) =>
+    withQuery(`/work-orders/rm-processing/detail/${encodeURIComponent(row.id)}`, {
+      woNumber: row.woNumber,
+      approvalStatus: row.approvalStatus,
+      createdDate: row.createdDate,
+      createdByName: row.createdByName,
+      sourceMaterialUniq: row.sourceMaterialUniq,
+      targetMaterialUniq: row.targetMaterialUniq,
+      model: row.model,
+      gradeSize: row.gradeSize,
+      inputQty: row.inputQty,
+      inputUom: row.inputUom,
+      outputQty: row.outputQty,
+      outputUom: row.outputUom,
+      dateIssued: row.dateIssued,
+      remarks: row.remarks,
+      status: row.status,
+      agingDays: row.agingDays,
+      qrDataUrl: row.qrDataUrl,
+    });
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -893,7 +941,13 @@ export default function WorkOrdersPage() {
             size="small"
             type="text"
             icon={<PrinterOutlined />}
-            onClick={() => message.info(`Print ${r.woNumber} (mock)`)}
+            onClick={() => {
+              if (!r.id) {
+                message.info(`Print ${r.woNumber} (mock)`);
+                return;
+              }
+              openPrintDetail(`/work-orders/detail/${encodeURIComponent(r.id)}`);
+            }}
           />
         </div>
       ),
@@ -1065,6 +1119,18 @@ export default function WorkOrdersPage() {
       key: "remarks",
       render: (value: string) => <span className="text-sm text-gray-700">{value}</span>,
     },
+    {
+      title: "Actions",
+      key: "actions",
+      width: 90,
+      fixed: "right",
+      render: (_: unknown, row) => (
+        <div className="flex items-center justify-end gap-1">
+          <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => router.push(buildRmProcessingDetailUrl(row))} />
+          <Button size="small" type="text" icon={<PrinterOutlined />} onClick={() => openPrintDetail(buildRmProcessingDetailUrl(row))} />
+        </div>
+      ),
+    },
   ];
 
   const bulkWoColumns: ColumnsType<BulkWoRow> = [
@@ -1119,6 +1185,18 @@ export default function WorkOrdersPage() {
       key: "status",
       width: 120,
       render: (value: string) => <Tag color="blue" className="!rounded-md">{value || "-"}</Tag>,
+    },
+    {
+      title: "Actions",
+      key: "actions",
+      width: 90,
+      fixed: "right",
+      render: (_: unknown, row) => (
+        <div className="flex items-center justify-end gap-1">
+          <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => router.push(buildBulkWoDetailUrl(row))} />
+          <Button size="small" type="text" icon={<PrinterOutlined />} onClick={() => openPrintDetail(buildBulkWoDetailUrl(row))} />
+        </div>
+      ),
     },
   ];
 
@@ -1577,6 +1655,23 @@ export default function WorkOrdersPage() {
             <span>Total UNIQs</span>
             <span className="font-semibold text-gray-900">{bulkTotalUniqs}</span>
           </div>
+
+          {selectedRows.length ? (
+            <div className="mt-4 space-y-2">
+              {selectedRows.map((row) => (
+                <div key={row.key} className="rounded-lg border border-gray-100 px-3 py-2 text-xs text-gray-600">
+                  <div className="font-semibold text-gray-900">{row.woNumber}</div>
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                    <span>Type: {row.type}</span>
+                    <span>Status: {row.status}</span>
+                    <span>Approval: {row.approvalStatus}</span>
+                    <span>Target: {row.targetDate}</span>
+                    <span>UNIQ: {row.uniqTotal}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-4">
@@ -1640,6 +1735,24 @@ export default function WorkOrdersPage() {
               <div className="text-xs text-gray-400">Select rows to bulk approve/reject</div>
             ) : null}
           </div>
+
+          {bulkWoSelectedRows.length ? (
+            <div className="mt-4 space-y-2">
+              {bulkWoSelectedRows.map((row) => (
+                <div key={row.key} className="rounded-lg border border-gray-100 px-3 py-2 text-xs text-gray-600">
+                  <div className="font-semibold text-gray-900">{row.woNumber}</div>
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+                    <span>Source: {row.sourceDocumentType}</span>
+                    <span>Document: {row.sourceDocumentId}</span>
+                    <span>Type: {row.woType}</span>
+                    <span>Status: {row.status}</span>
+                    <span>Approval: {row.approvalStatus}</span>
+                    <span>Items: {row.totalItems}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="mt-4">

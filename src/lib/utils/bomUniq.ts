@@ -28,6 +28,11 @@ type BomNodeLike = {
   packing_no?: unknown;
   packingNo?: unknown;
   kanban?: unknown;
+  grade_size?: unknown;
+  gradeSize?: unknown;
+  model_grade?: unknown;
+  modelGrade?: unknown;
+  size?: unknown;
   children?: unknown;
 };
 
@@ -45,6 +50,7 @@ export type BomUniqIndex = {
   partNumberByUniq: Record<string, string>;
   modelByUniq: Record<string, string>;
   assemblyCodeByUniq: Record<string, string>;
+  gradeSizeByUniq: Record<string, string>;
   packingNumberByUniq: Record<string, string>;
   uomByUniq: Record<string, string>;
   rawMaterialTypeByUniq: Record<string, string>;
@@ -58,6 +64,7 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
   const partNumberByUniq: Record<string, string> = {};
   const modelByUniq: Record<string, string> = {};
   const assemblyCodeByUniq: Record<string, string> = {};
+  const gradeSizeByUniq: Record<string, string> = {};
   const packingNumberByUniq: Record<string, string> = {};
   const uomByUniq: Record<string, string> = {};
   const rawMaterialTypeByUniq: Record<string, string> = {};
@@ -106,6 +113,7 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
             : "";
     const model = typeof modelCandidate === "string" ? modelCandidate.trim() : "";
     const assemblyCode = typeof n.assembly_code === "string" ? n.assembly_code.trim() : "";
+    const gradeSize = pickString(n.grade_size, n.gradeSize, n.model_grade, n.modelGrade, n.size);
     const packingNumberCandidate = [
       n.packing_number,
       n.packingNumber,
@@ -140,6 +148,7 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
       if (model && !modelByUniq[uniq]) modelByUniq[uniq] = model;
       if (assemblyCode && !assemblyCodeByUniq[uniq]) assemblyCodeByUniq[uniq] = assemblyCode;
       if (model && !assemblyCodeByUniq[uniq]) assemblyCodeByUniq[uniq] = model;
+      if (gradeSize && !gradeSizeByUniq[uniq]) gradeSizeByUniq[uniq] = gradeSize;
       if (packingNumber && !packingNumberByUniq[uniq]) {
         packingNumberByUniq[uniq] = packingNumber;
       }
@@ -170,6 +179,7 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
     partNumberByUniq,
     modelByUniq,
     assemblyCodeByUniq,
+    gradeSizeByUniq,
     packingNumberByUniq,
     uomByUniq,
     rawMaterialTypeByUniq,

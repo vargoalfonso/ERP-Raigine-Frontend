@@ -1803,7 +1803,7 @@ export default function ProductionDashboardPage() {
               open={isIssuesModalOpen}
               onCancel={closeIssuesModal}
               centered
-              destroyOnClose
+              destroyOnHidden
               okText={editingIssueKey ? "Save" : "Create"}
               cancelText="Cancel"
               onOk={onSubmitIssue}

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -123,9 +123,9 @@ type SafetyStockRow = {
 
 type StockdaysRow = {
   id: string;
-  itemCode: string;
+  itemUniqCode: string;
   stockDays: number;
-  safetyStock: number;
+  calculationType?: string;
   status: StatusType;
 };
 
@@ -422,16 +422,16 @@ const initialRoleRows: RoleRow[] = [
 const initialStockdaysRows: StockdaysRow[] = [
   {
     id: "SDP-001",
-    itemCode: "ITEM001",
+    itemUniqCode: "ITEM001",
     stockDays: 30,
-    safetyStock: 10,
+    calculationType: "a",
     status: "Inactive",
   },
   {
     id: "SDP-002",
-    itemCode: "ITEM002",
+    itemUniqCode: "ITEM002",
     stockDays: 45,
-    safetyStock: 15,
+    calculationType: "b",
     status: "Active",
   },
 ];
@@ -467,26 +467,26 @@ const initialPurchaseOrderRows: PurchaseOrderRow[] = [
   },
 ];
 
-const initialApprovalWorkflowRows: ApprovalWorkflowRow[] = [
-  {
-    id: "AW-001",
-    menuAction: "Update Budget for PO",
-    level1Role: "Procurement Manager",
-    level2Role: "Finance Manager",
-    level3Role: "Director",
-    level4Role: "CEO",
-    status: "Active",
-  },
-  {
-    id: "AW-002",
-    menuAction: "Approve Work Order",
-    level1Role: "Production Supervisor",
-    level2Role: "Production Manager",
-    level3Role: "Director",
-    level4Role: "-",
-    status: "Active",
-  },
-];
+// const initialApprovalWorkflowRows: ApprovalWorkflowRow[] = [
+//   {
+//     id: "AW-001",
+//     menuAction: "Update Budget for PO",
+//     level1Role: "Procurement Manager",
+//     level2Role: "Finance Manager",
+//     level3Role: "Director",
+//     level4Role: "CEO",
+//     status: "Active",
+//   },
+//   {
+//     id: "AW-002",
+//     menuAction: "Approve Work Order",
+//     level1Role: "Production Supervisor",
+//     level2Role: "Production Manager",
+//     level3Role: "Director",
+//     level4Role: "-",
+//     status: "Active",
+//   },
+// ];
 
 const initialSafetyStockRows: SafetyStockRow[] = [];
 
@@ -647,7 +647,7 @@ type KanbanFormValues = {
 type GlobalWorkingDaysFormValues = {
   parameterGroup?: string;
   period: string;
-  workingDays: number;
+  workingDays: string | number;
   status: StatusType;
 };
 
@@ -667,6 +667,25 @@ type MachinePatternFormValues = {
 };
 
 export default function SystemSettingsPage() {
+  const MONTH_NAMES = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ];
+
+  const CURRENT_YEAR = new Date().getFullYear();
+
+  const PERIOD_OPTIONS = MONTH_NAMES.map((m) => ({ label: `${m} ${CURRENT_YEAR}`, value: `${m} ${CURRENT_YEAR}` }));
+
   const router = useRouter();
 
   const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
@@ -674,7 +693,7 @@ export default function SystemSettingsPage() {
     "access-control-matrix"
   );
   const shouldLoadAccessControl = apiEnabled && selectedModuleId === "access-control-matrix";
-  const shouldLoadRoles = apiEnabled && (selectedModuleId === "access-control-matrix" || selectedModuleId === "roles");
+  const shouldLoadRoles = apiEnabled && (selectedModuleId === "access-control-matrix" || selectedModuleId === "roles" || selectedModuleId === "approval-workflow");
   const shouldLoadDepartments = apiEnabled && selectedModuleId === "access-control-matrix";
   const shouldLoadSafetyStock = apiEnabled && selectedModuleId === "safety-stock";
   const shouldLoadStockdays = apiEnabled && selectedModuleId === "stockdays";
@@ -769,7 +788,7 @@ export default function SystemSettingsPage() {
     initialPurchaseOrderRows
   );
   const [approvalWorkflowRows, setApprovalWorkflowRows] = useState<ApprovalWorkflowRow[]>(
-    initialApprovalWorkflowRows
+    []
   );
   const [kanbanRows, setKanbanRows] = useState<KanbanRow[]>(initialKanbanRows);
   const [globalWorkingDaysRows, setGlobalWorkingDaysRows] = useState<GlobalWorkingDaysRow[]>(
@@ -1227,9 +1246,9 @@ export default function SystemSettingsPage() {
       .filter((record) => Boolean(record?.id))
       .map((record) => ({
         id: String(record.id),
-        itemCode: String(record.item_code ?? ""),
+        itemUniqCode: String(record.item_uniq_code ?? ""),
         stockDays: Number(record.stock_days ?? 0),
-        safetyStock: Number(record.safety_stock ?? 0),
+        calculationType: String(record.calculation_type ?? ""),
         status: fromBackendStatus(record.status),
       }));
   }, [apiEnabled, stockdaysApiData, stockdaysRows]);
@@ -1240,7 +1259,7 @@ export default function SystemSettingsPage() {
       .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
       .filter((r) => {
         if (!q) return true;
-        return [r.itemCode, String(r.stockDays), String(r.safetyStock)]
+        return [r.itemUniqCode, String(r.stockDays), String(r.calculationType)]
           .join(" ")
           .toLowerCase()
           .includes(q);
@@ -1515,7 +1534,6 @@ export default function SystemSettingsPage() {
     approvalWorkflowForm.resetFields();
     approvalWorkflowForm.setFieldsValue({
       status: "Active",
-      level4Role: "-",
     });
     setApprovalWorkflowEditOpen(true);
   };
@@ -1553,6 +1571,7 @@ export default function SystemSettingsPage() {
     globalWorkingDaysForm.resetFields();
     globalWorkingDaysForm.setFieldsValue({
       parameterGroup: "planning",
+      period: `${MONTH_NAMES[0]} ${CURRENT_YEAR}`,
       workingDays: 22,
       status: "Active",
     });
@@ -2007,10 +2026,10 @@ export default function SystemSettingsPage() {
       if (apiEnabled) {
         const payload = {
           action_name: String(values.menuAction ?? "").trim(),
-          level_1_role: String(values.level1Role ?? "").trim(),
-          level_2_role: String(values.level2Role ?? "").trim(),
-          level_3_role: String(values.level3Role ?? "").trim(),
-          level_4_role: String(values.level4Role ?? "").trim(),
+          level_1_role: values.level1Role ? String(values.level1Role).trim() : null,
+          level_2_role: values.level2Role ? String(values.level2Role).trim() : null,
+          level_3_role: values.level3Role ? String(values.level3Role).trim() : null,
+          level_4_role: values.level4Role ? String(values.level4Role).trim() : null,
           status: toBackendStatus(values.status),
         };
 
@@ -2828,8 +2847,8 @@ export default function SystemSettingsPage() {
   const stockdaysColumns: ColumnsType<StockdaysRow> = [
     {
       title: "Item Code",
-      dataIndex: "itemCode",
-      key: "itemCode",
+      dataIndex: "itemUniqCode",
+      key: "itemUniqCode",
       width: 220,
       render: (v: string) => <div className="font-medium text-gray-900">{v}</div>,
     },
@@ -2841,14 +2860,14 @@ export default function SystemSettingsPage() {
       render: (v: number) => <div className="text-gray-700">{v}</div>,
     },
     {
-      title: "Safety Stock",
-      dataIndex: "safetyStock",
-      key: "safetyStock",
-      width: 140,
-      render: (v: number) => (
-        <span className="inline-flex items-center justify-center min-w-7 px-2 py-0.5 text-xs border border-gray-200 rounded-md bg-white text-gray-700">
-          {v}
-        </span>
+      title: "Calculation Type",
+      dataIndex: "calculationType",
+      key: "calculationType",
+      width: 260,
+      render: (v: string) => (
+        <div className="text-sm text-gray-700">
+          {v === "a" ? "Stockdays - PRL = Stock / (PRL/Working days)" : v === "b" ? "Stockdays - DailyUsage = Stock / Daily Usage (Data history)" : v}
+        </div>
       ),
     },
     {
@@ -3195,13 +3214,13 @@ export default function SystemSettingsPage() {
   ];
 
   const globalWorkingDaysColumns: ColumnsType<GlobalWorkingDaysRow> = [
-    {
-      title: "Parameter Group",
-      dataIndex: "parameterGroup",
-      key: "parameterGroup",
-      width: 180,
-      render: (v?: string) => <span className="text-gray-700">{v || "-"}</span>,
-    },
+    // {
+    //   title: "Parameter Group",
+    //   dataIndex: "parameterGroup",
+    //   key: "parameterGroup",
+    //   width: 180,
+    //   render: (v?: string) => <span className="text-gray-700">{v || "-"}</span>,
+    // },
     {
       title: "Period",
       dataIndex: "period",
@@ -3408,7 +3427,7 @@ export default function SystemSettingsPage() {
         onCancel={closeStockdaysDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{stockdaysDeletingRow?.itemCode}</span>.
+          This will remove <span className="font-semibold">{stockdaysDeletingRow?.itemUniqCode}</span>.
         </div>
       </Modal>
 
@@ -4372,20 +4391,32 @@ export default function SystemSettingsPage() {
           </Form.Item>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Form.Item label="Level 1 Role" name="level1Role" rules={[{ required: true }]}>
-              <Input placeholder="Production Supervisor" />
+            <Form.Item label="Level 1 Role" name="level1Role">
+              <Select
+                options={(shouldLoadRoles ? (rolesApiData ?? []) : []).map((r) => ({ label: String(r.name), value: String(r.name) }))}
+                allowClear
+              />
             </Form.Item>
 
-            <Form.Item label="Level 2 Role" name="level2Role" rules={[{ required: true }]}>
-              <Input placeholder="Production Manager" />
+            <Form.Item label="Level 2 Role" name="level2Role">
+              <Select
+                options={(shouldLoadRoles ? (rolesApiData ?? []) : []).map((r) => ({ label: String(r.name), value: String(r.name) }))}
+                allowClear
+              />
             </Form.Item>
 
-            <Form.Item label="Level 3 Role" name="level3Role" rules={[{ required: true }]}>
-              <Input placeholder="Director" />
+            <Form.Item label="Level 3 Role" name="level3Role">
+              <Select
+                options={(shouldLoadRoles ? (rolesApiData ?? []) : []).map((r) => ({ label: String(r.name), value: String(r.name) }))}
+                allowClear
+              />
             </Form.Item>
 
-            <Form.Item label="Level 4 Role" name="level4Role" rules={[{ required: true }]}>
-              <Input placeholder="CEO" />
+            <Form.Item label="Level 4 Role" name="level4Role">
+              <Select
+                options={(shouldLoadRoles ? (rolesApiData ?? []) : []).map((r) => ({ label: String(r.name), value: String(r.name) }))}
+                allowClear
+              />
             </Form.Item>
           </div>
 
@@ -4480,10 +4511,16 @@ export default function SystemSettingsPage() {
             <Input placeholder="planning" />
           </Form.Item>
           <Form.Item label="Period" name="period" rules={[{ required: true }]}>
-            <Input placeholder="2026-04" />
+            <Select
+              placeholder="Select period"
+              options={PERIOD_OPTIONS as unknown as { label: string; value: string }[]}
+              className="w-full"
+              showSearch
+              optionFilterProp="label"
+            />
           </Form.Item>
           <Form.Item label="Working Days" name="workingDays" rules={[{ required: true }]}>
-            <InputNumber className="w-full" min={0} placeholder="22" />
+            <Input className="w-full" placeholder="22" />
           </Form.Item>
           <Form.Item label="Status" name="status" rules={[{ required: true }]}>
             <Select
@@ -4749,6 +4786,10 @@ export default function SystemSettingsPage() {
                       router.push("/system-settings/stockdays/create");
                       return;
                     }
+                    if (selectedModuleId === "scrap") {
+                      router.push("/system-settings/scrap-type/create");
+                      return;
+                    }
                     if (selectedModuleId === "type-parameters") {
                       openCreateTypeParameter();
                       return;
@@ -4766,15 +4807,15 @@ export default function SystemSettingsPage() {
                       return;
                     }
                     if (selectedModuleId === "kanban") {
-                      router.push("/system-settings/kanban/create");
+                      router.push("/system-settings/kanban/parameter/create-fullscreen");
                       return;
                     }
                     if (selectedModuleId === "global") {
-                      openCreateGlobalWorkingDays();
+                      router.push("/system-settings/global/create-fullscreen");
                       return;
                     }
                     if (selectedModuleId === "process") {
-                      openCreateProcess();
+                      router.push("/system-settings/process/create-fullscreen");
                       return;
                     }
                     if (selectedModuleId === "machine") {

@@ -16,7 +16,7 @@ type FormValues = {
   max_stock: number;
 };
 
-export default function KanbanCreatePage() {
+export default function KanbanParameterCreateFullscreenPage() {
   const router = useRouter();
   const [form] = Form.useForm<FormValues>();
 
@@ -69,27 +69,50 @@ export default function KanbanCreatePage() {
         max_stock: Number(values.max_stock ?? 0),
       }).unwrap();
 
-      message.success("Kanban standard created");
+      message.success("Kanban parameter created");
       router.push("/system-settings");
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error(getApiErrorMessage(err, "Failed to create kanban standard"));
+      message.error(getApiErrorMessage(err, "Failed to create kanban parameter"));
+    }
+  };
+
+  const onAddAnother = async () => {
+    try {
+      const values = await form.validateFields();
+      await createKanbanStandard({
+        item_name: values.item_name,
+        item_uniq_code: values.item_uniq_code,
+        kanban_qty: Number(values.kanban_qty ?? 0),
+        min_stock: Number(values.min_stock ?? 0),
+        max_stock: Number(values.max_stock ?? 0),
+      }).unwrap();
+
+      message.success("Kanban parameter created");
+      // reset form for next entry
+      form.resetFields();
+      form.setFieldsValue({ kanban_qty: 50, min_stock: 100, max_stock: 500 });
+    } catch (err) {
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      message.error(getApiErrorMessage(err, "Failed to create kanban parameter"));
     }
   };
 
   return (
-    <div className="p-6 bg-gray-50 min-h-screen">
+    <div className="min-h-screen bg-[#EEF5FF] p-6">
       <div className="max-w-4xl mx-auto space-y-4">
-        <Card className="rounded-2xl shadow-sm" styles={{ body: { padding: 20 } }}>
+        <Card className="rounded-2xl shadow-sm" style={{ padding: 20 }}>
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
-              <div className="text-2xl font-bold text-gray-900">Create Kanban Standard</div>
+              <div className="text-2xl font-bold text-gray-900">Create Kanban Parameter</div>
               <div className="text-sm text-gray-500">Select item UNIQ from registered BOMs</div>
             </div>
             <div className="flex items-center gap-2">
-              <Button className="!rounded-lg" onClick={() => router.push("/system-settings")}
-              >
+              <Button className="!rounded-lg" onClick={() => router.push("/system-settings")}>
                 Back
+              </Button>
+              <Button className="!rounded-lg" onClick={onAddAnother}>
+                + Add Another Parameter
               </Button>
               <Button
                 type="primary"
@@ -103,7 +126,7 @@ export default function KanbanCreatePage() {
           </div>
         </Card>
 
-        <Card className="rounded-2xl shadow-sm" styles={{ body: { padding: 20 } }}>
+        <Card className="rounded-2xl shadow-sm" style={{ padding: 20 }}>
           <Form<FormValues>
             form={form}
             layout="vertical"
@@ -114,32 +137,30 @@ export default function KanbanCreatePage() {
             }}
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Form.Item name="item_name" label="Item Name" rules={[{ required: true }]}>
+              <Form.Item name="item_name" label="Item Name" rules={[{ required: true }]}> 
                 <Input className="!rounded-lg" placeholder="e.g. Bracket Assembly" />
               </Form.Item>
 
-              <Form.Item name="item_uniq_code" label="Item UNIQ Code" rules={[{ required: true }]}>
+              <Form.Item name="item_uniq_code" label="Item UNIQ Code" rules={[{ required: true }]}> 
                 <Select
                   showSearch
                   className="!rounded-lg"
                   placeholder="Select BOM UNIQ"
                   options={bomUniqOptions}
                   optionFilterProp="label"
-                  filterOption={(input, opt) =>
-                    String(opt?.label ?? "").toLowerCase().includes(input.toLowerCase())
-                  }
+                  filterOption={(input, opt) => String(opt?.label ?? "").toLowerCase().includes(input.toLowerCase())}
                 />
               </Form.Item>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Form.Item name="kanban_qty" label="Kanban Qty" rules={[{ required: true }]}>
+              <Form.Item name="kanban_qty" label="Kanban Qty" rules={[{ required: true }]}> 
                 <InputNumber className="w-full !rounded-lg" min={0} />
               </Form.Item>
-              <Form.Item name="min_stock" label="Min Stock" rules={[{ required: true }]}>
+              <Form.Item name="min_stock" label="Min Stock" rules={[{ required: true }]}> 
                 <InputNumber className="w-full !rounded-lg" min={0} />
               </Form.Item>
-              <Form.Item name="max_stock" label="Max Stock" rules={[{ required: true }]}>
+              <Form.Item name="max_stock" label="Max Stock" rules={[{ required: true }]}> 
                 <InputNumber className="w-full !rounded-lg" min={0} />
               </Form.Item>
             </div>

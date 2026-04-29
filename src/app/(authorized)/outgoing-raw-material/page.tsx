@@ -366,7 +366,7 @@ export default function OutgoingRawMaterialPage() {
         onCancel={closeDetail}
         footer={null}
         width={860}
-        destroyOnClose
+        destroyOnHidden
       >
         {detailQuery.isFetching ? (
           <div className="text-gray-600">Loading…</div>
@@ -387,7 +387,7 @@ export default function OutgoingRawMaterialPage() {
         okText="Create"
         confirmLoading={createState.isLoading}
         width={680}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" requiredMark={false}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
