@@ -114,6 +114,7 @@ export default function TypeParametersCreatePage() {
           type_name: String(e.typeName ?? "").trim(),
           description: String(e.description ?? "").trim(),
           status: e.status === "Active" ? "active" : "inactive",
+          parameter_group: "wip",
         }).unwrap();
       }
 

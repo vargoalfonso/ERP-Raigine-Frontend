@@ -22,6 +22,7 @@ import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
 import { useCreateScrapStockMutation } from "@/lib/api/scrap-stock/api";
 import { useGetWorkOrdersQuery } from "@/lib/api/work-orders/api";
+import { useGetScrapTypesQuery } from "@/lib/api/scrap-types/api";
 
 const { Title } = Typography;
 
@@ -40,12 +41,6 @@ type ScrapStockCreateForm = {
   date_received: Dayjs;
   remarks?: string | null;
 };
-
-const scrapTypeOptions = [
-  { label: "Setting Machine Scrap", value: "setting_machine_scrap" },
-  { label: "Process Scrap", value: "process_scrap" },
-  { label: "Product Return Scrap", value: "product_return_scrap" },
-];
 
 const disposalReasonOptions = [
   { label: "Dump", value: "dump" },
@@ -66,6 +61,21 @@ export default function CreateScrapStockPage() {
 
   const workOrdersQuery = useGetWorkOrdersQuery({ page: 1, limit: 200 }, { skip: !apiEnabled });
   const workOrders = workOrdersQuery.data?.items ?? [];
+  const scrapTypesQuery = useGetScrapTypesQuery({ page: 1, limit: 100 }, { skip: !apiEnabled });
+  const scrapTypeOptions = useMemo(
+    () =>
+      (scrapTypesQuery.data?.items ?? [])
+        .map((item) => {
+          const name = String(item.name ?? "").trim();
+          if (!name) return null;
+          return {
+            label: name,
+            value: name,
+          };
+        })
+        .filter((item): item is { label: string; value: string } => Boolean(item)),
+    [scrapTypesQuery.data?.items]
+  );
 
   const selectedWorkOrder = useMemo(
     () => workOrders.find((item) => item.wo_number === selectedWoNumber),
@@ -309,7 +319,13 @@ export default function CreateScrapStockPage() {
               </Form.Item>
 
               <Form.Item name="scrap_type" label="Scrap Type" rules={[{ required: true, message: "Select scrap type" }]}>
-                <Select placeholder="Select scrap type" options={scrapTypeOptions} />
+                <Select
+                  placeholder="Select scrap type"
+                  options={scrapTypeOptions}
+                  loading={apiEnabled && scrapTypesQuery.isFetching}
+                  showSearch
+                  optionFilterProp="label"
+                />
               </Form.Item>
 
               <Form.Item name="disposal_reason" label="Disposal Reason" rules={[{ required: true, message: "Select disposal reason" }]}>

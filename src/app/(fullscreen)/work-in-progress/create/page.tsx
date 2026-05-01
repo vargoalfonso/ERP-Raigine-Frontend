@@ -138,32 +138,35 @@ export default function CreateWorkInProgressPage() {
   );
 
   const wipTypeOptions = useMemo(() => {
-    const filtered = typeParameterRecords.filter((item) => {
-      const code = String(item.type_code ?? "").trim().toLowerCase();
-      const name = String(item.type_name ?? "").trim().toLowerCase();
-      return code.includes("wip") || name.includes("wip") || name.includes("work in progress") || code.includes("work in progress");
-    });
-
-    const options = filtered.map((item) => {
-      const code = String(item.type_code ?? "").trim();
-      const name = String(item.type_name ?? "").trim();
-      const value = code || name;
-      return {
-        label: code && name ? `${code} — ${name}` : value,
-        value,
-      };
-    }).filter((item) => Boolean(item.value));
+    const options = Array.from(
+      new Map(
+        typeParameterRecords
+          .map((item) => {
+            const typeName = String(item.type_name ?? "").trim();
+            if (!typeName) return null;
+            return [
+              typeName,
+              {
+                label: typeName,
+                value: typeName,
+              },
+            ] as const;
+          })
+          .filter(
+            (item): item is readonly [string, { label: string; value: string }] => Boolean(item)
+          )
+      ).values()
+    );
 
     if (options.length > 0) return options;
 
     return [
-      { label: "Draft", value: "draft" },
-      { label: "In Progress", value: "in_progress" },
-      { label: "Completed", value: "completed" },
+
+          
     ];
   }, [typeParameterRecords]);
 
-  const defaultWipType = wipTypeOptions[0]?.value ?? "draft";
+  const defaultWipType = wipTypeOptions[0]?.value ?? "";
 
   const workOrderByNumber = useMemo(
     () => new Map(workOrders.map((record) => [record.wo_number, record] as const)),
