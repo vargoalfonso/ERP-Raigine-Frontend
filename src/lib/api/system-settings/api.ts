@@ -389,6 +389,7 @@ export type CreateTypeParameterRequest = {
   type_name: string;
   description: string;
   status: StatusType;
+  parameter_group?: string;
 };
 
 export type TypeParameterRecord = {
@@ -397,6 +398,7 @@ export type TypeParameterRecord = {
   type_name: string;
   description: string;
   status: StatusType;
+  parameter_group?: string;
 };
 
 export type CreateSafetyStockRequest = {

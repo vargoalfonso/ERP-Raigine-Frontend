@@ -371,8 +371,9 @@ export default function CreateBomPage() {
           <Button
             icon={<PlusOutlined />}
             onClick={() => {
-              const current = form.getFieldValue([...absolutePath, "process_routes"]) ?? [];
-              form.setFieldValue([...absolutePath, "process_routes"], [
+              const dynamicForm = form as any;
+              const current = dynamicForm.getFieldValue([...absolutePath, "process_routes"]) ?? [];
+              dynamicForm.setFieldValue([...absolutePath, "process_routes"], [
                 ...current,
                 { sequence: (current.length ?? 0) + 1 },
               ]);
