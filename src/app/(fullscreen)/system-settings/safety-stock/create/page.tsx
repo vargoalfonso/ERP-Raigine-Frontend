@@ -34,9 +34,9 @@ const TYPE_OPTIONS = [
 
 
 const CALCULATION_OPTIONS = [
-  { label: "Days", value: "days" },
-  { label: "Percentage", value: "percentage" },
-  { label: "Forecast", value: "forecast" },
+  { label: "Using PRL/working days * days (C)", value: "days" },
+  { label: "Using PRL/working days * percentage (C)", value: "percentage" },
+  { label: "Demand Forecasting result for each Uniq", value: "forecast" },
   { label: "Using PRL/working days * days (C)", value: "Using PRL/working days * days (C)" },
 ];
 
@@ -81,10 +81,10 @@ export default function SafetyStockCreatePage() {
     const items = inventoryListResp?.data ?? [];
     return items
       .map((r) => {
-        const uniq = (r as any)?.uniq_code ?? (r as any)?.uniq ?? (r as any)?.item_name ?? undefined;
+        const uniq = (r as any)?.uniq_code ?? (r as any)?.uniq //?? (r as any)?.item_name ?? undefined;
         if (!uniq) return null;
-        const part = (r as any)?.part_name ?? (r as any)?.part_number ?? (r as any)?.item_name ?? "";
-        return { label: part ? `${uniq} — ${part}` : String(uniq), value: String(uniq) };
+        //const part = (r as any)?.part_name ?? (r as any)?.part_number ?? (r as any)?.item_name ?? "";
+        return { label: String(uniq), value: String(uniq)}; //label: part ? `${uniq} — ${part}` : };
       })
       .filter(Boolean) as { label: string; value: string }[];
   }, [inventoryListResp]);
@@ -252,6 +252,7 @@ export default function SafetyStockCreatePage() {
                     <div className="lg:col-span-3">
                       <div className="text-sm text-gray-700 mb-2">Uniq</div>
                       <Select
+                      className="safetystock-select-uniq max-w-2xl"
                         value={e.uniq}
                         onChange={(v) => updateEntry(e.id, { uniq: v, created: false })}
                         placeholder={inventoryType ? "Select Uniq" : "Select Type first"}
@@ -263,6 +264,8 @@ export default function SafetyStockCreatePage() {
                     <div className="lg:col-span-4">
                       <div className="text-sm text-gray-700 mb-2 max-w-2xl">Calculation Type</div>
                       <Select
+                        className="safetystock-select max-w-2xl"
+                        popupClassName="safetystock-select-popup"
                         value={e.calculationType}
                         onChange={(v) => updateEntry(e.id, { calculationType: v, created: false })}
                         options={CALCULATION_OPTIONS}

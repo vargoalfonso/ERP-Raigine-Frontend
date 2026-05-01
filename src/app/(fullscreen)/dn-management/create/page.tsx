@@ -1,11 +1,14 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+export const dynamic = "force-dynamic";
+
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { Button, Card, DatePicker, Input, InputNumber, Select, Tag, message } from "antd";
 import { LeftOutlined, SaveOutlined, PlusOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
+import customParseFormat from "dayjs/plugin/customParseFormat";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
@@ -15,6 +18,7 @@ import {
   type ProcurementDnType,
 } from "@/lib/api/procurement-dn/api";
 import { type ProcurementPoType, useGetProcurementPoByIdQuery, useListProcurementPosQuery } from "@/lib/api/procurement-po/api";
+import { useGetGlobalWorkingDaysQuery } from "@/lib/api/system-settings/api";
 
 type DnManagementType = "rm" | "indirect" | "subcon";
 
@@ -57,7 +61,25 @@ type Step2Draft = {
   dateIncoming?: Dayjs;
 };
 
+type UniqOption = {
+  label: string;
+  value: string;
+  material: {
+    code: string;
+    name: string;
+    model: string;
+  };
+  totalQty: number;
+  remainingQty: number;
+  uom: string;
+  packingNumber: string;
+  pcsPerKanban: number;
+  dateIncoming?: string;
+};
+
 type UnknownRecord = Record<string, unknown>;
+
+dayjs.extend(customParseFormat);
 
 const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
 
@@ -79,15 +101,16 @@ const toNumber = (value: unknown): number | undefined => {
   return undefined;
 };
 
-const UOM_OPTIONS = [
-  { label: "pcs", value: "pcs" },
-  { label: "kg", value: "kg" },
-  { label: "m", value: "m" },
-];
+const parseIncomingDate = (value?: string): Dayjs | undefined => {
+  const text = toText(value);
+  if (!text) return undefined;
 
-function nextDnCode() {
-  return "DN-RM-2024-001";
-}
+  const parsed = dayjs(text, ["DD/MM/YYYY", "YYYY-MM-DD", "YYYY/MM/DD"], true);
+  if (parsed.isValid()) return parsed;
+
+  const fallback = dayjs(text);
+  return fallback.isValid() ? fallback : undefined;
+};
 
 const tabToType = (tab: string): DnManagementType => {
   if (tab === "subcon") return "subcon";
@@ -114,16 +137,29 @@ const typeCopy = (type: DnManagementType) => {
   return { label: "Raw Material", title: "DN Raw Material", back: "Raw Material", codePrefix: "DN-RM" };
 };
 
-export default function DnRawMaterialCreatePage() {
+function DnRawMaterialCreatePageContent() {
   const router = useRouter();
   const apiEnabled = Boolean(apiBaseUrl);
   const [tabParam, setTabParam] = useState("raw");
   const dnType = tabToType(tabParam);
   const copy = typeCopy(dnType);
+
   const [createProcurementDn, { isLoading: saving }] = useCreateProcurementDnMutation();
   const [previewProcurementDn, { isLoading: previewing }] = usePreviewProcurementDnMutation();
 
   const [step1, setStep1] = useState<Step1Data>({});
+
+  const [scheduleDate, setScheduleDate] = useState<Dayjs | null>(dayjs());
+  const [priority, setPriority] = useState<string>("normal");
+
+  const [transportCompany, setTransportCompany] = useState<string>("");
+  const [vehicleNumber, setVehicleNumber] = useState<string>("");
+  const [driverName, setDriverName] = useState<string>("");
+  const [driverContact, setDriverContact] = useState<string>("");
+  const [departureAt, setDepartureAt] = useState<Dayjs | null>(null);
+  const [arrivalAt, setArrivalAt] = useState<Dayjs | null>(null);
+  const [status, setStatus] = useState<string>("");
+  const [remarks, setRemarks] = useState<string>("");
 
   const [preview, setPreview] = useState<ProcurementDnPreview | null>(null);
 
@@ -139,6 +175,28 @@ export default function DnRawMaterialCreatePage() {
 
   const poType = managementTypeToPoType(dnType);
   const poListQuery = useListProcurementPosQuery({ po_type: poType }, { skip: !apiEnabled });
+  const { data: globalParameters = [] } = useGetGlobalWorkingDaysQuery(undefined, { skip: !apiEnabled });
+
+  useEffect(() => {
+    if (step1.poNumber || step1.period) return;
+
+    const activePlanningPeriods = globalParameters
+      .filter((item) => String(item.status ?? "active").trim().toLowerCase() === "active")
+      .filter((item) => String(item.parameter_group ?? "").trim().toLowerCase() === "planning")
+      .map((item) => String(item.period ?? "").trim())
+      .filter(Boolean);
+
+    const fallbackPeriods = globalParameters
+      .filter((item) => String(item.status ?? "active").trim().toLowerCase() === "active")
+      .map((item) => String(item.period ?? "").trim())
+      .filter(Boolean);
+
+    const nextPeriod =
+      (activePlanningPeriods.length ? activePlanningPeriods : fallbackPeriods)[0] ??
+      (scheduleDate ?? dayjs()).format("YYYY-MM");
+
+    setStep1((prev) => ({ ...prev, period: nextPeriod }));
+  }, [globalParameters, scheduleDate, step1.period, step1.poNumber]);
 
 
   const selectedPo = useMemo(() => {
@@ -164,7 +222,32 @@ export default function DnRawMaterialCreatePage() {
       .filter((opt) => Boolean(opt.value));
   }, [poListQuery.data]);
 
-  const uniqOptions = useMemo(() => {
+  const periodOptions = useMemo(() => {
+    const activePlanningPeriods = globalParameters
+      .filter((item) => String(item.status ?? "active").trim().toLowerCase() === "active")
+      .filter((item) => String(item.parameter_group ?? "").trim().toLowerCase() === "planning")
+      .map((item) => String(item.period ?? "").trim())
+      .filter(Boolean);
+
+    const fallbackPeriods = globalParameters
+      .filter((item) => String(item.status ?? "active").trim().toLowerCase() === "active")
+      .map((item) => String(item.period ?? "").trim())
+      .filter(Boolean);
+
+    const basePeriods = (activePlanningPeriods.length ? activePlanningPeriods : fallbackPeriods).filter(
+      (value, index, array) => array.indexOf(value) === index,
+    );
+
+    const extraPeriods = [step1.period, preview?.period]
+      .map((value) => String(value ?? "").trim())
+      .filter(Boolean);
+
+    return [...basePeriods, ...extraPeriods]
+      .filter((value, index, array) => array.indexOf(value) === index)
+      .map((value) => ({ label: value, value }));
+  }, [globalParameters, preview?.period, step1.period]);
+
+  const previewItems = useMemo<UniqOption[]>(() => {
     if (preview?.items?.length) {
       const mapped = preview.items
         .map((item) => {
@@ -190,11 +273,7 @@ export default function DnRawMaterialCreatePage() {
         })
         .filter((v): v is NonNullable<typeof v> => v !== null);
 
-      const deduped = new Map<string, (typeof mapped)[number]>();
-      mapped.forEach((m) => {
-        if (!deduped.has(m.value)) deduped.set(m.value, m);
-      });
-      return Array.from(deduped.values());
+      return mapped;
     }
 
     const rawItems = (poDetailQuery.data?.data?.items ?? []).filter((it): it is UnknownRecord => isRecord(it));
@@ -243,100 +322,148 @@ export default function DnRawMaterialCreatePage() {
       })
       .filter((v): v is NonNullable<typeof v> => v !== null);
 
-    const deduped = new Map<string, (typeof mapped)[number]>();
-    mapped.forEach((m) => {
-      if (!deduped.has(m.value)) deduped.set(m.value, m);
+    return mapped;
+  }, [poDetailQuery.data, preview]);
+
+  const uniqOptions = useMemo(() => {
+    const deduped = new Map<string, UniqOption>();
+    previewItems.forEach((item) => {
+      if (!deduped.has(item.value)) deduped.set(item.value, item);
     });
     return Array.from(deduped.values());
-  }, [poDetailQuery.data, preview]);
+  }, [previewItems]);
+
+  const getPreviewItemForUniq = (uniq: string, packingNumber?: string) => {
+    if (packingNumber) {
+      const exact = previewItems.find((item) => item.value === uniq && item.packingNumber === packingNumber);
+      if (exact) return exact;
+    }
+
+    const nextUnused = previewItems.find(
+      (item) => item.value === uniq && !items.some((existing) => existing.uniq === uniq && existing.packingNumber === item.packingNumber),
+    );
+
+    return nextUnused ?? previewItems.find((item) => item.value === uniq);
+  };
+
+  const selectedDraftItem = useMemo(
+    () => (draft.uniq ? getPreviewItemForUniq(draft.uniq, draft.packing) : undefined),
+    [draft.packing, draft.uniq, items, previewItems],
+  );
 
   const dnCode = useMemo(() => `${copy.codePrefix}-${step1.period?.replace(/[^0-9A-Za-z]/g, "") ?? "202401"}-001`, [copy.codePrefix, step1.period]);
   const totalUniqChosen = useMemo(() => items.length, [items]);
+  const totalQty = useMemo(() => items.reduce((sum, it) => sum + Number(it.orderQty ?? 0), 0), [items]);
 
-  const onPickPo = async (poValue: string) => {
-    const po = (poListQuery.data?.data ?? []).find((p) => String(p.po_number ?? "").trim() === poValue);
+  const requestPreview = async (poNumber: string, periodValue?: string) => {
+    if (!apiEnabled || !poNumber) return;
 
     const procurementType = managementTypeToProcurementType(dnType);
 
-    setStep1((prev) => ({
-      ...prev,
-      poNumber: poValue,
-      period: String(po?.period ?? prev.period ?? "").trim() || prev.period,
-      supplierId: po?.supplier_id == null ? prev.supplierId : Number(po.supplier_id),
-      supplier: String(po?.supplier_name ?? prev.supplier ?? "").trim() || prev.supplier,
-      totalPo: po?.total_po == null ? prev.totalPo : Number(po.total_po),
-      totalIncoming: po?.total_incoming == null ? prev.totalIncoming : Number(po.total_incoming),
-      dnCreated: po?.dn_created == null ? prev.dnCreated : Number(po.dn_created),
-      dnIncoming: po?.dn_incoming == null ? prev.dnIncoming : Number(po.dn_incoming),
-    }));
-
-    if (!apiEnabled) return;
-
     try {
       const res = await previewProcurementDn({
-        po_number: poValue,
-        period: dayjs().format("YYYY-MM"),
+        po_number: poNumber,
+        period: periodValue,
         type: procurementType,
         item: [],
       }).unwrap();
 
       setPreview(res.data);
-
       setStep1((prev) => ({
         ...prev,
-        period: res.data.period ?? prev.period,
-        supplier: res.data.supplier ?? prev.supplier,
-        totalPo: res.data.total_po ?? prev.totalPo,
-        totalIncoming: res.data.total_incoming ?? prev.totalIncoming,
-        dnCreated: res.data.total_dn_created ?? prev.dnCreated,
-        dnIncoming: res.data.total_dn_incoming ?? prev.dnIncoming,
+        period: String(res.data.period ?? periodValue ?? prev.period ?? "").trim() || prev.period,
+        supplier: String(res.data.supplier ?? prev.supplier ?? "").trim() || prev.supplier,
+        totalPo: res.data.total_po == null ? undefined : Number(res.data.total_po),
+        totalIncoming: res.data.total_incoming == null ? undefined : Number(res.data.total_incoming),
+        dnCreated: res.data.total_dn_created == null ? undefined : Number(res.data.total_dn_created),
+        dnIncoming: res.data.total_dn_incoming == null ? undefined : Number(res.data.total_dn_incoming),
       }));
-
-      const nextItems: DnItemRow[] = (res.data.items ?? [])
-        .map((item, index) => {
-          const uniq = String(item.item_uniq_code ?? "").trim();
-          if (!uniq) return null;
-          const packingNumber = String(item.packing_number ?? "").trim() || "-";
-          const dateIncomingText = String(item.date_incoming ?? "").trim();
-          const dateIncoming = dateIncomingText ? dayjs(dateIncomingText, "DD/MM/YYYY") : undefined;
-
-          return {
-            key: `${uniq}-${packingNumber}-${index}`,
-            uniq,
-            materialInfo: {
-              code: String(item.material_info ?? uniq),
-              name: String(item.material_info ?? uniq),
-              model: String(res.data.type ?? "-") || "-",
-            },
-            totalQty: Number(item.total_qty ?? 0),
-            remainingQty: Number(item.remaining_qty ?? 0),
-            uom: String(item.uom ?? "-") || "-",
-            orderQty: Number(item.order_qty ?? 0),
-            packingNumber,
-            pcsPerKanban: Number(item.pcs_per_kanban ?? 0),
-            dateIncoming,
-          };
-        })
-        .filter((v): v is NonNullable<typeof v> => v !== null);
-
-      if (nextItems.length > 0) {
-        setItems(nextItems);
-      }
     } catch (error) {
-      message.error(getApiErrorMessage(error, "Failed to load DN preview"));
       setPreview(null);
+      setStep1((prev) => ({
+        ...prev,
+        totalPo: undefined,
+        totalIncoming: undefined,
+        dnCreated: undefined,
+        dnIncoming: undefined,
+      }));
+      message.error(getApiErrorMessage(error, "Failed to load DN preview"));
     }
   };
 
+  const onPickPo = async (poValue?: string) => {
+    setDraft({});
+    setItems([]);
+    setPreview(null);
+
+    if (!poValue) {
+      setStep1({
+        period: step1.period ?? periodOptions[0]?.value ?? (scheduleDate ?? dayjs()).format("YYYY-MM"),
+      });
+      return;
+    }
+
+    const po = (poListQuery.data?.data ?? []).find((p) => String(p.po_number ?? "").trim() === poValue);
+    const nextPeriod = String(step1.period ?? po?.period ?? periodOptions[0]?.value ?? "").trim() || undefined;
+
+    setStep1((prev) => ({
+      ...prev,
+      poNumber: poValue,
+      period: nextPeriod ?? prev.period,
+      supplierId: po?.supplier_id == null ? prev.supplierId : Number(po.supplier_id),
+      supplier: String(po?.supplier_name ?? prev.supplier ?? "").trim() || prev.supplier,
+      totalPo: undefined,
+      totalIncoming: undefined,
+      dnCreated: undefined,
+      dnIncoming: undefined,
+    }));
+
+    await requestPreview(poValue, nextPeriod);
+  };
+
+  const onPickPeriod = async (value?: string) => {
+    setDraft({});
+    setItems([]);
+    setPreview(null);
+
+    setStep1((prev) => ({
+      ...prev,
+      period: value,
+      totalPo: undefined,
+      totalIncoming: undefined,
+      dnCreated: undefined,
+      dnIncoming: undefined,
+    }));
+
+    if (!step1.poNumber || !value) return;
+    await requestPreview(step1.poNumber, value);
+  };
+
   const onPickUniq = (uniq: string) => {
-    const found = uniqOptions.find((u) => u.value === uniq);
+    const found = getPreviewItemForUniq(uniq);
+
+    // Ensure pcsPerKanban is populated even if preview-mapped value is 0
+    let resolvedPcs = found?.pcsPerKanban ?? undefined;
+    if ((resolvedPcs == null || Number(resolvedPcs) === 0) && preview?.items?.length) {
+      const match = preview.items.find((it) => {
+        const item = it as any;
+        const code = String(item.item_uniq_code ?? item.uniq ?? "").trim();
+        return code === uniq;
+      });
+      if (match) {
+        const m = match as any;
+        resolvedPcs = Number(m.pcs_per_kanban ?? m.pcsPerKanban ?? resolvedPcs ?? 0);
+      }
+    }
+
     setDraft((prev) => ({
       ...prev,
       uniq,
+      orderQty: undefined,
       uom: found?.uom ?? prev.uom,
       packing: found?.packingNumber ?? prev.packing,
-      pcsPerKanban: found?.pcsPerKanban ?? prev.pcsPerKanban,
-      dateIncoming: found?.dateIncoming ? dayjs(found.dateIncoming, "DD/MM/YYYY") : prev.dateIncoming,
+      pcsPerKanban: resolvedPcs ?? prev.pcsPerKanban,
+      dateIncoming: parseIncomingDate(found?.dateIncoming) ?? prev.dateIncoming,
     }));
   };
 
@@ -358,7 +485,7 @@ export default function DnRawMaterialCreatePage() {
     const uom = draft.uom;
     const orderQty = draft.orderQty;
 
-    const found = uniqOptions.find((u) => u.value === uniq);
+    const found = getPreviewItemForUniq(uniq, draft.packing);
     const material = found?.material ?? { code: "-", name: "-", model: "-" };
     const totalQty = found?.totalQty ?? 0;
     const remainingQty = found?.remainingQty ?? 0;
@@ -382,7 +509,7 @@ export default function DnRawMaterialCreatePage() {
           orderQty,
           packingNumber,
           pcsPerKanban: draft.pcsPerKanban ?? found?.pcsPerKanban ?? 0,
-          dateIncoming: draft.dateIncoming,
+          dateIncoming: draft.dateIncoming ?? parseIncomingDate(found?.dateIncoming),
         },
       ];
     });
@@ -444,16 +571,14 @@ export default function DnRawMaterialCreatePage() {
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/dn-management")}>Cancel</Button>
               <Button type="primary" icon={<SaveOutlined />} onClick={() => void onSave()} loading={saving}>
-                Save {copy.title}
+                Save {copy.back}
               </Button>
             </div>
           </div>
 
           <div className="mt-2">
-            <div className="text-xl font-semibold text-gray-900">{copy.title} Management</div>
-            <div className="text-sm text-gray-500">
-              Initialize new {copy.title} <span className="mx-2">•</span> 1 entry
-            </div>
+            <div className="text-xl font-semibold text-gray-900">Add Delivery Note</div>
+            <div className="text-sm text-gray-500">Create DN for incoming raw material receipt and tracking • 1 entry</div>
           </div>
         </div>
       </div>
@@ -463,220 +588,216 @@ export default function DnRawMaterialCreatePage() {
           <Card className="rounded-2xl" bodyStyle={{ padding: 24 }}>
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="text-base font-semibold text-gray-900">Step 1: Input General Data</div>
-                <div className="text-sm text-gray-500">Input General Data</div>
-              </div>
-              <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">Required</Tag>
-            </div>
-
-            <div className="mt-5 space-y-4">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Period</div>
-                  <Input value={step1.period} onChange={(e) => setStep1((p) => ({ ...p, period: e.target.value }))} />
-                </div>
-
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">PO Number</div>
-                  <Select
-                    value={step1.poNumber}
-                    onChange={onPickPo}
-                    options={poOptions.map((p) => ({ label: p.label, value: p.value }))}
-                    placeholder="Select PO Number"
-                    className="w-full"
-                    disabled={previewing}
-                  />
-                </div>
-
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Supplier</div>
-                  <Select
-                    value={step1.supplier}
-                    options={[{ label: step1.supplier ?? "Autofilled", value: step1.supplier ?? "Autofilled" }]}
-                    className="w-full"
-                    disabled
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Total PO</div>
-                  <InputNumber
-                    value={step1.totalPo}
-                    onChange={(v) => setStep1((p) => ({ ...p, totalPo: v ?? undefined }))}
-                    className="w-full"
-                    min={0}
-                  />
-                </div>
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Total Incoming</div>
-                  <InputNumber
-                    value={step1.totalIncoming}
-                    onChange={(v) => setStep1((p) => ({ ...p, totalIncoming: v ?? undefined }))}
-                    className="w-full"
-                    min={0}
-                  />
-                </div>
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">DN Created</div>
-                  <InputNumber
-                    value={step1.dnCreated}
-                    onChange={(v) => setStep1((p) => ({ ...p, dnCreated: v ?? undefined }))}
-                    className="w-full"
-                    min={0}
-                  />
-                </div>
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">DN Incoming</div>
-                  <InputNumber
-                    value={step1.dnIncoming}
-                    onChange={(v) => setStep1((p) => ({ ...p, dnIncoming: v ?? undefined }))}
-                    className="w-full"
-                    min={0}
-                  />
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="rounded-2xl" bodyStyle={{ padding: 24 }}>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-base font-semibold text-gray-900">Step 2: Input Data</div>
-                <div className="text-sm text-gray-500">Input Data for each items</div>
+                <div className="text-base font-semibold text-gray-900">Add Delivery Note #1</div>
+                <div className="text-sm text-gray-500">Create DN for incoming raw material receipt and tracking</div>
               </div>
               <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">Entry 1</Tag>
             </div>
 
-            <div className="mt-5 space-y-4">
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Uniq</div>
-                  <Select
-                    value={draft.uniq}
-                    onChange={onPickUniq}
-                    placeholder="Select Uniq"
-                    options={uniqOptions.map((u) => ({ label: u.label, value: u.value }))}
-                    className="w-full"
-                  />
-                </div>
-
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Order Qty</div>
-                  <InputNumber
-                    value={draft.orderQty}
-                    onChange={(v) => setDraft((p) => ({ ...p, orderQty: v ?? undefined }))}
-                    placeholder="Input Quantity"
-                    className="w-full"
-                    min={0}
-                  />
-                </div>
-
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Unit of Measurement</div>
-                  <Select
-                    value={draft.uom}
-                    onChange={(v) => setDraft((p) => ({ ...p, uom: v }))}
-                    placeholder="Select UoM"
-                    options={UOM_OPTIONS}
-                    className="w-full"
-                  />
-                </div>
-
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Packing</div>
-                  <Input
-                    value={draft.packing}
-                    onChange={(e) => setDraft((p) => ({ ...p, packing: e.target.value }))}
-                    placeholder="Input Packing Number"
-                    className="w-full"
-                  />
-                </div>
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Schedule ID</div>
+                <Input value={dnCode} disabled />
+              </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Schedule Date</div>
+                <DatePicker className="w-full" value={scheduleDate} onChange={(v) => setScheduleDate(v)} format="DD/MM/YYYY" />
+              </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Supplier</div>
+                <Input value={step1.supplier ?? ""} disabled placeholder="Auto-filled from PO" />
+              </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">PO Number</div>
+                <Select
+                  value={step1.poNumber}
+                  onChange={onPickPo}
+                  options={poOptions.map((p) => ({ label: p.label, value: p.value }))}
+                  placeholder="Select PO Number"
+                  className="w-full"
+                  disabled={previewing}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                />
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-end">
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Pcs/Kanban</div>
-                  <InputNumber
-                    value={draft.pcsPerKanban}
-                    onChange={(v) => setDraft((p) => ({ ...p, pcsPerKanban: v ?? undefined }))}
-                    placeholder="Input pcs/kanban"
-                    className="w-full"
-                    min={0}
-                  />
-                </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Period</div>
+                <Select
+                  value={step1.period}
+                  onChange={(value) => void onPickPeriod(value)}
+                  options={periodOptions}
+                  placeholder="Select period"
+                  className="w-full"
+                  disabled={previewing}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Total PO</div>
+                <InputNumber value={step1.totalPo} disabled className="w-full" />
+              </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Total Incoming</div>
+                <InputNumber value={step1.totalIncoming} disabled className="w-full" />
+              </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">DN Created</div>
+                <InputNumber value={step1.dnCreated} disabled className="w-full" />
+              </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">DN Incoming</div>
+                <InputNumber value={step1.dnIncoming} disabled className="w-full" />
+              </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Priority</div>
+                <Select
+                  className="w-full"
+                  value={priority}
+                  onChange={(v) => setPriority(v)}
+                  options={[
+                    { label: "Select Priority", value: "" },
+                    { label: "normal", value: "normal" },
+                    { label: "high", value: "high" },
+                  ]}
+                />
+              </div>
+            </div>
 
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Date Incoming</div>
-                  <DatePicker
-                    value={draft.dateIncoming}
-                    onChange={(v) => setDraft((p) => ({ ...p, dateIncoming: v ?? undefined }))}
-                    className="w-full"
-                  />
-                </div>
+            <div className="mt-6">
+              <div className="text-sm font-semibold text-gray-900">Delivery Items</div>
+              <div className="mt-3 space-y-3">
+                {items.map((it) => (
+                  <div key={it.key} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                      <div className="text-sm text-gray-700 mb-2">DN Number</div>
+                      <Input value={it.uniq} disabled />
+                    </div>
+                    <div>
+                      <div className="text-sm text-gray-700 mb-2">Product Name</div>
+                      <Input value={it.materialInfo.name} disabled />
+                    </div>
+                    <div>
+                      <div className="text-sm text-gray-700 mb-2">Total Quantity</div>
+                      <InputNumber value={it.orderQty} disabled className="w-full" />
+                    </div>
+                    <div className="flex items-end justify-end">
+                      <Button danger onClick={() => setItems((prev) => prev.filter((p) => p.key !== it.key))} className="!rounded-lg">
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                ))}
 
-                <div className="lg:col-span-2 flex justify-start lg:justify-center">
-                  <Button type="primary" icon={<PlusOutlined />} onClick={addItem} className="w-full lg:w-64">
-                    Create DN
-                  </Button>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div>
+                    <div className="text-sm text-gray-700 mb-2">DN Number</div>
+                    <Select
+                      value={draft.uniq}
+                      onChange={onPickUniq}
+                      placeholder={step1.poNumber ? "Select DN Number" : "Select PO Number first"}
+                      options={uniqOptions.map((u) => ({ label: u.label, value: u.value }))}
+                      className="w-full"
+                      disabled={!step1.poNumber || previewing}
+                    />
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-700 mb-2">Product Name</div>
+                    <Input value={selectedDraftItem?.material?.name ?? ""} disabled placeholder="Auto-filled" />
+                  </div>
+                  <div>
+                    <div className="text-sm text-gray-700 mb-2">Total Quantity</div>
+                    <InputNumber
+                      value={draft.orderQty}
+                      onChange={(v) => setDraft((p) => ({ ...p, orderQty: v ?? undefined }))}
+                      className="w-full"
+                      min={0}
+                    />
+                  </div>
+                  <div className="flex items-end justify-end">
+                    <Button type="primary" className="!rounded-lg" onClick={addItem} icon={<PlusOutlined />} disabled={!step1.poNumber || previewing}>
+                      Add More Delivery Items
+                    </Button>
+                  </div>
                 </div>
               </div>
+            </div>
 
-              <div className="pt-2">
-                <div className="text-base font-semibold text-gray-900">{dnCode}</div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-3">
-                  <div>
-                    <div className="text-xs text-gray-500">Period</div>
-                    <div className="text-sm font-medium text-gray-900">{step1.period ?? "-"}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500">PO Number</div>
-                    <div className="text-sm font-medium text-gray-900">{step1.poNumber ?? "-"}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500">Total Uniq Choosen</div>
-                    <div className="text-sm font-medium text-gray-900">{totalUniqChosen}</div>
-                  </div>
-                </div>
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Transport Company</div>
+                <Input value={transportCompany} onChange={(e) => setTransportCompany(e.target.value)} placeholder="PT JNE" />
+              </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Vehicle Number</div>
+                <Input value={vehicleNumber} onChange={(e) => setVehicleNumber(e.target.value)} placeholder="B 1234 ABC" />
+              </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Driver Name</div>
+                <Input value={driverName} onChange={(e) => setDriverName(e.target.value)} placeholder="Driver Name" />
+              </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Driver Contact</div>
+                <Input value={driverContact} onChange={(e) => setDriverContact(e.target.value)} placeholder="Driver Contact" />
               </div>
 
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-50 text-gray-600">
-                      <tr>
-                        <th className="text-left font-medium px-4 py-3">Uniq</th>
-                        <th className="text-left font-medium px-4 py-3">Material Info</th>
-                        <th className="text-left font-medium px-4 py-3">Total Qty</th>
-                        <th className="text-left font-medium px-4 py-3">Remaining Qty</th>
-                        <th className="text-left font-medium px-4 py-3">UoM</th>
-                        <th className="text-left font-medium px-4 py-3">Order Qty</th>
-                        <th className="text-left font-medium px-4 py-3">Packing Number</th>
-                        <th className="text-left font-medium px-4 py-3">Pcs/Kanban</th>
-                        <th className="text-left font-medium px-4 py-3">Date Incoming</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {items.map((r) => (
-                        <tr key={r.key} className="text-gray-800">
-                          <td className="px-4 py-4 whitespace-nowrap">{r.uniq}</td>
-                          <td className="px-4 py-4 min-w-[220px]">
-                            <div className="text-[11px] text-gray-500">{r.materialInfo.code}</div>
-                            <div className="text-sm font-medium text-gray-900">{r.materialInfo.name}</div>
-                            <div className="text-[11px] text-gray-500">{r.materialInfo.model}</div>
-                          </td>
-                          <td className="px-4 py-4 whitespace-nowrap">{r.totalQty}</td>
-                          <td className="px-4 py-4 whitespace-nowrap">{r.remainingQty}</td>
-                          <td className="px-4 py-4 whitespace-nowrap">{r.uom}</td>
-                          <td className="px-4 py-4 whitespace-nowrap">{r.orderQty}</td>
-                          <td className="px-4 py-4 whitespace-nowrap">{r.packingNumber}</td>
-                          <td className="px-4 py-4 whitespace-nowrap">{r.pcsPerKanban}</td>
-                          <td className="px-4 py-4 whitespace-nowrap">{r.dateIncoming ? r.dateIncoming.format("M/D/YYYY") : ""}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Departure Date & Time</div>
+                <DatePicker className="w-full" value={departureAt} onChange={(v) => setDepartureAt(v)} showTime format="DD/MM/YYYY HH:mm" />
+              </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Arrival Date & Time</div>
+                <DatePicker className="w-full" value={arrivalAt} onChange={(v) => setArrivalAt(v)} showTime format="DD/MM/YYYY HH:mm" />
+              </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Status</div>
+                <Select
+                  className="w-full"
+                  value={status}
+                  onChange={(v) => setStatus(v)}
+                  options={[
+                    { label: "Select Status", value: "" },
+                    { label: "Scheduled", value: "scheduled" },
+                    { label: "In Transit", value: "in_transit" },
+                    { label: "Arrived", value: "arrived" },
+                  ]}
+                />
+              </div>
+              <div>
+                <div className="text-sm text-gray-700 mb-2">Approval Status</div>
+                <Input value="Status From Manager" disabled />
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <div className="text-sm text-gray-700 mb-2">Remarks & Special Instructions</div>
+              <Input.TextArea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} placeholder="Require QC Certificate and special handling" />
+            </div>
+          </Card>
+
+          <div className="flex justify-center">
+            <Button className="!rounded-lg" disabled>
+              + Add Another Schedule
+            </Button>
+          </div>
+
+          <Card className="rounded-2xl" bodyStyle={{ padding: 20 }}>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold text-gray-900">Summary</div>
+                <div className="text-xs text-gray-500">1 Schedule Entry ready to be saved</div>
+              </div>
+              <div className="flex items-center gap-8">
+                <div className="text-center">
+                  <div className="text-lg font-bold text-gray-900">{step1.dnCreated ?? 0}</div>
+                  <div className="text-xs text-gray-500">DN Created</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-lg font-bold text-gray-900">{step1.dnIncoming ?? 0}</div>
+                  <div className="text-xs text-gray-500">DN Incoming</div>
                 </div>
               </div>
             </div>
@@ -684,5 +805,13 @@ export default function DnRawMaterialCreatePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function DnRawMaterialCreatePage() {
+  return (
+    <Suspense fallback={null}>
+      <DnRawMaterialCreatePageContent />
+    </Suspense>
   );
 }

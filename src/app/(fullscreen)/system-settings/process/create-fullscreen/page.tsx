@@ -29,8 +29,10 @@ function makeEntry(idx: number): Entry {
 }
 
 const CATEGORY_OPTIONS = [
-  { label: "SubCon", value: "SubCon" },
-  { label: "Production", value: "Production" },
+   { label: "Metal Forming", value: "Metal Forming" },
+  { label: "Joining", value: "Joining" },
+  { label: "Assembly", value: "Assembly" },
+  { label: "Finishing", value: "Finishing" },
 ];
 
 export default function ProcessCreateFullscreenPage() {
@@ -173,7 +175,7 @@ export default function ProcessCreateFullscreenPage() {
                   <div className="text-sm text-gray-700 mb-2">Process Name</div>
                   <Input
                     value={e.processName ?? ""}
-                    onChange={(ev) => onProcessNameChange(e.id, ev.target.value)}
+                     onChange={(ev) => updateEntry(e.id, { processName: ev.target.value, processCode: ev.target.value, created: false })}
                     placeholder="Input Process Name"
                   />
                 </div>

@@ -146,7 +146,7 @@ export default function ProcessCreatePage() {
                     <div className="text-sm text-gray-700 mb-2">Process Name</div>
                     <Input
                       value={e.processName}
-                      onChange={(ev) => updateEntry(e.id, { processName: ev.target.value, created: false })}
+                      onChange={(ev) => updateEntry(e.id, { processName: ev.target.value, processCode: ev.target.value, created: false })}
                       placeholder="Input Process Name"
                     />
                   </div>

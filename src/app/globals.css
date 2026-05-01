@@ -24,3 +24,32 @@ body {
   color: #0a0a0a;
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Safety stock select larger border and option spacing */
+.safetystock-select .ant-select-selector {
+  border-width: 2px !important;
+  border-color: #3b82f6 !important;
+  border-radius: 0.75rem !important;
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+  width: 100% !important;
+}
+.safetystock-select-uniq .ant-select-selector {
+  border-width: 2px !important;
+  border-color: #3b82f6 !important;
+  border-radius: 0.75rem !important;
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+  width: 150px !important;
+}
+.safetystock-select-popup .ant-select-item-option {
+  padding-top: 10px !important;
+  padding-bottom: 10px !important;
+  padding-left: 14px !important;
+  padding-right: 14px !important;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+}
+
+.safetystock-select-popup .ant-select-item-option:last-child {
+  border-bottom: none;
+}

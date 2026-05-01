@@ -277,7 +277,7 @@ const modules: ModuleItem[] = [
   },
   {
     id: "type-parameters",
-    name: "Type Parameters",
+    name: "WIP Type",
     description: "Configure Type",
     icon: <AppstoreOutlined />,
     iconBgClass: "bg-pink-50",
@@ -285,7 +285,7 @@ const modules: ModuleItem[] = [
   },
   {
     id: "scrap",
-    name: "Scrap",
+    name: "Scrap Type",
     description: "Scrap parameters",
     icon: <WarningOutlined />,
     iconBgClass: "bg-red-50",
@@ -6061,7 +6061,7 @@ export default function SystemSettingsPage() {
                       return;
                     }
                     if (selectedModuleId === "purchase-order") {
-                      openCreatePurchaseOrder();
+                      router.push("/system-settings/purchase-order/create");
                       return;
                     }
                     if (selectedModuleId === "approval-workflow") {

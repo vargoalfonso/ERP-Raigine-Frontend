@@ -370,17 +370,17 @@ export const procurementDnApiSlice = apiSlice
     }),
 
     previewProcurementDn: builder.mutation<ApiResponse<ProcurementDnPreview>, ProcurementDnPreviewRequest>({
-      query: ({ po_number, period, type, item }) => ({
-        url: `/delivery-notes/preview?po_number=${encodeURIComponent(po_number)}`,
-        method: "POST",
-        body: {
-          period,
-          po_number,
-          type,
-          item: Array.isArray(item) ? item : [],
-        },
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
+      query: ({ po_number, period }) => {
+        const params = new URLSearchParams({ po_number: String(po_number ?? "").trim() });
+        const normalizedPeriod = String(period ?? "").trim();
+        if (normalizedPeriod) params.set("period", normalizedPeriod);
+
+        return {
+          url: `/delivery-notes/preview?${params.toString()}`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        };
+      },
       transformResponse: (response: unknown) => ok(toPreview(response), "success"),
     }),
 

@@ -164,6 +164,7 @@ export default function ApprovalWorkflowCreatePage() {
                 <div>
                   <div className="text-sm text-gray-700 mb-2">Menu/Action</div>
                   <Select
+                  className="w-[220px]"
                     value={e.menuAction}
                     onChange={(v) => updateEntry(e.id, { menuAction: v, created: false })}
                     placeholder="Pilih menu"
@@ -175,6 +176,7 @@ export default function ApprovalWorkflowCreatePage() {
                   <div>
                     <div className="text-sm text-gray-700 mb-2">Level 1 Role</div>
                     <Select
+                     className="w-[150px]"
                       value={e.level1Role}
                       onChange={(v) => updateEntry(e.id, { level1Role: v, created: false })}
                       placeholder="Level 1 Role"
@@ -186,6 +188,7 @@ export default function ApprovalWorkflowCreatePage() {
                   <div>
                     <div className="text-sm text-gray-700 mb-2">Level 2 Role</div>
                     <Select
+                    className="w-[150px]"
                       value={e.level2Role}
                       onChange={(v) => updateEntry(e.id, { level2Role: v, created: false })}
                       placeholder="Level 2 Role"
@@ -197,6 +200,7 @@ export default function ApprovalWorkflowCreatePage() {
                   <div>
                     <div className="text-sm text-gray-700 mb-2">Level 3 Role</div>
                     <Select
+                    className="w-[150px]"
                       value={e.level3Role}
                       onChange={(v) => updateEntry(e.id, { level3Role: v, created: false })}
                       placeholder="Level 3 Role"
@@ -208,6 +212,7 @@ export default function ApprovalWorkflowCreatePage() {
                   <div>
                     <div className="text-sm text-gray-700 mb-2">Level 4 Role</div>
                     <Select
+                    className="w-[150px]"
                       value={e.level4Role}
                       onChange={(v) => updateEntry(e.id, { level4Role: v, created: false })}
                       placeholder="Level 4 Role"
