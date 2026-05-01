@@ -252,6 +252,14 @@ function PageContent() {
                       label: "Finished Goods",
                       value: "finished_goods",
                     },
+                    {
+                      label: "Indirect Raw Material",
+                      value: "indirect_material",
+                    },
+                    {
+                      label: "SubCon",
+                      value: "subcon",
+                    },
                   ]}
                 />
               </Form.Item>
@@ -300,7 +308,7 @@ function PageContent() {
                         },
                         {
                           label:
-                            "Stockdays - Daily Usage",
+                            "Stockdats - DailyUsage = Stock / Daily Usage (Data history)",
                           value: "percentage",
                         },
                       ]}

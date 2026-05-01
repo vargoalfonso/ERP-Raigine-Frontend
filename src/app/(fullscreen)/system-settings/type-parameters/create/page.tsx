@@ -15,6 +15,7 @@ type Entry = {
   typeName?: string;
   description?: string;
   status?: StatusType;
+  readonlyCode?: boolean;
   created: boolean;
 };
 
@@ -23,29 +24,52 @@ const STATUS_OPTIONS = [
   { label: "Inactive", value: "Inactive" },
 ] as const;
 
-function makeEntry(idx: number): Entry {
+function makeEntry(idx: number, code: string, readonlyCode = true): Entry {
   return {
     id: `entry-${idx}`,
-    typeCode: idx === 1 ? "WIP-A" : undefined,
-    typeName: idx === 1 ? "Semi-Finished Product A" : undefined,
-    description: idx === 1 ? "After pressing process" : undefined,
+    typeCode: code, // ✅ WAJIB
+    typeName: undefined,
+    description: undefined,
     status: idx === 1 ? "Active" : undefined,
+    readonlyCode,
     created: false,
   };
 }
 
+const computeNextWipCode = (existing: Array<string | undefined>): string => {
+  const nums = existing
+    .map((code) => {
+      if (!code) return null;
+
+      const match = code
+        .trim()
+        .toUpperCase()
+        .match(/^WIP-(\d{1,})$/);
+      return match ? parseInt(match[1], 10) : null;
+    })
+    .filter((n): n is number => n !== null);
+
+  const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+
+  return `WIP-${String(next).padStart(3, "0")}`;
+};
+
 export default function TypeParametersCreatePage() {
   const router = useRouter();
 
-  const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
+  const [entries, setEntries] = useState<Entry[]>([
+    makeEntry(1, "WIP-001", true),
+  ]);
 
   const completeCount = useMemo(
     () => entries.filter((e) => e.created).length,
-    [entries]
+    [entries],
   );
 
   const updateEntry = (id: string, patch: Partial<Entry>) => {
-    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    setEntries((prev) =>
+      prev.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+    );
   };
 
   const validateEntry = (e: Entry) => {
@@ -57,7 +81,11 @@ export default function TypeParametersCreatePage() {
   };
 
   const addAnother = () => {
-    setEntries((prev) => [...prev, makeEntry(prev.length + 1)]);
+    setEntries((prev) => {
+      const existingCodes = prev.map((p) => p.typeCode);
+      const nextCode = computeNextWipCode(existingCodes);
+      return [...prev, makeEntry(prev.length + 1, nextCode, true)];
+    });
   };
 
   const [createTypeParameter, createState] = useCreateTypeParameterMutation();
@@ -111,7 +139,9 @@ export default function TypeParametersCreatePage() {
             </button>
 
             <div className="flex items-center gap-2">
-              <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
+              <Button onClick={() => router.push("/system-settings")}>
+                Cancel
+              </Button>
               <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
                 Save Parameter
               </Button>
@@ -119,9 +149,12 @@ export default function TypeParametersCreatePage() {
           </div>
 
           <div className="mt-2">
-            <div className="text-xl font-semibold text-gray-900">Add WIP Type</div>
+            <div className="text-xl font-semibold text-gray-900">
+              Add WIP Type
+            </div>
             <div className="text-sm text-gray-500">
-              Create WIP Type <span className="mx-2">•</span> {entries.length} entry
+              Create WIP Type <span className="mx-2">•</span> {entries.length}{" "}
+              entry
             </div>
           </div>
         </div>
@@ -130,13 +163,19 @@ export default function TypeParametersCreatePage() {
       <div className="px-6 py-6">
         <div className="max-w-6xl mx-auto space-y-5">
           {entries.map((e, idx) => (
-            <Card key={e.id} className="rounded-2xl" bodyStyle={{ padding: 24 }}>
+            <Card
+              key={e.id}
+              className="rounded-2xl"
+              bodyStyle={{ padding: 24 }}
+            >
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="text-base font-semibold text-gray-900">
                     Add New Parameter #{idx + 1}
                   </div>
-                  <div className="text-sm text-gray-500">Configure Parameter for WIP Types</div>
+                  <div className="text-sm text-gray-500">
+                    Configure Parameter for WIP Types
+                  </div>
                 </div>
                 <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">
                   Entry {idx + 1}
@@ -148,8 +187,19 @@ export default function TypeParametersCreatePage() {
                   <div className="text-sm text-gray-700 mb-2">Type Code</div>
                   <Input
                     value={e.typeCode}
-                    onChange={(ev) => updateEntry(e.id, { typeCode: ev.target.value, created: false })}
-                    placeholder="WIP-A"
+                    onChange={(ev) =>
+                      updateEntry(e.id, {
+                        typeCode: ev.target.value,
+                        created: false,
+                      })
+                    }
+                    placeholder="auto-generated"
+                    disabled
+                    title={
+                      e.readonlyCode
+                        ? "Auto-generated code (not editable)"
+                        : undefined
+                    }
                   />
                 </div>
 
@@ -157,7 +207,12 @@ export default function TypeParametersCreatePage() {
                   <div className="text-sm text-gray-700 mb-2">Type Name</div>
                   <Input
                     value={e.typeName}
-                    onChange={(ev) => updateEntry(e.id, { typeName: ev.target.value, created: false })}
+                    onChange={(ev) =>
+                      updateEntry(e.id, {
+                        typeName: ev.target.value,
+                        created: false,
+                      })
+                    }
                     placeholder="Semi-Finished Product A"
                   />
                 </div>
@@ -167,7 +222,10 @@ export default function TypeParametersCreatePage() {
                   <Input
                     value={e.description}
                     onChange={(ev) =>
-                      updateEntry(e.id, { description: ev.target.value, created: false })
+                      updateEntry(e.id, {
+                        description: ev.target.value,
+                        created: false,
+                      })
                     }
                     placeholder="After pressing process"
                   />
@@ -177,9 +235,19 @@ export default function TypeParametersCreatePage() {
                   <div className="text-sm text-gray-700 mb-2">Status</div>
                   <Select
                     value={e.status}
-                    onChange={(v) => updateEntry(e.id, { status: v as StatusType, created: false })}
+                    onChange={(v) =>
+                      updateEntry(e.id, {
+                        status: v as StatusType,
+                        created: false,
+                      })
+                    }
                     placeholder="Select Status"
-                    options={STATUS_OPTIONS as unknown as { label: string; value: string }[]}
+                    options={
+                      STATUS_OPTIONS as unknown as {
+                        label: string;
+                        value: string;
+                      }[]
+                    }
                   />
                 </div>
               </div>
@@ -195,18 +263,24 @@ export default function TypeParametersCreatePage() {
           <Card className="rounded-2xl" bodyStyle={{ padding: 18 }}>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-base font-semibold text-gray-900">Summary</div>
+                <div className="text-base font-semibold text-gray-900">
+                  Summary
+                </div>
                 <div className="text-sm text-gray-500">
                   {entries.length} Parameter ready to be saved
                 </div>
               </div>
               <div className="flex items-center gap-10">
                 <div className="text-right">
-                  <div className="text-lg font-semibold text-gray-900">{entries.length}</div>
+                  <div className="text-lg font-semibold text-gray-900">
+                    {entries.length}
+                  </div>
                   <div className="text-xs text-gray-500">Entries</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-lg font-semibold text-gray-900">{completeCount}</div>
+                  <div className="text-lg font-semibold text-gray-900">
+                    {completeCount}
+                  </div>
                   <div className="text-xs text-gray-500">Complete</div>
                 </div>
               </div>

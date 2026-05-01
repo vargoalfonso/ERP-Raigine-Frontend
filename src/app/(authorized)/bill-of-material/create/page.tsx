@@ -349,6 +349,188 @@ export default function CreateBomPage() {
     ]);
   };
 
+  const renderChildProcessAndMaterial = (
+    fieldPath: Array<string | number>,
+    absolutePath: Array<string | number>,
+    options?: {
+      processTitle?: string;
+      materialTitle?: string;
+      className?: string;
+    }
+  ) => {
+    const processTitle = options?.processTitle ?? "Process Routes";
+    const materialTitle = options?.materialTitle ?? "Material List";
+    const sectionClassName = options?.className ?? "mt-6";
+
+    return (
+      <div className={sectionClassName}>
+        <div className="flex items-center justify-between mb-3">
+          <Title level={5} className="!mb-0">
+            {processTitle}
+          </Title>
+          <Button
+            icon={<PlusOutlined />}
+            onClick={() => {
+              const current = form.getFieldValue([...absolutePath, "process_routes"]) ?? [];
+              form.setFieldValue([...absolutePath, "process_routes"], [
+                ...current,
+                { sequence: (current.length ?? 0) + 1 },
+              ]);
+            }}
+          >
+            Add Process
+          </Button>
+        </div>
+
+        <Form.List name={[...fieldPath, "process_routes"]}>
+          {(procFields, { remove: removeProc }) => (
+            <div className="space-y-3 mb-6">
+              {procFields.map((pf) => (
+                <div
+                  key={pf.key}
+                  className="grid grid-cols-1 md:grid-cols-8 gap-3 items-start"
+                >
+                  <Form.Item
+                    {...pf}
+                    name={[pf.name, "process_id"]}
+                    label="Process"
+                    rules={[{ required: true, message: "Process is required" }]}
+                  >
+                    <Select
+                      showSearch
+                      placeholder="Select process"
+                      options={processOptions}
+                      loading={isProcessesLoading}
+                      optionFilterProp="label"
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    {...pf}
+                    name={[pf.name, "machine_id"]}
+                    label="Machine"
+                    rules={[{ required: true, message: "Machine is required" }]}
+                  >
+                    <Select
+                      showSearch
+                      placeholder="Select machine"
+                      options={machineOptions}
+                      loading={isMachinesLoading}
+                      optionFilterProp="label"
+                    />
+                  </Form.Item>
+                  <Form.Item {...pf} name={[pf.name, "sequence"]} label="Sequence">
+                    <InputNumber min={1} style={{ width: "100%" }} />
+                  </Form.Item>
+                  <Form.Item
+                    {...pf}
+                    name={[pf.name, "cycle_time_sec_per_pc"]}
+                    label="Cycle Time"
+                  >
+                    <InputNumber min={0} style={{ width: "100%" }} />
+                  </Form.Item>
+                  <Form.Item
+                    {...pf}
+                    name={[pf.name, "setup_time_min"]}
+                    label="Setup Time"
+                  >
+                    <InputNumber min={0} style={{ width: "100%" }} />
+                  </Form.Item>
+                  <Form.Item {...pf} name={[pf.name, "tooling"]} label="Tooling">
+                    <Select
+                      placeholder="Select tooling"
+                      options={[
+                        { label: "Dies", value: "Dies" },
+                        { label: "JIG", value: "JIG" },
+                        { label: "CF", value: "CF" },
+                      ]}
+                      allowClear
+                    />
+                  </Form.Item>
+                  <Form.Item
+                    {...pf}
+                    name={[pf.name, "machine_stroke"]}
+                    label="Machine Stroke"
+                  >
+                    <Input placeholder="machine stroke" />
+                  </Form.Item>
+                  <div className="flex items-center pt-7">
+                    <Button
+                      danger
+                      type="text"
+                      icon={<DeleteOutlined />}
+                      onClick={() => removeProc(pf.name)}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Form.List>
+
+        <Title level={5} className="!mb-3">
+          {materialTitle}
+        </Title>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Form.Item name={[...fieldPath, "material_spec", "material_code"]} label="Material Code">
+            <Input placeholder="Material Code" />
+          </Form.Item>
+          <Form.Item name={[...fieldPath, "material_spec", "form"]} label="Form">
+            <Select
+              placeholder="Select form"
+              options={[
+                { label: "Plate", value: "Plate" },
+                { label: "Coil", value: "Coil" },
+                { label: "Pipe", value: "Pipe" },
+                { label: "Rod", value: "Rod" },
+                { label: "Wire", value: "Wire" },
+                { label: "Other", value: "Other" },
+              ]}
+              allowClear
+            />
+          </Form.Item>
+          <Form.Item name={[...fieldPath, "material_spec", "supplier"]} label="Supplier">
+            <Select
+              placeholder="Select supplier"
+              options={supplierOptions}
+              loading={isSuppliersLoading}
+              showSearch
+              optionFilterProp="label"
+              allowClear
+            />
+          </Form.Item>
+          <Form.Item name={[...fieldPath, "material_spec", "width_mm"]} label="Width (mm)">
+            <InputNumber min={0} style={{ width: "100%" }} />
+          </Form.Item>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Form.Item name={[...fieldPath, "material_spec", "diameter_mm"]} label="Ø (mm)">
+            <InputNumber min={0} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name={[...fieldPath, "material_spec", "thickness_mm"]} label="Thickness (mm)">
+            <InputNumber min={0} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name={[...fieldPath, "material_spec", "length_mm"]} label="Length (mm)">
+            <InputNumber min={0} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item
+            name={[...fieldPath, "material_spec", "cycle_time_sec_per_pc"]}
+            label="Cycle Time (sec/pc)"
+          >
+            <InputNumber min={0} style={{ width: "100%" }} />
+          </Form.Item>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Form.Item
+            name={[...fieldPath, "material_spec", "dandori_setup_time_min"]}
+            label="Dandori/Setup Time (min)"
+          >
+            <InputNumber min={0} style={{ width: "100%" }} />
+          </Form.Item>
+        </div>
+      </div>
+    );
+  };
+
   const onSaveBom = async () => {
     try {
       // Ensure Step 1 required fields are validated even when user is on Step 2
@@ -1532,6 +1714,16 @@ export default function CreateBomPage() {
                                         </Form.Item>
                                       </div>
 
+                                      {renderChildProcessAndMaterial(
+                                        [lvl2Field.name],
+                                        [
+                                          "child_parts",
+                                          childField.name,
+                                          "children",
+                                          lvl2Field.name,
+                                        ]
+                                      )}
+
                                       <Form.List name={[lvl2Field.name, "children"]}>
                                         {(lvl3Fields, { remove: removeLvl3 }) => {
                                           if (lvl3Fields.length === 0) return null;
@@ -1642,6 +1834,18 @@ export default function CreateBomPage() {
                                                     </Form.Item>
                                                   </div>
 
+                                                  {renderChildProcessAndMaterial(
+                                                    [lvl3Field.name],
+                                                    [
+                                                      "child_parts",
+                                                      childField.name,
+                                                      "children",
+                                                      lvl2Field.name,
+                                                      "children",
+                                                      lvl3Field.name,
+                                                    ]
+                                                  )}
+
                                                   <Form.List name={[lvl3Field.name, "children"]}>
                                                     {(lvl4Fields, { remove: removeLvl4 }) => {
                                                       if (lvl4Fields.length === 0) return null;
@@ -1728,6 +1932,20 @@ export default function CreateBomPage() {
                                                                   <Input value="Active" size="large" disabled />
                                                                 </Form.Item>
                                                               </div>
+
+                                                              {renderChildProcessAndMaterial(
+                                                                [lvl4Field.name],
+                                                                [
+                                                                  "child_parts",
+                                                                  childField.name,
+                                                                  "children",
+                                                                  lvl2Field.name,
+                                                                  "children",
+                                                                  lvl3Field.name,
+                                                                  "children",
+                                                                  lvl4Field.name,
+                                                                ]
+                                                              )}
                                                             </Card>
                                                           ))}
                                                         </div>
@@ -1801,193 +2019,10 @@ export default function CreateBomPage() {
                             </Text>
                           </div>
 
-                          <div className="flex items-center justify-between mb-3">
-                            <Title level={5} className="!mb-0">
-                              Process Routes
-                            </Title>
-                            <Button
-                              icon={<PlusOutlined />}
-                              onClick={() => {
-                                const current =
-                                  form.getFieldValue([
-                                    "child_parts",
-                                    childField.name,
-                                    "process_routes",
-                                  ]) ?? [];
-                                form.setFieldValue(
-                                  [
-                                    "child_parts",
-                                    childField.name,
-                                    "process_routes",
-                                  ],
-                                  [...current, { sequence: (current.length ?? 0) + 1 }]
-                                );
-                              }}
-                            >
-                              Add Process
-                            </Button>
-                          </div>
-
-                          <Form.List name={[childField.name, "process_routes"]}>
-                            {(procFields, { remove: removeProc }) => (
-                              <div className="space-y-3 mb-6">
-                                {procFields.map((pf) => (
-                                  <div
-                                    key={pf.key}
-                                    className="grid grid-cols-1 md:grid-cols-7 gap-3 items-start"
-                                  >
-                                    <Form.Item
-                                      {...pf}
-                                      name={[pf.name, "process_id"]}
-                                      label="Process"
-                                      rules={[{ required: true, message: "Process is required" }]}
-                                    >
-                                      <Select
-                                        showSearch
-                                        placeholder="Select process"
-                                        options={processOptions}
-                                        loading={isProcessesLoading}
-                                        optionFilterProp="label"
-                                      />
-                                    </Form.Item>
-                                    <Form.Item
-                                      {...pf}
-                                      name={[pf.name, "machine_id"]}
-                                      label="Machine"
-                                      rules={[{ required: true, message: "Machine is required" }]}
-                                    >
-                                      <Select
-                                        showSearch
-                                        placeholder="Select machine"
-                                        options={machineOptions}
-                                        loading={isMachinesLoading}
-                                        optionFilterProp="label"
-                                      />
-                                    </Form.Item>
-                                    <Form.Item
-                                      {...pf}
-                                      name={[pf.name, "sequence"]}
-                                      label="Sequence"
-                                    >
-                                      <InputNumber min={1} style={{ width: "100%" }} />
-                                    </Form.Item>
-                                    <Form.Item
-                                      {...pf}
-                                      name={[pf.name, "cycle_time_sec_per_pc"]}
-                                      label="Cycle Time"
-                                    >
-                                      <InputNumber min={0} style={{ width: "100%" }} />
-                                    </Form.Item>
-                                    <Form.Item
-                                      {...pf}
-                                      name={[pf.name, "setup_time_min"]}
-                                      label="Setup Time"
-                                    >
-                                      <InputNumber min={0} style={{ width: "100%" }} />
-                                    </Form.Item>
-                                    <Form.Item
-                                      {...pf}
-                                      name={[pf.name, "tooling"]}
-                                      label="Tooling"
-                                    >
-                                      <Select
-                                        placeholder="Select tooling"
-                                        options={[
-                                          { label: "Dies", value: "Dies" },
-                                          { label: "JIG", value: "JIG" },
-                                          { label: "CF", value: "CF" },
-                                        ]}
-                                        allowClear
-                                      />
-                                    </Form.Item>
-                                    <div className="flex items-center pt-7">
-                                      <Button
-                                        danger
-                                        type="text"
-                                        icon={<DeleteOutlined />}
-                                        onClick={() => removeProc(pf.name)}
-                                      />
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </Form.List>
-
-                          <Title level={5} className="!mb-3">
-                            Material Specifications
-                          </Title>
-                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            <Form.Item
-                              {...childField}
-                              name={[childField.name, "material_spec", "material_code"]}
-                              label="Material Code"
-                            >
-                              <Input placeholder="Material Code" />
-                            </Form.Item>
-                            <Form.Item
-                              {...childField}
-                              name={[childField.name, "material_spec", "form"]}
-                              label="Form"
-                            >
-                              <Select
-                                placeholder="Select form"
-                                options={[
-                                  { label: "Plate", value: "Plate" },
-                                  { label: "Coil", value: "Coil" },
-                                  { label: "Pipe", value: "Pipe" },
-                                  { label: "Rod", value: "Rod" },
-                                  { label: "Wire", value: "Wire" },
-                                  { label: "Other", value: "Other" },
-                                ]}
-                                allowClear
-                              />
-                            </Form.Item>
-                            <Form.Item
-                              {...childField}
-                              name={[childField.name, "material_spec", "width_mm"]}
-                              label="Width (mm)"
-                            >
-                              <InputNumber min={0} style={{ width: "100%" }} />
-                            </Form.Item>
-                            <Form.Item
-                              {...childField}
-                              name={[childField.name, "material_spec", "diameter_mm"]}
-                              label="Ø (mm)"
-                            >
-                              <InputNumber min={0} style={{ width: "100%" }} />
-                            </Form.Item>
-                          </div>
-                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            <Form.Item
-                              {...childField}
-                              name={[childField.name, "material_spec", "thickness_mm"]}
-                              label="Thickness (mm)"
-                            >
-                              <InputNumber min={0} style={{ width: "100%" }} />
-                            </Form.Item>
-                            <Form.Item
-                              {...childField}
-                              name={[childField.name, "material_spec", "length_mm"]}
-                              label="Length (mm)"
-                            >
-                              <InputNumber min={0} style={{ width: "100%" }} />
-                            </Form.Item>
-                            <Form.Item
-                              {...childField}
-                              name={[childField.name, "material_spec", "supplier"]}
-                              label="Supplier"
-                            >
-                              <Select
-                                placeholder="Select supplier"
-                                options={supplierOptions}
-                                loading={isSuppliersLoading}
-                                showSearch
-                                optionFilterProp="label"
-                                allowClear
-                              />
-                            </Form.Item>
-                          </div>
+                          {renderChildProcessAndMaterial(
+                            [childField.name],
+                            ["child_parts", childField.name]
+                          )}
                         </Card>
                       ))}
                     </div>

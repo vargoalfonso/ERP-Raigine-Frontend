@@ -20,7 +20,6 @@ type Entry = {
   created: boolean;
 };
 
-
 const STATUS_OPTIONS = [
   { label: "Active", value: "Active" },
   { label: "Inactive", value: "Inactive" },
@@ -29,9 +28,7 @@ const STATUS_OPTIONS = [
 function makeEntry(idx: number): Entry {
   return {
     id: `entry-${idx}`,
-    typeCode: idx === 1 ? "PCS" : undefined,
-    typeName: idx === 1 ? "Pieces" : undefined,
-    category: idx === 1 ? "Quantity" : undefined,
+
     status: idx === 1 ? "Active" : undefined,
     created: false,
   };
@@ -46,11 +43,13 @@ export default function UomCreatePage() {
 
   const completeCount = useMemo(
     () => entries.filter((e) => e.created).length,
-    [entries]
+    [entries],
   );
 
   const updateEntry = (id: string, patch: Partial<Entry>) => {
-    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    setEntries((prev) =>
+      prev.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+    );
   };
 
   const validateEntry = (e: Entry) => {
@@ -111,17 +110,27 @@ export default function UomCreatePage() {
             </button>
 
             <div className="flex items-center gap-2">
-              <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} loading={createUomState.isLoading} onClick={onSave}>
+              <Button onClick={() => router.push("/system-settings")}>
+                Cancel
+              </Button>
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                loading={createUomState.isLoading}
+                onClick={onSave}
+              >
                 Save Parameter
               </Button>
             </div>
           </div>
 
           <div className="mt-2">
-            <div className="text-xl font-semibold text-gray-900">Add UoM Parameter (Global)</div>
+            <div className="text-xl font-semibold text-gray-900">
+              Add UoM Parameter (Global)
+            </div>
             <div className="text-sm text-gray-500">
-              Create Global Unit of Measurement <span className="mx-2">•</span> {entries.length} entry
+              Create Global Unit of Measurement <span className="mx-2">•</span>{" "}
+              {entries.length} entry
             </div>
           </div>
         </div>
@@ -130,13 +139,23 @@ export default function UomCreatePage() {
       <div className="px-6 py-6">
         <div className="max-w-6xl mx-auto space-y-5">
           {entries.map((e, idx) => (
-            <Card key={e.id} className="rounded-2xl" bodyStyle={{ padding: 24 }}>
+            <Card
+              key={e.id}
+              className="rounded-2xl"
+              bodyStyle={{ padding: 24 }}
+            >
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="text-base font-semibold text-gray-900">Add New Parameter #{idx + 1}</div>
-                  <div className="text-sm text-gray-500">Configure Parameter for Global Unit of Measurement</div>
+                  <div className="text-base font-semibold text-gray-900">
+                    Add New Parameter #{idx + 1}
+                  </div>
+                  <div className="text-sm text-gray-500">
+                    Configure Parameter for Global Unit of Measurement
+                  </div>
                 </div>
-                <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">Entry {idx + 1}</Tag>
+                <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">
+                  Entry {idx + 1}
+                </Tag>
               </div>
 
               <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -144,8 +163,14 @@ export default function UomCreatePage() {
                   <div className="text-sm text-gray-700 mb-2">Type Code</div>
                   <Input
                     value={e.typeCode}
-                    onChange={(ev) => updateEntry(e.id, { typeCode: ev.target.value, created: false })}
+                    onChange={(ev) =>
+                      updateEntry(e.id, {
+                        typeCode: ev.target.value,
+                        created: false,
+                      })
+                    }
                     placeholder="PCS"
+                    className="placeholder-gray-400"
                   />
                 </div>
 
@@ -153,7 +178,12 @@ export default function UomCreatePage() {
                   <div className="text-sm text-gray-700 mb-2">Type Name</div>
                   <Input
                     value={e.typeName}
-                    onChange={(ev) => updateEntry(e.id, { typeName: ev.target.value, created: false })}
+                    onChange={(ev) =>
+                      updateEntry(e.id, {
+                        typeName: ev.target.value,
+                        created: false,
+                      })
+                    }
                     placeholder="Pieces"
                   />
                 </div>
@@ -162,7 +192,12 @@ export default function UomCreatePage() {
                   <div className="text-sm text-gray-700 mb-2">Category</div>
                   <Input
                     value={e.category}
-                    onChange={(ev) => updateEntry(e.id, { category: ev.target.value as UomCategory, created: false })}
+                    onChange={(ev) =>
+                      updateEntry(e.id, {
+                        category: ev.target.value as UomCategory,
+                        created: false,
+                      })
+                    }
                     placeholder="Enter category (e.g. Count, Weight, Length)"
                   />
                 </div>
@@ -171,9 +206,19 @@ export default function UomCreatePage() {
                   <div className="text-sm text-gray-700 mb-2">Status</div>
                   <Select
                     value={e.status}
-                    onChange={(v) => updateEntry(e.id, { status: v as StatusType, created: false })}
+                    onChange={(v) =>
+                      updateEntry(e.id, {
+                        status: v as StatusType,
+                        created: false,
+                      })
+                    }
                     placeholder="Select Status"
-                    options={STATUS_OPTIONS as unknown as { label: string; value: string }[]}
+                    options={
+                      STATUS_OPTIONS as unknown as {
+                        label: string;
+                        value: string;
+                      }[]
+                    }
                   />
                 </div>
               </div>
@@ -189,16 +234,24 @@ export default function UomCreatePage() {
           <Card className="rounded-2xl" bodyStyle={{ padding: 18 }}>
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-base font-semibold text-gray-900">Summary</div>
-                <div className="text-sm text-gray-500">{entries.length} Parameter ready to be saved</div>
+                <div className="text-base font-semibold text-gray-900">
+                  Summary
+                </div>
+                <div className="text-sm text-gray-500">
+                  {entries.length} Parameter ready to be saved
+                </div>
               </div>
               <div className="flex items-center gap-10">
                 <div className="text-right">
-                  <div className="text-lg font-semibold text-gray-900">{entries.length}</div>
+                  <div className="text-lg font-semibold text-gray-900">
+                    {entries.length}
+                  </div>
                   <div className="text-xs text-gray-500">Entries</div>
                 </div>
                 <div className="text-right">
-                  <div className="text-lg font-semibold text-gray-900">{completeCount}</div>
+                  <div className="text-lg font-semibold text-gray-900">
+                    {completeCount}
+                  </div>
                   <div className="text-xs text-gray-500">Complete</div>
                 </div>
               </div>
