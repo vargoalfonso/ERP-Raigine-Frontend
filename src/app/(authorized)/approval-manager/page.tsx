@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Card, Input, Modal, Segmented, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -13,6 +13,7 @@ import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
   type ApprovalManagerItem,
+  type ApprovalManagerDecision,
   type ApprovalManagerType,
   useGetApprovalManagerItemsQuery,
   useGetApprovalManagerSummaryQuery,
@@ -183,6 +184,8 @@ export default function ApprovalManagerPage() {
 
   const [selectedItem, setSelectedItem] = useState<ApprovalManagerItem | null>(null);
   const [remarks, setRemarks] = useState<string>("");
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
+  const [bulkActionLoading, setBulkActionLoading] = useState<ApprovalManagerDecision | null>(null);
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailTitle, setDetailTitle] = useState<string>("Detail");
@@ -257,6 +260,29 @@ export default function ApprovalManagerPage() {
       <div className="text-sm font-medium text-gray-900 break-words">{value}</div>
     </div>
   );
+  const formatNumber = (value: unknown): string => {
+    const parsed = toNumber(value);
+    if (parsed == null) return "-";
+    return new Intl.NumberFormat("en-US").format(parsed);
+  };
+  const normalizePoBudgetPayload = (value: unknown) => {
+    const payload = isRecord(value) ? (value as UnknownRecord) : {};
+    const basic = isRecord(payload.basic_information)
+      ? (payload.basic_information as UnknownRecord)
+      : payload;
+    const calc = isRecord(payload.budget_calculations)
+      ? (payload.budget_calculations as UnknownRecord)
+      : payload;
+    const result = isRecord(payload.calculation_results)
+      ? (payload.calculation_results as UnknownRecord)
+      : payload;
+    const additional = isRecord(payload.additional_information)
+      ? (payload.additional_information as UnknownRecord)
+      : payload;
+    const history = Array.isArray(payload.history) ? payload.history : [];
+
+    return { basic, calc, result, additional, history };
+  };
 
   const rows = useMemo<ApprovalRow[]>(() => {
     if (!apiEnabled) return MOCK_ROWS;
@@ -300,6 +326,10 @@ export default function ApprovalManagerPage() {
     if (activeTab === "All Items") return rows;
     return rows.filter((row) => row.tab === activeTab);
   }, [activeTab, rows]);
+
+  useEffect(() => {
+    setSelectedRowKeys((prev) => prev.filter((key) => filteredRows.some((row) => row.key === key)));
+  }, [filteredRows]);
 
   const summary = useMemo(() => {
     if (!apiEnabled) {
@@ -372,6 +402,21 @@ export default function ApprovalManagerPage() {
     action: "approve" | "reject",
     nextRemarks?: string
   ) => {
+    try {
+      await submitDecisionForItem(item, action, nextRemarks);
+      messageApi.success(action === "approve" ? "Approved" : "Rejected");
+      await Promise.all([listQuery.refetch(), summaryQuery.refetch()]);
+      setSelectedRowKeys([]);
+    } catch (error) {
+      messageApi.error(getApiErrorMessage(error, action === "approve" ? "Failed to approve" : "Failed to reject"));
+    }
+  };
+
+  const submitDecisionForItem = async (
+    item: ApprovalManagerItem | undefined,
+    action: "approve" | "reject",
+    nextRemarks?: string
+  ) => {
     if (!item) return;
     if (!canActionable(item)) return;
 
@@ -386,26 +431,83 @@ export default function ApprovalManagerPage() {
       return String(item.approval_url ?? "").trim();
     })();
     if (!approvalUrl) {
-      messageApi.error(
+      throw new Error(
         getModuleKind(item) === "stock_opname"
           ? "Missing stock opname session id (instance_id/reference_id)"
           : "Missing approval_url from backend"
       );
+    }
+
+    await submitDecision({
+      approval_url: approvalUrl,
+      reference_id: item.reference_id,
+      action,
+      remarks: nextRemarks,
+      module_kind: getModuleKind(item),
+    }).unwrap();
+  };
+
+  const selectedRows = useMemo(
+    () => filteredRows.filter((row) => selectedRowKeys.includes(row.key)),
+    [filteredRows, selectedRowKeys]
+  );
+
+  const selectedActionableRows = useMemo(
+    () => selectedRows.filter((row) => canActionable(row.backend)),
+    [selectedRows]
+  );
+
+  const selectedApprovableRows = useMemo(
+    () => selectedActionableRows.filter((row) => row.backend?.can_approve === true),
+    [selectedActionableRows]
+  );
+
+  const selectedRejectableRows = useMemo(
+    () => selectedActionableRows.filter((row) => row.backend?.can_reject === true),
+    [selectedActionableRows]
+  );
+
+  const handleBulkDecision = async (action: ApprovalManagerDecision) => {
+    const candidates = action === "approve" ? selectedApprovableRows : selectedRejectableRows;
+    const skipped = selectedRows.length - candidates.length;
+
+    if (candidates.length === 0) {
+      messageApi.warning(
+        action === "approve"
+          ? "No selected rows can be bulk approved."
+          : "No selected rows can be bulk rejected."
+      );
       return;
     }
 
+    setBulkActionLoading(action);
+    const failures: string[] = [];
+
     try {
-      await submitDecision({
-        approval_url: approvalUrl,
-        reference_id: item.reference_id,  // Pass reference_id for correct URL building
-        action,
-        remarks: nextRemarks,
-        module_kind: getModuleKind(item),
-      }).unwrap();
-      messageApi.success(action === "approve" ? "Approved" : "Rejected");
+      for (const row of candidates) {
+        try {
+          await submitDecisionForItem(row.backend, action);
+        } catch (error) {
+          failures.push(`${row.itemCode}: ${getApiErrorMessage(error, `Failed to ${action}`)}`);
+        }
+      }
+
       await Promise.all([listQuery.refetch(), summaryQuery.refetch()]);
-    } catch (error) {
-      messageApi.error(getApiErrorMessage(error, action === "approve" ? "Failed to approve" : "Failed to reject"));
+      setSelectedRowKeys([]);
+
+      const successCount = candidates.length - failures.length;
+      if (failures.length === 0) {
+        messageApi.success(
+          `${successCount} item${successCount > 1 ? "s" : ""} ${action === "approve" ? "approved" : "rejected"}${skipped > 0 ? `, ${skipped} skipped` : ""}.`
+        );
+        return;
+      }
+
+      messageApi.warning(
+        `${successCount} succeeded, ${failures.length} failed${skipped > 0 ? `, ${skipped} skipped` : ""}.`
+      );
+    } finally {
+      setBulkActionLoading(null);
     }
   };
 
@@ -645,11 +747,115 @@ export default function ApprovalManagerPage() {
       );
     };
 
+    const renderPoBudget = () => {
+      if (!isRecord(payload)) return missing;
+
+      const { basic, calc, result, additional, history } = normalizePoBudgetPayload(payload);
+      const historyRows = history
+        .map((entry, index) => {
+          const row = isRecord(entry) ? (entry as UnknownRecord) : {};
+          return {
+            key: String(toText(row.id ?? row.date_time ?? index)),
+            date_time: toText(row.date_time ?? row.created_at),
+            action: toText(row.action ?? row.status),
+            user: toText(row.user ?? row.user_name ?? row.approved_by_name ?? row.submitted_by_name),
+            notes: toText(row.notes ?? row.note ?? row.remarks),
+          };
+        })
+        .filter((row) => row.date_time !== "-" || row.action !== "-" || row.user !== "-" || row.notes !== "-");
+
+      const historyColumns: ColumnsType<(typeof historyRows)[number]> = [
+        { title: "Date Time", dataIndex: "date_time", key: "date_time", width: 180 },
+        {
+          title: "Action",
+          dataIndex: "action",
+          key: "action",
+          width: 120,
+          render: (value: string) => {
+            const lower = value.toLowerCase();
+            const color = lower.includes("approve") ? "green" : lower.includes("reject") ? "red" : "blue";
+            return <Tag color={color} className="!rounded-full">{value}</Tag>;
+          },
+        },
+        { title: "User", dataIndex: "user", key: "user", width: 160 },
+        { title: "Notes", dataIndex: "notes", key: "notes" },
+      ];
+
+      return (
+        <>
+          <div className="mt-4">
+            <div className="text-sm font-semibold text-gray-900">Basic Information</div>
+            <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+              {kv("PO Budget Ref", toText(basic.po_budget_ref ?? basic.poBudgetRef ?? basic.id))}
+              {kv("Customer", toText(basic.customer_name ?? basic.customer))}
+              {kv("UNIQ", toText(basic.uniq ?? basic.uniq_code))}
+              {kv("Product Model", toText(basic.product_model))}
+              {kv("Part Name", toText(basic.part_name))}
+              {kv("Part Number", toText(basic.part_number))}
+              {kv("Supplier", toText(basic.supplier_name))}
+              {kv("Budget Type", toText(basic.type_label ?? basic.budget_type ?? basic.budget_subtype))}
+              {kv("Period", toText(basic.period))}
+              {kv("Status", toText(additional.status ?? result.apo_prl_state ?? basic.status))}
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="text-sm font-semibold text-gray-900">Budget Calculations</div>
+            <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+              {kv("Sales Plan", formatNumber(calc.sales_plan))}
+              {kv("Purchase Request", formatNumber(calc.purchase_request))}
+              {kv("PRL Amount", formatNumber(calc.prl_amount ?? calc.prl))}
+              {kv("PO1 %", toText(calc.po1_pct))}
+              {kv("PO2 %", toText(calc.po2_pct))}
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="text-sm font-semibold text-gray-900">Calculation Results</div>
+            <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+              {kv("PO1 Amount", formatNumber(result.po1_amount ?? result.po1))}
+              {kv("PO2 Amount", formatNumber(result.po2_amount ?? result.po2))}
+              {kv("Total PO", formatNumber(result.total_po))}
+              {kv("APO vs PRL", formatNumber(result.apo_prl_abs ?? result.apo_prl))}
+              {kv("APO/PRL State", toText(result.apo_prl_state))}
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="text-sm font-semibold text-gray-900">Additional Information</div>
+            <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+              {kv("Submitted By", toText(additional.submitted_by_name ?? additional.submitted_by))}
+              {kv("Submitted At", toText(additional.submitted_at))}
+              {kv("Approved By", toText(additional.approved_by_name ?? additional.approved_by))}
+              {kv("Approved At", toText(additional.approved_at ?? additional.approval_date))}
+              {kv("Notes", toText(additional.notes ?? additional.note ?? additional.remarks))}
+            </div>
+          </div>
+
+          {historyRows.length > 0 ? (
+            <div className="mt-4">
+              <div className="text-sm font-semibold text-gray-900">Approval History</div>
+              <div className="mt-2">
+                <Table
+                  size="small"
+                  columns={historyColumns}
+                  dataSource={historyRows}
+                  pagination={false}
+                  scroll={{ x: 760 }}
+                />
+              </div>
+            </div>
+          ) : null}
+        </>
+      );
+    };
+
     const details = (() => {
       if (!payload) return missing;
       if (kind === "stock_opname") return renderStockOpname();
       if (kind === "bom") return renderBom();
       if (kind === "prl") return renderPrl();
+      if (kind === "po_budget") return renderPoBudget();
       return (
         <div className="mt-4">
           <div className="text-sm text-gray-500">
@@ -756,7 +962,7 @@ export default function ApprovalManagerPage() {
                   type="text"
                   size="small"
                   icon={<CheckCircleOutlined />}
-                  className="text-green-500"
+                  className="!text-emerald-600 hover:!text-emerald-700"
                   disabled={!canActionable(row.backend) || submitDecisionState.isLoading}
                   onClick={() => onApprove(row.backend, "approve")}
                 />
@@ -766,7 +972,7 @@ export default function ApprovalManagerPage() {
                   type="text"
                   size="small"
                   icon={<CloseCircleOutlined />}
-                  className="text-red-500"
+                  className="!text-red-600 hover:!text-red-700"
                   disabled={!canActionable(row.backend) || submitDecisionState.isLoading}
                   onClick={() => onApprove(row.backend, "reject")}
                 />
@@ -840,6 +1046,36 @@ export default function ApprovalManagerPage() {
         </div>
 
         <div className="mt-6">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm text-gray-500">
+              {selectedRows.length > 0
+                ? `${selectedRows.length} row selected${selectedRows.length > 1 ? "s" : ""}`
+                : "Select pending rows to bulk approve or reject"}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                danger
+                icon={<CloseCircleOutlined />}
+                className="!border-red-200 !bg-red-50 !text-red-600 hover:!border-red-300 hover:!bg-red-100 hover:!text-red-700"
+                disabled={selectedRejectableRows.length === 0}
+                loading={bulkActionLoading === "reject"}
+                onClick={() => handleBulkDecision("reject")}
+              >
+                Bulk Reject
+              </Button>
+              <Button
+                type="primary"
+                icon={<CheckCircleOutlined />}
+                className="!border-emerald-600 !bg-emerald-600 hover:!border-emerald-700 hover:!bg-emerald-700"
+                disabled={selectedApprovableRows.length === 0}
+                loading={bulkActionLoading === "approve"}
+                onClick={() => handleBulkDecision("approve")}
+              >
+                Bulk Approve
+              </Button>
+            </div>
+          </div>
+
           <Modal
             title={detailTitle}
             open={detailOpen}
@@ -856,6 +1092,8 @@ export default function ApprovalManagerPage() {
                   {showReject ? (
                     <Button
                       danger
+                      icon={<CloseCircleOutlined />}
+                      className="!border-red-200 !bg-red-50 !text-red-600 hover:!border-red-300 hover:!bg-red-100 hover:!text-red-700"
                       onClick={() => onApprove(item ?? undefined, "reject", remarks)}
                       disabled={disabled}
                       loading={submitDecisionState.isLoading}
@@ -866,6 +1104,8 @@ export default function ApprovalManagerPage() {
                   {showApprove ? (
                     <Button
                       type="primary"
+                      icon={<CheckCircleOutlined />}
+                      className="!border-emerald-600 !bg-emerald-600 hover:!border-emerald-700 hover:!bg-emerald-700"
                       onClick={() => onApprove(item ?? undefined, "approve", remarks)}
                       disabled={disabled}
                       loading={submitDecisionState.isLoading}
@@ -898,6 +1138,14 @@ export default function ApprovalManagerPage() {
             columns={columns}
             dataSource={filteredRows}
             loading={apiEnabled && (listQuery.isFetching || summaryQuery.isFetching)}
+            rowSelection={{
+              fixed: true,
+              selectedRowKeys,
+              onChange: (keys) => setSelectedRowKeys(keys.map((key) => String(key))),
+              getCheckboxProps: (row) => ({
+                disabled: !canActionable(row.backend),
+              }),
+            }}
             pagination={{
               current: page,
               pageSize: limit,

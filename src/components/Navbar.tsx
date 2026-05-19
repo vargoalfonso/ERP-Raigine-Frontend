@@ -49,9 +49,13 @@ const getPageTitle = (pathname: string): string => {
     "/dn-management": "DN Management",
     "/dn-management/detail": "DN Raw Material Details",
     "/stock-opname": "Stock Opname",
+    "/po-procurement": "Purchase Order",
+    "/po-procurement/create": "Create Purchase Order",
+    "/po-procurement/detail": "Purchase Order Details",
   };
 
   if (pathname.startsWith("/dn-management/detail")) return "DN Raw Material Details";
+  if (pathname.startsWith("/po-procurement/detail")) return "Purchase Order Details";
   return pathTitleMap[pathname] || "Dashboard";
 };
 

@@ -104,6 +104,13 @@ export type ActivateBomRequest = {
   change_note: string;
 };
 
+export type BomImportResponse = {
+  imported?: number;
+  failed?: number;
+  errors?: unknown[];
+  message?: string;
+};
+
 const ok = <T,>(data: T, message = "OK"): ApiResponse<T> => ({
   message,
   status: "success",
@@ -490,6 +497,28 @@ export const bomSlice = apiSlice.injectEndpoints({
       invalidatesTags: [BOM_TAG],
     }),
 
+    importBom: builder.mutation<ApiResponse<BomImportResponse>, File>({
+      query: (file) => {
+        const formData = new FormData();
+        formData.append("file", file, file.name);
+
+        return {
+          url: "/products/bom/import",
+          method: "POST",
+          body: formData,
+          meta: { useAuthorization: true, contentType: "multipart/form-data" },
+        };
+      },
+      transformResponse: (response: unknown) => {
+        const data =
+          response && typeof response === "object" && "data" in response
+            ? ((response as { data?: BomImportResponse }).data ?? {})
+            : ((response as BomImportResponse | undefined) ?? {});
+        return ok(data, "Imported");
+      },
+      invalidatesTags: [BOM_TAG],
+    }),
+
     updateBom: builder.mutation<
       ApiResponse<{ id: string }>,
       { bom_id: string; body: Partial<BomCreateRequest> }
@@ -568,6 +597,7 @@ export const {
   useGetBomVersionsQuery,
   useActivateBomMutation,
   useCreateBomMutation,
+  useImportBomMutation,
   useUpdateBomMutation,
   useDeleteBomParentMutation,
   useDeleteBomChildMutation,

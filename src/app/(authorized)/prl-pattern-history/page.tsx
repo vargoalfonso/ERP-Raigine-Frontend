@@ -8,29 +8,27 @@ import { MdLightbulbOutline, MdSettings, MdSwapVert } from "react-icons/md";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
-  useGetMachinePatternsQuery,
-  useGetPrlHistoryQuery,
-  useGetPrlLogsByUniqQuery,
+  useGetPrlHistoryVsDeliveryDetailQuery,
+  useGetPrlHistoryVsDeliveryQuery,
+  useGetPrlMachinePatternsQuery,
 } from "@/lib/api/prl-log/api";
 
 type HistoryTabId = "prl-history" | "machine-pattern";
 
 type PrlHistoryRow = {
   key: string;
-  period: string;
+  forecastPeriod: string;
   uniq: string;
-  machinePattern: string;
-  productionOutput: number;
+  prlQuantity: number;
+  deliveryQty: number;
 };
 
 type MachinePatternRow = {
   key: string;
   uniq: string;
-  pattern: string;
-  steps: string;
-  avgCycleTime: string;
-  output: number;
-  status: "Stable" | "Watch";
+  forecastPeriod: string;
+  machinePattern: string;
+  productionOutput: number;
 };
 
 type LogTimelineItem = {
@@ -47,6 +45,8 @@ type UniqLogDetails = {
   uniq: string;
   totalLogs: number;
   lastUpdated: string;
+  forecastPeriod?: string;
+  machinePattern?: string;
   timeline: LogTimelineItem[];
 };
 
@@ -57,48 +57,52 @@ function formatNumber(value: number) {
 export default function PrlPatternHistoryPage() {
   const [activeTab, setActiveTab] = useState<HistoryTabId>("prl-history");
   const [detailOpen, setDetailOpen] = useState(false);
-  const [selectedUniq, setSelectedUniq] = useState<string | null>(null);
+  const [selectedTarget, setSelectedTarget] = useState<{ uniq: string; forecastPeriod: string } | null>(null);
   const apiEnabled = Boolean(apiBaseUrl);
 
-  const prlHistoryQuery = useGetPrlHistoryQuery(undefined, {
+  const prlHistoryQuery = useGetPrlHistoryVsDeliveryQuery({ page: 1, limit: 20 }, {
     skip: !apiEnabled,
   });
-  const machinePatternQuery = useGetMachinePatternsQuery(undefined, {
+  const machinePatternQuery = useGetPrlMachinePatternsQuery({ page: 1, limit: 20 }, {
     skip: !apiEnabled,
   });
-  const uniqLogsQuery = useGetPrlLogsByUniqQuery(selectedUniq ?? "", {
-    skip: !apiEnabled || !detailOpen || !selectedUniq,
+  const uniqLogsQuery = useGetPrlHistoryVsDeliveryDetailQuery({
+    uniq_code: selectedTarget?.uniq ?? "",
+    forecast_period: selectedTarget?.forecastPeriod ?? "",
+    limit: 50,
+  }, {
+    skip: !apiEnabled || !detailOpen || !selectedTarget?.uniq || !selectedTarget?.forecastPeriod,
   });
 
   const fallbackPrlHistoryRows = useMemo<PrlHistoryRow[]>(
     () => [
       {
         key: "1",
-        period: "Jan 2025",
+        forecastPeriod: "Jan 2025",
         uniq: "LV7-001",
-        machinePattern: "Pattern A: Bending > Stamping > Assembly",
-        productionOutput: 1180,
+        prlQuantity: 1200,
+        deliveryQty: 1180,
       },
       {
         key: "2",
-        period: "Jan 2025",
+        forecastPeriod: "Jan 2025",
         uniq: "LV8-002",
-        machinePattern: "Pattern B: Machining > Assembly",
-        productionOutput: 820,
+        prlQuantity: 850,
+        deliveryQty: 820,
       },
       {
         key: "3",
-        period: "Dec 2024",
+        forecastPeriod: "Dec 2024",
         uniq: "LV7-001",
-        machinePattern: "Pattern A: Bending > Stamping > Assembly",
-        productionOutput: 1130,
+        prlQuantity: 1150,
+        deliveryQty: 1130,
       },
       {
         key: "4",
-        period: "Dec 2024",
+        forecastPeriod: "Dec 2024",
         uniq: "LV9-003",
-        machinePattern: "Pattern C: Bending > Welding > Assembly",
-        productionOutput: 580,
+        prlQuantity: 600,
+        deliveryQty: 580,
       },
     ],
     []
@@ -109,29 +113,23 @@ export default function PrlPatternHistoryPage() {
       {
         key: "m1",
         uniq: "LV7-001",
-        pattern: "Pattern A",
-        steps: "Bending > Stamping > Assembly",
-        avgCycleTime: "42s",
-        output: 1180,
-        status: "Stable",
+        forecastPeriod: "Jan 2025",
+        machinePattern: "Pattern A: Bending > Stamping > Assembly",
+        productionOutput: 1180,
       },
       {
         key: "m2",
         uniq: "LV8-002",
-        pattern: "Pattern B",
-        steps: "Machining > Assembly",
-        avgCycleTime: "51s",
-        output: 820,
-        status: "Watch",
+        forecastPeriod: "Jan 2025",
+        machinePattern: "Pattern B: Machining > Assembly",
+        productionOutput: 820,
       },
       {
         key: "m3",
         uniq: "LV9-003",
-        pattern: "Pattern C",
-        steps: "Bending > Welding > Assembly",
-        avgCycleTime: "39s",
-        output: 580,
-        status: "Stable",
+        forecastPeriod: "Dec 2024",
+        machinePattern: "Pattern C: Bending > Welding > Assembly",
+        productionOutput: 580,
       },
     ],
     []
@@ -216,77 +214,66 @@ export default function PrlPatternHistoryPage() {
 
   const prlHistoryRows = useMemo<PrlHistoryRow[]>(() => {
     if (!apiEnabled) return fallbackPrlHistoryRows;
-    const list = prlHistoryQuery.data;
+    const list = prlHistoryQuery.data?.items;
     if (!list?.length) return fallbackPrlHistoryRows;
 
     return list.map((row, index) => ({
-      key: `${row.item_uniq_code ?? "uniq"}-${row.period ?? index}-${index}`,
-      period: row.period ?? "-",
-      uniq: row.item_uniq_code ?? "-",
-      machinePattern:
-        [row.product_details?.part_name, row.product_details?.part_number]
-          .filter(Boolean)
-          .join(" • ") || "-",
-      productionOutput: Number(row.delivery_quantity ?? row.quantity ?? 0),
+      key: `${row.uniq_code ?? "uniq"}-${row.forecast_period ?? index}-${index}`,
+      forecastPeriod: row.forecast_period ?? "-",
+      uniq: row.uniq_code ?? "-",
+      prlQuantity: Number(row.prl_quantity ?? 0),
+      deliveryQty: Number(row.delivery_qty ?? 0),
     }));
   }, [apiEnabled, fallbackPrlHistoryRows, prlHistoryQuery.data]);
 
   const machinePatternRows = useMemo<MachinePatternRow[]>(() => {
     if (!apiEnabled) return fallbackMachinePatternRows;
-    const list = machinePatternQuery.data;
+    const list = machinePatternQuery.data?.items;
     if (!list?.length) return fallbackMachinePatternRows;
 
     return list.map((row, index) => {
-      const rawPattern = String(row.machine_pattern ?? "-");
-      const [pattern, ...restSteps] = rawPattern.split(":");
-      const steps = restSteps.join(":").trim() || rawPattern;
-
       return {
-        key: `${row.uniq ?? "machine"}-${row.period ?? index}-${index}`,
-        uniq: row.uniq ?? "-",
-        pattern: pattern.trim() || rawPattern,
-        steps,
-        avgCycleTime: row.period ?? "-",
-        output: Number(row.production_output ?? 0),
-        status: Number(row.production_output ?? 0) > 0 ? "Stable" : "Watch",
+        key: `${row.uniq_code ?? "machine"}-${row.forecast_period ?? index}-${index}`,
+        uniq: row.uniq_code ?? "-",
+        forecastPeriod: row.forecast_period ?? "-",
+        machinePattern: row.machine_pattern ?? "-",
+        productionOutput: Number(row.production_output ?? 0),
       };
     });
   }, [apiEnabled, fallbackMachinePatternRows, machinePatternQuery.data]);
 
   const uniqLogDetailsMap = useMemo<Record<string, UniqLogDetails>>(() => {
     if (!apiEnabled) return fallbackUniqLogDetailsMap;
-    if (!selectedUniq) return fallbackUniqLogDetailsMap;
+    if (!selectedTarget?.uniq) return fallbackUniqLogDetailsMap;
 
-    const logs = uniqLogsQuery.data;
-    if (!logs?.length) return fallbackUniqLogDetailsMap;
+    const details = uniqLogsQuery.data;
+    if (!details?.timeline?.length && !details?.summary) return fallbackUniqLogDetailsMap;
 
-    const timeline: LogTimelineItem[] = logs.map((log, index) => ({
-      key: `${log.id}-${index}`,
-      title: log.action ?? "Activity",
-      timestamp: log.created_at ?? "-",
-      description:
-        log.old_value && log.new_value
-          ? `Changed value from ${log.old_value} to ${log.new_value}`
-          : log.action ?? "No description available",
-      actor: log.user_name ?? "System",
-      oldValue: log.old_value,
-      newValue: log.new_value,
+    const timeline: LogTimelineItem[] = (details.timeline ?? []).map((log, index) => ({
+      key: `${selectedTarget.uniq}-${selectedTarget.forecastPeriod}-${index}`,
+      title: log.activity ?? "Activity",
+      timestamp: log.event_time ?? "-",
+      description: log.description ?? log.activity ?? "No description available",
+      actor: log.actor ?? "System",
+      newValue: log.new_value == null ? undefined : String(log.new_value),
     }));
 
-    const lastUpdated = logs[0]?.created_at ?? "-";
+    const lastUpdated = details.summary?.last_updated ?? "-";
 
     return {
       ...fallbackUniqLogDetailsMap,
-      [selectedUniq]: {
-        uniq: selectedUniq,
-        totalLogs: logs.length,
+      [selectedTarget.uniq]: {
+        uniq: details.summary?.uniq_code ?? selectedTarget.uniq,
+        totalLogs: Number(details.summary?.total_logs ?? timeline.length ?? 0),
         lastUpdated,
+        forecastPeriod: details.summary?.forecast_period ?? selectedTarget.forecastPeriod,
+        machinePattern: details.summary?.machine_pattern ?? "-",
         timeline,
       },
     };
-  }, [apiEnabled, fallbackUniqLogDetailsMap, selectedUniq, uniqLogsQuery.data]);
+  }, [apiEnabled, fallbackUniqLogDetailsMap, selectedTarget, uniqLogsQuery.data]);
 
-  const selectedDetails = selectedUniq ? uniqLogDetailsMap[selectedUniq] : undefined;
+  const selectedDetails = selectedTarget?.uniq ? uniqLogDetailsMap[selectedTarget.uniq] : undefined;
 
   React.useEffect(() => {
     if (!apiEnabled) return;
@@ -300,8 +287,8 @@ export default function PrlPatternHistoryPage() {
     message.error(getApiErrorMessage(uniqLogsQuery.error, "Failed to load UNIQ log details"));
   }, [apiEnabled, detailOpen, uniqLogsQuery.error]);
 
-  const openUniqDetail = (uniq: string) => {
-    setSelectedUniq(uniq);
+  const openUniqDetail = (uniq: string, forecastPeriod: string) => {
+    setSelectedTarget({ uniq, forecastPeriod });
     setDetailOpen(true);
   };
 
@@ -309,7 +296,7 @@ export default function PrlPatternHistoryPage() {
     () => [
       {
         title: "Period",
-        dataIndex: "period",
+        dataIndex: "forecastPeriod",
         key: "period",
         render: (v: string) => (
           <Tag color="purple" className="!rounded-md !px-2 !py-0.5 !text-xs !font-semibold">
@@ -321,10 +308,48 @@ export default function PrlPatternHistoryPage() {
         title: "Uniq",
         dataIndex: "uniq",
         key: "uniq",
-        render: (v: string) => (
-          <button type="button" onClick={() => openUniqDetail(v)}>
+        render: (v: string, row) => (
+          <button type="button" onClick={() => openUniqDetail(v, row.forecastPeriod)}>
             <Tag className="!rounded-md !px-2 !py-0.5 !text-xs !font-semibold !text-gray-700">{v}</Tag>
           </button>
+        ),
+      },
+      {
+        title: "PRL Quantity",
+        dataIndex: "prlQuantity",
+        key: "prlQuantity",
+        align: "right",
+        render: (v: number) => <span className="text-sm font-semibold text-gray-900">{formatNumber(v)}</span>,
+      },
+      {
+        title: "Delivery Qty",
+        dataIndex: "deliveryQty",
+        key: "deliveryQty",
+        align: "right",
+        render: (v: number) => <span className="text-sm font-semibold text-green-600">{formatNumber(v)}</span>,
+      },
+    ],
+    []
+  );
+
+  const machineColumns = useMemo<ColumnsType<MachinePatternRow>>(
+    () => [
+      {
+        title: "Uniq",
+        dataIndex: "uniq",
+        key: "uniq",
+        render: (v: string) => (
+          <span className="text-sm font-semibold text-gray-800">{v}</span>
+        ),
+      },
+      {
+        title: "Period",
+        dataIndex: "forecastPeriod",
+        key: "forecastPeriod",
+        render: (v: string) => (
+          <Tag color="purple" className="!rounded-md !px-2 !py-0.5 !text-xs !font-semibold">
+            {v}
+          </Tag>
         ),
       },
       {
@@ -349,65 +374,9 @@ export default function PrlPatternHistoryPage() {
     []
   );
 
-  const machineColumns = useMemo<ColumnsType<MachinePatternRow>>(
-    () => [
-      {
-        title: "Uniq",
-        dataIndex: "uniq",
-        key: "uniq",
-        render: (v: string) => <span className="text-sm font-semibold text-gray-800">{v}</span>,
-      },
-      {
-        title: "Pattern",
-        dataIndex: "pattern",
-        key: "pattern",
-        render: (v: string) => <span className="text-sm font-semibold text-gray-800">{v}</span>,
-      },
-      {
-        title: "Steps",
-        dataIndex: "steps",
-        key: "steps",
-        render: (v: string) => <span className="text-sm text-gray-700">{v}</span>,
-      },
-      {
-        title: "Avg Cycle Time",
-        dataIndex: "avgCycleTime",
-        key: "avgCycleTime",
-        align: "right",
-        render: (v: string) => <span className="text-sm text-gray-700">{v}</span>,
-      },
-      {
-        title: "Output",
-        dataIndex: "output",
-        key: "output",
-        align: "right",
-        render: (v: number) => <span className="text-sm font-semibold text-green-600">{formatNumber(v)}</span>,
-      },
-      {
-        title: "Status",
-        dataIndex: "status",
-        key: "status",
-        align: "center",
-        render: (v: MachinePatternRow["status"]) => (
-          <Tag
-            color={v === "Watch" ? "orange" : "default"}
-            className={
-              v === "Watch"
-                ? "!rounded-md !px-2 !py-0.5 !text-xs !font-semibold"
-                : "!rounded-md !px-2 !py-0.5 !text-xs !font-semibold !text-gray-700"
-            }
-          >
-            {v}
-          </Tag>
-        ),
-      },
-    ],
-    []
-  );
-
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
-      {detailOpen && selectedUniq && (
+      {detailOpen && selectedTarget?.uniq && (
         <div className="text-sm text-gray-400 mb-3">PRL & Pattern History / PRL History / Log Details</div>
       )}
 
@@ -487,7 +456,9 @@ export default function PrlPatternHistoryPage() {
           <div className="flex items-center gap-2">
             <FileTextOutlined className="text-blue-600" />
             <div>
-              <div className="text-sm font-semibold text-gray-900">Log Details for {selectedUniq ?? "-"}</div>
+              <div className="text-sm font-semibold text-gray-900">
+                Log Details for {selectedTarget?.uniq ?? "-"}
+              </div>
               <div className="text-xs text-gray-500">Detailed history of all changes and activities for this UNIQ</div>
             </div>
           </div>
@@ -498,7 +469,7 @@ export default function PrlPatternHistoryPage() {
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <div className="text-xs text-gray-500">UNIQ</div>
-                <div className="text-sm font-semibold text-gray-900">{selectedDetails?.uniq ?? selectedUniq ?? "-"}</div>
+                <div className="text-sm font-semibold text-gray-900">{selectedDetails?.uniq ?? selectedTarget?.uniq ?? "-"}</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Total Logs</div>

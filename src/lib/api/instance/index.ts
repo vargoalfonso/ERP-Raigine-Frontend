@@ -125,8 +125,18 @@ export const apiSlice = createApi({
       };
     }
 
-    const { useAuthorization = false, contentType = "application/json" } =
-      args.meta || {};
+    const argsMeta = (typeof args === "object" && args && "meta" in args ? args.meta : undefined) as
+      | { useAuthorization?: boolean; contentType?: string }
+      | undefined;
+
+    const requestBody = typeof args === "object" && args && "body" in args ? args.body : undefined;
+    const inferredContentType =
+      typeof FormData !== "undefined" && requestBody instanceof FormData
+        ? "multipart/form-data"
+        : "application/json";
+
+    const { useAuthorization = false, contentType = inferredContentType } =
+      argsMeta || {};
 
     const headers = await generateHeaders({ useAuthorization, contentType });
 

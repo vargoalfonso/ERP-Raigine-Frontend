@@ -88,6 +88,33 @@ type Step1Values = {
   child_parts?: ChildPart[];
 };
 
+type FormPath = Array<string | number>;
+
+const MAX_CHILDREN_PER_PARENT = 6;
+const MAX_BOM_LEVEL = 6;
+
+const createDefaultChildPart = (): ChildPart => ({
+  status: "Active",
+  version: "v1.0",
+  qpu: 1,
+  process_routes: [{ sequence: 1 }],
+  material_spec: {},
+  children: [],
+});
+
+const getLevelBadgeClass = (level: number): string => {
+  const palette: Record<number, string> = {
+    1: "bg-blue-50 text-blue-700",
+    2: "bg-indigo-50 text-indigo-700",
+    3: "bg-purple-50 text-purple-700",
+    4: "bg-fuchsia-50 text-fuchsia-700",
+    5: "bg-pink-50 text-pink-700",
+    6: "bg-rose-50 text-rose-700",
+  };
+
+  return palette[level] ?? "bg-gray-100 text-gray-700";
+};
+
 const toApiStatus = (status?: BomStatus): string | undefined => {
   const s = typeof status === "string" ? status.trim() : "";
   if (s === "Active" || s === "Inactive") return s;
@@ -310,43 +337,27 @@ export default function CreateBomPage() {
   const childPartsCount = Array.isArray(childParts) ? childParts.length : 0;
 
   const addNestedChild = (path: Array<string | number>, level: number) => {
-    if (level > 4) {
-      messageApi.warning("Maximum nesting level is 4.");
+    if (level > MAX_BOM_LEVEL) {
+      messageApi.warning(`Maximum nesting level is ${MAX_BOM_LEVEL}.`);
       return;
     }
+
     const current = (form as any).getFieldValue(path as any) ?? [];
+    if ((current.length ?? 0) >= MAX_CHILDREN_PER_PARENT) {
+      messageApi.warning(
+        `Maximum ${MAX_CHILDREN_PER_PARENT} child parts allowed for each parent.`
+      );
+      return;
+    }
+
     (form as any).setFieldValue(path as any, [
       ...current,
-      {
-        status: "Active",
-        version: "v1.0",
-        qpu: 1,
-        process_routes: [{ sequence: 1 }],
-        material_spec: {},
-        children: [],
-      } satisfies ChildPart,
+      createDefaultChildPart(),
     ]);
   };
 
   const addLevel1Child = () => {
-    const current = form.getFieldValue("child_parts") ?? [];
-    const nextCount = (current.length ?? 0) + 1;
-    if (nextCount > 4) {
-      messageApi.warning("Maximum 4 child components allowed.");
-      return;
-    }
-
-    form.setFieldValue("child_parts", [
-      ...current,
-      {
-        status: "Active",
-        version: "v1.0",
-        qpu: 1,
-        process_routes: [{ sequence: 1 }],
-        material_spec: {},
-        children: [],
-      } satisfies ChildPart,
-    ]);
+    addNestedChild(["child_parts"], 1);
   };
 
   const renderChildProcessAndMaterial = (
@@ -531,6 +542,223 @@ export default function CreateBomPage() {
       </div>
     );
   };
+
+  const removeTopLevelChild = (index: number, remove: (index: number) => void) => {
+    remove(index);
+    setChildFileLists((prev) => {
+      const next: Record<number, UploadFile[]> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        const currentIndex = Number(k);
+        if (!Number.isFinite(currentIndex)) continue;
+        if (currentIndex === index) continue;
+        next[currentIndex > index ? currentIndex - 1 : currentIndex] = v;
+      }
+      return next;
+    });
+  };
+
+  const renderChildList = (listPath: FormPath, level: number, parentNumbers: number[] = []) => (
+    <Form.List name={listPath}>
+      {(fields, { remove }) => {
+        if (fields.length === 0) {
+          if (level !== 1) return null;
+
+          return (
+            <Card styles={{ body: { paddingTop: 24, paddingBottom: 24 } }}>
+              <div className="flex flex-col items-center justify-center text-center py-10">
+                <div className="h-16 w-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+                  <svg
+                    width="28"
+                    height="28"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="text-gray-500"
+                  >
+                    <path
+                      d="M12 2L20 6V18L12 22L4 18V6L12 2Z"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M4 6L12 10L20 6"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinejoin="round"
+                    />
+                    <path
+                      d="M12 10V22"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
+                <Text type="secondary">No child components added yet</Text>
+                <div className="mt-4">
+                  <Button
+                    type="primary"
+                    icon={<PlusOutlined />}
+                    onClick={addLevel1Child}
+                    disabled={childPartsCount >= MAX_CHILDREN_PER_PARENT}
+                  >
+                    Add First Child Component
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          );
+        }
+
+        return (
+          <div className={level === 1 ? "space-y-5" : "mt-5 space-y-4 border-l-2 border-gray-100 pl-4"}>
+            {fields.map((field, idx) => {
+              const numbering = [...parentNumbers, idx + 1];
+              const itemPath = [...listPath, field.name];
+              const canAddMoreLevels = level < MAX_BOM_LEVEL;
+
+              return (
+                <Card
+                  key={field.key}
+                  className={level <= 2 ? "border border-gray-200" : "border border-gray-100"}
+                  styles={{ body: { paddingTop: 16 } }}
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <span
+                        className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-semibold ${getLevelBadgeClass(level)}`}
+                      >
+                        Level {level}
+                      </span>
+                      <Title level={5} className="!mb-0">
+                        Child #{numbering.join(".")}
+                      </Title>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {canAddMoreLevels ? (
+                        <Button
+                          icon={<PlusOutlined />}
+                          onClick={() => addNestedChild([...itemPath, "children"], level + 1)}
+                        >
+                          Add Child Level {level + 1}
+                        </Button>
+                      ) : null}
+                      <Button
+                        danger
+                        type="text"
+                        icon={<DeleteOutlined />}
+                        onClick={() => {
+                          if (level === 1) {
+                            removeTopLevelChild(Number(field.name), remove);
+                            return;
+                          }
+                          remove(field.name);
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <Form.Item
+                      {...field}
+                      name={[field.name, "uniq"]}
+                      label="UNIQ"
+                      rules={[{ required: true, message: "UNIQ is required" }]}
+                    >
+                      <Input placeholder={`e.g., LV7-001-${String.fromCharCode(64 + Math.min(level, 26))}`} size="large" />
+                    </Form.Item>
+                    <Form.Item
+                      {...field}
+                      name={[field.name, "part_name"]}
+                      label="Part Name"
+                      rules={[{ required: true, message: "Part name is required" }]}
+                    >
+                      <Input placeholder="Enter part name" size="large" />
+                    </Form.Item>
+                    <Form.Item
+                      {...field}
+                      name={[field.name, "part_number"]}
+                      label="Part Number"
+                      rules={[{ required: true, message: "Part number is required" }]}
+                    >
+                      <Input placeholder="Enter part number" size="large" />
+                    </Form.Item>
+                    <Form.Item
+                      {...field}
+                      name={[field.name, "model"]}
+                      label="Product Model"
+                      rules={[{ required: true, message: "Product model is required" }]}
+                    >
+                      <Input placeholder="Enter product model" size="large" />
+                    </Form.Item>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Form.Item
+                      {...field}
+                      name={[field.name, "qpu"]}
+                      label={level === 1 ? "QPU (Quantity Per Unit)" : "QPU"}
+                      rules={[{ required: true, message: "QPU is required" }]}
+                    >
+                      <InputNumber min={0} size="large" style={{ width: "100%" }} />
+                    </Form.Item>
+                    <Form.Item
+                      {...field}
+                      name={[field.name, "version"]}
+                      label="Version"
+                    >
+                      <Input placeholder="v1.0" size="large" />
+                    </Form.Item>
+                    <Form.Item
+                      {...field}
+                      name={[field.name, "status"]}
+                      label="Status"
+                      initialValue="Active"
+                      hidden
+                    >
+                      <Input />
+                    </Form.Item>
+                    <Form.Item label="Status">
+                      <Input value="Active" size="large" disabled />
+                    </Form.Item>
+                  </div>
+
+                  {level === 1 ? (
+                    <div className="mb-6">
+                      <Text className="block mb-2">Add Picture for child UNIQ</Text>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                        <Upload
+                          fileList={childFileLists[field.name] ?? []}
+                          beforeUpload={() => false}
+                          onChange={({ fileList: next }) =>
+                            setChildFileLists((prev) => ({
+                              ...prev,
+                              [field.name]: next,
+                            }))
+                          }
+                          maxCount={1}
+                        >
+                          <Button icon={<UploadOutlined />}>Choose File</Button>
+                        </Upload>
+                      </div>
+                      <Text type="secondary" className="block mt-2">
+                        Upload image for 3D/2D CAD reference
+                      </Text>
+                    </div>
+                  ) : null}
+
+                  {renderChildProcessAndMaterial([field.name], itemPath)}
+                  {canAddMoreLevels ? renderChildList([...itemPath, "children"], level + 1, numbering) : null}
+                </Card>
+              );
+            })}
+          </div>
+        );
+      }}
+    </Form.List>
+  );
 
   const onSaveBom = async () => {
     try {
@@ -971,7 +1199,7 @@ export default function CreateBomPage() {
           current={step}
           items={[
             { title: "Step 1", description: "Parent Info & Specs" },
-            { title: "Step 2", description: "Add Child Parts (Up to Level 4)" },
+            { title: "Step 2", description: `Add Child Parts (Up to Level ${MAX_BOM_LEVEL})` },
           ]}
         />
 
@@ -1431,605 +1659,24 @@ export default function CreateBomPage() {
             ) : (
               <>
               <div className="bg-blue-50 border border-blue-100 text-blue-700 px-4 py-3 rounded-md mb-6 text-sm">
-                Step 2: Add child components with their own process routes and material specs. You can create up to 4 levels of nested children.
+                Step 2: Add child components with their own process routes and material specs. Maksimal {MAX_CHILDREN_PER_PARENT} child per parent dan level maksimal {MAX_BOM_LEVEL}.
               </div>
 
               <div className="flex items-center justify-between mb-4">
                 <Title level={4} className="!mb-0">
-                  Child Parts (Levels 1-4)
+                  Child Parts (Levels 1-{MAX_BOM_LEVEL})
                 </Title>
                 <Button
                   type="primary"
                   icon={<PlusOutlined />}
                   onClick={addLevel1Child}
-                  disabled={childPartsCount >= 4}
+                  disabled={childPartsCount >= MAX_CHILDREN_PER_PARENT}
                 >
                   Add Level 1 Child
                 </Button>
               </div>
 
-              <Form.List name="child_parts">
-                {(childFields, { remove }) => {
-                  if (childFields.length === 0) {
-                    return (
-                      <Card styles={{ body: { paddingTop: 24, paddingBottom: 24 } }}>
-                        <div className="flex flex-col items-center justify-center text-center py-10">
-                          <div className="h-16 w-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
-                            <svg
-                              width="28"
-                              height="28"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              xmlns="http://www.w3.org/2000/svg"
-                              className="text-gray-500"
-                            >
-                              <path
-                                d="M12 2L20 6V18L12 22L4 18V6L12 2Z"
-                                stroke="currentColor"
-                                strokeWidth="1.5"
-                                strokeLinejoin="round"
-                              />
-                              <path
-                                d="M4 6L12 10L20 6"
-                                stroke="currentColor"
-                                strokeWidth="1.5"
-                                strokeLinejoin="round"
-                              />
-                              <path
-                                d="M12 10V22"
-                                stroke="currentColor"
-                                strokeWidth="1.5"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </div>
-                          <Text type="secondary">No child components added yet</Text>
-                          <div className="mt-4">
-                            <Button
-                              type="primary"
-                              icon={<PlusOutlined />}
-                              onClick={addLevel1Child}
-                            >
-                              Add First Child Component
-                            </Button>
-                          </div>
-                        </div>
-                      </Card>
-                    );
-                  }
-
-                  return (
-                    <div className="space-y-5">
-                      {childFields.map((childField, idx) => (
-                        <Card
-                          key={childField.key}
-                          className="border border-gray-200"
-                          styles={{ body: { paddingTop: 16 } }}
-                        >
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-3">
-                              <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
-                                Level 1
-                              </span>
-                              <Title level={5} className="!mb-0">
-                                Child #{idx + 1}
-                              </Title>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                icon={<PlusOutlined />}
-                                onClick={() =>
-                                  addNestedChild(
-                                    ["child_parts", childField.name, "children"],
-                                    2
-                                  )
-                                }
-                              >
-                                Add Child Level 2
-                              </Button>
-                              <Button
-                                danger
-                                type="text"
-                                icon={<DeleteOutlined />}
-                                onClick={() => {
-                                  remove(childField.name);
-                                  setChildFileLists((prev) => {
-                                    const next: Record<number, UploadFile[]> = {};
-                                    const removedIndex = Number(childField.name);
-                                    for (const [k, v] of Object.entries(prev)) {
-                                      const idx = Number(k);
-                                      if (!Number.isFinite(idx)) continue;
-                                      if (idx === removedIndex) continue;
-                                      next[idx > removedIndex ? idx - 1 : idx] = v;
-                                    }
-                                    return next;
-                                  });
-                                }}
-                              />
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            <Form.Item
-                              {...childField}
-                              name={[childField.name, "uniq"]}
-                              label="UNIQ"
-                              rules={[{ required: true, message: "UNIQ is required" }]}
-                            >
-                              <Input placeholder="e.g., LV7-001-A" size="large" />
-                            </Form.Item>
-                            <Form.Item
-                              {...childField}
-                              name={[childField.name, "part_name"]}
-                              label="Part Name"
-                              rules={[{ required: true, message: "Part name is required" }]}
-                            >
-                              <Input placeholder="Enter part name" size="large" />
-                            </Form.Item>
-                            <Form.Item
-                              {...childField}
-                              name={[childField.name, "part_number"]}
-                              label="Part Number"
-                              rules={[{ required: true, message: "Part number is required" }]}
-                            >
-                              <Input placeholder="Enter part number" size="large" />
-                            </Form.Item>
-                            <Form.Item
-                              {...childField}
-                              name={[childField.name, "model"]}
-                              label="Product Model"
-                              rules={[{ required: true, message: "Product model is required" }]}
-                            >
-                              <Input placeholder="Enter product model" size="large" />
-                            </Form.Item>
-                          </div>
-
-                          <Form.List name={[childField.name, "children"]}>
-                            {(lvl2Fields, { remove: removeLvl2 }) => {
-                              if (lvl2Fields.length === 0) return null;
-                              return (
-                                <div className="mt-5 space-y-4">
-                                  <div className="flex items-center justify-between">
-                                    <Title level={5} className="!mb-0">
-                                      Level 2 Children
-                                    </Title>
-                                    <Button
-                                      icon={<PlusOutlined />}
-                                      onClick={() =>
-                                        addNestedChild(
-                                          [
-                                            "child_parts",
-                                            childField.name,
-                                            "children",
-                                          ],
-                                          2
-                                        )
-                                      }
-                                    >
-                                      Add Level 2 Child
-                                    </Button>
-                                  </div>
-
-                                  {lvl2Fields.map((lvl2Field, lvl2Idx) => (
-                                    <Card
-                                      key={lvl2Field.key}
-                                      className="border border-gray-100"
-                                      styles={{ body: { paddingTop: 12 } }}
-                                    >
-                                      <div className="flex items-center justify-between mb-3">
-                                        <div className="flex items-center gap-3">
-                                          <span className="inline-flex items-center rounded-md bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700">
-                                            Level 2
-                                          </span>
-                                          <Text strong>Child #{idx + 1}.{lvl2Idx + 1}</Text>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                          <Button
-                                            icon={<PlusOutlined />}
-                                            onClick={() =>
-                                              addNestedChild(
-                                                [
-                                                  "child_parts",
-                                                  childField.name,
-                                                  "children",
-                                                  lvl2Field.name,
-                                                  "children",
-                                                ],
-                                                3
-                                              )
-                                            }
-                                          >
-                                            Add Child Level 3
-                                          </Button>
-                                          <Button
-                                            danger
-                                            type="text"
-                                            icon={<DeleteOutlined />}
-                                            onClick={() => removeLvl2(lvl2Field.name)}
-                                          />
-                                        </div>
-                                      </div>
-
-                                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                        <Form.Item
-                                          {...lvl2Field}
-                                          name={[lvl2Field.name, "uniq"]}
-                                          label="UNIQ"
-                                          rules={[{ required: true, message: "UNIQ is required" }]}
-                                        >
-                                          <Input placeholder="e.g., LV7-001-B" size="large" />
-                                        </Form.Item>
-                                        <Form.Item
-                                          {...lvl2Field}
-                                          name={[lvl2Field.name, "part_name"]}
-                                          label="Part Name"
-                                          rules={[{ required: true, message: "Part name is required" }]}
-                                        >
-                                          <Input placeholder="Enter part name" size="large" />
-                                        </Form.Item>
-                                        <Form.Item
-                                          {...lvl2Field}
-                                          name={[lvl2Field.name, "part_number"]}
-                                          label="Part Number"
-                                          rules={[{ required: true, message: "Part number is required" }]}
-                                        >
-                                          <Input placeholder="Enter part number" size="large" />
-                                        </Form.Item>
-                                        <Form.Item
-                                          {...lvl2Field}
-                                          name={[lvl2Field.name, "model"]}
-                                          label="Product Model"
-                                          rules={[{ required: true, message: "Product model is required" }]}
-                                        >
-                                          <Input placeholder="Enter product model" size="large" />
-                                        </Form.Item>
-                                      </div>
-
-                                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                        <Form.Item
-                                          {...lvl2Field}
-                                          name={[lvl2Field.name, "qpu"]}
-                                          label="QPU"
-                                          rules={[{ required: true, message: "QPU is required" }]}
-                                        >
-                                          <InputNumber min={0} size="large" style={{ width: "100%" }} />
-                                        </Form.Item>
-                                        <Form.Item
-                                          {...lvl2Field}
-                                          name={[lvl2Field.name, "version"]}
-                                          label="Version"
-                                        >
-                                          <Input placeholder="v1.0" size="large" />
-                                        </Form.Item>
-                                        <Form.Item
-                                          {...lvl2Field}
-                                          name={[lvl2Field.name, "status"]}
-                                          label="Status"
-                                          initialValue="Active"
-                                          hidden
-                                        >
-                                          <Input />
-                                        </Form.Item>
-                                        <Form.Item label="Status">
-                                          <Input value="Active" size="large" disabled />
-                                        </Form.Item>
-                                      </div>
-
-                                      {renderChildProcessAndMaterial(
-                                        [lvl2Field.name],
-                                        [
-                                          "child_parts",
-                                          childField.name,
-                                          "children",
-                                          lvl2Field.name,
-                                        ]
-                                      )}
-
-                                      <Form.List name={[lvl2Field.name, "children"]}>
-                                        {(lvl3Fields, { remove: removeLvl3 }) => {
-                                          if (lvl3Fields.length === 0) return null;
-                                          return (
-                                            <div className="mt-4 space-y-3">
-                                              <Text strong>Level 3 Children</Text>
-                                              {lvl3Fields.map((lvl3Field, lvl3Idx) => (
-                                                <Card
-                                                  key={lvl3Field.key}
-                                                  className="border border-gray-50"
-                                                  styles={{ body: { paddingTop: 10 } }}
-                                                >
-                                                  <div className="flex items-center justify-between mb-2">
-                                                    <span className="inline-flex items-center rounded-md bg-purple-50 px-2 py-1 text-xs font-semibold text-purple-700">
-                                                      Level 3
-                                                    </span>
-                                                    <div className="flex items-center gap-2">
-                                                      <Button
-                                                        icon={<PlusOutlined />}
-                                                        onClick={() =>
-                                                          addNestedChild(
-                                                            [
-                                                              "child_parts",
-                                                              childField.name,
-                                                              "children",
-                                                              lvl2Field.name,
-                                                              "children",
-                                                              lvl3Field.name,
-                                                              "children",
-                                                            ],
-                                                            4
-                                                          )
-                                                        }
-                                                      >
-                                                        Add Child Level 4
-                                                      </Button>
-                                                      <Button
-                                                        danger
-                                                        type="text"
-                                                        icon={<DeleteOutlined />}
-                                                        onClick={() => removeLvl3(lvl3Field.name)}
-                                                      />
-                                                    </div>
-                                                  </div>
-
-                                                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                                    <Form.Item
-                                                      {...lvl3Field}
-                                                      name={[lvl3Field.name, "uniq"]}
-                                                      label="UNIQ"
-                                                      rules={[{ required: true, message: "UNIQ is required" }]}
-                                                    >
-                                                      <Input placeholder="e.g., LV7-001-C" size="large" />
-                                                    </Form.Item>
-                                                    <Form.Item
-                                                      {...lvl3Field}
-                                                      name={[lvl3Field.name, "part_name"]}
-                                                      label="Part Name"
-                                                      rules={[{ required: true, message: "Part name is required" }]}
-                                                    >
-                                                      <Input placeholder="Enter part name" size="large" />
-                                                    </Form.Item>
-                                                    <Form.Item
-                                                      {...lvl3Field}
-                                                      name={[lvl3Field.name, "part_number"]}
-                                                      label="Part Number"
-                                                      rules={[{ required: true, message: "Part number is required" }]}
-                                                    >
-                                                      <Input placeholder="Enter part number" size="large" />
-                                                    </Form.Item>
-                                                    <Form.Item
-                                                      {...lvl3Field}
-                                                      name={[lvl3Field.name, "model"]}
-                                                      label="Product Model"
-                                                      rules={[{ required: true, message: "Product model is required" }]}
-                                                    >
-                                                      <Input placeholder="Enter product model" size="large" />
-                                                    </Form.Item>
-                                                  </div>
-
-                                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                    <Form.Item
-                                                      {...lvl3Field}
-                                                      name={[lvl3Field.name, "qpu"]}
-                                                      label="QPU"
-                                                      rules={[{ required: true, message: "QPU is required" }]}
-                                                    >
-                                                      <InputNumber min={0} size="large" style={{ width: "100%" }} />
-                                                    </Form.Item>
-                                                    <Form.Item
-                                                      {...lvl3Field}
-                                                      name={[lvl3Field.name, "version"]}
-                                                      label="Version"
-                                                    >
-                                                      <Input placeholder="v1.0" size="large" />
-                                                    </Form.Item>
-                                                    <Form.Item
-                                                      {...lvl3Field}
-                                                      name={[lvl3Field.name, "status"]}
-                                                      label="Status"
-                                                      initialValue="Active"
-                                                      hidden
-                                                    >
-                                                      <Input />
-                                                    </Form.Item>
-                                                    <Form.Item label="Status">
-                                                      <Input value="Active" size="large" disabled />
-                                                    </Form.Item>
-                                                  </div>
-
-                                                  {renderChildProcessAndMaterial(
-                                                    [lvl3Field.name],
-                                                    [
-                                                      "child_parts",
-                                                      childField.name,
-                                                      "children",
-                                                      lvl2Field.name,
-                                                      "children",
-                                                      lvl3Field.name,
-                                                    ]
-                                                  )}
-
-                                                  <Form.List name={[lvl3Field.name, "children"]}>
-                                                    {(lvl4Fields, { remove: removeLvl4 }) => {
-                                                      if (lvl4Fields.length === 0) return null;
-                                                      return (
-                                                        <div className="mt-3 space-y-2">
-                                                          <Text strong>Level 4 Children</Text>
-                                                          {lvl4Fields.map((lvl4Field) => (
-                                                            <Card
-                                                              key={lvl4Field.key}
-                                                              className="border border-gray-50"
-                                                              styles={{ body: { paddingTop: 10 } }}
-                                                            >
-                                                              <div className="flex items-center justify-between mb-2">
-                                                                <span className="inline-flex items-center rounded-md bg-fuchsia-50 px-2 py-1 text-xs font-semibold text-fuchsia-700">
-                                                                  Level 4
-                                                                </span>
-                                                                <Button
-                                                                  danger
-                                                                  type="text"
-                                                                  icon={<DeleteOutlined />}
-                                                                  onClick={() => removeLvl4(lvl4Field.name)}
-                                                                />
-                                                              </div>
-                                                              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                                                <Form.Item
-                                                                  {...lvl4Field}
-                                                                  name={[lvl4Field.name, "uniq"]}
-                                                                  label="UNIQ"
-                                                                  rules={[{ required: true, message: "UNIQ is required" }]}
-                                                                >
-                                                                  <Input placeholder="e.g., LV7-001-D" size="large" />
-                                                                </Form.Item>
-                                                                <Form.Item
-                                                                  {...lvl4Field}
-                                                                  name={[lvl4Field.name, "part_name"]}
-                                                                  label="Part Name"
-                                                                  rules={[{ required: true, message: "Part name is required" }]}
-                                                                >
-                                                                  <Input placeholder="Enter part name" size="large" />
-                                                                </Form.Item>
-                                                                <Form.Item
-                                                                  {...lvl4Field}
-                                                                  name={[lvl4Field.name, "part_number"]}
-                                                                  label="Part Number"
-                                                                  rules={[{ required: true, message: "Part number is required" }]}
-                                                                >
-                                                                  <Input placeholder="Enter part number" size="large" />
-                                                                </Form.Item>
-                                                                <Form.Item
-                                                                  {...lvl4Field}
-                                                                  name={[lvl4Field.name, "model"]}
-                                                                  label="Product Model"
-                                                                  rules={[{ required: true, message: "Product model is required" }]}
-                                                                >
-                                                                  <Input placeholder="Enter product model" size="large" />
-                                                                </Form.Item>
-                                                              </div>
-                                                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                                <Form.Item
-                                                                  {...lvl4Field}
-                                                                  name={[lvl4Field.name, "qpu"]}
-                                                                  label="QPU"
-                                                                  rules={[{ required: true, message: "QPU is required" }]}
-                                                                >
-                                                                  <InputNumber min={0} size="large" style={{ width: "100%" }} />
-                                                                </Form.Item>
-                                                                <Form.Item
-                                                                  {...lvl4Field}
-                                                                  name={[lvl4Field.name, "version"]}
-                                                                  label="Version"
-                                                                >
-                                                                  <Input placeholder="v1.0" size="large" />
-                                                                </Form.Item>
-                                                                <Form.Item
-                                                                  {...lvl4Field}
-                                                                  name={[lvl4Field.name, "status"]}
-                                                                  label="Status"
-                                                                  initialValue="Active"
-                                                                  hidden
-                                                                >
-                                                                  <Input />
-                                                                </Form.Item>
-                                                                <Form.Item label="Status">
-                                                                  <Input value="Active" size="large" disabled />
-                                                                </Form.Item>
-                                                              </div>
-
-                                                              {renderChildProcessAndMaterial(
-                                                                [lvl4Field.name],
-                                                                [
-                                                                  "child_parts",
-                                                                  childField.name,
-                                                                  "children",
-                                                                  lvl2Field.name,
-                                                                  "children",
-                                                                  lvl3Field.name,
-                                                                  "children",
-                                                                  lvl4Field.name,
-                                                                ]
-                                                              )}
-                                                            </Card>
-                                                          ))}
-                                                        </div>
-                                                      );
-                                                    }}
-                                                  </Form.List>
-                                                </Card>
-                                              ))}
-                                            </div>
-                                          );
-                                        }}
-                                      </Form.List>
-                                    </Card>
-                                  ))}
-                                </div>
-                              );
-                            }}
-                          </Form.List>
-
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <Form.Item
-                              {...childField}
-                              name={[childField.name, "qpu"]}
-                              label="QPU (Quantity Per Unit)"
-                              rules={[{ required: true, message: "QPU is required" }]}
-                            >
-                              <InputNumber min={0} size="large" style={{ width: "100%" }} />
-                            </Form.Item>
-                            <Form.Item
-                              {...childField}
-                              name={[childField.name, "version"]}
-                              label="Version"
-                            >
-                              <Input placeholder="v1.0" size="large" />
-                            </Form.Item>
-                            <Form.Item
-                              {...childField}
-                              name={[childField.name, "status"]}
-                              label="Status"
-                              initialValue="Active"
-                              hidden
-                            >
-                              <Input />
-                            </Form.Item>
-                            <Form.Item label="Status">
-                              <Input value="Active" size="large" disabled />
-                            </Form.Item>
-                          </div>
-
-                          <div className="mb-6">
-                            <Text className="block mb-2">Add Picture for child UNIQ</Text>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-                              <Upload
-                                fileList={childFileLists[childField.name] ?? []}
-                                beforeUpload={() => false}
-                                onChange={({ fileList: next }) =>
-                                  setChildFileLists((prev) => ({
-                                    ...prev,
-                                    [childField.name]: next,
-                                  }))
-                                }
-                                maxCount={1}
-                              >
-                                <Button icon={<UploadOutlined />}>Choose File</Button>
-                              </Upload>
-
-                             
-                            </div>
-                            <Text type="secondary" className="block mt-2">
-                              Upload image for 3D/2D CAD reference
-                            </Text>
-                          </div>
-
-                          {renderChildProcessAndMaterial(
-                            [childField.name],
-                            ["child_parts", childField.name]
-                          )}
-                        </Card>
-                      ))}
-                    </div>
-                  );
-                }}
-              </Form.List>
+              {renderChildList(["child_parts"], 1)}
 
               <div className="flex items-center justify-between mt-6">
                 <Button onClick={() => setStep(0)} icon={<ArrowLeftOutlined />}
