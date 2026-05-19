@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -53,6 +53,7 @@ type MaterialSpec = {
   material_code?: string;
   form?: string;
   supplier?: string;
+  weight_kg?: number;
   width_mm?: number;
   diameter_mm?: number;
   thickness_mm?: number;
@@ -129,14 +130,17 @@ const asFile = (v: unknown): File | null => {
   return null;
 };
 
+const toChildFileKey = (path: Array<string | number>): string => path.join(".");
+
 export default function CreateBomPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
   const [messageApi, contextHolder] = message.useMessage();
   const [form] = Form.useForm<Step1Values>();
+  const rootAddChildRef = useRef<(() => void) | null>(null);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [childFileLists, setChildFileLists] = useState<
-    Record<number, UploadFile[]>
+    Record<string, UploadFile[]>
   >({});
   const [openProcessRouteIndex, setOpenProcessRouteIndex] = useState<
     number | null
@@ -283,6 +287,14 @@ export default function CreateBomPage() {
     [suppliers]
   );
 
+  const supplierNameByValue = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const option of supplierOptions) {
+      map.set(String(option.value), option.label);
+    }
+    return map;
+  }, [supplierOptions]);
+
   const initialValues = useMemo<Step1Values>(
     () => ({
       status: "Active",
@@ -336,28 +348,8 @@ export default function CreateBomPage() {
   const childParts = Form.useWatch("child_parts", form);
   const childPartsCount = Array.isArray(childParts) ? childParts.length : 0;
 
-  const addNestedChild = (path: Array<string | number>, level: number) => {
-    if (level > MAX_BOM_LEVEL) {
-      messageApi.warning(`Maximum nesting level is ${MAX_BOM_LEVEL}.`);
-      return;
-    }
-
-    const current = (form as any).getFieldValue(path as any) ?? [];
-    if ((current.length ?? 0) >= MAX_CHILDREN_PER_PARENT) {
-      messageApi.warning(
-        `Maximum ${MAX_CHILDREN_PER_PARENT} child parts allowed for each parent.`
-      );
-      return;
-    }
-
-    (form as any).setFieldValue(path as any, [
-      ...current,
-      createDefaultChildPart(),
-    ]);
-  };
-
   const addLevel1Child = () => {
-    addNestedChild(["child_parts"], 1);
+    rootAddChildRef.current?.();
   };
 
   const renderChildProcessAndMaterial = (
@@ -397,13 +389,15 @@ export default function CreateBomPage() {
         <Form.List name={[...fieldPath, "process_routes"]}>
           {(procFields, { remove: removeProc }) => (
             <div className="space-y-3 mb-6">
-              {procFields.map((pf) => (
+              {procFields.map((pf) => {
+                const procKey = pf.key;
+
+                return (
                 <div
-                  key={pf.key}
+                  key={procKey}
                   className="grid grid-cols-1 md:grid-cols-8 gap-3 items-start"
                 >
                   <Form.Item
-                    {...pf}
                     name={[pf.name, "process_id"]}
                     label="Process"
                     rules={[{ required: true, message: "Process is required" }]}
@@ -417,7 +411,6 @@ export default function CreateBomPage() {
                     />
                   </Form.Item>
                   <Form.Item
-                    {...pf}
                     name={[pf.name, "machine_id"]}
                     label="Machine"
                     rules={[{ required: true, message: "Machine is required" }]}
@@ -430,24 +423,22 @@ export default function CreateBomPage() {
                       optionFilterProp="label"
                     />
                   </Form.Item>
-                  <Form.Item {...pf} name={[pf.name, "sequence"]} label="Sequence">
+                  <Form.Item name={[pf.name, "sequence"]} label="Sequence">
                     <InputNumber min={1} style={{ width: "100%" }} />
                   </Form.Item>
                   <Form.Item
-                    {...pf}
                     name={[pf.name, "cycle_time_sec_per_pc"]}
                     label="Cycle Time"
                   >
                     <InputNumber min={0} style={{ width: "100%" }} />
                   </Form.Item>
                   <Form.Item
-                    {...pf}
                     name={[pf.name, "setup_time_min"]}
                     label="Setup Time"
                   >
                     <InputNumber min={0} style={{ width: "100%" }} />
                   </Form.Item>
-                  <Form.Item {...pf} name={[pf.name, "tooling"]} label="Tooling">
+                  <Form.Item name={[pf.name, "tooling"]} label="Tooling">
                     <Select
                       placeholder="Select tooling"
                       options={[
@@ -459,7 +450,6 @@ export default function CreateBomPage() {
                     />
                   </Form.Item>
                   <Form.Item
-                    {...pf}
                     name={[pf.name, "machine_stroke"]}
                     label="Machine Stroke"
                   >
@@ -474,7 +464,7 @@ export default function CreateBomPage() {
                     />
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
           )}
         </Form.List>
@@ -543,23 +533,191 @@ export default function CreateBomPage() {
     );
   };
 
-  const removeTopLevelChild = (index: number, remove: (index: number) => void) => {
-    remove(index);
-    setChildFileLists((prev) => {
-      const next: Record<number, UploadFile[]> = {};
-      for (const [k, v] of Object.entries(prev)) {
-        const currentIndex = Number(k);
-        if (!Number.isFinite(currentIndex)) continue;
-        if (currentIndex === index) continue;
-        next[currentIndex > index ? currentIndex - 1 : currentIndex] = v;
-      }
-      return next;
-    });
-  };
+  const renderChildCards = (
+    fields: Array<{ key: number; name: number }>,
+    remove: (index: number | number[]) => void,
+    listPath: FormPath,
+    level: number,
+    parentNumbers: number[] = []
+  ) => (
+    <div className={level === 1 ? "space-y-5" : "mt-5 space-y-4 border-l-2 border-gray-100 pl-4"}>
+      {fields.map((field, idx) => {
+        const childFieldKey = field.key;
+        const numbering = [...parentNumbers, idx + 1];
+        const itemPath = [...listPath, field.name];
+        const childFileKey = toChildFileKey(itemPath);
+        const canAddMoreLevels = level < MAX_BOM_LEVEL;
+
+        return (
+          <Card
+            key={childFieldKey}
+            className={level <= 2 ? "border border-gray-200" : "border border-gray-100"}
+            styles={{ body: { paddingTop: 16 } }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <span
+                  className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-semibold ${getLevelBadgeClass(level)}`}
+                >
+                  Level {level}
+                </span>
+                <Title level={5} className="!mb-0">
+                  Child #{numbering.join(".")}
+                </Title>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  danger
+                  type="text"
+                  icon={<DeleteOutlined />}
+                  onClick={() => remove(field.name)}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Form.Item
+                name={[field.name, "uniq"]}
+                label="UNIQ"
+                rules={[{ required: true, message: "UNIQ is required" }]}
+              >
+                <Input placeholder={`e.g., LV7-001-${String.fromCharCode(64 + Math.min(level, 26))}`} size="large" />
+              </Form.Item>
+              <Form.Item
+                name={[field.name, "part_name"]}
+                label="Part Name"
+                rules={[{ required: true, message: "Part name is required" }]}
+              >
+                <Input placeholder="Enter part name" size="large" />
+              </Form.Item>
+              <Form.Item
+                name={[field.name, "part_number"]}
+                label="Part Number"
+                rules={[{ required: true, message: "Part number is required" }]}
+              >
+                <Input placeholder="Enter part number" size="large" />
+              </Form.Item>
+              <Form.Item
+                name={[field.name, "model"]}
+                label="Product Model"
+                rules={[{ required: true, message: "Product model is required" }]}
+              >
+                <Input placeholder="Enter product model" size="large" />
+              </Form.Item>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Form.Item
+                name={[field.name, "qpu"]}
+                label={level === 1 ? "QPU (Quantity Per Unit)" : "QPU"}
+                rules={[{ required: true, message: "QPU is required" }]}
+              >
+                <InputNumber min={0} size="large" style={{ width: "100%" }} />
+              </Form.Item>
+              <Form.Item
+                name={[field.name, "version"]}
+                label="Version"
+              >
+                <Input placeholder="v1.0" size="large" />
+              </Form.Item>
+              <Form.Item
+                name={[field.name, "status"]}
+                label="Status"
+                initialValue="Active"
+                hidden
+              >
+                <Input />
+              </Form.Item>
+              <Form.Item label="Status">
+                <Input value="Active" size="large" disabled />
+              </Form.Item>
+            </div>
+
+            <div className="mb-6">
+              <Text className="block mb-2">Add Picture for child UNIQ</Text>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                <Upload
+                  fileList={childFileLists[childFileKey] ?? []}
+                  beforeUpload={() => false}
+                  onChange={({ fileList: next }) =>
+                    setChildFileLists((prev) => ({
+                      ...prev,
+                      [childFileKey]: next,
+                    }))
+                  }
+                  maxCount={1}
+                >
+                  <Button icon={<UploadOutlined />}>Choose File</Button>
+                </Upload>
+              </div>
+              <Text type="secondary" className="block mt-2">
+                Upload image for 3D/2D CAD reference
+              </Text>
+            </div>
+
+            {renderChildProcessAndMaterial([field.name], itemPath)}
+
+            {canAddMoreLevels ? (
+              <Form.List name={[field.name, "children"]}>
+                {(nestedFields, { add: addNestedField, remove: removeNestedField }) => (
+                  <div className="mt-6">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <Text strong>Level {level + 1} Children</Text>
+                      <Button
+                        icon={<PlusOutlined />}
+                        onClick={() => {
+                          if (nestedFields.length >= MAX_CHILDREN_PER_PARENT) {
+                            messageApi.warning(
+                              `Maximum ${MAX_CHILDREN_PER_PARENT} child parts allowed for each parent.`
+                            );
+                            return;
+                          }
+                          addNestedField(createDefaultChildPart());
+                        }}
+                      >
+                        Add Child Level {level + 1}
+                      </Button>
+                    </div>
+
+                    {nestedFields.length > 0 ? (
+                      renderChildCards(
+                        nestedFields as Array<{ key: number; name: number }>,
+                        removeNestedField,
+                        [...itemPath, "children"],
+                        level + 1,
+                        numbering
+                      )
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-4 text-sm text-gray-500">
+                        No level {level + 1} child yet. Klik <span className="font-medium">Add Child Level {level + 1}</span> untuk menambahkan UNIQ, Part Name, Part Number, Product Model, upload gambar, Process Routes, dan Material List.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Form.List>
+            ) : null}
+          </Card>
+        );
+      })}
+    </div>
+  );
 
   const renderChildList = (listPath: FormPath, level: number, parentNumbers: number[] = []) => (
     <Form.List name={listPath}>
-      {(fields, { remove }) => {
+      {(fields, { add, remove }) => {
+        if (level === 1) {
+          rootAddChildRef.current = () => {
+            if (fields.length >= MAX_CHILDREN_PER_PARENT) {
+              messageApi.warning(
+                `Maximum ${MAX_CHILDREN_PER_PARENT} child parts allowed for each parent.`
+              );
+              return;
+            }
+            add(createDefaultChildPart());
+          };
+        }
+
         if (fields.length === 0) {
           if (level !== 1) return null;
 
@@ -611,150 +769,12 @@ export default function CreateBomPage() {
           );
         }
 
-        return (
-          <div className={level === 1 ? "space-y-5" : "mt-5 space-y-4 border-l-2 border-gray-100 pl-4"}>
-            {fields.map((field, idx) => {
-              const numbering = [...parentNumbers, idx + 1];
-              const itemPath = [...listPath, field.name];
-              const canAddMoreLevels = level < MAX_BOM_LEVEL;
-
-              return (
-                <Card
-                  key={field.key}
-                  className={level <= 2 ? "border border-gray-200" : "border border-gray-100"}
-                  styles={{ body: { paddingTop: 16 } }}
-                >
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-semibold ${getLevelBadgeClass(level)}`}
-                      >
-                        Level {level}
-                      </span>
-                      <Title level={5} className="!mb-0">
-                        Child #{numbering.join(".")}
-                      </Title>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {canAddMoreLevels ? (
-                        <Button
-                          icon={<PlusOutlined />}
-                          onClick={() => addNestedChild([...itemPath, "children"], level + 1)}
-                        >
-                          Add Child Level {level + 1}
-                        </Button>
-                      ) : null}
-                      <Button
-                        danger
-                        type="text"
-                        icon={<DeleteOutlined />}
-                        onClick={() => {
-                          if (level === 1) {
-                            removeTopLevelChild(Number(field.name), remove);
-                            return;
-                          }
-                          remove(field.name);
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <Form.Item
-                      {...field}
-                      name={[field.name, "uniq"]}
-                      label="UNIQ"
-                      rules={[{ required: true, message: "UNIQ is required" }]}
-                    >
-                      <Input placeholder={`e.g., LV7-001-${String.fromCharCode(64 + Math.min(level, 26))}`} size="large" />
-                    </Form.Item>
-                    <Form.Item
-                      {...field}
-                      name={[field.name, "part_name"]}
-                      label="Part Name"
-                      rules={[{ required: true, message: "Part name is required" }]}
-                    >
-                      <Input placeholder="Enter part name" size="large" />
-                    </Form.Item>
-                    <Form.Item
-                      {...field}
-                      name={[field.name, "part_number"]}
-                      label="Part Number"
-                      rules={[{ required: true, message: "Part number is required" }]}
-                    >
-                      <Input placeholder="Enter part number" size="large" />
-                    </Form.Item>
-                    <Form.Item
-                      {...field}
-                      name={[field.name, "model"]}
-                      label="Product Model"
-                      rules={[{ required: true, message: "Product model is required" }]}
-                    >
-                      <Input placeholder="Enter product model" size="large" />
-                    </Form.Item>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <Form.Item
-                      {...field}
-                      name={[field.name, "qpu"]}
-                      label={level === 1 ? "QPU (Quantity Per Unit)" : "QPU"}
-                      rules={[{ required: true, message: "QPU is required" }]}
-                    >
-                      <InputNumber min={0} size="large" style={{ width: "100%" }} />
-                    </Form.Item>
-                    <Form.Item
-                      {...field}
-                      name={[field.name, "version"]}
-                      label="Version"
-                    >
-                      <Input placeholder="v1.0" size="large" />
-                    </Form.Item>
-                    <Form.Item
-                      {...field}
-                      name={[field.name, "status"]}
-                      label="Status"
-                      initialValue="Active"
-                      hidden
-                    >
-                      <Input />
-                    </Form.Item>
-                    <Form.Item label="Status">
-                      <Input value="Active" size="large" disabled />
-                    </Form.Item>
-                  </div>
-
-                  {level === 1 ? (
-                    <div className="mb-6">
-                      <Text className="block mb-2">Add Picture for child UNIQ</Text>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-                        <Upload
-                          fileList={childFileLists[field.name] ?? []}
-                          beforeUpload={() => false}
-                          onChange={({ fileList: next }) =>
-                            setChildFileLists((prev) => ({
-                              ...prev,
-                              [field.name]: next,
-                            }))
-                          }
-                          maxCount={1}
-                        >
-                          <Button icon={<UploadOutlined />}>Choose File</Button>
-                        </Upload>
-                      </div>
-                      <Text type="secondary" className="block mt-2">
-                        Upload image for 3D/2D CAD reference
-                      </Text>
-                    </div>
-                  ) : null}
-
-                  {renderChildProcessAndMaterial([field.name], itemPath)}
-                  {canAddMoreLevels ? renderChildList([...itemPath, "children"], level + 1, numbering) : null}
-                </Card>
-              );
-            })}
-          </div>
+        return renderChildCards(
+          fields as Array<{ key: number; name: number }>,
+          remove,
+          listPath,
+          level,
+          parentNumbers
         );
       }}
     </Form.List>
@@ -880,7 +900,10 @@ export default function CreateBomPage() {
 
       const mapMaterialSpec = (spec?: MaterialSpec) => {
         const s = spec ?? {};
-        const supplierId = toId(s.supplier);
+        const supplierRaw = cleanText(s.supplier);
+        const supplierName = supplierRaw
+          ? supplierNameByValue.get(supplierRaw) ?? supplierRaw
+          : undefined;
         const form = normalizeMaterialForm(s.form);
         const raw: Record<string, unknown> = {
           material_grade: cleanText(s.material_code),
@@ -889,7 +912,8 @@ export default function CreateBomPage() {
           diameter_mm: s.diameter_mm,
           thickness_mm: s.thickness_mm,
           length_mm: s.length_mm,
-          ...(supplierId !== undefined ? { supplier_id: supplierId } : {}),
+          weight_kg: s.weight_kg,
+          ...(supplierName ? { supplier_name: supplierName } : {}),
           cycle_time_sec: s.cycle_time_sec_per_pc,
           setup_time_min: s.dandori_setup_time_min,
         };
@@ -908,17 +932,15 @@ export default function CreateBomPage() {
             const uniq_code = cleanText(c.uniq);
             const part_name = cleanText(c.part_name);
             const part_number = cleanText(c.part_number);
-            const model = cleanText(c.model);
 
             const anyChildFieldFilled =
               Boolean(uniq_code) ||
               Boolean(part_name) ||
               Boolean(part_number) ||
-              Boolean(model) ||
               (typeof c.qpu === "number" && Number.isFinite(c.qpu));
 
             if (!anyChildFieldFilled) return null;
-            if (!uniq_code || !part_name || !part_number || !model) {
+            if (!uniq_code || !part_name || !part_number) {
               skippedChildren.push(`L${level} #${idx + 1}`);
               return null;
             }
@@ -931,17 +953,14 @@ export default function CreateBomPage() {
               uniq_code,
               part_name,
               part_number,
-              model,
               uom: parentUomValue,
               level,
               qty_per_uniq:
                 typeof c.qpu === "number" && Number.isFinite(c.qpu) ? c.qpu : 1,
-              scrap_factor: 0,
-              status: toApiStatus(c.status) ?? "Active",
             };
             if (childRoutes.length > 0) childBody.process_routes = childRoutes;
             if (childSpec !== undefined) childBody.material_spec = childSpec;
-            childBody.children = nested; // always send [], backend contract
+            if (nested.length > 0) childBody.children = nested;
             return childBody;
           })
           .filter(Boolean);
@@ -976,22 +995,18 @@ export default function CreateBomPage() {
         uniq_code: parentUniq,
         part_name: cleanText(values.part_name),
         part_number: cleanText(values.part_number),
-        model: cleanText(values.model),
         uom: parentUomValue,
-        bom_status: cleanText(values.bom_status) ?? "Draft",
-        qty_per_uniq: 1,
-        scrap_factor: 0,
         description: cleanText(values.description),
         material_spec: parentSpec,
       };
       const parentStatus = toApiStatus(values.status);
       if (parentStatus) payload.status = parentStatus;
       if (parentRoutes.length > 0) payload.process_routes = parentRoutes;
-      payload.children = childrenPayload; // always send [], backend contract
+      if (childrenPayload.length > 0) payload.children = childrenPayload;
 
       if (skippedChildren.length > 0) {
         messageApi.warning(
-          `Skipped incomplete child rows: ${skippedChildren.join(", ")}. Fill UNIQ/Name/Part No or remove the row.`
+          `Skipped incomplete child rows: ${skippedChildren.join(", ")}. Fill UNIQ, Part Name, Part Number or remove the row.`
         );
       }
 
@@ -1003,32 +1018,6 @@ export default function CreateBomPage() {
       // bomId  = BOM header ID → used in BOM GET/UPDATE URLs
       const itemId = (created as any)?.data?.id as string | undefined;
       const bomId = (created as any)?.data?.bom_id as string | undefined;
-
-      const updateBomBody = async (id: string, body: Record<string, unknown>) => {
-        const token = getCookiesFromBrowser("Authorization");
-        const url = `${apiBaseUrl}/products/bom/${encodeURIComponent(id)}`;
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-        };
-        if (token) headers.Authorization = `Bearer ${token}`;
-
-        const tryUpdate = (method: "PATCH" | "PUT") =>
-          fetch(url, { method, headers, body: JSON.stringify(body) });
-
-        let res = await tryUpdate("PATCH");
-        if (!res.ok && (res.status === 404 || res.status === 405)) {
-          res = await tryUpdate("PUT");
-        }
-
-        const text = await res.text().catch(() => "");
-        if (!res.ok) {
-          throw new Error(
-            `Update BOM failed (${res.status}): ${text || res.statusText}`
-          );
-        }
-
-        return text;
-      };
 
       const parentFile = asFile(fileList?.[0]?.originFileObj);
       if (itemId && parentFile) {
@@ -1060,7 +1049,9 @@ export default function CreateBomPage() {
         messageApi.destroy("bom-upload-parent");
       }
 
-      // Upload child assets using child IDs (bom_child_id) from detail response.
+      // Upload child assets using item IDs from detail response.
+      // Avoid PATCH/PUT after create because backend can mark the new BOM version read-only.
+      // The upload session already receives item_id so the file can be attached server-side.
       if (bomId) {
         const token = getCookiesFromBrowser("Authorization");
         const res = await fetch(`${apiBaseUrl}/products/bom/${encodeURIComponent(bomId)}`, {
@@ -1083,58 +1074,84 @@ export default function CreateBomPage() {
         };
 
         const uniqToChildId = new Map<string, string>();
-        for (const c of childrenFromApi) {
-          const uniq = typeof c?.uniq_code === "string" ? c.uniq_code : typeof c?.uniq === "string" ? c.uniq : "";
-          // `id` is the item ID needed for upload sessions (numeric in API response)
-          const childId = toStrId(c?.id) || toStrId(c?.uuid) || toStrId(c?.bom_child_id);
-          if (uniq && childId) uniqToChildId.set(uniq, childId);
-        }
+        const collectChildIds = (nodes: any[]) => {
+          for (const childNode of nodes) {
+            const uniq =
+              typeof childNode?.uniq_code === "string"
+                ? childNode.uniq_code.trim()
+                : typeof childNode?.uniq === "string"
+                  ? childNode.uniq.trim()
+                  : "";
+            const childId =
+              toStrId(childNode?.id) ||
+              toStrId(childNode?.uuid) ||
+              toStrId(childNode?.bom_child_id);
+            if (uniq && childId) uniqToChildId.set(uniq, childId);
 
-        const childAssetPatches: Array<{ uniq_code?: string; bom_child_id?: string; asset: string }> = [];
-        for (let idx = 0; idx < childrenPayload.length; idx++) {
-          const child = childrenPayload[idx] as any;
-          const uniqCode = child.uniq_code as string | undefined;
-          const childFile = asFile(childFileLists?.[idx]?.[0]?.originFileObj);
-          if (!uniqCode || !childFile) {
-            continue;
+            if (Array.isArray(childNode?.children) && childNode.children.length > 0) {
+              collectChildIds(childNode.children);
+            }
           }
+        };
+        collectChildIds(childrenFromApi);
 
-          const childItemId = uniqToChildId.get(uniqCode);
-          if (!childItemId) {
-            continue;
-          }
+        const uploadChildAssets = async (
+          parts: ChildPart[] | undefined,
+          indexPath: number[] = []
+        ): Promise<void> => {
+          const arr = Array.isArray(parts) ? parts : [];
+          for (let idx = 0; idx < arr.length; idx++) {
+            const child = arr[idx];
+            const currentPath = [...indexPath, idx];
+            const childFileKey = toChildFileKey([
+              "child_parts",
+              ...currentPath.flatMap((pathIndex, depth) =>
+                depth === 0 ? [pathIndex] : ["children", pathIndex]
+              ),
+            ]);
+            const childFile = asFile(childFileLists?.[childFileKey]?.[0]?.originFileObj);
+            const uniqCode = cleanText(child?.uniq);
+            const childItemId = uniqCode ? uniqToChildId.get(uniqCode) : undefined;
 
-          messageApi.open({
-            key: `bom-upload-child-${idx}`,
-            type: "loading",
-            content: `Uploading child #${idx + 1} asset...`,
-            duration: 0,
-          });
-          const sessionArgs: CreateUploadSessionArgs = {
-            item_id: childItemId,
-            asset_type: "drawing",
-            file_name: childFile.name,
-            mime_type: childFile.type || "application/octet-stream",
-          };
-          const uploaded = await uploadFileInChunks(childFile, {
-            onProgress: (pct) => {
+            if (childFile && uniqCode && childItemId) {
+              const childLabel = currentPath.map((n) => n + 1).join(".");
+              const uploadKey = `bom-upload-child-${childLabel}`;
+
               messageApi.open({
-                key: `bom-upload-child-${idx}`,
+                key: uploadKey,
                 type: "loading",
-                content: `Uploading child #${idx + 1} asset... ${pct}%`,
+                content: `Uploading child #${childLabel} asset...`,
                 duration: 0,
               });
-            },
-            session: sessionArgs,
-          });
-          messageApi.destroy(`bom-upload-child-${idx}`);
-          const asset = uploaded.asset || uploaded.url;
-          if (asset) childAssetPatches.push({ uniq_code: uniqCode, bom_child_id: childItemId, asset });
-        }
 
-        if (childAssetPatches.length > 0) {
-          await updateBomBody(bomId, { children: childAssetPatches });
-        }
+              const sessionArgs: CreateUploadSessionArgs = {
+                item_id: childItemId,
+                asset_type: "drawing",
+                file_name: childFile.name,
+                mime_type: childFile.type || "application/octet-stream",
+              };
+
+              await uploadFileInChunks(childFile, {
+                onProgress: (pct) => {
+                  messageApi.open({
+                    key: uploadKey,
+                    type: "loading",
+                    content: `Uploading child #${childLabel} asset... ${pct}%`,
+                    duration: 0,
+                  });
+                },
+                session: sessionArgs,
+              });
+              messageApi.destroy(uploadKey);
+            }
+
+            if (Array.isArray(child?.children) && child.children.length > 0) {
+              await uploadChildAssets(child.children, currentPath);
+            }
+          }
+        };
+
+        await uploadChildAssets(values.child_parts, []);
       }
 
       messageApi.destroy("bom-save");
@@ -1403,10 +1420,13 @@ export default function CreateBomPage() {
                             </div>
                           ),
                           children: (
-                            <div className="border border-gray-200 rounded-lg p-4">
+                              <div className="border border-gray-200 rounded-lg p-4">
+                                {(() => {
+                                  const { key: _ignoredKey, ...routeField } = field;
+                                  return (
                               <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
                                 <Form.Item
-                                  {...field}
+                                  {...routeField}
                                   name={[field.name, "process_id"]}
                                   label="Process"
                                   rules={[{ required: true, message: "Process is required" }]}
@@ -1426,7 +1446,7 @@ export default function CreateBomPage() {
                                 </Form.Item>
 
                                 <Form.Item
-                                  {...field}
+                                  {...routeField}
                                   name={[field.name, "machine_id"]}
                                   label="Machine"
                                   rules={[{ required: true, message: "Machine is required" }]}
@@ -1446,7 +1466,7 @@ export default function CreateBomPage() {
                                 </Form.Item>
 
                                 <Form.Item
-                                  {...field}
+                                  {...routeField}
                                   name={[field.name, "sequence"]}
                                   label="Sequence"
                                 >
@@ -1454,7 +1474,7 @@ export default function CreateBomPage() {
                                 </Form.Item>
 
                                 <Form.Item
-                                  {...field}
+                                  {...routeField}
                                   name={[field.name, "cycle_time_sec_per_pc"]}
                                   label="Cycle Time"
                                 >
@@ -1466,7 +1486,7 @@ export default function CreateBomPage() {
                                 </Form.Item>
 
                                 <Form.Item
-                                  {...field}
+                                  {...routeField}
                                   name={[field.name, "setup_time_min"]}
                                   label="Setup Time"
                                 >
@@ -1478,7 +1498,7 @@ export default function CreateBomPage() {
                                 </Form.Item>
 
                                 <Form.Item
-                                  {...field}
+                                  {...routeField}
                                   name={[field.name, "tooling"]}
                                   label="Add Tooling"
                                 >
@@ -1494,13 +1514,15 @@ export default function CreateBomPage() {
                                 </Form.Item>
 
                                 <Form.Item
-                                  {...field}
+                                  {...routeField}
                                   name={[field.name, "machine_stroke"]}
                                   label="Machine Stroke"
                                 >
                                   <Input placeholder="machine stroke" />
                                 </Form.Item>
                               </div>
+                                  );
+                                })()}
                             </div>
                           ),
                         }))}
