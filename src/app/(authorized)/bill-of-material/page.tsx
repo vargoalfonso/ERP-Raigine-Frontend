@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Modal, Table, Tag, Typography, message } from "antd";
+import { Button, Modal, Table, Tag, Typography, Upload, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   BulbOutlined,
@@ -11,15 +11,18 @@ import {
   EyeOutlined,
   PlusOutlined,
   RightOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 
 import {
   useDeleteBomChildMutation,
   useDeleteBomParentMutation,
   useGetBomTreeQuery,
+  useImportBomMutation,
 } from "@/lib/api/bom/api";
 import type { BackendBomNode } from "@/lib/api/bom/api";
 import { apiBaseUrl, getCookiesFromBrowser } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
 
 type BomStatus = string;
 
@@ -135,10 +138,12 @@ export default function BillOfMaterialPage() {
   const [expandedRowKeys, setExpandedRowKeys] = useState<React.Key[]>([]);
   const [messageApi, contextHolder] = message.useMessage();
   const [deleteTarget, setDeleteTarget] = useState<BomRow | null>(null);
+  const [excelModalOpen, setExcelModalOpen] = useState(false);
 
-  const { data: bomTreeRes, isLoading: isBomLoading } = useGetBomTreeQuery();
+  const { data: bomTreeRes, isLoading: isBomLoading, refetch } = useGetBomTreeQuery();
   const [deleteBomParent, { isLoading: isDeletingParent }] = useDeleteBomParentMutation();
   const [deleteBomChild, { isLoading: isDeletingChild }] = useDeleteBomChildMutation();
+  const [importBom, importBomState] = useImportBomMutation();
 
   const bomRows = useMemo(() => {
     const tree = bomTreeRes?.data ?? [];
@@ -353,6 +358,13 @@ export default function BillOfMaterialPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <Button
+            icon={<UploadOutlined />}
+            className="flex items-center gap-2"
+            onClick={() => setExcelModalOpen(true)}
+          >
+            Excel Upload
+          </Button>
           
           <Button
             type="primary"
@@ -365,6 +377,62 @@ export default function BillOfMaterialPage() {
         </div>
       </div>
       {contextHolder}
+      <Modal
+        open={excelModalOpen}
+        title="Bulk Import BOM"
+        footer={null}
+        onCancel={() => setExcelModalOpen(false)}
+        destroyOnHidden
+      >
+        <div className="mb-3 text-sm text-gray-500">
+          Upload file Excel untuk import BOM.
+        </div>
+        <Upload.Dragger
+          name="file"
+          accept=".xlsx,.xls"
+          multiple={false}
+          showUploadList={false}
+          disabled={importBomState.isLoading}
+          beforeUpload={(file) => {
+            const isExcel =
+              file.name.toLowerCase().endsWith(".xlsx") ||
+              file.name.toLowerCase().endsWith(".xls");
+
+            if (!isExcel) {
+              messageApi.error("Please upload an Excel file (.xlsx/.xls)");
+              return Upload.LIST_IGNORE;
+            }
+
+            importBom(file as File)
+              .unwrap()
+              .then(async () => {
+                messageApi.success(`Imported ${file.name}`);
+                setExcelModalOpen(false);
+                await refetch();
+              })
+              .catch((error) => {
+                messageApi.error(getApiErrorMessage(error, "BOM import failed"));
+              });
+
+            return false;
+          }}
+        >
+          <div className="py-6">
+            <UploadOutlined className="text-3xl text-gray-400 mb-3" />
+            <div className="text-sm font-semibold text-gray-900">Upload BOM Excel File</div>
+            <div className="text-xs text-gray-500 mt-1">
+              Drag and drop your Excel file here, or click to browse
+            </div>
+            <div className="mt-2 text-xs text-gray-400">
+              Endpoint: <span className="font-medium">/products/bom/import</span> • form-data key:
+              <span className="font-medium"> file</span>
+            </div>
+            <Button className="mt-4" type="primary" loading={importBomState.isLoading}>
+              Choose File
+            </Button>
+          </div>
+        </Upload.Dragger>
+      </Modal>
       <Modal
         open={Boolean(deleteTarget)}
         title="Delete BOM item?"

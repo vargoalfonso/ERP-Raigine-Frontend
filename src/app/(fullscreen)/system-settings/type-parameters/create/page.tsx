@@ -114,7 +114,6 @@ export default function TypeParametersCreatePage() {
           type_name: String(e.typeName ?? "").trim(),
           description: String(e.description ?? "").trim(),
           status: e.status === "Active" ? "active" : "inactive",
-          parameter_group: "wip",
         }).unwrap();
       }
 
@@ -211,6 +210,7 @@ export default function TypeParametersCreatePage() {
                     onChange={(ev) =>
                       updateEntry(e.id, {
                         typeName: ev.target.value,
+                        typeCode: ev.target.value.toLowerCase().replace(" ", "-"),
                         created: false,
                       })
                     }
