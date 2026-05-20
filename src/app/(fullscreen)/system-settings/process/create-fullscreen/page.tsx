@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Button, Card, Input, Select, Tag, message } from "antd";
+import { Button, Card, Checkbox, Input, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { useCreateProcessMutation, useGetProcessesQuery } from "@/lib/api/system-settings/api";
@@ -12,6 +12,8 @@ type Entry = {
   processCode?: string;
   category?: string;
   sequence?: number | string;
+  isAssembly?: boolean;
+  subCon?: boolean;
   status?: string;
   created?: boolean;
 };
@@ -23,6 +25,8 @@ function makeEntry(idx: number): Entry {
     processCode: undefined,
     category: undefined,
     sequence: undefined,
+    isAssembly: false,
+    subCon: false,
     status: "Active",
     created: false,
   };
@@ -102,6 +106,8 @@ export default function ProcessCreateFullscreenPage() {
           category: String(e.category ?? ""),
           process_name: String(e.processName ?? ""),
           sequence: Number(e.sequence ?? 0),
+          is_assembly: e.isAssembly === true,
+          sub_con: e.subCon === true,
           status: String(e.status ?? "active").toLowerCase(),
         }).unwrap();
       }
@@ -198,6 +204,21 @@ export default function ProcessCreateFullscreenPage() {
                     placeholder="Select Status"
                     className="w-full"
                   />
+                </div>
+
+                <div className="flex items-end gap-6 pb-2">
+                  <Checkbox
+                    checked={e.isAssembly === true}
+                    onChange={(ev) => updateEntry(e.id, { isAssembly: ev.target.checked, created: false })}
+                  >
+                    is_assembly
+                  </Checkbox>
+                  <Checkbox
+                    checked={e.subCon === true}
+                    onChange={(ev) => updateEntry(e.id, { subCon: ev.target.checked, created: false })}
+                  >
+                    sub_con
+                  </Checkbox>
                 </div>
               </div>
             </Card>

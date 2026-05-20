@@ -1,33 +1,46 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { useParams, useRouter } from "next/navigation";
 import {
   Alert,
   Button,
   Card,
-  Collapse,
+  Checkbox,
   Form,
   Input,
   InputNumber,
   Select,
   Spin,
   Typography,
+  Upload,
   message,
 } from "antd";
-import { ArrowLeftOutlined, PlusOutlined, SaveOutlined, DeleteOutlined } from "@ant-design/icons";
+import type { UploadFile } from "antd/es/upload/interface";
+import {
+  ArrowLeftOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+  SaveOutlined,
+  UploadOutlined,
+} from "@ant-design/icons";
 
-import { useGetBomByIdQuery, useGetBomVersionsQuery, useUpdateBomMutation } from "@/lib/api/bom/api";
-import { useGetProcessesQuery } from "@/lib/api/system-settings/api";
-import { useGetMachinesQuery } from "@/lib/api/machines/api";
+import {
+  useGetBomFullByIdQuery,
+  useGetBomVersionsQuery,
+  useReplaceBomMutation,
+} from "@/lib/api/bom/api";
+import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetProcessesQuery, useGetUomsQuery } from "@/lib/api/system-settings/api";
+import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 
-const { Title, Text } = Typography;
+const { Title, Text, Link } = Typography;
+const { TextArea } = Input;
 
 type ProcessRouteForm = {
   op_seq?: number;
   process_id?: number | string;
-  machine_id?: number | string;
   cycle_time_sec?: number;
   setup_time_min?: number;
   machine_stroke?: string;
@@ -35,56 +48,145 @@ type ProcessRouteForm = {
 };
 
 type MaterialSpecForm = {
-  material_grade?: string;
+  material_code?: string;
   form?: string;
+  supplier?: string;
+  weight_kg?: number;
   width_mm?: number;
   diameter_mm?: number;
   thickness_mm?: number;
   length_mm?: number;
-  weight_kg?: number;
-  supplier_id?: string;
+};
+
+type ChildPartForm = {
+  child_id?: number | string | null;
+  line_id?: number | string | null;
+  uniq_code?: string;
+  parent_uniq_code?: string;
+  level?: number;
+  qty_per_uniq?: number;
+  scrap_factor?: number;
+  is_phantom?: boolean;
+  part_name?: string;
+  part_number?: string;
+  model?: string;
+  uom?: string | number;
+  asset_id?: number | string | null;
+  asset_url?: string | null;
+  material_spec?: MaterialSpecForm;
+  process_routes?: ProcessRouteForm[];
+  children?: ChildPartForm[];
 };
 
 type EditValues = {
+  change_note?: string;
+  parent_uniq?: string;
   part_name?: string;
+  part_number?: string;
+  model?: string;
+  uom?: string | number;
+  status?: string;
   description?: string;
-  bom_status?: string;
-  process_routes?: ProcessRouteForm[];
+  asset_id?: number | string | null;
+  asset_url?: string | null;
   material_spec?: MaterialSpecForm;
+  process_routes?: ProcessRouteForm[];
+  child_parts?: ChildPartForm[];
 };
 
-const toNumberId = (v: unknown): number | undefined => {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string") {
-    const trimmed = v.trim();
+type FormPath = Array<string | number>;
+
+const MAX_CHILDREN_PER_PARENT = 6;
+const MAX_BOM_LEVEL = 6;
+
+const toNumberId = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
     if (!trimmed) return undefined;
-    const n = Number(trimmed);
-    return Number.isFinite(n) ? n : undefined;
+    const asNumber = Number(trimmed);
+    return Number.isFinite(asNumber) ? asNumber : undefined;
   }
   return undefined;
 };
 
-const cleanText = (v: unknown): string | undefined => {
-  if (typeof v !== "string") return undefined;
-  const s = v.trim();
-  return s ? s : undefined;
+const cleanText = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 };
+
+const cleanNullableText = (value: unknown): string | null => cleanText(value) ?? null;
+
+const asFile = (value: unknown): File | null => (value instanceof File ? value : null);
+
+const toChildFileKey = (path: Array<string | number>): string => path.join(".");
+
+const normalizeMaterialForm = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const raw = value.trim();
+  if (!raw) return undefined;
+  const allowed = new Set(["Plate", "Coil", "Pipe", "Rod", "Wire", "Other"]);
+  if (allowed.has(raw)) return raw;
+  const lower = raw.toLowerCase();
+  if (lower === "sheet" || lower === "plate") return "Plate";
+  if (lower === "round bar" || lower === "rod") return "Rod";
+  if (lower === "pipe") return "Pipe";
+  if (lower === "coil") return "Coil";
+  if (lower === "wire") return "Wire";
+  if (lower === "other") return "Other";
+  return undefined;
+};
+
+const resolveAssetUrl = (url: unknown): string => {
+  if (typeof url !== "string") return "";
+  const trimmed = url.trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (trimmed.startsWith("/")) return `${apiBaseUrl}${trimmed}`;
+  return `${apiBaseUrl}/${trimmed}`;
+};
+
+const createDefaultChild = (): ChildPartForm => ({
+  qty_per_uniq: 1,
+  scrap_factor: 0,
+  is_phantom: false,
+  process_routes: [],
+  material_spec: {},
+  children: [],
+});
 
 export default function BomEditPage() {
   const router = useRouter();
   const params = useParams<{ id?: string | string[] }>();
   const [messageApi, contextHolder] = message.useMessage();
   const [form] = Form.useForm<EditValues>();
+  const rootAddChildRef = useRef<(() => void) | null>(null);
+  const [fileList, setFileList] = useState<UploadFile[]>([]);
+  const [childFileLists, setChildFileLists] = useState<Record<string, UploadFile[]>>({});
 
   const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id;
   const queryArg = apiEnabled && id ? id : skipToken;
 
-  const { data, isLoading, error } = useGetBomByIdQuery(queryArg);
+  const { data, isLoading, error } = useGetBomFullByIdQuery(queryArg);
   const { data: versionsRes } = useGetBomVersionsQuery(queryArg);
-  const [updateBom, updateState] = useUpdateBomMutation();
+  const [replaceBom, replaceState] = useReplaceBomMutation();
 
   const bom = (data as any)?.data ?? data;
+  const watchedPartName = Form.useWatch("part_name", form);
+  const watchedParentProcessRoutes = Form.useWatch("process_routes", form);
+  const childParts = Form.useWatch("child_parts", form);
+  const childPartsCount = Array.isArray(childParts) ? childParts.length : 0;
+  const existingParentAssetUrl = resolveAssetUrl(Form.useWatch("asset_url", form));
+
+  const titlePartName = useMemo(() => {
+    if (typeof watchedPartName === "string" && watchedPartName.trim()) {
+      return watchedPartName.trim();
+    }
+    const bomPartName = (bom as any)?.part_name;
+    return typeof bomPartName === "string" && bomPartName.trim() ? bomPartName.trim() : "";
+  }, [bom, watchedPartName]);
 
   const canonicalBomId = useMemo(() => {
     const bomId = (bom as any)?.bom_id;
@@ -117,174 +219,724 @@ export default function BomEditPage() {
 
   const { data: processes = [], isLoading: isProcessesLoading } =
     useGetProcessesQuery(undefined, { skip: !apiEnabled });
-  const { data: machines = [], isLoading: isMachinesLoading } =
-    useGetMachinesQuery(undefined, { skip: !apiEnabled });
+  const { data: suppliers = [], isLoading: isSuppliersLoading } = useListSuppliersQuery();
+  const {
+    data: uoms = [],
+    isLoading: isUomsLoading,
+    error: uomsError,
+  } = useGetUomsQuery(undefined, { skip: !apiEnabled });
 
-  const processOptions = useMemo<Array<{ value: string | number; label: string }>>(() => {
+  const processOptions = useMemo<Array<{ value: string | number; label: string; isAssembly: boolean }>>(() => {
     return (processes ?? [])
       .map((p: any) => {
-        const rawId = p?.id;
+        const rawId = p?.id ?? p?.ID;
         const idStr = typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
         if (!idStr) return null;
         const asNumber = Number(idStr);
         const value: string | number = Number.isFinite(asNumber) ? asNumber : idStr;
-        const code = typeof p?.process_code === "string" ? p.process_code.trim() : "";
-        const name = typeof p?.process_name === "string" ? p.process_name.trim() : "";
-        return { value, label: code && name ? `${code} — ${name}` : name || code || idStr };
+        const code = String(p?.process_code ?? p?.ProcessCode ?? "").trim();
+        const name = String(p?.process_name ?? p?.ProcessName ?? "").trim();
+        return {
+          value,
+          label: code && name ? `${code} — ${name}` : name || code || idStr,
+          isAssembly: Boolean(p?.is_assembly ?? p?.IsAssembly),
+        };
       })
-      .filter((x): x is { value: string | number; label: string } => Boolean(x));
+      .filter(
+        (item): item is { value: string | number; label: string; isAssembly: boolean } => Boolean(item)
+      );
   }, [processes]);
 
-  const machineOptions = useMemo<Array<{ value: string | number; label: string }>>(() => {
-    return (machines ?? [])
-      .map((m: any) => {
-        const rawId = m?.id;
-        const idStr = typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
-        if (!idStr) return null;
-        const asNumber = Number(idStr);
-        const value: string | number = Number.isFinite(asNumber) ? asNumber : idStr;
-        const name = typeof m?.machine_name === "string" ? m.machine_name.trim() : "";
-        const number = typeof m?.machine_number === "string" ? m.machine_number.trim() : "";
-        return { value, label: number && name ? `${number} — ${name}` : name || number || idStr };
+  const supplierOptions = useMemo(
+    () =>
+      suppliers
+        .map((supplier) => {
+          const rawId = supplier.id;
+          const value = rawId === undefined || rawId === null ? "" : String(rawId);
+          const label =
+            typeof supplier.supplier_name === "string" && supplier.supplier_name.trim()
+              ? supplier.supplier_name.trim()
+              : value;
+          if (!value) return null;
+          return { value, label };
+        })
+        .filter((item): item is { value: string; label: string } => Boolean(item)),
+    [suppliers]
+  );
+
+  const supplierNameByValue = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const option of supplierOptions) {
+      map.set(String(option.value), option.label);
+    }
+    return map;
+  }, [supplierOptions]);
+
+  const uomIsForbidden = useMemo(() => {
+    const err = uomsError as any;
+    const status = err?.status ?? err?.data?.status;
+    return Number(status) === 403;
+  }, [uomsError]);
+
+  const seededUomOptions = useMemo<Array<{ value: string; label: string; code: string }>>(
+    () => [
+      { value: "PCS", label: "PCS — Pieces", code: "PCS" },
+      { value: "KG", label: "KG — Kilogram", code: "KG" },
+      { value: "M", label: "M — Meter", code: "M" },
+      { value: "MM", label: "MM — Millimeter", code: "MM" },
+    ],
+    []
+  );
+
+  const uomOptions = useMemo<Array<{ value: string; label: string; code: string }>>(() => {
+    if (!apiEnabled) return seededUomOptions;
+    const mapped = (uoms ?? [])
+      .map((uom) => {
+        const idValue = String((uom as any).id ?? "").trim();
+        const code = String((uom as any).code ?? (uom as any).unit_code ?? "").trim().toUpperCase();
+        const name = String((uom as any).name ?? (uom as any).unit_name ?? "").trim();
+        if (!idValue || !code) return null;
+        return { value: idValue, label: code && name ? `${code} — ${name}` : code, code };
       })
-      .filter((x): x is { value: string | number; label: string } => Boolean(x));
-  }, [machines]);
+      .filter((item): item is { value: string; label: string; code: string } => Boolean(item));
+    if (mapped.length > 0) return mapped;
+    return uomIsForbidden ? [] : seededUomOptions;
+  }, [apiEnabled, seededUomOptions, uomIsForbidden, uoms]);
+
+  const uomCodeByValue = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const option of uomOptions) {
+      map.set(String(option.value), option.code);
+    }
+    return map;
+  }, [uomOptions]);
+
+  const uomValueByCode = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const option of uomOptions) {
+      map.set(option.code, String(option.value));
+    }
+    return map;
+  }, [uomOptions]);
+
+  const isAssemblyProcessValue = (value: unknown) => {
+    const key = String(value ?? "").trim();
+    if (!key) return false;
+    return processOptions.some(
+      (option) => String(option.value).trim() === key && option.isAssembly === true
+    );
+  };
+
+  const isParentAssembly = useMemo(() => {
+    if (!Array.isArray(watchedParentProcessRoutes) || watchedParentProcessRoutes.length === 0) {
+      return false;
+    }
+    return watchedParentProcessRoutes.some((route) => isAssemblyProcessValue(route?.process_id));
+  }, [watchedParentProcessRoutes, processOptions]);
+
+  useEffect(() => {
+    if (!isParentAssembly) return;
+    const currentRoutes = form.getFieldValue("process_routes");
+    const currentFirst = Array.isArray(currentRoutes) && currentRoutes.length > 0 ? currentRoutes[0] : {};
+    form.setFieldValue("process_routes", [
+      {
+        ...currentFirst,
+        op_seq:
+          typeof currentFirst?.op_seq === "number" && Number.isFinite(currentFirst.op_seq)
+            ? currentFirst.op_seq
+            : 10,
+      },
+    ]);
+    form.setFieldValue("material_spec", {});
+  }, [form, isParentAssembly]);
 
   useEffect(() => {
     if (!bom) return;
-    const initial: EditValues = {
-      part_name: typeof (bom as any).part_name === "string" ? (bom as any).part_name : undefined,
-      description:
-        typeof (bom as any).description === "string" ? (bom as any).description : undefined,
-      bom_status:
-        typeof (bom as any).bom_status === "string" ? (bom as any).bom_status : undefined,
-      process_routes: Array.isArray((bom as any).process_routes)
-        ? (bom as any).process_routes.map((r: any) => ({
-            op_seq: typeof r?.op_seq === "number" ? r.op_seq : undefined,
-            process_id: r?.process_id ?? undefined,
-            machine_id: r?.machine_id ?? undefined,
-            cycle_time_sec: typeof r?.cycle_time_sec === "number" ? r.cycle_time_sec : undefined,
-            setup_time_min: typeof r?.setup_time_min === "number" ? r.setup_time_min : undefined,
-            machine_stroke: typeof r?.machine_stroke === "string" ? r.machine_stroke : undefined,
-            tooling_ref: typeof r?.tooling_ref === "string" ? r.tooling_ref : undefined,
-          }))
-        : [],
-      material_spec:
-        (bom as any).material_spec && typeof (bom as any).material_spec === "object"
-          ? {
-              material_grade:
-                typeof (bom as any).material_spec.material_grade === "string"
-                  ? (bom as any).material_spec.material_grade
-                  : undefined,
-              form:
-                typeof (bom as any).material_spec.form === "string"
-                  ? (bom as any).material_spec.form
-                  : undefined,
-              width_mm:
-                typeof (bom as any).material_spec.width_mm === "number"
-                  ? (bom as any).material_spec.width_mm
-                  : undefined,
-              diameter_mm:
-                typeof (bom as any).material_spec.diameter_mm === "number"
-                  ? (bom as any).material_spec.diameter_mm
-                  : undefined,
-              thickness_mm:
-                typeof (bom as any).material_spec.thickness_mm === "number"
-                  ? (bom as any).material_spec.thickness_mm
-                  : undefined,
-              length_mm:
-                typeof (bom as any).material_spec.length_mm === "number"
-                  ? (bom as any).material_spec.length_mm
-                  : undefined,
-              weight_kg:
-                typeof (bom as any).material_spec.weight_kg === "number"
-                  ? (bom as any).material_spec.weight_kg
-                  : undefined,
-              supplier_id:
-                typeof (bom as any).material_spec.supplier_id === "string"
-                  ? (bom as any).material_spec.supplier_id
-                  : undefined,
-            }
-          : undefined,
+    const mapRouteFromApi = (route: any): ProcessRouteForm => ({
+      op_seq: typeof route?.op_seq === "number" ? route.op_seq : undefined,
+      process_id: route?.process_id ?? undefined,
+      cycle_time_sec: typeof route?.cycle_time_sec === "number" ? route.cycle_time_sec : undefined,
+      setup_time_min: typeof route?.setup_time_min === "number" ? route.setup_time_min : undefined,
+      machine_stroke: typeof route?.machine_stroke === "string" ? route.machine_stroke : undefined,
+      tooling_ref: typeof route?.tooling_ref === "string" ? route.tooling_ref : undefined,
+    });
+
+    const mapMaterialSpecFromApi = (spec: any): MaterialSpecForm | undefined => {
+      if (!spec || typeof spec !== "object") return undefined;
+      return {
+        material_code:
+          typeof spec.material_code === "string"
+            ? spec.material_code
+            : typeof spec.material_grade === "string"
+              ? spec.material_grade
+              : undefined,
+        form: typeof spec.form === "string" ? spec.form : undefined,
+        supplier:
+          typeof spec.supplier_id === "string"
+            ? spec.supplier_id
+            : typeof spec.supplier_name === "string"
+              ? spec.supplier_name
+              : typeof spec.supplier === "string"
+                ? spec.supplier
+                : undefined,
+        weight_kg: typeof spec.weight_kg === "number" ? spec.weight_kg : undefined,
+        width_mm: typeof spec.width_mm === "number" ? spec.width_mm : undefined,
+        diameter_mm: typeof spec.diameter_mm === "number" ? spec.diameter_mm : undefined,
+        thickness_mm: typeof spec.thickness_mm === "number" ? spec.thickness_mm : undefined,
+        length_mm: typeof spec.length_mm === "number" ? spec.length_mm : undefined,
+      };
     };
-    form.setFieldsValue(initial);
-  }, [bom, form]);
+
+    const mapUomToFormValue = (rawUom: unknown) => {
+      const code = typeof rawUom === "string" ? rawUom.trim().toUpperCase() : "";
+      if (!code) return undefined;
+      return uomValueByCode.get(code) ?? code;
+    };
+
+    const mapChildFromApi = (child: any): ChildPartForm => ({
+      child_id: child?.child_id ?? null,
+      line_id: child?.line_id ?? null,
+      uniq_code: typeof child?.uniq_code === "string" ? child.uniq_code : undefined,
+      parent_uniq_code: typeof child?.parent_uniq_code === "string" ? child.parent_uniq_code : undefined,
+      level: typeof child?.level === "number" ? child.level : undefined,
+      qty_per_uniq:
+        typeof child?.qty_per_uniq === "number" ? child.qty_per_uniq : typeof child?.qpu === "number" ? child.qpu : 1,
+      scrap_factor: typeof child?.scrap_factor === "number" ? child.scrap_factor : 0,
+      is_phantom: Boolean(child?.is_phantom),
+      part_name: typeof child?.part_name === "string" ? child.part_name : undefined,
+      part_number: typeof child?.part_number === "string" ? child.part_number : undefined,
+      model: typeof child?.model === "string" ? child.model : undefined,
+      uom: mapUomToFormValue(child?.uom),
+      asset_id: child?.asset?.id ?? null,
+      asset_url: typeof child?.asset?.url === "string" ? child.asset.url : null,
+      material_spec: mapMaterialSpecFromApi(child?.material_spec),
+      process_routes: Array.isArray(child?.process_routes) ? child.process_routes.map(mapRouteFromApi) : [],
+      children: Array.isArray(child?.children) ? child.children.map(mapChildFromApi) : [],
+    });
+
+    form.setFieldsValue({
+      change_note: "",
+      parent_uniq: typeof (bom as any)?.uniq_code === "string" ? (bom as any).uniq_code : undefined,
+      part_name: typeof (bom as any)?.part_name === "string" ? (bom as any).part_name : undefined,
+      part_number: typeof (bom as any)?.part_number === "string" ? (bom as any).part_number : undefined,
+      model: typeof (bom as any)?.model === "string" ? (bom as any).model : undefined,
+      uom: mapUomToFormValue((bom as any)?.uom),
+      status: typeof (bom as any)?.status === "string" ? (bom as any).status : "Draft",
+      description: typeof (bom as any)?.description === "string" ? (bom as any).description : undefined,
+      asset_id: (bom as any)?.asset?.id ?? null,
+      asset_url: typeof (bom as any)?.asset?.url === "string" ? (bom as any).asset.url : null,
+      material_spec: mapMaterialSpecFromApi((bom as any)?.material_spec),
+      process_routes: Array.isArray((bom as any)?.process_routes)
+        ? (bom as any).process_routes.map(mapRouteFromApi)
+        : [],
+      child_parts: Array.isArray((bom as any)?.children)
+        ? (bom as any).children.map(mapChildFromApi)
+        : [],
+    });
+    setFileList([]);
+    setChildFileLists({});
+  }, [bom, form, uomValueByCode]);
+
+  const addLevel1Child = () => {
+    rootAddChildRef.current?.();
+  };
+
+  const renderProcessRoutesEditor = (
+    fieldPath: FormPath,
+    absolutePath: FormPath,
+    options?: { hideAddWhenAssembly?: boolean; isAssemblyMode?: boolean }
+  ) => {
+    const isAssemblyMode = options?.isAssemblyMode === true;
+    const hideAddWhenAssembly = options?.hideAddWhenAssembly === true;
+    return (
+      <div className="space-y-3">
+        {!(hideAddWhenAssembly && isAssemblyMode) ? (
+          <div className="flex items-center justify-between">
+            <Text strong>Process Routes</Text>
+            <Button
+              icon={<PlusOutlined />}
+              onClick={() => {
+                const dynamicForm = form as any;
+                const current = dynamicForm.getFieldValue([...absolutePath, "process_routes"]) ?? [];
+                dynamicForm.setFieldValue([...absolutePath, "process_routes"], [
+                  ...current,
+                  {
+                    op_seq:
+                      typeof current?.[current.length - 1]?.op_seq === "number"
+                        ? current[current.length - 1].op_seq + 10
+                        : (current.length + 1) * 10,
+                  },
+                ]);
+              }}
+            >
+              Add Process Route
+            </Button>
+          </div>
+        ) : (
+          <Text strong>Process Routes</Text>
+        )}
+
+        <Form.List name={[...fieldPath, "process_routes"]}>
+          {(routeFields, { remove }) => (
+            <div className="space-y-3">
+              {routeFields.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-4 text-sm text-gray-500">
+                  No process route yet.
+                </div>
+              ) : null}
+
+              {routeFields.map((routeField, idx) => (
+                <div key={routeField.key} className="rounded-lg border border-gray-200 p-4">
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                    <Form.Item name={[routeField.name, "op_seq"]} label="Op Seq" rules={[{ required: true, message: "Op Seq is required" }]}> 
+                      <InputNumber min={1} step={10} style={{ width: "100%" }} />
+                    </Form.Item>
+                    <Form.Item name={[routeField.name, "process_id"]} label="Process" rules={[{ required: true, message: "Process is required" }]}> 
+                      <Select
+                        showSearch
+                        placeholder="Select process"
+                        options={processOptions}
+                        loading={isProcessesLoading}
+                        optionFilterProp="label"
+                        filterOption={(input, option) =>
+                          String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                        }
+                      />
+                    </Form.Item>
+                    <Form.Item name={[routeField.name, "cycle_time_sec"]} label="Cycle Time (sec)">
+                      <InputNumber min={0} style={{ width: "100%" }} />
+                    </Form.Item>
+                    <Form.Item name={[routeField.name, "setup_time_min"]} label="Setup Time (min)">
+                      <InputNumber min={0} style={{ width: "100%" }} />
+                    </Form.Item>
+                    <Form.Item name={[routeField.name, "tooling_ref"]} label="Tooling">
+                      <Select
+                        placeholder="Select tooling"
+                        options={[
+                          { label: "Dies", value: "Dies" },
+                          { label: "JIG", value: "JIG" },
+                          { label: "CF", value: "CF" },
+                        ]}
+                        allowClear
+                      />
+                    </Form.Item>
+                    <Form.Item name={[routeField.name, "machine_stroke"]} label="Machine Stroke" className="md:col-span-4">
+                      <Input placeholder="Machine stroke" />
+                    </Form.Item>
+                    <div className="flex items-end justify-end md:col-span-1">
+                      <Button danger type="text" icon={<DeleteOutlined />} disabled={isAssemblyMode && idx === 0} onClick={() => remove(routeField.name)}>
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Form.List>
+      </div>
+    );
+  };
+
+  const renderMaterialSpecEditor = (fieldPath: FormPath, disabled = false) => (
+    <div className="space-y-3">
+      <Text strong>Material Specifications</Text>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Form.Item name={[...fieldPath, "material_spec", "material_code"]} label="Material Code" rules={disabled ? [] : [{ required: true, message: "Material Code is required" }]}> 
+          <Input placeholder="e.g., STKM550" disabled={disabled} />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "form"]} label="Form" rules={disabled ? [] : [{ required: true, message: "Form is required" }]}> 
+          <Select
+            placeholder="Select form"
+            disabled={disabled}
+            options={[
+              { label: "Plate", value: "Plate" },
+              { label: "Coil", value: "Coil" },
+              { label: "Pipe", value: "Pipe" },
+              { label: "Rod", value: "Rod" },
+              { label: "Wire", value: "Wire" },
+              { label: "Other", value: "Other" },
+            ]}
+            allowClear
+          />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "supplier"]} label="Supplier" rules={disabled ? [] : [{ required: true, message: "Supplier is required" }]}> 
+          <Select
+            placeholder="Select supplier"
+            disabled={disabled}
+            options={supplierOptions}
+            loading={isSuppliersLoading}
+            showSearch
+            optionFilterProp="label"
+            allowClear
+          />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "weight_kg"]} label="Weight (kg)">
+          <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
+        </Form.Item>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Form.Item name={[...fieldPath, "material_spec", "width_mm"]} label="Width (mm)">
+          <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "diameter_mm"]} label="Diameter (mm)">
+          <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "thickness_mm"]} label="Thickness (mm)">
+          <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "length_mm"]} label="Length (mm)">
+          <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
+        </Form.Item>
+      </div>
+    </div>
+  );
+
+  const renderChildProcessAndMaterial = (fieldPath: FormPath, absolutePath: FormPath) => (
+    <div className="mt-6 space-y-6">
+      {renderProcessRoutesEditor(fieldPath, absolutePath)}
+      {renderMaterialSpecEditor(fieldPath)}
+    </div>
+  );
+
+  const renderChildCards = (
+    fields: Array<{ key: number; name: number }>,
+    remove: (index: number | number[]) => void,
+    listPath: FormPath,
+    level: number,
+    parentNumbers: number[] = []
+  ) => (
+    <div className={level === 1 ? "space-y-5" : "mt-5 space-y-4 border-l-2 border-gray-100 pl-4"}>
+      {fields.map((field, idx) => {
+        const numbering = [...parentNumbers, idx + 1];
+        const itemPath = [...listPath, field.name];
+        const childFileKey = toChildFileKey(itemPath);
+        const canAddMoreLevels = level < MAX_BOM_LEVEL;
+        const dynamicForm = form as any;
+        const existingChildAssetUrl = resolveAssetUrl(dynamicForm.getFieldValue([...itemPath, "asset_url"]));
+
+        return (
+          <Card key={field.key} className="border border-gray-200" styles={{ body: { paddingTop: 16 } }}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">Level {level}</span>
+                <Title level={5} className="!mb-0">Child #{numbering.join(".")}</Title>
+              </div>
+              <Button danger type="text" icon={<DeleteOutlined />} onClick={() => remove(field.name)}>
+                Remove
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Form.Item name={[field.name, "uniq_code"]} label="UNIQ" rules={[{ required: true, message: "UNIQ is required" }]}> 
+                <Input placeholder="Child UNIQ" size="large" />
+              </Form.Item>
+              <Form.Item name={[field.name, "part_name"]} label="Part Name" rules={[{ required: true, message: "Part name is required" }]}> 
+                <Input placeholder="Part name" size="large" />
+              </Form.Item>
+              <Form.Item name={[field.name, "part_number"]} label="Part Number" rules={[{ required: true, message: "Part number is required" }]}> 
+                <Input placeholder="Part number" size="large" />
+              </Form.Item>
+              <Form.Item name={[field.name, "model"]} label="Model">
+                <Input placeholder="Model" size="large" />
+              </Form.Item>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Form.Item name={[field.name, "uom"]} label="UOM" rules={[{ required: true, message: "UOM is required" }]}> 
+                <Select
+                  showSearch
+                  placeholder="Select UOM"
+                  options={uomOptions}
+                  loading={apiEnabled && isUomsLoading && !uomIsForbidden}
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+              <Form.Item name={[field.name, "qty_per_uniq"]} label="Qty per UNIQ" rules={[{ required: true, message: "Qty per UNIQ is required" }]}> 
+                <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+              <Form.Item name={[field.name, "scrap_factor"]} label="Scrap Factor">
+                <InputNumber min={0} style={{ width: "100%" }} />
+              </Form.Item>
+              <Form.Item name={[field.name, "is_phantom"]} valuePropName="checked" label=" ">
+                <Checkbox>Is Phantom</Checkbox>
+              </Form.Item>
+            </div>
+
+            <Form.Item name={[field.name, "asset_id"]} hidden>
+              <Input />
+            </Form.Item>
+            <Form.Item name={[field.name, "asset_url"]} hidden>
+              <Input />
+            </Form.Item>
+
+            <div className="mb-6">
+              <Text className="block mb-2">Add Picture for Child UNIQ</Text>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                <Upload
+                  fileList={childFileLists[childFileKey] ?? []}
+                  beforeUpload={() => false}
+                  onChange={({ fileList: next }) =>
+                    setChildFileLists((prev) => ({
+                      ...prev,
+                      [childFileKey]: next,
+                    }))
+                  }
+                  maxCount={1}
+                >
+                  <Button icon={<UploadOutlined />}>Choose File</Button>
+                </Upload>
+                {existingChildAssetUrl ? (
+                  <Link href={existingChildAssetUrl} target="_blank">Current asset</Link>
+                ) : (
+                  <Text type="secondary">No existing asset</Text>
+                )}
+              </div>
+            </div>
+
+            {renderChildProcessAndMaterial([field.name], itemPath)}
+
+            {canAddMoreLevels ? (
+              <Form.List name={[field.name, "children"]}>
+                {(nestedFields, { add: addNestedField, remove: removeNestedField }) => (
+                  <div className="mt-6">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <Text strong>Level {level + 1} Children</Text>
+                      <Button
+                        icon={<PlusOutlined />}
+                        onClick={() => {
+                          if (nestedFields.length >= MAX_CHILDREN_PER_PARENT) {
+                            messageApi.warning(`Maximum ${MAX_CHILDREN_PER_PARENT} child parts allowed for each parent.`);
+                            return;
+                          }
+                          addNestedField(createDefaultChild());
+                        }}
+                      >
+                        Add Child Level {level + 1}
+                      </Button>
+                    </div>
+                    {nestedFields.length > 0 ? (
+                      renderChildCards(nestedFields as Array<{ key: number; name: number }>, removeNestedField, [...itemPath, "children"], level + 1, numbering)
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-4 text-sm text-gray-500">No level {level + 1} child yet.</div>
+                    )}
+                  </div>
+                )}
+              </Form.List>
+            ) : null}
+          </Card>
+        );
+      })}
+    </div>
+  );
+
+  const renderChildList = (listPath: FormPath, level: number, parentNumbers: number[] = []) => (
+    <Form.List name={listPath}>
+      {(fields, { add, remove }) => {
+        if (level === 1) {
+          rootAddChildRef.current = () => {
+            if (fields.length >= MAX_CHILDREN_PER_PARENT) {
+              messageApi.warning(`Maximum ${MAX_CHILDREN_PER_PARENT} child parts allowed for each parent.`);
+              return;
+            }
+            add(createDefaultChild());
+          };
+        }
+
+        if (fields.length === 0) {
+          if (level !== 1) return null;
+          return (
+            <Card styles={{ body: { paddingTop: 24, paddingBottom: 24 } }}>
+              <div className="flex flex-col items-center justify-center text-center py-10">
+                <Text type="secondary">No child components added yet</Text>
+                <div className="mt-4">
+                  <Button type="primary" icon={<PlusOutlined />} onClick={addLevel1Child} disabled={childPartsCount >= MAX_CHILDREN_PER_PARENT}>
+                    Add First Child Component
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          );
+        }
+
+        return renderChildCards(fields as Array<{ key: number; name: number }>, remove, listPath, level, parentNumbers);
+      }}
+    </Form.List>
+  );
 
   const onSave = async () => {
     try {
       if (!isLatest) {
-        messageApi.error(
-          "Tidak bisa edit historical version. Pilih latest version dulu, lalu edit."
-        );
+        messageApi.error("Tidak bisa edit historical version. Pilih latest version dulu, lalu edit.");
         return;
       }
 
-      const values = (await form.validateFields()) as EditValues;
+      await form.validateFields(["change_note", "part_name", "part_number", "uom", "status"]);
+      const values = form.getFieldsValue(true) as EditValues;
+      const assemblyMode = Array.isArray(values.process_routes) && values.process_routes.some((route) => isAssemblyProcessValue(route?.process_id));
 
-      const routes = (values.process_routes ?? [])
-        .map((r, idx) => {
-          const baseSeq = typeof r.op_seq === "number" ? r.op_seq : (idx + 1) * 10;
-          const process_id = toNumberId(r.process_id);
-          const machine_id = toNumberId(r.machine_id);
-          if (!process_id || !machine_id) return null;
-          const body: any = {
-            op_seq: baseSeq,
-            process_id,
-            machine_id,
+      if (!assemblyMode) {
+        await form.validateFields([["material_spec", "material_code"], ["material_spec", "form"], ["material_spec", "supplier"]]);
+      }
+
+      const rootUniq = cleanText(values.parent_uniq);
+      if (!rootUniq) {
+        messageApi.error("Missing parent UNIQ");
+        return;
+      }
+
+      const resolveUomCode = (rawValue: unknown): string | null => {
+        if (rawValue === undefined || rawValue === null) return null;
+        const key = String(rawValue).trim();
+        if (!key) return null;
+        return uomCodeByValue.get(key) ?? key.toUpperCase();
+      };
+
+      const mapMaterialSpec = (spec?: MaterialSpecForm) => {
+        const supplierRaw = cleanText(spec?.supplier);
+        const normalizedForm = normalizeMaterialForm(spec?.form);
+        const payload: Record<string, unknown> = {
+          material_grade: cleanText(spec?.material_code) ?? null,
+          form: normalizedForm ?? null,
+          width_mm: typeof spec?.width_mm === "number" && Number.isFinite(spec.width_mm) ? spec.width_mm : null,
+          diameter_mm: typeof spec?.diameter_mm === "number" && Number.isFinite(spec.diameter_mm) ? spec.diameter_mm : null,
+          thickness_mm: typeof spec?.thickness_mm === "number" && Number.isFinite(spec.thickness_mm) ? spec.thickness_mm : null,
+          length_mm: typeof spec?.length_mm === "number" && Number.isFinite(spec.length_mm) ? spec.length_mm : null,
+          weight_kg: typeof spec?.weight_kg === "number" && Number.isFinite(spec.weight_kg) ? spec.weight_kg : null,
+        };
+        if (supplierRaw) {
+          const supplierId = toNumberId(supplierRaw);
+          if (supplierId !== undefined) {
+            payload.supplier_id = supplierId;
+          } else {
+            payload.supplier_name = supplierNameByValue.get(supplierRaw) ?? supplierRaw;
+          }
+        } else {
+          payload.supplier_id = null;
+        }
+        const hasMeaningfulValue = Object.values(payload).some((value) => value !== null && value !== undefined && value !== "");
+        return hasMeaningfulValue ? payload : null;
+      };
+
+      const mapProcessRoutes = (routes?: ProcessRouteForm[]) =>
+        (routes ?? [])
+          .map((route, index) => {
+            const processId = toNumberId(route.process_id);
+            if (processId === undefined) return null;
+            const body: Record<string, unknown> = {
+              op_seq: typeof route.op_seq === "number" && Number.isFinite(route.op_seq) ? route.op_seq : (index + 1) * 10,
+              process_id: processId,
+            };
+            if (typeof route.cycle_time_sec === "number" && Number.isFinite(route.cycle_time_sec)) body.cycle_time_sec = route.cycle_time_sec;
+            if (typeof route.setup_time_min === "number" && Number.isFinite(route.setup_time_min)) body.setup_time_min = route.setup_time_min;
+            if (cleanText(route.machine_stroke)) body.machine_stroke = cleanText(route.machine_stroke);
+            if (cleanText(route.tooling_ref)) body.tooling_ref = cleanText(route.tooling_ref);
+            return body;
+          })
+          .filter((item): item is Record<string, unknown> => Boolean(item));
+
+      const mapAssemblyParentRoutes = (routes?: ProcessRouteForm[]) => {
+        const first = Array.isArray(routes) ? routes[0] : undefined;
+        const processId = toNumberId(first?.process_id);
+        if (processId === undefined) return [];
+        return [{ op_seq: typeof first?.op_seq === "number" && Number.isFinite(first.op_seq) ? first.op_seq : 10, process_id: processId }];
+      };
+
+      const files: Array<{ key: string; file: File }> = [];
+      const seenUniqs = new Set<string>();
+
+      const mapChildParts = (children: ChildPartForm[] | undefined, level: number, parentUniq: string, pathIndices: number[] = []): any[] => {
+        const list = Array.isArray(children) ? children : [];
+        return list.map((child, index) => {
+          const currentPath = [...pathIndices, index];
+          const uniqCode = cleanText(child.uniq_code);
+          const partName = cleanText(child.part_name);
+          const partNumber = cleanText(child.part_number);
+          const childUom = resolveUomCode(child.uom);
+          const pathLabel = currentPath.map((value) => value + 1).join(".");
+          if (!uniqCode || !partName || !partNumber || !childUom) throw new Error(`Child #${pathLabel} belum lengkap.`);
+          if (seenUniqs.has(uniqCode)) throw new Error(`Duplicate child UNIQ '${uniqCode}'.`);
+          seenUniqs.add(uniqCode);
+
+          const childFileKey = toChildFileKey(["child_parts", ...currentPath.flatMap((pathIndex, depth) => depth === 0 ? [pathIndex] : ["children", pathIndex])]);
+          const childFile = asFile(childFileLists?.[childFileKey]?.[0]?.originFileObj);
+          if (childFile) files.push({ key: `upload_child_${uniqCode}`, file: childFile });
+
+          return {
+            uniq_code: uniqCode,
+            parent_uniq_code: parentUniq,
+            level,
+            qty_per_uniq: typeof child.qty_per_uniq === "number" && Number.isFinite(child.qty_per_uniq) ? child.qty_per_uniq : 1,
+            scrap_factor: typeof child.scrap_factor === "number" && Number.isFinite(child.scrap_factor) ? child.scrap_factor : 0,
+            is_phantom: child.is_phantom === true,
+            part_name: partName,
+            part_number: partNumber,
+            model: cleanNullableText(child.model),
+            uom: childUom,
+            asset_id: childFile ? null : child.asset_id ?? null,
+            upload_key: childFile ? `child_${uniqCode}` : null,
+            material_spec: mapMaterialSpec(child.material_spec),
+            process_routes: mapProcessRoutes(child.process_routes),
+            children: mapChildParts(child.children, level + 1, uniqCode, currentPath),
           };
-          if (typeof r.cycle_time_sec === "number") body.cycle_time_sec = r.cycle_time_sec;
-          if (typeof r.setup_time_min === "number") body.setup_time_min = r.setup_time_min;
-          if (typeof r.machine_stroke === "string" && r.machine_stroke.trim()) body.machine_stroke = r.machine_stroke.trim();
-          if (typeof r.tooling_ref === "string" && r.tooling_ref.trim()) body.tooling_ref = r.tooling_ref.trim();
-          return body;
-        })
-        .filter(Boolean);
-
-      const materialSpec = values.material_spec ?? {};
-      const materialBody: any = {
-        material_grade: cleanText(materialSpec.material_grade),
-        form: cleanText(materialSpec.form),
-        width_mm: materialSpec.width_mm,
-        diameter_mm: materialSpec.diameter_mm,
-        thickness_mm: materialSpec.thickness_mm,
-        length_mm: materialSpec.length_mm,
-        weight_kg: materialSpec.weight_kg,
-        supplier_id: cleanText(materialSpec.supplier_id),
+        });
       };
-      Object.keys(materialBody).forEach((k) => {
-        const v = materialBody[k];
-        if (v === undefined || v === null || v === "") delete materialBody[k];
-      });
 
-      const body: any = {
-        part_name: cleanText(values.part_name),
-        description: cleanText(values.description),
-        bom_status: cleanText(values.bom_status),
-      };
-      Object.keys(body).forEach((k) => {
-        const v = body[k];
-        if (v === undefined || v === null || v === "") delete body[k];
-      });
-
-      // Only send if user has them.
-      if (routes.length > 0) body.process_routes = routes;
-      if (Object.keys(materialBody).length > 0) body.material_spec = materialBody;
-
-      if (Object.keys(body).length === 0) {
-        messageApi.info("No changes to save.");
+      const parentUom = resolveUomCode(values.uom);
+      if (!parentUom) {
+        messageApi.error("UOM is required.");
         return;
       }
 
-      if (!resolvedBomId) {
-        messageApi.error("Missing BOM id");
+      const parentFile = asFile(fileList?.[0]?.originFileObj);
+      if (parentFile) files.push({ key: "upload_header", file: parentFile });
+
+      const parentRoutes = assemblyMode ? mapAssemblyParentRoutes(values.process_routes) : mapProcessRoutes(values.process_routes);
+      const parentMaterialSpec = assemblyMode ? null : mapMaterialSpec(values.material_spec);
+      const childrenPayload = mapChildParts(values.child_parts, 1, rootUniq);
+
+      if (assemblyMode && childrenPayload.length < 2) {
+        messageApi.error("Assembly parent must have at least 2 child parts.");
+        return;
+      }
+      if (!assemblyMode && !parentMaterialSpec) {
+        messageApi.error("Material specifications are required.");
         return;
       }
 
-      await updateBom({ bom_id: resolvedBomId, body }).unwrap();
-      messageApi.success("Updated");
+      await replaceBom({
+        bom_id: resolvedBomId,
+        payload: {
+          change_note: cleanText(values.change_note),
+          part_name: cleanText(values.part_name),
+          part_number: cleanText(values.part_number),
+          model: cleanNullableText(values.model),
+          uom: parentUom,
+          status: cleanText(values.status) ?? "Draft",
+          description: cleanNullableText(values.description),
+          asset_id: parentFile ? null : values.asset_id ?? null,
+          upload_key: parentFile ? "header" : null,
+          material_spec: parentMaterialSpec,
+          process_routes: parentRoutes,
+          children: childrenPayload,
+        },
+        files,
+      }).unwrap();
+
+      messageApi.success("BOM updated");
       router.push(`/bill-of-material/${encodeURIComponent(resolvedBomId)}`);
-    } catch {
-      // antd shows errors
+    } catch (err) {
+      const anyErr = err as any;
+      const data = anyErr?.data;
+      const detail =
+        typeof data === "string"
+          ? data
+          : data && typeof data === "object"
+            ? JSON.stringify(data)
+            : anyErr?.message
+              ? String(anyErr.message)
+              : "";
+      if (detail) messageApi.error(detail);
     }
   };
 
@@ -294,25 +946,14 @@ export default function BomEditPage() {
 
       <div className="flex items-center justify-between bg-white p-4 rounded-lg shadow-sm mb-6">
         <div>
-          <Title level={3} className="!mb-0">
-            Edit BOM
-          </Title>
-          <Text type="secondary">/products/bom/{resolvedBomId}</Text>
+          <Title level={3} className="!mb-0">{titlePartName ? `Edit BOM (${titlePartName})` : "Edit BOM"}</Title>
+          <Text type="secondary">/products/bom/{resolvedBomId}/full</Text>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            icon={<ArrowLeftOutlined />}
-            onClick={() => router.push(`/bill-of-material/${encodeURIComponent(resolvedBomId)}`)}
-            disabled={!resolvedBomId}
-          >
+          <Button icon={<ArrowLeftOutlined />} onClick={() => router.push(`/bill-of-material/${encodeURIComponent(resolvedBomId)}`)} disabled={!resolvedBomId}>
             Back
           </Button>
-          <Button
-            type="primary"
-            icon={<SaveOutlined />}
-            loading={updateState.isLoading}
-            onClick={onSave}
-          >
+          <Button type="primary" icon={<SaveOutlined />} loading={replaceState.isLoading} onClick={onSave}>
             Save
           </Button>
         </div>
@@ -320,11 +961,9 @@ export default function BomEditPage() {
 
       <Card>
         {isLoading ? (
-          <div className="py-8 flex items-center justify-center">
-            <Spin />
-          </div>
+          <div className="py-8 flex items-center justify-center"><Spin /></div>
         ) : error ? (
-          <Text type="danger">Failed to load BOM.</Text>
+          <Text type="danger">Failed to load BOM full detail.</Text>
         ) : (
           <>
             {!isLatest && currentBomId ? (
@@ -335,15 +974,9 @@ export default function BomEditPage() {
                 message="Historical version (read-only)"
                 description={
                   <div>
-                    Edit hanya boleh di latest version untuk menghindari error (misal v1 sudah ada v2).
+                    Edit hanya boleh di latest version.
                     <div className="mt-2">
-                      <Button
-                        size="small"
-                        type="primary"
-                        onClick={() =>
-                          router.push(`/bill-of-material/${encodeURIComponent(currentBomId)}/edit`)
-                        }
-                      >
+                      <Button size="small" type="primary" onClick={() => router.push(`/bill-of-material/${encodeURIComponent(currentBomId)}/edit`)}>
                         Go to Latest
                       </Button>
                     </div>
@@ -352,162 +985,74 @@ export default function BomEditPage() {
               />
             ) : null}
 
-            <Form layout="vertical" form={form} disabled={!isLatest}>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Form.Item name="part_name" label="Part Name" rules={[{ required: true, message: "Part name is required" }]}>
-                <Input size="large" />
-              </Form.Item>
-              <Form.Item label="Status">
-                <Input value={String((bom as any)?.bom_status ?? "Draft")} size="large" disabled />
-              </Form.Item>
-            </div>
-
-            <Form.Item name="description" label="Description">
-              <Input.TextArea rows={4} />
-            </Form.Item>
-
-            <Form.Item name="bom_status" label="BOM Status">
-              <Select
-                placeholder="Select BOM Status"
-                options={[
-                  { label: "Draft", value: "Draft" },
-                  { label: "Released", value: "Released" },
-                  { label: "Obsolete", value: "Obsolete" },
-                ]}
-                allowClear
-              />
-            </Form.Item>
-
-            <DividerLine title="Process Routes" />
-
-            <Form.List name="process_routes">
-              {(fields, { add, remove }) => (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Text strong>Routes</Text>
-                    <Button icon={<PlusOutlined />} onClick={() => add({})}>
-                      Add Route
-                    </Button>
-                  </div>
-
-                  <Collapse
-                    accordion
-                    bordered={false}
-                    className="!bg-transparent"
-                    items={fields.map((f, idx) => ({
-                      key: String(f.key),
-                      label: `Route #${idx + 1}`,
-                      children: (
-                        <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
-                          <Form.Item {...f} name={[f.name, "op_seq"]} label="Op Seq">
-                            <InputNumber min={1} style={{ width: "100%" }} />
-                          </Form.Item>
-                          <Form.Item {...f} name={[f.name, "process_id"]} label="Process" rules={[{ required: true, message: "Process is required" }]}>
-                            <Select
-                              showSearch
-                              options={processOptions}
-                              loading={isProcessesLoading}
-                              optionFilterProp="label"
-                              placeholder="Select process"
-                            />
-                          </Form.Item>
-                          <Form.Item {...f} name={[f.name, "machine_id"]} label="Machine" rules={[{ required: true, message: "Machine is required" }]}>
-                            <Select
-                              showSearch
-                              options={machineOptions}
-                              loading={isMachinesLoading}
-                              optionFilterProp="label"
-                              placeholder="Select machine"
-                            />
-                          </Form.Item>
-                          <Form.Item {...f} name={[f.name, "cycle_time_sec"]} label="Cycle (sec)">
-                            <InputNumber min={0} style={{ width: "100%" }} />
-                          </Form.Item>
-                          <Form.Item {...f} name={[f.name, "setup_time_min"]} label="Setup (min)">
-                            <InputNumber min={0} style={{ width: "100%" }} />
-                          </Form.Item>
-                          <Form.Item {...f} name={[f.name, "tooling_ref"]} label="Tooling">
-                            <Select
-                              placeholder="Select tooling"
-                              options={[
-                                { label: "Dies", value: "Dies" },
-                                { label: "JIG", value: "JIG" },
-                                { label: "CF", value: "CF" },
-                              ]}
-                              allowClear
-                            />
-                          </Form.Item>
-                          <div className="md:col-span-6">
-                            <Button
-                              danger
-                              icon={<DeleteOutlined />}
-                              onClick={() => remove(f.name)}
-                            >
-                              Remove Route
-                            </Button>
-                          </div>
-                        </div>
-                      ),
-                    }))}
-                  />
+            <Form layout="vertical" form={form} disabled={!isLatest} requiredMark={false}>
+              <Card title="Parent Component Information" className="mb-6" styles={{ body: { paddingTop: 16 } }}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Form.Item name="parent_uniq" label="Parent UNIQ"><Input size="large" disabled /></Form.Item>
+                  <Form.Item name="change_note" label="Change Note" rules={[{ required: true, message: "Change note is required" }]}> 
+                    <Input placeholder="Contoh: Tambah image header dan update children" size="large" />
+                  </Form.Item>
+                  <Form.Item name="part_name" label="Part Name" rules={[{ required: true, message: "Part name is required" }]}> 
+                    <Input size="large" />
+                  </Form.Item>
+                  <Form.Item name="part_number" label="Part Number" rules={[{ required: true, message: "Part number is required" }]}> 
+                    <Input size="large" />
+                  </Form.Item>
+                  <Form.Item name="model" label="Model"><Input size="large" /></Form.Item>
+                  <Form.Item name="uom" label="UOM" rules={[{ required: true, message: "UOM is required" }]}> 
+                    <Select showSearch placeholder="Select UOM" size="large" loading={apiEnabled && isUomsLoading && !uomIsForbidden} options={uomOptions} optionFilterProp="label" />
+                  </Form.Item>
+                  <Form.Item name="status" label="Status" rules={[{ required: true, message: "Status is required" }]}> 
+                    <Select size="large" options={[{ label: "Draft", value: "Draft" }, { label: "Released", value: "Released" }, { label: "Obsolete", value: "Obsolete" }]} />
+                  </Form.Item>
                 </div>
-              )}
-            </Form.List>
 
-            <DividerLine title="Material Spec" />
+                <Form.Item name="asset_id" hidden><Input /></Form.Item>
+                <Form.Item name="asset_url" hidden><Input /></Form.Item>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Form.Item name={["material_spec", "material_grade"]} label="Material Grade">
-                <Input />
-              </Form.Item>
-              <Form.Item name={["material_spec", "form"]} label="Form">
-                <Select
-                  options={[
-                    { label: "Plate", value: "Plate" },
-                    { label: "Coil", value: "Coil" },
-                    { label: "Pipe", value: "Pipe" },
-                    { label: "Rod", value: "Rod" },
-                    { label: "Wire", value: "Wire" },
-                    { label: "Other", value: "Other" },
-                  ]}
-                  allowClear
-                />
-              </Form.Item>
-              <Form.Item name={["material_spec", "supplier_id"]} label="Supplier ID">
-                <Input />
-              </Form.Item>
-            </div>
+                <Form.Item label="Header Image">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                    <Upload fileList={fileList} beforeUpload={() => false} onChange={({ fileList: next }) => setFileList(next)} maxCount={1}>
+                      <Button icon={<UploadOutlined />}>Choose File</Button>
+                    </Upload>
+                    {existingParentAssetUrl ? <Link href={existingParentAssetUrl} target="_blank">Current asset</Link> : <Text type="secondary">No existing asset</Text>}
+                  </div>
+                </Form.Item>
 
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              <Form.Item name={["material_spec", "width_mm"]} label="Width (mm)">
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-              <Form.Item name={["material_spec", "diameter_mm"]} label="Diameter (mm)">
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-              <Form.Item name={["material_spec", "thickness_mm"]} label="Thickness (mm)">
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-              <Form.Item name={["material_spec", "length_mm"]} label="Length (mm)">
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-              <Form.Item name={["material_spec", "weight_kg"]} label="Weight (kg)">
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-            </div>
+                <Form.Item name="description" label="Description"><TextArea rows={4} /></Form.Item>
+              </Card>
+
+              <Card
+                title={
+                  <div className="space-y-4">
+                    {isParentAssembly ? (
+                      <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
+                        Process yang dipilih bertipe <span className="font-semibold">Assembly</span>, sehingga material parent disabled dan child minimal 2 item.
+                      </div>
+                    ) : null}
+                    <span>Parent Process & Material</span>
+                  </div>
+                }
+                className="mb-6"
+                styles={{ body: { paddingTop: 16 } }}
+              >
+                {renderProcessRoutesEditor([], [], { hideAddWhenAssembly: true, isAssemblyMode: isParentAssembly })}
+                <div className="mt-6">{renderMaterialSpecEditor([], isParentAssembly)}</div>
+              </Card>
+
+              <Card title={`Child Parts (Levels 1-${MAX_BOM_LEVEL})`} styles={{ body: { paddingTop: 16 } }}>
+                <div className="flex items-center justify-between mb-4">
+                  <Text type="secondary">Children dari `/products/bom/:bomId/full` bisa diedit dan akan dikirim ulang ke endpoint replace.</Text>
+                  <Button type="primary" icon={<PlusOutlined />} onClick={addLevel1Child} disabled={childPartsCount >= MAX_CHILDREN_PER_PARENT}>
+                    Add Level 1 Child
+                  </Button>
+                </div>
+                {renderChildList(["child_parts"], 1)}
+              </Card>
             </Form>
           </>
         )}
       </Card>
-    </div>
-  );
-}
-
-function DividerLine({ title }: { title: string }) {
-  return (
-    <div className="mt-6 mb-3">
-      <div className="h-px bg-gray-200 mb-2" />
-      <Text strong>{title}</Text>
     </div>
   );
 }

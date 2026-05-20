@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Input, Modal, Segmented, Table, Tag, message } from "antd";
+import { Alert, Button, Card, Input, Modal, Segmented, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   CheckCircleOutlined,
@@ -23,6 +23,7 @@ import {
 
 type ApprovalTab = "All Items" | "BOM" | "PRL" | "PO Budget" | "Stock Opname";
 type ApprovalStatus = "Pending" | "Approved" | "Rejected";
+type ApprovalStatusFilter = "All Status" | ApprovalStatus;
 
 type ApprovalRow = {
   key: string;
@@ -181,6 +182,7 @@ export default function ApprovalManagerPage() {
   const apiEnabled = Boolean(apiBaseUrl);
   const [messageApi, contextHolder] = message.useMessage();
   const [activeTab, setActiveTab] = useState<ApprovalTab>("All Items");
+  const [statusFilter, setStatusFilter] = useState<ApprovalStatusFilter>("All Status");
 
   const [selectedItem, setSelectedItem] = useState<ApprovalManagerItem | null>(null);
   const [remarks, setRemarks] = useState<string>("");
@@ -323,9 +325,14 @@ export default function ApprovalManagerPage() {
   }, [apiEnabled, listQuery.data?.data]);
 
   const filteredRows = useMemo(() => {
-    if (activeTab === "All Items") return rows;
-    return rows.filter((row) => row.tab === activeTab);
-  }, [activeTab, rows]);
+    const tabFiltered = activeTab === "All Items" ? rows : rows.filter((row) => row.tab === activeTab);
+    if (statusFilter === "All Status") return tabFiltered;
+    return tabFiltered.filter((row) => row.approvalStatus === statusFilter);
+  }, [activeTab, rows, statusFilter]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [activeTab, statusFilter]);
 
   useEffect(() => {
     setSelectedRowKeys((prev) => prev.filter((key) => filteredRows.some((row) => row.key === key)));
@@ -652,7 +659,8 @@ export default function ApprovalManagerPage() {
     };
 
     const renderBom = () => {
-      const obj = isRecord(payload) ? (payload as UnknownRecord) : null;
+      const rawObj = isRecord(payload) ? (payload as UnknownRecord) : null;
+      const obj = rawObj && isRecord(rawObj.data) ? (rawObj.data as UnknownRecord) : rawObj;
       if (!obj) return missing;
 
       const processRoutes = Array.isArray(obj.process_routes) ? (obj.process_routes as unknown[]) : [];
@@ -671,24 +679,134 @@ export default function ApprovalManagerPage() {
         { title: "Op Seq", dataIndex: "op_seq", key: "op_seq", width: 90 },
         { title: "Process", dataIndex: "process_name", key: "process_name", width: 180 },
         { title: "Machine", dataIndex: "machine_name", key: "machine_name", width: 180 },
-        { title: "Cycle (sec)", dataIndex: "cycle_time_sec", key: "cycle_time_sec", width: 110 },
+        { title: "Cycle (sec/pcs)", dataIndex: "cycle_time_sec", key: "cycle_time_sec", width: 110 },
         { title: "Setup (min)", dataIndex: "setup_time_min", key: "setup_time_min", width: 110 },
       ];
 
       const material = isRecord(obj.material_spec) ? (obj.material_spec as UnknownRecord) : null;
+      const asset = isRecord(obj.asset) ? (obj.asset as UnknownRecord) : null;
+
+      const renderBomNode = (node: UnknownRecord, depth = 0, numbering = ""): React.ReactNode => {
+        const nodeMaterial = isRecord(node.material_spec) ? (node.material_spec as UnknownRecord) : null;
+        const nodeAsset = isRecord(node.asset) ? (node.asset as UnknownRecord) : null;
+        const nodeProcessRoutes = Array.isArray(node.process_routes)
+          ? (node.process_routes as unknown[])
+          : [];
+        const childNodes = Array.isArray(node.children)
+          ? node.children.filter(isRecord) as UnknownRecord[]
+          : [];
+
+        const nodeProcessRows = nodeProcessRoutes
+          .map((r) => (isRecord(r) ? (r as UnknownRecord) : {}))
+          .map((r) => ({
+            key: String(toText(r.route_id ?? r.op_seq ?? `${numbering}-${Math.random()}`)),
+            op_seq: toNumber(r.op_seq) ?? 0,
+            process_name: toText(r.process_name),
+            machine_name: toText(r.machine_name),
+            cycle_time_sec: toNumber(r.cycle_time_sec) ?? null,
+            setup_time_min: toNumber(r.setup_time_min) ?? null,
+          }));
+
+        return (
+          <div
+            key={String(toText(node.line_id ?? node.id ?? numbering) ?? depth)}
+            className={depth === 0 ? "rounded-xl border border-gray-200 bg-white p-4" : "rounded-xl border border-gray-200 bg-gray-50 p-4"}
+          >
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div className="text-sm font-semibold text-gray-900">
+                  {depth === 0 ? "Root BOM" : `Child Level ${toText(node.level) !== "-" ? toText(node.level) : depth}`}
+                  {numbering ? ` • ${numbering}` : ""}
+                </div>
+                <div className="text-xs text-gray-500">
+                  {toText(node.part_name)}
+                </div>
+              </div>
+              <Tag className="!rounded-full">{toText(node.status)}</Tag>
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+              {kv("UNIQ", toText(node.uniq_code))}
+              {kv("Part Name", toText(node.part_name))}
+              {kv("Part Number", toText(node.part_number))}
+              {kv("Model", toText(node.model))}
+              {kv("Level", toText(node.level))}
+              {kv("Qty per UNIQ", toText(node.qty_per_uniq))}
+              {kv("Version", toText(node.version))}
+              {kv("Asset", toText(nodeAsset?.label ?? nodeAsset?.asset_type))}
+            </div>
+
+            {nodeMaterial ? (
+              <div className="mt-4">
+                <div className="text-sm font-semibold text-gray-900">Material Spec</div>
+                <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {kv("Grade", toText(nodeMaterial.material_grade))}
+                  {kv("Form", toText(nodeMaterial.form))}
+                  {kv("Width (mm)", toText(nodeMaterial.width_mm))}
+                  {kv("Diameter (mm)", toText(nodeMaterial.diameter_mm))}
+                  {kv("Thickness (mm)", toText(nodeMaterial.thickness_mm))}
+                  {kv("Length (mm)", toText(nodeMaterial.length_mm))}
+                  {kv("Weight (kg)", toText(nodeMaterial.weight_kg))}
+                  {kv("Supplier", toText(nodeMaterial.supplier_name ?? nodeMaterial.supplier_id))}
+                  {kv("Cycle (sec/pcs)", toText(nodeMaterial.cycle_time_sec))}
+                  {kv("Setup (min)", toText(nodeMaterial.setup_time_min))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-4">
+              <div className="text-sm font-semibold text-gray-900">Process Routes</div>
+              <div className="mt-2">
+                {nodeProcessRows.length > 0 ? (
+                  <Table
+                    size="small"
+                    columns={processColumns}
+                    dataSource={nodeProcessRows}
+                    pagination={false}
+                    scroll={{ x: 800 }}
+                  />
+                ) : (
+                  <div className="rounded-lg border border-dashed border-gray-200 bg-white px-3 py-2 text-sm text-gray-500">
+                    No process routes.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {childNodes.length > 0 ? (
+              <div className="mt-4 space-y-3">
+                <div className="text-sm font-semibold text-gray-900">Children</div>
+                {childNodes.map((child, index) =>
+                  renderBomNode(child, depth + 1, numbering ? `${numbering}.${index + 1}` : `${index + 1}`)
+                )}
+              </div>
+            ) : null}
+          </div>
+        );
+      };
+
+      const childNodes = Array.isArray(obj.children)
+        ? obj.children.filter(isRecord) as UnknownRecord[]
+        : [];
 
       return (
         <>
           <div className="mt-4">
             <div className="text-sm font-semibold text-gray-900">Details</div>
             <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+              {kv("BOM ID", toText(obj.bom_id))}
               {kv("UNIQ", toText(obj.uniq_code))}
               {kv("Part Name", toText(obj.part_name))}
               {kv("Part Number", toText(obj.part_number))}
+              {kv("Version", toText(obj.version))}
               {kv("BOM Status", toText(obj.bom_status))}
               {kv("BOM Version", toText(obj.bom_version))}
+              {kv("Status", toText(obj.status))}
+              {kv("Is Current", toText(obj.is_current))}
               {kv("Read Only", toText(obj.read_only))}
               {kv("Change Note", toText(obj.change_note))}
+              {kv("Model", toText(obj.model))}
+              {kv("Asset", toText(asset?.label ?? asset?.asset_type))}
               {kv("Description", toText(obj.description))}
             </div>
           </div>
@@ -700,9 +818,13 @@ export default function ApprovalManagerPage() {
                 {kv("Grade", toText(material.material_grade))}
                 {kv("Form", toText(material.form))}
                 {kv("Width (mm)", toText(material.width_mm))}
+                {kv("Diameter (mm)", toText(material.diameter_mm))}
                 {kv("Thickness (mm)", toText(material.thickness_mm))}
                 {kv("Length (mm)", toText(material.length_mm))}
                 {kv("Weight (kg)", toText(material.weight_kg))}
+                {kv("Supplier", toText(material.supplier_name ?? material.supplier_id))}
+                {kv("Cycle (sec/pcs)", toText(material.cycle_time_sec))}
+                {kv("Setup (min)", toText(material.setup_time_min))}
               </div>
             </div>
           ) : null}
@@ -710,15 +832,30 @@ export default function ApprovalManagerPage() {
           <div className="mt-4">
             <div className="text-sm font-semibold text-gray-900">Process Routes</div>
             <div className="mt-2">
-              <Table
-                size="small"
-                columns={processColumns}
-                dataSource={processRows}
-                pagination={false}
-                scroll={{ x: 800 }}
-              />
+              {processRows.length > 0 ? (
+                <Table
+                  size="small"
+                  columns={processColumns}
+                  dataSource={processRows}
+                  pagination={false}
+                  scroll={{ x: 800 }}
+                />
+              ) : (
+                <div className="rounded-lg border border-dashed border-gray-200 bg-white px-3 py-2 text-sm text-gray-500">
+                  No process routes.
+                </div>
+              )}
             </div>
           </div>
+
+          {childNodes.length > 0 ? (
+            <div className="mt-4">
+              <div className="text-sm font-semibold text-gray-900">BOM Structure / Children</div>
+              <div className="mt-2 space-y-3">
+                {childNodes.map((child, index) => renderBomNode(child, 1, `${index + 1}`))}
+              </div>
+            </div>
+          ) : null}
         </>
       );
     };
@@ -1052,7 +1189,18 @@ export default function ApprovalManagerPage() {
                 ? `${selectedRows.length} row selected${selectedRows.length > 1 ? "s" : ""}`
                 : "Select pending rows to bulk approve or reject"}
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Select<ApprovalStatusFilter>
+                value={statusFilter}
+                onChange={(value) => setStatusFilter(value)}
+                className="min-w-[180px]"
+                options={[
+                  { label: "All Status", value: "All Status" },
+                  { label: "Pending", value: "Pending" },
+                  { label: "Approved", value: "Approved" },
+                  { label: "Rejected", value: "Rejected" },
+                ]}
+              />
               <Button
                 danger
                 icon={<CloseCircleOutlined />}
@@ -1150,7 +1298,7 @@ export default function ApprovalManagerPage() {
               current: page,
               pageSize: limit,
               total:
-                apiEnabled
+                apiEnabled && statusFilter === "All Status"
                   ? listQuery.data?.pagination?.total ?? filteredRows.length
                   : filteredRows.length,
               showSizeChanger: true,

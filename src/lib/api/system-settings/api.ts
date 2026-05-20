@@ -315,6 +315,8 @@ export type CreateProcessRequest = {
   category: string;
   process_name: string;
   sequence: number;
+  is_assembly?: boolean;
+  sub_con?: boolean;
   status?: StatusType;
 };
 
@@ -324,6 +326,8 @@ export type ProcessRecord = {
   category: string;
   process_name: string;
   sequence: number;
+  is_assembly?: boolean;
+  sub_con?: boolean;
   status: StatusType;
 };
 
@@ -1163,6 +1167,14 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
             process_name: String(r.process_name ?? r.ProcessName ?? ""),
             category: String(r.category ?? r.Category ?? ""),
             sequence: Number(r.sequence ?? r.Sequence ?? 0),
+            is_assembly:
+              typeof (r.is_assembly ?? r.IsAssembly) === "boolean"
+                ? Boolean(r.is_assembly ?? r.IsAssembly)
+                : String(r.is_assembly ?? r.IsAssembly ?? "").toLowerCase() === "true",
+            sub_con:
+              typeof (r.sub_con ?? r.subcon ?? r.SubCon) === "boolean"
+                ? Boolean(r.sub_con ?? r.subcon ?? r.SubCon)
+                : String(r.sub_con ?? r.subcon ?? r.SubCon ?? "").toLowerCase() === "true",
             status: String(r.status ?? r.Status ?? ""),
           } satisfies ProcessRecord;
         }),

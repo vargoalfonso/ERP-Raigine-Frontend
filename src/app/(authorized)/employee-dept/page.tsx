@@ -341,11 +341,24 @@ function EmployeeDeptPageContent() {
     : String(employeeEditApiData.reports_to_id);
 
     editEmployeeForm.setFieldsValue({
+      name: employeeEditApiData.full_name ?? selectedEmployee.name,
+      email: employeeEditApiData.email ?? "",
+      phone: employeeEditApiData.phone_number ?? "",
+      jobTitle: employeeEditApiData.job_title ?? "",
       departmentId,
       roleId,
       reportsToId,
+      unitCost:
+        typeof employeeEditApiData.unit_cost === "number"
+          ? employeeEditApiData.unit_cost
+          : undefined,
       joinDate: employeeEditApiData.join_date ? dayjs(employeeEditApiData.join_date) : undefined,
       notes: employeeEditApiData.notes ?? "",
+      status:
+        String(employeeEditApiData.status ?? selectedEmployee.status ?? "active").toLowerCase() ===
+        "inactive"
+          ? "Inactive"
+          : "Active",
     });
   }, [
     apiEnabled,
@@ -1039,6 +1052,16 @@ router.refresh();
           <Form.Item name="jobTitle" label="Job Title">
             <Input className="!rounded-lg" placeholder="Job title" />
           </Form.Item>
+          {apiEnabled ? (
+            <Form.Item name="unitCost" label="Unit Cost">
+              <InputNumber
+                className="!rounded-lg w-full"
+                min={0}
+                placeholder="15000000"
+                style={{ width: "100%" }}
+              />
+            </Form.Item>
+          ) : null}
           <Form.Item name={apiEnabled ? "departmentId" : "department"} label="Department" rules={[{ required: true }]}>
             {apiEnabled ? (
               <Select

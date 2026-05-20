@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Button, Card, Input, InputNumber, Select, Tag, message } from "antd";
+import { Button, Card, Checkbox, Input, InputNumber, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 
@@ -13,6 +13,8 @@ type Entry = {
   category?: string;
   processName?: string;
   sequence?: number;
+  isAssembly?: boolean;
+  subCon?: boolean;
   status?: StatusType;
   created: boolean;
 };
@@ -36,6 +38,8 @@ function makeEntry(idx: number): Entry {
     category: undefined,
     processName: undefined,
     sequence: undefined,
+    isAssembly: false,
+    subCon: false,
     status: undefined,
     created: false,
   };
@@ -175,7 +179,20 @@ export default function ProcessCreatePage() {
                     />
                   </div>
 
-                  <div />
+                  <div className="flex items-end gap-6 pb-2">
+                    <Checkbox
+                      checked={e.isAssembly === true}
+                      onChange={(ev) => updateEntry(e.id, { isAssembly: ev.target.checked, created: false })}
+                    >
+                      is_assembly
+                    </Checkbox>
+                    <Checkbox
+                      checked={e.subCon === true}
+                      onChange={(ev) => updateEntry(e.id, { subCon: ev.target.checked, created: false })}
+                    >
+                      sub_con
+                    </Checkbox>
+                  </div>
                 </div>
               </div>
             </Card>

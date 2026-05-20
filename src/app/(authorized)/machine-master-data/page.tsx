@@ -30,8 +30,6 @@ import { MdSettings, MdBuild } from "react-icons/md";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
-  getMachinePrintUrl,
-  getMachineQrCodeUrl,
   useCreateMachineMutation,
   useDeleteMachineMutation,
   useGetMachinesQuery,
@@ -332,13 +330,6 @@ export default function MachineMasterDataPage() {
             className="!rounded-lg"
             icon={<QrcodeOutlined />}
             onClick={() => {
-              if (apiEnabled && record.id) {
-                window.open(
-                  getMachineQrCodeUrl(record.id),
-                  "_blank",
-                  "noopener,noreferrer",
-                );
-              }
               setBarcodeRow(record);
               setBarcodeOpen(true);
             }}
@@ -542,15 +533,6 @@ export default function MachineMasterDataPage() {
 
   const handlePrintBarcode = () => {
     if (!barcodeRow) return;
-
-    if (apiEnabled && barcodeRow.id) {
-      window.open(
-        getMachinePrintUrl(barcodeRow.id),
-        "_blank",
-        "noopener,noreferrer",
-      );
-      return;
-    }
 
     const canvas = qrWrapperRef.current?.querySelector(
       "canvas",
