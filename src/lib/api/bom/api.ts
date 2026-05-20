@@ -111,6 +111,61 @@ export type BomImportResponse = {
   message?: string;
 };
 
+export type BomFullAsset = {
+  id?: number | string | null;
+  url?: string | null;
+  asset_type?: string | null;
+  label?: string | null;
+  cad_viewable?: boolean;
+};
+
+export type BomFullProcessRoute = {
+  route_id?: number | string;
+  op_seq?: number;
+  process_id?: number | string;
+  process_name?: string | null;
+  machine_id?: number | string | null;
+  machine_name?: string | null;
+  cycle_time_sec?: number | null;
+  setup_time_min?: number | null;
+  machine_stroke?: string | null;
+  tooling_ref?: string | null;
+  toolings?: unknown;
+};
+
+export type BomFullNode = {
+  bom_id?: number | string;
+  bom_version?: number;
+  is_archived?: boolean;
+  uniq_code?: string;
+  part_name?: string;
+  part_number?: string;
+  model?: string | null;
+  uom?: string | null;
+  status?: string | null;
+  description?: string | null;
+  asset?: BomFullAsset | null;
+  material_spec?: Record<string, unknown> | null;
+  process_routes?: BomFullProcessRoute[] | null;
+  children?: BomFullNode[];
+  child_id?: number | string;
+  line_id?: number | string;
+  parent_uniq_code?: string;
+  level?: number;
+  qty_per_uniq?: number;
+  scrap_factor?: number;
+  is_phantom?: boolean;
+};
+
+export type ReplaceBomRequest = {
+  bom_id: string;
+  payload: Record<string, unknown>;
+  files?: Array<{
+    key: string;
+    file: File;
+  }>;
+};
+
 const ok = <T,>(data: T, message = "OK"): ApiResponse<T> => ({
   message,
   status: "success",
@@ -463,6 +518,21 @@ export const bomSlice = apiSlice.injectEndpoints({
       },
     }),
 
+    getBomFullById: builder.query<ApiResponse<BomFullNode>, string>({
+      query: (id) => ({
+        url: `/products/bom/${encodeURIComponent(id)}/full`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => {
+        if (response && typeof response === "object") {
+          const data = (response as Partial<{ data: unknown }>).data;
+          return ok(((data ?? response) as BomFullNode) ?? {});
+        }
+        return ok((response as BomFullNode | undefined) ?? {});
+      },
+    }),
+
     getBomVersions: builder.query<ApiResponse<BomVersionsResponse>, string>({
       query: (bomId) => ({
         url: `/products/bom/${encodeURIComponent(bomId)}/versions`,
@@ -533,6 +603,26 @@ export const bomSlice = apiSlice.injectEndpoints({
       invalidatesTags: [BOM_TAG],
     }),
 
+    replaceBom: builder.mutation<ApiResponse<{ id: string; bom_id: string }>, ReplaceBomRequest>({
+      query: ({ bom_id, payload, files = [] }) => {
+        const formData = new FormData();
+        formData.append("payload", JSON.stringify(payload));
+        for (const entry of files) {
+          if (!entry?.key || !(entry.file instanceof File)) continue;
+          formData.append(entry.key, entry.file, entry.file.name);
+        }
+
+        return {
+          url: `/products/bom/${encodeURIComponent(bom_id)}/replace`,
+          method: "POST",
+          body: formData,
+          meta: { useAuthorization: true, contentType: "multipart/form-data" },
+        };
+      },
+      transformResponse: (response: unknown) => ok(parseCreateIds(response), "Updated"),
+      invalidatesTags: [BOM_TAG],
+    }),
+
     deleteBomParent: builder.mutation<ApiResponse<{ id: string }>, { bom_id: string }>({
       query: ({ bom_id }) => ({
         url: `/products/bom/${encodeURIComponent(bom_id)}`,
@@ -594,11 +684,13 @@ export const bomSlice = apiSlice.injectEndpoints({
 export const {
   useGetBomTreeQuery,
   useGetBomByIdQuery,
+  useGetBomFullByIdQuery,
   useGetBomVersionsQuery,
   useActivateBomMutation,
   useCreateBomMutation,
   useImportBomMutation,
   useUpdateBomMutation,
+  useReplaceBomMutation,
   useDeleteBomParentMutation,
   useDeleteBomChildMutation,
   useDeleteBomLineMutation,

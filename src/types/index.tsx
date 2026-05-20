@@ -19,6 +19,8 @@ export type DataObject<T> = T;
 export interface PayloadToken extends JwtPayload {
   id: string;
   userId: string;
+  username?: string;
+  user_name?: string;
   execute_date: string;
   full_name: string;
   role: string;

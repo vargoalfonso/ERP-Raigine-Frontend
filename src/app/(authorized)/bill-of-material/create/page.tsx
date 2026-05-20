@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -58,8 +58,6 @@ type MaterialSpec = {
   diameter_mm?: number;
   thickness_mm?: number;
   length_mm?: number;
-  cycle_time_sec_per_pc?: number;
-  dandori_setup_time_min?: number;
 };
 
 type ChildPart = {
@@ -177,7 +175,7 @@ export default function CreateBomPage() {
   const { data: machines = [], isLoading: isMachinesLoading } =
     useGetMachinesQuery(undefined, { skip: !apiEnabled });
 
-  const processOptions = useMemo<Array<{ value: string | number; label: string }>>(() => {
+  const processOptions = useMemo<Array<{ value: string | number; label: string; isAssembly: boolean; subCon: boolean }>>(() => {
     return (processes ?? [])
       .map((p: any) => {
         // Handle both snake_case (normalized) and PascalCase (raw Go response)
@@ -191,10 +189,12 @@ export default function CreateBomPage() {
         return {
           value,
           label: code && name ? `${code} — ${name}` : name || code || idStr,
+          isAssembly: Boolean(p?.is_assembly ?? p?.IsAssembly),
+          subCon: Boolean(p?.sub_con ?? p?.subcon ?? p?.SubCon),
         };
       })
       .filter(
-        (x): x is { value: string | number; label: string } =>
+        (x): x is { value: string | number; label: string; isAssembly: boolean; subCon: boolean } =>
           Boolean(x) && typeof (x as any).label === "string"
       );
   }, [processes]);
@@ -236,21 +236,28 @@ export default function CreateBomPage() {
 
   const uomOptions = useMemo(() => {
     return (uoms ?? [])
-      .filter((u) => Boolean((u as any)?.id))
       .map((u) => {
-        const id = String((u as any).id ?? "");
-        const code = String((u as any).code ?? (u as any).unit_code ?? "").trim();
+        const id = String((u as any).id ?? "").trim();
+        const code = String((u as any).code ?? (u as any).unit_code ?? "").trim().toUpperCase();
         const name = String((u as any).name ?? (u as any).unit_name ?? "").trim();
-        if (!id) return null;
-        // Backend expects UOM code string (e.g. "PCS"), not numeric ID.
-        const value = code || id;
+        if (!id || !code) return null;
+
         return {
-          value,
-          label: code && name ? `${code} — ${name}` : code || name || id,
+          value: id,
+          label: code && name ? `${code} — ${name}` : code,
+          code,
         };
       })
-      .filter((x): x is { value: string; label: string } => Boolean(x));
+      .filter((x): x is { value: string; label: string; code: string } => Boolean(x));
   }, [uoms]);
+
+  const uomCodeByValue = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const option of uomOptions) {
+      map.set(String(option.value), option.code);
+    }
+    return map;
+  }, [uomOptions]);
 
   const seededUomOptions = useMemo<Array<{ value: string; label: string }>>(
     () => [
@@ -264,10 +271,9 @@ export default function CreateBomPage() {
   const effectiveUomOptions = useMemo<Array<{ value: string; label: string }>>(() => {
     if (!apiEnabled) return seededUomOptions;
     if (uomOptions.length > 0) return uomOptions;
-    // If forbidden (403) or empty list, keep UX working with seeded options.
-    if (uomIsForbidden) return seededUomOptions;
+    if (uomIsForbidden) return [];
     if (isUomsLoading) return [];
-    return seededUomOptions;
+    return [];
   }, [apiEnabled, isUomsLoading, seededUomOptions, uomIsForbidden, uomOptions]);
 
   const supplierOptions = useMemo(
@@ -310,8 +316,6 @@ export default function CreateBomPage() {
         diameter_mm: 25,
         thickness_mm: 5,
         length_mm: 300,
-        cycle_time_sec_per_pc: 30,
-        dandori_setup_time_min: 15,
       },
     }),
     []
@@ -346,7 +350,45 @@ export default function CreateBomPage() {
   };
 
   const childParts = Form.useWatch("child_parts", form);
+  const watchedParentProcessRoutes = Form.useWatch("process_routes", form);
   const childPartsCount = Array.isArray(childParts) ? childParts.length : 0;
+
+  const isAssemblyProcessValue = (value: unknown) => {
+    const key = String(value ?? "").trim();
+    if (!key) return false;
+    return processOptions.some(
+      (option) => String(option.value).trim() === key && option.isAssembly === true
+    );
+  };
+
+  const isParentAssembly = useMemo(() => {
+    if (!Array.isArray(watchedParentProcessRoutes) || watchedParentProcessRoutes.length === 0) {
+      return false;
+    }
+
+    return watchedParentProcessRoutes.some((route) => isAssemblyProcessValue(route?.process_id));
+  }, [watchedParentProcessRoutes, processOptions]);
+
+  useEffect(() => {
+    if (!isParentAssembly) return;
+
+    const currentRoutes = form.getFieldValue("process_routes");
+    const currentFirst = Array.isArray(currentRoutes) && currentRoutes.length > 0
+      ? currentRoutes[0]
+      : {};
+
+    form.setFieldValue("process_routes", [
+      {
+        ...currentFirst,
+        sequence:
+          typeof currentFirst?.sequence === "number" && Number.isFinite(currentFirst.sequence)
+            ? currentFirst.sequence
+            : 1,
+      },
+    ]);
+    form.setFieldValue("material_spec", {});
+    setOpenProcessRouteIndex(0);
+  }, [form, isParentAssembly]);
 
   const addLevel1Child = () => {
     rootAddChildRef.current?.();
@@ -428,13 +470,13 @@ export default function CreateBomPage() {
                   </Form.Item>
                   <Form.Item
                     name={[pf.name, "cycle_time_sec_per_pc"]}
-                    label="Cycle Time"
+                    label="Cycle Time (sec/pcs)"
                   >
                     <InputNumber min={0} style={{ width: "100%" }} />
                   </Form.Item>
                   <Form.Item
                     name={[pf.name, "setup_time_min"]}
-                    label="Setup Time"
+                    label="Setup Time (min)"
                   >
                     <InputNumber min={0} style={{ width: "100%" }} />
                   </Form.Item>
@@ -512,20 +554,6 @@ export default function CreateBomPage() {
             <InputNumber min={0} style={{ width: "100%" }} />
           </Form.Item>
           <Form.Item name={[...fieldPath, "material_spec", "length_mm"]} label="Length (mm)">
-            <InputNumber min={0} style={{ width: "100%" }} />
-          </Form.Item>
-          <Form.Item
-            name={[...fieldPath, "material_spec", "cycle_time_sec_per_pc"]}
-            label="Cycle Time (sec/pc)"
-          >
-            <InputNumber min={0} style={{ width: "100%" }} />
-          </Form.Item>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Form.Item
-            name={[...fieldPath, "material_spec", "dandori_setup_time_min"]}
-            label="Dandori/Setup Time (min)"
-          >
             <InputNumber min={0} style={{ width: "100%" }} />
           </Form.Item>
         </div>
@@ -790,14 +818,22 @@ export default function CreateBomPage() {
         "part_number",
         "model",
         "uom",
-        ["material_spec", "material_code"],
-        ["material_spec", "form"],
-        ["material_spec", "supplier"],
       ]);
 
       // `validateFields(names)` only returns those specific fields. We need the
       // full form state (including `child_parts`) to build the payload.
       const values = form.getFieldsValue(true) as Step1Values;
+      const assemblyMode =
+        Array.isArray(values.process_routes) &&
+        values.process_routes.some((route) => isAssemblyProcessValue(route?.process_id));
+
+      if (!assemblyMode) {
+        await form.validateFields([
+          ["material_spec", "material_code"],
+          ["material_spec", "form"],
+          ["material_spec", "supplier"],
+        ]);
+      }
 
       messageApi.open({
         key: "bom-save",
@@ -835,14 +871,17 @@ export default function CreateBomPage() {
         return s ? s : undefined;
       };
 
-      const parentUom = toId(values.uom);
-      if (parentUom === undefined) {
+      const parentUomSelection = toId(values.uom);
+      const parentUomValue =
+        parentUomSelection === undefined
+          ? undefined
+          : uomCodeByValue.get(String(parentUomSelection)) ?? String(parentUomSelection);
+
+      if (!parentUomValue) {
         messageApi.destroy("bom-save");
         messageApi.error("UOM is required.");
         return;
       }
-
-      const parentUomValue = String(parentUom);
 
       const normalizeMaterialForm = (v: unknown): string | undefined => {
         if (typeof v !== "string") return undefined;
@@ -898,6 +937,19 @@ export default function CreateBomPage() {
           })
           .filter((r) => r.process_id !== undefined && r.machine_id !== undefined);
 
+      const mapAssemblyParentRoutes = (routes?: ProcessRoute[]) => {
+        const first = Array.isArray(routes) ? routes[0] : undefined;
+        const process_id = toNumberId(first?.process_id);
+        if (process_id === undefined) return [];
+
+        return [
+          {
+            op_seq: 10,
+            process_id,
+          },
+        ];
+      };
+
       const mapMaterialSpec = (spec?: MaterialSpec) => {
         const s = spec ?? {};
         const supplierRaw = cleanText(s.supplier);
@@ -914,8 +966,6 @@ export default function CreateBomPage() {
           length_mm: s.length_mm,
           weight_kg: s.weight_kg,
           ...(supplierName ? { supplier_name: supplierName } : {}),
-          cycle_time_sec: s.cycle_time_sec_per_pc,
-          setup_time_min: s.dandori_setup_time_min,
         };
         const cleanedEntries = Object.entries(raw).filter(
           ([, v]) => v !== undefined && v !== null && v !== ""
@@ -968,9 +1018,17 @@ export default function CreateBomPage() {
 
       const childrenPayload = mapChildParts(values.child_parts, 1);
 
-      const parentRoutes = mapProcessRoutes(values.process_routes);
-      const parentSpec = mapMaterialSpec(values.material_spec);
-      if (!parentSpec) {
+      if (assemblyMode && childrenPayload.length < 2) {
+        messageApi.destroy("bom-save");
+        messageApi.error("Assembly parent must have at least 2 child parts.");
+        return;
+      }
+
+      const parentRoutes = assemblyMode
+        ? mapAssemblyParentRoutes(values.process_routes)
+        : mapProcessRoutes(values.process_routes);
+      const parentSpec = assemblyMode ? undefined : mapMaterialSpec(values.material_spec);
+      if (!assemblyMode && !parentSpec) {
         messageApi.destroy("bom-save");
         messageApi.error("Material specifications are required.");
         return;
@@ -997,10 +1055,10 @@ export default function CreateBomPage() {
         part_number: cleanText(values.part_number),
         uom: parentUomValue,
         description: cleanText(values.description),
-        material_spec: parentSpec,
       };
       const parentStatus = toApiStatus(values.status);
       if (parentStatus) payload.status = parentStatus;
+      if (parentSpec !== undefined) payload.material_spec = parentSpec;
       if (parentRoutes.length > 0) payload.process_routes = parentRoutes;
       if (childrenPayload.length > 0) payload.children = childrenPayload;
 
@@ -1286,6 +1344,14 @@ export default function CreateBomPage() {
                         size="large"
                         loading={apiEnabled && isUomsLoading && !uomIsForbidden}
                         options={effectiveUomOptions}
+                        virtual={false}
+                        notFoundContent={
+                          apiEnabled
+                            ? isUomsLoading
+                              ? "Loading UOM..."
+                              : "No UOM found from System Settings"
+                            : "No UOM available"
+                        }
                         optionFilterProp="label"
                         filterOption={(input, opt) =>
                           String(opt?.label ?? "")
@@ -1344,22 +1410,32 @@ export default function CreateBomPage() {
 
                 <Card
                   title={
-                    <div className="flex items-center justify-between">
-                      <span>Process Routes</span>
-                      <Button
-                        type="primary"
-                        icon={<PlusOutlined />}
-                        onClick={() => {
-                          const current = form.getFieldValue("process_routes") ?? [];
-                          form.setFieldValue("process_routes", [
-                            ...current,
-                            { sequence: (current.length ?? 0) + 1 },
-                          ]);
-                          setOpenProcessRouteIndex(current.length ?? 0);
-                        }}
-                      >
-                        Add Process Route
-                      </Button>
+                    <div className="space-y-4">
+                      {isParentAssembly ? (
+                        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
+                          Process yang dipilih bertipe <span className="font-semibold">Assembly</span>, sehingga material parent disabled dan child minimal 2 item.
+                        </div>
+                      ) : null}
+
+                      <div className="flex items-center justify-between">
+                        <span>Process Routes</span>
+                        {!isParentAssembly ? (
+                          <Button
+                            type="primary"
+                            icon={<PlusOutlined />}
+                            onClick={() => {
+                              const current = form.getFieldValue("process_routes") ?? [];
+                              form.setFieldValue("process_routes", [
+                                ...current,
+                                { sequence: (current.length ?? 0) + 1 },
+                              ]);
+                              setOpenProcessRouteIndex(current.length ?? 0);
+                            }}
+                          >
+                            Add Process Route
+                          </Button>
+                        ) : null}
+                      </div>
                     </div>
                   }
                   className="mb-6"
@@ -1402,6 +1478,7 @@ export default function CreateBomPage() {
                                 <Button
                                   type="text"
                                   danger
+                                  disabled={isParentAssembly}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     remove(field.name);
@@ -1476,7 +1553,7 @@ export default function CreateBomPage() {
                                 <Form.Item
                                   {...routeField}
                                   name={[field.name, "cycle_time_sec_per_pc"]}
-                                  label="Cycle Time"
+                                  label="Cycle Time (sec/pcs)"
                                 >
                                   <InputNumber
                                     min={0}
@@ -1488,7 +1565,7 @@ export default function CreateBomPage() {
                                 <Form.Item
                                   {...routeField}
                                   name={[field.name, "setup_time_min"]}
-                                  label="Setup Time"
+                                  label="Setup Time (min)"
                                 >
                                   <InputNumber
                                     min={0}
@@ -1532,7 +1609,16 @@ export default function CreateBomPage() {
                 </Card>
 
                 <Card
-                  title="Material Specifications"
+                  title={
+                    <div className="flex items-center justify-between gap-3">
+                      <span>Material Specifications</span>
+                      {isParentAssembly ? (
+                        <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600">
+                          Disabled for Assembly parent
+                        </span>
+                      ) : null}
+                    </div>
+                  }
                   className="mb-6"
                   styles={{ body: { paddingTop: 16 } }}
                 >
@@ -1540,19 +1626,20 @@ export default function CreateBomPage() {
                     <Form.Item
                       name={["material_spec", "material_code"]}
                       label="Material Code"
-                      rules={[{ required: true, message: "Material Code is required" }]}
+                      rules={isParentAssembly ? [] : [{ required: true, message: "Material Code is required" }]}
                     >
-                      <Input placeholder="e.g., STKM550" size="large" />
+                      <Input placeholder="e.g., STKM550" size="large" disabled={isParentAssembly} />
                     </Form.Item>
 
                     <Form.Item
                       name={["material_spec", "form"]}
                       label="Form"
-                      rules={[{ required: true, message: "Form is required" }]}
+                      rules={isParentAssembly ? [] : [{ required: true, message: "Form is required" }]}
                     >
                       <Select
                         placeholder="Select form"
                         size="large"
+                        disabled={isParentAssembly}
                         options={[
                           { label: "Plate", value: "Plate" },
                           { label: "Coil", value: "Coil" },
@@ -1567,11 +1654,12 @@ export default function CreateBomPage() {
                     <Form.Item
                       name={["material_spec", "supplier"]}
                       label="Supplier"
-                      rules={[{ required: true, message: "Supplier is required" }]}
+                      rules={isParentAssembly ? [] : [{ required: true, message: "Supplier is required" }]}
                     >
                       <Select
                         placeholder="Select supplier"
                         size="large"
+                        disabled={isParentAssembly}
                         options={supplierOptions}
                         loading={isSuppliersLoading}
                         showSearch
@@ -1595,7 +1683,7 @@ export default function CreateBomPage() {
                         },
                       ]}
                     >
-                      <InputNumber min={0} size="large" style={{ width: "100%" }} />
+                      <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
                     </Form.Item>
 
                     <Form.Item
@@ -1611,7 +1699,7 @@ export default function CreateBomPage() {
                         },
                       ]}
                     >
-                      <InputNumber min={0} size="large" style={{ width: "100%" }} />
+                      <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
                     </Form.Item>
                     <Form.Item
                       name={["material_spec", "thickness_mm"]}
@@ -1626,7 +1714,7 @@ export default function CreateBomPage() {
                         },
                       ]}
                     >
-                      <InputNumber min={0} size="large" style={{ width: "100%" }} />
+                      <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
                     </Form.Item>
                     <Form.Item
                       name={["material_spec", "length_mm"]}
@@ -1641,24 +1729,10 @@ export default function CreateBomPage() {
                         },
                       ]}
                     >
-                      <InputNumber min={0} size="large" style={{ width: "100%" }} />
+                      <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
                     </Form.Item>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Form.Item
-                      name={["material_spec", "cycle_time_sec_per_pc"]}
-                      label="Cycle Time (sec/pc)"
-                    >
-                      <InputNumber min={0} size="large" style={{ width: "100%" }} />
-                    </Form.Item>
-                    <Form.Item
-                      name={["material_spec", "dandori_setup_time_min"]}
-                      label="Dandori/Setup Time (min)"
-                    >
-                      <InputNumber min={0} size="large" style={{ width: "100%" }} />
-                    </Form.Item>
-                  </div>
                 </Card>
 
                 <div className="flex items-center justify-between">

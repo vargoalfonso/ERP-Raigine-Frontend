@@ -1,5 +1,7 @@
 "use client";
 
+import { getCurrentUserProfile } from "@/lib/utils/currentUser";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { MdCircle } from "react-icons/md";
 
@@ -49,14 +51,25 @@ const getPageTitle = (pathname: string): string => {
     "/dn-management": "DN Management",
     "/dn-management/detail": "DN Raw Material Details",
     "/stock-opname": "Stock Opname",
-    "/po-procurement": "Purchase Order",
+    "/po-procurement": "Purchase Order Management",
     "/po-procurement/create": "Create Purchase Order",
     "/po-procurement/detail": "Purchase Order Details",
+    "/demand-forecasting": "Demand Forecasting",
+    "/prl-pattern-history": "PRL Pattern History",
+    "/po-budget": "PO Budgeting",
+    "/master-supplier/performance-management": "Supplier Performance Management",
+    "/machine-master-data": "Machine Master Data",
+    "/machine-pattern": "Machine Pattern",
+    "/product-return": "Product Return",
+    "/delivery-scheduling": "Delivery Scheduling",
+    "/employee-dept": "Employee and Department Management",
+    "/robot-automation": "Robot Automation",
   };
 
   if (pathname.startsWith("/dn-management/detail")) return "DN Raw Material Details";
   if (pathname.startsWith("/po-procurement/detail")) return "Purchase Order Details";
-  return pathTitleMap[pathname] || "Dashboard";
+
+  return pathTitleMap[pathname] || "";
 };
 
 // Format tanggal
@@ -76,6 +89,11 @@ export default function Navbar() {
   const pathname = usePathname();
   const pageTitle = getPageTitle(pathname);
   const currentDate = getCurrentDate();
+  const [currentUser, setCurrentUser] = useState(() => getCurrentUserProfile());
+
+  useEffect(() => {
+    setCurrentUser(getCurrentUserProfile());
+  }, []);
 
   return (
     <header className="bg-white border-b border-gray-200 px-6 py-3">
@@ -104,11 +122,15 @@ export default function Navbar() {
               className="flex items-center space-x-2 p-2 bg-[#F1F5FF] hover:bg-gray-100 rounded-lg transition-colors duration-200"
             >
               <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
-                <span className="text-white font-medium text-sm">AI</span>
+                <span className="text-white font-medium text-sm">{currentUser.initials}</span>
               </div>
               <div className="text-left">
-                <p className="text-sm font-medium text-gray-900">MRP Admin</p>
-                <p className="text-xs text-gray-500">Admin Manufacturing</p>
+                <p className="text-sm font-medium text-gray-900">
+                  {currentUser.displayName || "User"}
+                </p>
+                <p className="text-xs text-gray-500">
+                  {currentUser.role || "No role assigned"}
+                </p>
               </div>
               {/* <MdExpandMore className="w-4 h-4 text-gray-500" /> */}
             </button>

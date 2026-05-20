@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Button,
   Card,
+  Checkbox,
   Drawer,
   Form,
   Input,
@@ -204,6 +205,8 @@ type ProcessRow = {
   processName: string;
   category: string;
   sequence: number;
+  isAssembly?: boolean;
+  subCon?: boolean;
   status: StatusType;
 };
 
@@ -758,6 +761,8 @@ type ProcessFormValues = {
   processName: string;
   category: string;
   sequence: number;
+  isAssembly?: boolean;
+  subCon?: boolean;
   status: StatusType;
 };
 
@@ -1459,6 +1464,8 @@ export default function SystemSettingsPage() {
         processName: String(p.process_name ?? ""),
         category: String(p.category ?? ""),
         sequence: Number(p.sequence ?? 0),
+        isAssembly: Boolean(p.is_assembly),
+        subCon: Boolean(p.sub_con),
         status: fromBackendStatus(p.status),
       }));
   }, [apiEnabled, processRows, processesApiData]);
@@ -2001,6 +2008,8 @@ export default function SystemSettingsPage() {
       processName: row.processName,
       category: row.category,
       sequence: row.sequence,
+      isAssembly: row.isAssembly,
+      subCon: row.subCon,
       status: row.status,
     });
     setProcessEditOpen(true);
@@ -2640,6 +2649,8 @@ export default function SystemSettingsPage() {
           process_name: String(values.processName ?? ""),
           category: String(values.category ?? ""),
           sequence: Number(values.sequence ?? 0),
+          is_assembly: values.isAssembly === true,
+          sub_con: values.subCon === true,
           status: toBackendStatus(values.status),
         };
 
@@ -2650,6 +2661,8 @@ export default function SystemSettingsPage() {
             body: {
               process_name: createPayload.process_name,
               sequence: createPayload.sequence,
+              is_assembly: createPayload.is_assembly,
+              sub_con: createPayload.sub_con,
               status: createPayload.status,
             },
           }).unwrap();
@@ -5790,6 +5803,15 @@ export default function SystemSettingsPage() {
           >
             <Input placeholder="Procurement" />
           </Form.Item>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+            <Form.Item name="isAssembly" valuePropName="checked" className="!mb-0">
+              <Checkbox>is_assembly</Checkbox>
+            </Form.Item>
+            <Form.Item name="subCon" valuePropName="checked" className="!mb-0">
+              <Checkbox>sub_con</Checkbox>
+            </Form.Item>
+          </div>
 
           <Form.Item
             label="Category"
