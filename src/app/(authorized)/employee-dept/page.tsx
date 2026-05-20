@@ -335,10 +335,10 @@ function EmployeeDeptPageContent() {
       employeeEditApiData.role_id == null
         ? selectedEmployee.roleId
         : String(employeeEditApiData.role_id);
-    const reportsToId =
-      employeeEditApiData.reports_to_id == null
-        ? null
-        : String(employeeEditApiData.reports_to_id);
+ const reportsToId =
+  employeeEditApiData.reports_to_id == null
+    ? null
+    : String(employeeEditApiData.reports_to_id);
 
     editEmployeeForm.setFieldsValue({
       departmentId,
@@ -451,11 +451,17 @@ function EmployeeDeptPageContent() {
     return (rolesApiData ?? []).map((r) => ({ label: r.name, value: r.id }));
   }, [rolesApiData]);
 
-  const reportsToOptionsApi = useMemo(() => {
-    if (!apiEnabled) return [];
-    const managers = apiEmployeesRows.filter((e) => e.isManager);
-    return [{ label: "Top Level", value: null }, ...managers.map((e) => ({ label: e.name, value: e.apiId ?? e.key }))];
-  }, [apiEnabled, apiEmployeesRows]);
+const reportsToOptionsApi = useMemo(() => {
+  if (!apiEnabled) return [];
+
+  return [
+    { label: "Top Level", value: null },
+    ...apiEmployeesRows.map((e) => ({
+      label: e.name,
+      value: String(e.apiId ?? e.key),
+    })),
+  ];
+}, [apiEnabled, apiEmployeesRows]);
 
   const metrics = useMemo(() => {
     const activeEmployees = apiEnabled ? apiEmployeesRows : employees;
@@ -968,85 +974,54 @@ function EmployeeDeptPageContent() {
         okButtonProps={{ className: "!rounded-lg" }}
         cancelButtonProps={{ className: "!rounded-lg" }}
         onOk={async () => {
-          try {
-            const values = await editEmployeeForm.validateFields();
-            if (!selectedEmployee) return;
+  try {
+    const values = await editEmployeeForm.validateFields();
 
-            if (!apiEnabled) {
-              setEmployees((prev) =>
-                prev.map((e) =>
-                  e.key === selectedEmployee.key
-                    ? {
-                        ...e,
-                        name: values.name,
-                        email: values.email || "-",
-                        department: values.department || "-",
-                        status: values.status,
-                      }
-                    : e
-                )
-              );
-              message.success("Employee updated");
-            } else {
-              const apiId = selectedEmployee.apiId;
-              if (!apiId) throw new Error("Missing employee id");
+    if (!selectedEmployee?.apiId) {
+      throw new Error("Missing employee id");
+    }
 
-              const apiStatus = String(values.status ?? "active").toLowerCase() === "inactive" ? "inactive" : "active";
-              const departmentIdForAccessControl =
-                values.departmentId ?? selectedEmployee.departmentId ?? null;
-              const apiAccessControlStatus = apiStatus;
+    const payload = {
+      full_name: values.name,
+      email: values.email || null,
+      phone_number: values.phone || null,
+      job_title: values.jobTitle || null,
+      unit_cost: values.unitCost ? Number(values.unitCost) : 0,
+      join_date:
+        values.joinDate && typeof values.joinDate.toISOString === "function"
+          ? values.joinDate.toISOString()
+          : null,
+      role_id: values.roleId ? Number(values.roleId) : null,
+      department_id: values.departmentId
+        ? Number(values.departmentId)
+        : null,
+      reports_to_id: values.reportsToId
+        ? Number(values.reportsToId)
+        : null,
+      status:
+        String(values.status).toLowerCase() === "inactive"
+          ? "inactive"
+          : "active",
+      notes: values.notes || null,
+    };
 
-              await updateEmployee({
-                id: apiId,
-                body: {
-                  full_name: values.name,
-                  email: values.email || null,
-                  phone_number: values.phone || null,
-                  job_title: values.jobTitle || null,
-                  status: apiStatus,
-                  role_id: values.roleId || null,
-                  department_id: values.departmentId ?? selectedEmployee.departmentId ?? null,
-                  reports_to_id: values.reportsToId ?? null,
-                  join_date:
-                    values.joinDate && typeof values.joinDate.toISOString === "function" ? values.joinDate.toISOString() : null,
-                  notes: values.notes ? String(values.notes) : null,
-                },
-              }).unwrap();
+    await updateEmployee({
+      id: selectedEmployee.apiId,
+      body: payload,
+    }).unwrap();
 
-              if (selectedEmployee.accessControlId) {
-                await updateAccessControl({
-                  id: selectedEmployee.accessControlId,
-                  body: {
-                    employee_id: selectedEmployee.empId,
-                    full_name: values.name,
-                    department_id: departmentIdForAccessControl,
-                    role_id: values.roleId,
-                    status: apiAccessControlStatus,
-                  },
-                }).unwrap();
-              } else if (departmentIdForAccessControl && values.roleId) {
-                await createAccessControl({
-                  employee_id: selectedEmployee.empId,
-                  full_name: values.name,
-                  department_id: departmentIdForAccessControl,
-                  role_id: values.roleId,
-                  status: apiAccessControlStatus,
-                }).unwrap();
-              }
+    message.success("Employee updated");
+await refetchEmployees();
 
-              message.success("Employee updated");
-              refetchEmployees();
-              refetchAccessControl();
-              refetchRoles();
-            }
+router.refresh();
 
-            setEditEmployeeOpen(false);
-            setSelectedEmployee(null);
-            editEmployeeForm.resetFields();
-          } catch (e) {
-            message.error(getApiErrorMessage(e, "Failed to update employee"));
-          }
-        }}
+    setEditEmployeeOpen(false);
+    setSelectedEmployee(null);
+    editEmployeeForm.resetFields();
+  } catch (e) {
+    message.error(getApiErrorMessage(e, "Failed to update employee"));
+  }
+}}
       >
         <Form form={editEmployeeForm} layout="vertical">
           <Form.Item name="empId" label="Employee ID">
