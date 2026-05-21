@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { Button, Form, Input, message } from "antd";
 import { useSearchParams, useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 
 export default function SetPasswordPage() {
+  return (
+    <Suspense fallback={null}>
+      <SetPasswordPageContent />
+    </Suspense>
+  );
+}
+
+function SetPasswordPageContent() {
   const [form] = Form.useForm();
   const searchParams = useSearchParams();
   const router = useRouter();
