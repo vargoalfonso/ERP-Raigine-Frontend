@@ -1,6 +1,7 @@
 "use client";
 
-import { getCurrentUserProfile } from "@/lib/utils/currentUser";
+import { apiBaseUrl, getCookiesFromBrowser } from "@/lib/api/instance";
+import { getCurrentUserProfile, getCurrentUserTokenPayload, getCurrentUserUid } from "@/lib/utils/currentUser";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { MdCircle } from "react-icons/md";
@@ -92,7 +93,106 @@ export default function Navbar() {
   const [currentUser, setCurrentUser] = useState(() => getCurrentUserProfile());
 
   useEffect(() => {
-    setCurrentUser(getCurrentUserProfile());
+    let cancelled = false;
+
+    const hydrateCurrentUser = async () => {
+      const baseProfile = getCurrentUserProfile();
+      if (!cancelled) {
+        setCurrentUser(baseProfile);
+      }
+
+      const payload = getCurrentUserTokenPayload();
+      const uid = getCurrentUserUid();
+
+      // Try UID-based profile fetch first (more reliable when token lacks email/username)
+      if (uid && apiBaseUrl) {
+        try {
+          const token = getCookiesFromBrowser("Authorization");
+          const response = await fetch(`${apiBaseUrl}/user/${uid}`, {
+            method: "GET",
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          });
+          if (response.ok) {
+            const json = await response.json().catch(() => null);
+            const userRecord = json?.data ?? json ?? null;
+            const username = typeof userRecord?.username === "string" && userRecord.username.trim() ? userRecord.username.trim() : null;
+
+            if (!cancelled && username) {
+              setCurrentUser((prev) => ({
+                ...prev,
+                displayName: username,
+                initials: username
+                  .split(/\s+/)
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .map((part: string) => part.charAt(0).toUpperCase())
+                  .join("") || prev.initials,
+              }));
+              return; // done
+            }
+          }
+        } catch {
+          // ignore and fall back to email-based lookup below
+        }
+      }
+
+      // Fallback: try matching by email across /user list (keeps previous behavior)
+      const email = typeof payload?.email === "string" ? payload.email.trim().toLowerCase() : "";
+      if (!email || !apiBaseUrl) return;
+
+      try {
+        const token = getCookiesFromBrowser("Authorization");
+        const response = await fetch(`${apiBaseUrl}/user`, {
+          method: "GET",
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        });
+        if (!response.ok) return;
+
+        const json = await response.json().catch(() => null);
+        const rawList = Array.isArray(json)
+          ? json
+          : Array.isArray(json?.data)
+            ? json.data
+            : Array.isArray(json?.data?.items)
+              ? json.data.items
+              : [];
+
+        const matchedUser = rawList.find((item: any) => {
+          const itemEmail = typeof item?.email === "string" ? item.email.trim().toLowerCase() : "";
+          return itemEmail === email;
+        });
+
+        const username =
+          typeof matchedUser?.username === "string" && matchedUser.username.trim()
+            ? matchedUser.username.trim()
+            : null;
+
+        if (!cancelled && username) {
+          setCurrentUser((prev) => ({
+            ...prev,
+            displayName: username,
+            initials: username
+              .split(/\s+/)
+              .filter(Boolean)
+              .slice(0, 2)
+              .map((part: string) => part.charAt(0).toUpperCase())
+              .join("") || prev.initials,
+          }));
+        }
+      } catch {
+        // ignore DB username fallback failures and keep token-derived profile
+      }
+    };
+
+    void hydrateCurrentUser();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (

@@ -107,7 +107,28 @@ export default function AddDepartmentPage() {
     }
   }, []);
 
-  const generatedCode = useMemo(() => nextDeptCode(departments), [departments]);
+  const generatedCode = useMemo(() => {
+    if (apiEnabled) {
+      // Try to compute next code from API-provided departments if available
+      try {
+        const codes = (departmentApiData ?? [])
+          .map((d: any) => d.department_code ?? d.code ?? null)
+          .filter((c: any): c is string => Boolean(c))
+          .map((c: string) => {
+            const m = String(c).match(/(\d+)$/);
+            return m ? Number(m[1]) : null;
+          })
+          .filter((n: any): n is number => typeof n === "number" && Number.isFinite(n));
+
+        const next = (codes.length ? Math.max(...codes) : 0) + 1;
+        return `DEPT-${String(next).padStart(3, "0")}`;
+      } catch {
+        return nextDeptCode(departments);
+      }
+    }
+
+    return nextDeptCode(departments);
+  }, [apiEnabled, departmentApiData, departments]);
 
   useEffect(() => {
     form.setFieldsValue({ departmentCode: generatedCode });

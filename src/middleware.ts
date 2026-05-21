@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const excludedPaths = [
   "/login",
+  "/set-password",
   "/register",
   "/forgot-password",
   "/not-active",
@@ -54,6 +55,6 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api|_next|register|forgot-password|login|public|.*\\.png$|.*\\.jpeg$|.*\\.svg$).*)",
+    "/((?!api|_next|register|forgot-password|login|set-password|public|.*\\.png$|.*\\.jpeg$|.*\\.svg$).*)",
   ],
 };

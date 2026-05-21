@@ -301,6 +301,19 @@ function EmployeeDeptPageContent() {
     if (t === "employee") setActiveTab("employee");
   }, [searchParams]);
 
+  // Ensure fresh data after navigation or actions: refetch when API mode is enabled
+  useEffect(() => {
+    if (!apiEnabled) return;
+    // Refetch when the active tab changes so newly created/edited items appear immediately
+    if (activeTab === "department") {
+      void refetchDepartments();
+    }
+    if (activeTab === "employee") {
+      void refetchEmployees();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiEnabled, activeTab]);
+
   useEffect(() => {
     if (apiEnabled) return;
     if (!hasLoaded) return;
@@ -1282,6 +1295,8 @@ router.refresh();
                     (departmentsApiData ?? []).find((dept) => dept.department_name === values.parentDepartment)?.id ??
                     selectedDept.parentDepartmentId ??
                     null,
+                  department_code: values.code || selectedDept.code || null,
+                  status: String(values.status ?? selectedDept.status ?? "Active").toLowerCase(),
                 },
               }).unwrap();
               refetchDepartments();

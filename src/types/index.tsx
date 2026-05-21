@@ -21,9 +21,16 @@ export interface PayloadToken extends JwtPayload {
   userId: string;
   username?: string;
   user_name?: string;
+  preferred_username?: string;
+  uid?: string;
+  // `sub` is provided by JwtPayload but include here for clarity
+  sub?: string;
+  name?: string;
   execute_date: string;
   full_name: string;
-  role: string;
+  // token may include a single role or an array of roles
+  role?: string;
+  roles?: string[];
   email: string;
   status: string;
   is_active: boolean;

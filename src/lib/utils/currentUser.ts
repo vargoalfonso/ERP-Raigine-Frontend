@@ -21,6 +21,16 @@ const getTokenPayload = (): PayloadToken | null => {
   }
 };
 
+export const getCurrentUserTokenPayload = (): PayloadToken | null => getTokenPayload();
+
+export const getCurrentUserUid = (): string | null => {
+  const decoded = getTokenPayload();
+  if (!decoded) return null;
+  if (typeof decoded.uid === "string" && decoded.uid.trim()) return decoded.uid.trim();
+  if (typeof decoded.sub === "string" && decoded.sub.trim()) return decoded.sub.trim();
+  return null;
+};
+
 const getInitials = (value: string | null): string => {
   if (!value) return "AI";
 
@@ -41,6 +51,9 @@ export const getCurrentUserDisplayName = (): string | null => {
   const candidates = [
     decoded.username,
     decoded.user_name,
+    decoded.preferred_username,
+    decoded.uid,
+    decoded.name,
     decoded.full_name,
     decoded.email,
     decoded.sub,

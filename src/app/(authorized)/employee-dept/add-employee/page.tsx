@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Button, DatePicker, Form, Input, InputNumber, Select, message } from "antd";
+import { Button, DatePicker, Form, Input, InputNumber, Select, message, notification } from "antd";
 import {
   ArrowLeftOutlined,
   SaveOutlined,
@@ -225,6 +225,12 @@ export default function AddEmployeePage() {
         }).unwrap();
 
         message.success("Employee created");
+        if (typeof values.workEmail === "string" && values.workEmail.trim()) {
+          notification.success({
+            message: "email berhasil dikirim",
+            placement: "topRight",
+          });
+        }
         router.push("/employee-dept");
         return;
       }
