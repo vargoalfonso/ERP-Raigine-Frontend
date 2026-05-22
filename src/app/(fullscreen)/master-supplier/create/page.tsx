@@ -67,6 +67,7 @@ type BomOption = {
   grade?: string;
   size?: string;
   uom?: string;
+  weight?: number;
 };
 
 const SECTION_OPTIONS: Array<{ label: string; value: SupplierSection }> = [
@@ -107,6 +108,62 @@ const sectionApiValue = (section: SupplierSection) => {
   return "raw_material";
 };
 
+const sectionPayloadTypeValue = (section: SupplierSection) => {
+  if (section === "indirect-raw-material") return "indirect";
+  if (section === "subcon") return "subcon";
+  return "raw_material";
+};
+
+const normalizeSupplierCategory = (value: unknown): SupplierSection => {
+  const raw = pickText(value).toLowerCase();
+  if (raw.includes("indirect")) return "indirect-raw-material";
+  if (raw.includes("sub")) return "subcon";
+  return "raw-material";
+};
+
+const resolveSupplierCategory = (supplier: Record<string, unknown>): SupplierSection =>
+  normalizeSupplierCategory(
+    pickText(
+      supplier.material_category,
+      supplier.materialCategory,
+      supplier.category,
+      supplier.type,
+    )
+  );
+
+const formatSizeFromMaterialSpec = (materialSpec?: Record<string, unknown>): string => {
+  if (!materialSpec) return "";
+
+  const diameter = pickText(materialSpec.diameter_mm);
+  const thickness = pickText(materialSpec.thickness_mm);
+  const length = pickText(materialSpec.length_mm);
+  const width = pickText(materialSpec.width_mm);
+
+  const parts = [
+    diameter ? `Ø${diameter}` : "",
+    width ? `W${width}` : "",
+    thickness ? `T${thickness}` : "",
+    length ? `L${length}` : "",
+  ].filter(Boolean);
+
+  return parts.join(" x ");
+};
+
+const extractWeightFromMaterialSpec = (materialSpec?: Record<string, unknown>): number | undefined => {
+  if (!materialSpec) return undefined;
+
+  const candidates = [materialSpec.weight_kg, materialSpec.weight, materialSpec.unit_weight];
+  for (const candidate of candidates) {
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+    if (typeof candidate === "string") {
+      const parsed = Number(candidate);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+
+  return undefined;
+};
+
 const flattenBomTree = (nodes: BackendBomNode[]): BackendBomNode[] => {
   const flattened: BackendBomNode[] = [];
 
@@ -128,6 +185,12 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
   const materialSpec = isRecord(node.material_specifications)
     ? node.material_specifications
     : undefined;
+  const size =
+    pickText(
+      materialSpec?.size,
+      materialSpec?.material_size,
+      materialSpec?.thickness,
+    ) || formatSizeFromMaterialSpec(materialSpec);
 
   return {
     value: uniqCode,
@@ -143,8 +206,9 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
       node.material_code,
     ),
     grade: pickText(materialSpec?.material_grade, materialSpec?.grade),
-    size: pickText(materialSpec?.size, materialSpec?.material_size, materialSpec?.thickness),
+    size,
     uom: pickText(node.unit_measurement),
+    weight: extractWeightFromMaterialSpec(materialSpec),
   };
 };
 
@@ -186,7 +250,8 @@ function MasterSupplierCreatePageContent() {
       suppliers
         .filter((supplier) => {
           const status = String(supplier.status ?? "active").trim().toLowerCase();
-          return !status || status === "active";
+          const category = resolveSupplierCategory(supplier as Record<string, unknown>);
+          return (!status || status === "active") && category === section;
         })
         .map((supplier) => {
           const value = pickText(
@@ -209,7 +274,7 @@ function MasterSupplierCreatePageContent() {
         })
         .filter((option): option is { value: string; label: string; supplierCode: string } => Boolean(option))
         .sort((left, right) => left.label.localeCompare(right.label)),
-    [suppliers]
+      [section, suppliers]
   );
 
   const uomOptions = useMemo(
@@ -308,6 +373,7 @@ function MasterSupplierCreatePageContent() {
       grade: matched.grade,
       size: matched.size,
       uom: matchedUom?.value,
+      weight: matched.weight,
       description: form.getFieldValue("description") || matched.partName,
     });
   };
@@ -324,22 +390,14 @@ function MasterSupplierCreatePageContent() {
         supplier_uuid: pickText(values.supplier_uuid),
         sebango_code: pickText(values.sebango_code),
         uniq_code: pickText(values.uniq_code),
-        type: pickText(values.type) || sectionApiValue(section),
+        type: sectionPayloadTypeValue(section),
         description: pickText(values.description, values.part_name, values.uniq_code),
-        quantity: Number(values.quantity ?? 0),
+        quantity: String(values.quantity ?? 0),
         uom: pickText(values.uom),
-        weight: Number(values.weight ?? 0),
-        pcs_per_kanban: Number(values.pcs_per_kanban ?? 0),
+        weight: String(values.weight ?? 0),
+        pcs_per_kanban: String(values.pcs_per_kanban ?? 0),
         customer_cycle: pickText(values.customer_cycle),
         status: pickText(values.status) || pickText(detailQuery.data?.status) || "active",
-        warehouse_uuid: pickText(values.warehouse_uuid) || undefined,
-        warehouse_name: selectedWarehouse?.label,
-        product_model: pickText(values.product_model) || undefined,
-        part_name: pickText(values.part_name) || undefined,
-        part_number: pickText(values.part_number) || undefined,
-        material_type: sectionApiValue(section),
-        grade: pickText(values.grade) || undefined,
-        size: pickText(values.size) || undefined,
       };
 
       if (isEditing) {
@@ -467,9 +525,9 @@ function MasterSupplierCreatePageContent() {
                   </Form.Item>
 
                   <Form.Item
-                    label="UNIQ Code"
+                    label="Sebango Code"
                     name="uniq_code"
-                    rules={[{ required: true, message: "Please select a uniq code" }]}
+                    rules={[{ required: true, message: "Please select a Sebango Code" }]}
                   >
                     <Select
                       showSearch
@@ -481,11 +539,11 @@ function MasterSupplierCreatePageContent() {
                   </Form.Item>
 
                   <Form.Item
-                    label="Sebango Code"
+                    label="Material Code"
                     name="sebango_code"
-                    rules={[{ required: true, message: "Please input sebango code" }]}
+                    rules={[{ required: true, message: "Please input material code" }]}
                   >
-                    <Input placeholder="Enter sebango code" />
+                    <Input placeholder="Enter material code" />
                   </Form.Item>
                 </div>
 

@@ -77,6 +77,12 @@ type SupplierOnlyRow = {
   fullAddress: string;
 };
 
+const SUPPLIER_CATEGORY_OPTIONS = [
+  { label: "Raw Material", value: "Raw Material" },
+  { label: "Indirect Raw Material", value: "Indirect Raw Material" },
+  { label: "Subcon", value: "Subcon" },
+] as const;
+
 const SECTION_OPTIONS: Array<{ label: string; value: SupplierSection }> = [
   { label: "Supplier Only", value: "supplier-only" },
   { label: "Raw Material", value: "raw-material" },
@@ -111,6 +117,13 @@ const normalizeSection = (value: unknown): SupplierItemSection => {
   if (raw.includes("indirect")) return "indirect-raw-material";
   if (raw.includes("sub")) return "subcon";
   return "raw-material";
+};
+
+const normalizeMaterialCategory = (value: unknown): (typeof SUPPLIER_CATEGORY_OPTIONS)[number]["value"] => {
+  const raw = pickText(value).toLowerCase();
+  if (raw.includes("indirect")) return "Indirect Raw Material";
+  if (raw.includes("sub")) return "Subcon";
+  return "Raw Material";
 };
 
 const sectionLabel = (section: SupplierSection) =>
@@ -151,7 +164,12 @@ const toSupplierOnlyRow = (record: SupplierRecord, index: number): SupplierOnlyR
   contactPerson: String(record.contact_person ?? "-"),
   contactNumber: String(record.contact_number ?? "-"),
   emailAddress: String(record.email_address ?? "-"),
-  materialCategory: String(record.material_category ?? "-"),
+  materialCategory: normalizeMaterialCategory(
+    record.material_category ??
+      (record as Record<string, unknown>).materialCategory ??
+      (record as Record<string, unknown>).category ??
+      "Raw Material"
+  ),
   city: String(record.city ?? "-"),
   paymentTerms: String(record.payment_terms ?? "-"),
   leadTimeDays: Number(record.delivery_lead_time_days ?? 0),
@@ -166,6 +184,7 @@ export default function MasterSupplierPage() {
   const [activeSection, setActiveSection] = useState<SupplierSection>("supplier-only");
   const [searchValue, setSearchValue] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>();
+  const [supplierCategoryFilter, setSupplierCategoryFilter] = useState<string>();
   const [selectedSupplierOnlyRow, setSelectedSupplierOnlyRow] = useState<SupplierOnlyRow | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -230,23 +249,24 @@ export default function MasterSupplierPage() {
 
   const filteredSupplierOnlyRows = useMemo(() => {
     const query = searchValue.trim().toLowerCase();
-    if (!query) return supplierOnlyRows;
-
-    return supplierOnlyRows.filter((row) =>
-      [
-        row.supplierCode,
-        row.supplierName,
-        row.contactPerson,
-        row.contactNumber,
-        row.emailAddress,
-        row.materialCategory,
-        row.city,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(query)
-    );
-  }, [searchValue, supplierOnlyRows]);
+    return supplierOnlyRows
+      .filter((row) => (supplierCategoryFilter ? row.materialCategory === supplierCategoryFilter : true))
+      .filter((row) => {
+        if (!query) return true;
+        return [
+          row.supplierCode,
+          row.supplierName,
+          row.contactPerson,
+          row.contactNumber,
+          row.emailAddress,
+          row.materialCategory,
+          row.city,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
+      });
+  }, [searchValue, supplierCategoryFilter, supplierOnlyRows]);
 
   const openCreatePage = (mode: "create" | "edit" | "view", row?: SupplierRow) => {
     const targetSection = row?.section ?? (activeSection === "supplier-only" ? "raw-material" : activeSection);
@@ -514,6 +534,7 @@ export default function MasterSupplierPage() {
               setActiveSection(value as SupplierSection);
               setSearchValue("");
               setTypeFilter(undefined);
+              setSupplierCategoryFilter(undefined);
             }}
           />
 
@@ -537,6 +558,15 @@ export default function MasterSupplierPage() {
               onChange={(value) => setTypeFilter(value)}
               placeholder="Filter by type"
               options={typeOptions}
+              className="w-full md:w-[240px]"
+            />
+          ) : isSupplierOnly ? (
+            <Select
+              allowClear
+              value={supplierCategoryFilter}
+              onChange={(value) => setSupplierCategoryFilter(value)}
+              placeholder="Filter by category"
+              options={[...SUPPLIER_CATEGORY_OPTIONS]}
               className="w-full md:w-[240px]"
             />
           ) : null}

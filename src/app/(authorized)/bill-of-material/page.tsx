@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Modal, Table, Tag, Typography, Upload, message, Progress } from "antd";
+import { Button, Input, Modal, Table, Tag, Typography, Upload, message, Progress } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   BulbOutlined,
@@ -408,6 +408,26 @@ const mapNodeToRow = (
   };
 };
 
+const filterBomRowsByUniq = (rows: BomRow[], query: string): BomRow[] => {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return rows;
+
+  return rows.reduce<BomRow[]>((acc, row) => {
+    const matchedChildren = row.children ? filterBomRowsByUniq(row.children, normalizedQuery) : undefined;
+    const selfMatched = row.uniq.toLowerCase().includes(normalizedQuery);
+
+    if (!selfMatched && (!matchedChildren || matchedChildren.length === 0)) {
+      return acc;
+    }
+
+    acc.push({
+      ...row,
+      children: selfMatched ? row.children : matchedChildren,
+    });
+    return acc;
+  }, []);
+};
+
 const fetchBomIdByAnyId = async (anyId: string): Promise<string> => {
   const token = getCookiesFromBrowser("Authorization");
   if (!apiBaseUrl || !anyId) return "";
@@ -440,6 +460,7 @@ export default function BillOfMaterialPage() {
   const [stagedPreviewRows, setStagedPreviewRows] = useState<ImportPreviewRow[]>([]);
   const [uploadHistory, setUploadHistory] = useState<UploadHistoryEntry[]>([]);
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
+  const [uniqSearch, setUniqSearch] = useState("");
 
   const { data: bomTreeRes, isLoading: isBomLoading, refetch } = useGetBomTreeQuery();
   const [deleteBomParent, { isLoading: isDeletingParent }] = useDeleteBomParentMutation();
@@ -451,9 +472,16 @@ export default function BillOfMaterialPage() {
     return tree.map((n) => mapNodeToRow(n, { level: 0 }));
   }, [bomTreeRes?.data]);
 
-  const expandableParentKeys = bomRows
+  const filteredBomRows = useMemo(
+    () => filterBomRowsByUniq(bomRows, uniqSearch),
+    [bomRows, uniqSearch]
+  );
+
+  const expandableParentKeys = filteredBomRows
     .filter((r) => (r.children?.length ?? 0) > 0)
     .map((r) => r.key);
+
+  const effectiveExpandedRowKeys = uniqSearch.trim() ? expandableParentKeys : expandedRowKeys;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -468,6 +496,16 @@ export default function BillOfMaterialPage() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(BOM_UPLOAD_HISTORY_STORAGE_KEY, JSON.stringify(uploadHistory));
   }, [uploadHistory]);
+
+  // Ensure we have a selected history entry after loading history from storage.
+  // This fixes the case where the modal was opened and switched to the History
+  // tab before `uploadHistory` was populated from localStorage, leaving the
+  // preview pane empty even though entries exist.
+  useEffect(() => {
+    if (selectedHistoryId == null && uploadHistory.length > 0) {
+      setSelectedHistoryId(uploadHistory[0].id);
+    }
+  }, [uploadHistory, selectedHistoryId]);
 
   const selectedHistoryEntry = useMemo(
     () => uploadHistory.find((entry) => entry.id === selectedHistoryId) ?? null,
@@ -731,11 +769,14 @@ export default function BillOfMaterialPage() {
     {
       title: "Actions",
       key: "actions",
-      width: 120,
+      width: 150,
+      fixed: "right",
       render: (_: unknown, record: BomRow) => (
-        <div className="flex items-center gap-2">
+        <div className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white/95 p-1 shadow-sm backdrop-blur-sm">
           <Button
             type="text"
+            size="small"
+            className="!flex !h-8 !w-8 !items-center !justify-center !rounded-full hover:!bg-blue-50"
             icon={<EyeOutlined />}
             onClick={(e) => {
               e.stopPropagation();
@@ -751,6 +792,8 @@ export default function BillOfMaterialPage() {
           />
           <Button
             type="text"
+            size="small"
+            className="!flex !h-8 !w-8 !items-center !justify-center !rounded-full hover:!bg-blue-50"
             icon={<EditOutlined />}
             onClick={(e) => {
               e.stopPropagation();
@@ -769,6 +812,8 @@ export default function BillOfMaterialPage() {
           <Button
             danger
             type="text"
+            size="small"
+            className="!flex !h-8 !w-8 !items-center !justify-center !rounded-full hover:!bg-red-50"
             icon={<DeleteOutlined />}
             onClick={(e) => {
               e.stopPropagation();
@@ -1312,9 +1357,19 @@ export default function BillOfMaterialPage() {
         </div>
 
         <div className="px-5 pb-5">
+          <div className="mb-4 flex items-center justify-between gap-4 flex-wrap">
+            <Input
+              allowClear
+              value={uniqSearch}
+              onChange={(event) => setUniqSearch(event.target.value)}
+              placeholder="Search by UNIQ code"
+              className="w-full md:w-[360px]"
+            />
+          </div>
+
           <Table<BomRow>
             columns={columns}
-            dataSource={bomRows}
+            dataSource={filteredBomRows}
             rowKey="key"
             bordered
             loading={isBomLoading || isDeletingParent || isDeletingChild}
@@ -1327,8 +1382,12 @@ export default function BillOfMaterialPage() {
                 `${range[0]}-${range[1]} of ${total} Results`,
             }}
             expandable={{
-              expandedRowKeys,
-              onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
+              expandedRowKeys: effectiveExpandedRowKeys,
+              onExpandedRowsChange: (keys) => {
+                if (!uniqSearch.trim()) {
+                  setExpandedRowKeys([...keys]);
+                }
+              },
               rowExpandable: (record) => (record.children?.length ?? 0) > 0,
               expandIcon: ({ expanded, onExpand, record }) => {
                 const canExpand = (record.children?.length ?? 0) > 0;

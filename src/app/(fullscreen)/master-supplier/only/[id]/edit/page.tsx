@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { skipToken } from "@reduxjs/toolkit/query";
 import { useParams, useRouter } from "next/navigation";
 import {
@@ -10,6 +10,7 @@ import {
   Input,
   InputNumber,
   Select,
+  AutoComplete,
   Tag,
   Typography,
   message,
@@ -50,6 +51,19 @@ type EditSupplierOnlyForm = {
   status: SupplierStatusUi;
 };
 
+const SUPPLIER_CATEGORY_OPTIONS = [
+  { label: "Raw Material", value: "Raw Material" },
+  { label: "Indirect Raw Material", value: "Indirect Raw Material" },
+  { label: "Subcon", value: "Subcon" },
+] as const;
+
+const normalizeMaterialCategory = (value: unknown): string => {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw.includes("indirect")) return "Indirect Raw Material";
+  if (raw.includes("sub")) return "Subcon";
+  return "Raw Material";
+};
+
 const normalizeStatusToApi = (status: SupplierStatusUi | string | undefined) => {
   const s = String(status ?? "").trim().toLowerCase();
   if (!s) return undefined;
@@ -70,6 +84,7 @@ export default function EditSupplierOnlyPage() {
   const router = useRouter();
   const params = useParams<{ id?: string | string[] }>();
   const [form] = Form.useForm<EditSupplierOnlyForm>();
+  const [bankFreeText, setBankFreeText] = useState(false);
   const [messageApi, contextHolder] = message.useMessage();
   const apiEnabled = Boolean(apiBaseUrl);
 
@@ -90,7 +105,7 @@ export default function EditSupplierOnlyPage() {
       contactPerson: String(d.contact_person ?? ""),
       contactNumber: String(d.contact_number ?? ""),
       email: String(d.email_address ?? ""),
-      materialCategory: String(d.material_category ?? "Raw Material"),
+      materialCategory: normalizeMaterialCategory(d.material_category ?? "Raw Material"),
       fullAddress: String(d.full_address ?? ""),
       city: String(d.city ?? ""),
       province: String(d.province ?? ""),
@@ -132,7 +147,9 @@ export default function EditSupplierOnlyPage() {
           contact_person: v.contactPerson,
           contact_number: v.contactNumber,
           email_address: v.email,
-          ...(v.materialCategory?.trim() ? { material_category: v.materialCategory.trim() } : {}),
+          ...(v.materialCategory?.trim()
+            ? { material_category: normalizeMaterialCategory(v.materialCategory) }
+            : {}),
           full_address: v.fullAddress,
           city: v.city,
           province: v.province,
@@ -328,15 +345,33 @@ export default function EditSupplierOnlyPage() {
                   <Input className="!rounded-lg" placeholder="01.234.567.8-901.000" />
                 </Form.Item>
 
-                <Form.Item label="Bank Name" name="bankName" rules={[{ required: true, message: "Bank name is required" }]}>
-                  <Select
-                    className="!rounded-lg"
-                    placeholder="Select bank"
-                    options={BANK_SELECT_OPTIONS}
-                    showSearch
-                    optionFilterProp="label"
-                  />
+                <Form.Item label="Bank Name" name="bankName" rules={[{ required: true, message: "Bank name is required" }]}> 
+                  {bankFreeText ? (
+                    <Input placeholder="Type bank name" className="!rounded-lg" />
+                  ) : (
+                    <AutoComplete
+                      options={BANK_SELECT_OPTIONS}
+                      placeholder="Select or type bank name"
+                      filterOption={(inputValue, option) =>
+                        String(option?.label ?? option?.value ?? "")
+                          .toLowerCase()
+                          .includes(String(inputValue ?? "").toLowerCase())
+                      }
+                      className="!rounded-lg"
+                    />
+                  )}
                 </Form.Item>
+                <div className="-mt-4 md:col-start-2">
+                  {!bankFreeText ? (
+                    <Button type="link" className="!px-0" onClick={() => setBankFreeText(true)}>
+                      + Add new bank
+                    </Button>
+                  ) : (
+                    <Button type="link" className="!px-0" onClick={() => setBankFreeText(false)}>
+                      ← Use bank list
+                    </Button>
+                  )}
+                </div>
 
                 <Form.Item
                   label="Bank Account Number"

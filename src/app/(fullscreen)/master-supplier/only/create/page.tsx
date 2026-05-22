@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -9,6 +9,7 @@ import {
   Input,
   InputNumber,
   Select,
+  AutoComplete,
   Tag,
   Typography,
   message,
@@ -49,6 +50,19 @@ type CreateSupplierOnlyForm = {
   status: SupplierStatus;
 };
 
+const SUPPLIER_CATEGORY_OPTIONS = [
+  { label: "Raw Material", value: "Raw Material" },
+  { label: "Indirect Raw Material", value: "Indirect Raw Material" },
+  { label: "Subcon", value: "Subcon" },
+] as const;
+
+const normalizeMaterialCategory = (value: unknown): string => {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw.includes("indirect")) return "Indirect Raw Material";
+  if (raw.includes("sub")) return "Subcon";
+  return "Raw Material";
+};
+
 const generateSupplierCode = (): string => {
   const n = Date.now() % 10000;
   return `SUP-${String(n).padStart(4, "0")}`;
@@ -66,6 +80,7 @@ const normalizeStatusToApi = (status: SupplierStatus | string | undefined) => {
 export default function CreateSupplierOnlyPage() {
   const router = useRouter();
   const [form] = Form.useForm<CreateSupplierOnlyForm>();
+  const [bankFreeText, setBankFreeText] = useState(false);
   const apiEnabled = Boolean(apiBaseUrl);
   const { data: nextCode } = useGetNextSupplierCodeQuery(undefined, {
     skip: !apiEnabled,
@@ -100,7 +115,9 @@ export default function CreateSupplierOnlyPage() {
         contact_person: v.contactPerson,
         contact_number: v.contactNumber,
         email_address: v.email,
-        ...(v.materialCategory?.trim() ? { material_category: v.materialCategory.trim() } : {}),
+        ...(v.materialCategory?.trim()
+          ? { material_category: normalizeMaterialCategory(v.materialCategory) }
+          : {}),
         full_address: v.fullAddress,
         city: v.city,
         province: v.province,
@@ -208,16 +225,11 @@ export default function CreateSupplierOnlyPage() {
               <Form.Item
                 label="Category"
                 name="materialCategory"
+                rules={[{ required: true, message: "Category is required" }]}
               >
                 <Select
                   className="!rounded-lg"
-                  allowClear
-                  options={[
-                    { label: "(Kosong)", value: "" },
-                    { label: "Raw Materials", value: "Raw Material" },
-                    { label: "Indirect Material Raw", value: "Indirect Material Raw" },
-                    { label: "Sub Con Materials", value: "Sub Con Materials" },
-                  ]}
+                  options={[...SUPPLIER_CATEGORY_OPTIONS]}
                 />
               </Form.Item>
             </div>
@@ -278,14 +290,32 @@ export default function CreateSupplierOnlyPage() {
               </Form.Item>
 
               <Form.Item label="Bank Name" name="bankName" rules={[{ required: true, message: "Bank name is required" }]}>
-                <Select
-                  className="!rounded-lg"
-                  placeholder="Select bank"
-                  options={BANK_SELECT_OPTIONS}
-                  showSearch
-                  optionFilterProp="label"
-                />
+                {bankFreeText ? (
+                  <Input placeholder="Type bank name" className="!rounded-lg" />
+                ) : (
+                  <AutoComplete
+                    options={BANK_SELECT_OPTIONS}
+                    placeholder="Select or type bank name"
+                    filterOption={(inputValue, option) =>
+                      String(option?.label ?? option?.value ?? "")
+                        .toLowerCase()
+                        .includes(String(inputValue ?? "").toLowerCase())
+                    }
+                    className="!rounded-lg"
+                  />
+                )}
               </Form.Item>
+              <div className="-mt-4 md:col-start-2">
+                {!bankFreeText ? (
+                  <Button type="link" className="!px-0" onClick={() => setBankFreeText(true)}>
+                    + Add new bank
+                  </Button>
+                ) : (
+                  <Button type="link" className="!px-0" onClick={() => setBankFreeText(false)}>
+                    ← Use bank list
+                  </Button>
+                )}
+              </div>
 
               <Form.Item
                 label="Bank Account Number"

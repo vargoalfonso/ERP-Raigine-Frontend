@@ -83,10 +83,10 @@ export type SupplierItemMutationRequest = {
   uniq_code: string;
   type: string;
   description: string;
-  quantity: number;
+  quantity: string | number;
   uom: string;
-  weight: number;
-  pcs_per_kanban: number;
+  weight: string | number;
+  pcs_per_kanban: string | number;
   customer_cycle: string;
   status?: string;
   warehouse_uuid?: string;
