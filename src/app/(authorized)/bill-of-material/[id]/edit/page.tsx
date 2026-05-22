@@ -1028,7 +1028,7 @@ export default function BomEditPage() {
         return;
       }
 
-      await replaceBom({
+      const replaceResult = await replaceBom({
         bom_id: resolvedBomId,
         payload: {
           change_note: cleanText(values.change_note),
@@ -1047,8 +1047,14 @@ export default function BomEditPage() {
         files,
       }).unwrap();
 
+      const newBomId =
+        (replaceResult as any)?.data?.new_bom_id ??
+        (replaceResult as any)?.data?.bom_id ??
+        (replaceResult as any)?.new_bom_id ??
+        resolvedBomId;
+
       messageApi.success("BOM updated");
-      router.push(`/bill-of-material/${encodeURIComponent(resolvedBomId)}`);
+      router.push(`/bill-of-material/${encodeURIComponent(String(newBomId))}`);
     } catch (err) {
       const anyErr = err as any;
       const data = anyErr?.data;
