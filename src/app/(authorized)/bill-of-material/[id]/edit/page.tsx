@@ -8,6 +8,7 @@ import {
   Button,
   Card,
   Checkbox,
+  Collapse,
   Form,
   Input,
   InputNumber,
@@ -38,13 +39,21 @@ import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 const { Title, Text, Link } = Typography;
 const { TextArea } = Input;
 
+type ToolingForm = {
+  tooling_type?: string;
+  tooling_code?: string;
+  tooling_name?: string;
+};
+
 type ProcessRouteForm = {
   op_seq?: number;
   process_id?: number | string;
+  machine_id?: number | null;
   cycle_time_sec?: number;
   setup_time_min?: number;
   machine_stroke?: string;
   tooling_ref?: string;
+  toolings?: ToolingForm[];
 };
 
 type MaterialSpecForm = {
@@ -56,6 +65,8 @@ type MaterialSpecForm = {
   diameter_mm?: number;
   thickness_mm?: number;
   length_mm?: number;
+  cycle_time_sec?: number;
+  setup_time_min?: number;
 };
 
 type ChildPartForm = {
@@ -155,6 +166,30 @@ const createDefaultChild = (): ChildPartForm => ({
   material_spec: {},
   children: [],
 });
+
+function ChildCollapseHeader({
+  form,
+  itemPath,
+  numbering,
+  level,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  form: import("antd").FormInstance<any>;
+  itemPath: Array<string | number>;
+  numbering: number[];
+  level: number;
+}) {
+  const uniqCode = Form.useWatch([...itemPath, "uniq_code"], form as any);
+  const partName = Form.useWatch([...itemPath, "part_name"], form as any);
+  const label = [uniqCode, partName].filter(Boolean).join(" — ");
+  return (
+    <span className="font-medium">
+      Child #{numbering.join(".")}
+      <span className="ml-2 text-xs font-normal text-gray-400">Level {level}</span>
+      {label ? <span className="ml-2 text-sm text-blue-600">{label}</span> : null}
+    </span>
+  );
+}
 
 export default function BomEditPage() {
   const router = useRouter();
@@ -355,10 +390,18 @@ export default function BomEditPage() {
     const mapRouteFromApi = (route: any): ProcessRouteForm => ({
       op_seq: typeof route?.op_seq === "number" ? route.op_seq : undefined,
       process_id: route?.process_id ?? undefined,
+      machine_id: route?.machine_id != null ? Number(route.machine_id) || null : null,
       cycle_time_sec: typeof route?.cycle_time_sec === "number" ? route.cycle_time_sec : undefined,
       setup_time_min: typeof route?.setup_time_min === "number" ? route.setup_time_min : undefined,
       machine_stroke: typeof route?.machine_stroke === "string" ? route.machine_stroke : undefined,
       tooling_ref: typeof route?.tooling_ref === "string" ? route.tooling_ref : undefined,
+      toolings: Array.isArray(route?.toolings)
+        ? route.toolings.map((t: any): ToolingForm => ({
+            tooling_type: typeof t?.tooling_type === "string" ? t.tooling_type : undefined,
+            tooling_code: typeof t?.tooling_code === "string" ? t.tooling_code : undefined,
+            tooling_name: typeof t?.tooling_name === "string" ? t.tooling_name : undefined,
+          }))
+        : [],
     });
 
     const mapMaterialSpecFromApi = (spec: any): MaterialSpecForm | undefined => {
@@ -384,6 +427,8 @@ export default function BomEditPage() {
         diameter_mm: typeof spec.diameter_mm === "number" ? spec.diameter_mm : undefined,
         thickness_mm: typeof spec.thickness_mm === "number" ? spec.thickness_mm : undefined,
         length_mm: typeof spec.length_mm === "number" ? spec.length_mm : undefined,
+        cycle_time_sec: typeof spec.cycle_time_sec === "number" ? spec.cycle_time_sec : undefined,
+        setup_time_min: typeof spec.setup_time_min === "number" ? spec.setup_time_min : undefined,
       };
     };
 
@@ -486,12 +531,12 @@ export default function BomEditPage() {
               ) : null}
 
               {routeFields.map((routeField, idx) => (
-                <div key={routeField.key} className="rounded-lg border border-gray-200 p-4">
+                <div key={routeField.key} className="rounded-lg border border-gray-200 p-4 space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                    <Form.Item name={[routeField.name, "op_seq"]} label="Op Seq" rules={[{ required: true, message: "Op Seq is required" }]}> 
+                    <Form.Item name={[routeField.name, "op_seq"]} label="Op Seq" rules={[{ required: true, message: "Op Seq is required" }]}>
                       <InputNumber min={1} step={10} style={{ width: "100%" }} />
                     </Form.Item>
-                    <Form.Item name={[routeField.name, "process_id"]} label="Process" rules={[{ required: true, message: "Process is required" }]}> 
+                    <Form.Item name={[routeField.name, "process_id"]} label="Process" rules={[{ required: true, message: "Process is required" }]}>
                       <Select
                         showSearch
                         placeholder="Select process"
@@ -503,22 +548,14 @@ export default function BomEditPage() {
                         }
                       />
                     </Form.Item>
+                    <Form.Item name={[routeField.name, "machine_id"]} label="Machine ID">
+                      <InputNumber min={0} style={{ width: "100%" }} placeholder="e.g. 1" />
+                    </Form.Item>
                     <Form.Item name={[routeField.name, "cycle_time_sec"]} label="Cycle Time (sec)">
                       <InputNumber min={0} style={{ width: "100%" }} />
                     </Form.Item>
                     <Form.Item name={[routeField.name, "setup_time_min"]} label="Setup Time (min)">
                       <InputNumber min={0} style={{ width: "100%" }} />
-                    </Form.Item>
-                    <Form.Item name={[routeField.name, "tooling_ref"]} label="Tooling">
-                      <Select
-                        placeholder="Select tooling"
-                        options={[
-                          { label: "Dies", value: "Dies" },
-                          { label: "JIG", value: "JIG" },
-                          { label: "CF", value: "CF" },
-                        ]}
-                        allowClear
-                      />
                     </Form.Item>
                     <Form.Item name={[routeField.name, "machine_stroke"]} label="Machine Stroke" className="md:col-span-4">
                       <Input placeholder="Machine stroke" />
@@ -528,6 +565,54 @@ export default function BomEditPage() {
                         Remove
                       </Button>
                     </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <Text className="text-sm font-medium">Toolings</Text>
+                      <Button
+                        size="small"
+                        icon={<PlusOutlined />}
+                        onClick={() => {
+                          const dynamicForm = form as any;
+                          const current = dynamicForm.getFieldValue([...absolutePath, "process_routes", routeField.name, "toolings"]) ?? [];
+                          dynamicForm.setFieldValue([...absolutePath, "process_routes", routeField.name, "toolings"], [...current, {}]);
+                        }}
+                      >
+                        Add Tooling
+                      </Button>
+                    </div>
+                    <Form.List name={[routeField.name, "toolings"]}>
+                      {(toolingFields, { remove: removeTooling }) => (
+                        <div className="space-y-2">
+                          {toolingFields.length === 0 ? (
+                            <div className="text-xs text-gray-400 py-1">No toolings</div>
+                          ) : null}
+                          {toolingFields.map((toolingField) => (
+                            <div key={toolingField.key} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end rounded border border-gray-100 bg-gray-50 p-2">
+                              <Form.Item name={[toolingField.name, "tooling_type"]} label="Type" className="!mb-0">
+                                <Select
+                                  placeholder="Type"
+                                  options={[
+                                    { label: "Dies", value: "Dies" },
+                                    { label: "JIG", value: "JIG" },
+                                    { label: "CF", value: "CF" },
+                                  ]}
+                                  allowClear
+                                />
+                              </Form.Item>
+                              <Form.Item name={[toolingField.name, "tooling_code"]} label="Code" className="!mb-0">
+                                <Input placeholder="e.g. DIE-EMA-001" />
+                              </Form.Item>
+                              <Form.Item name={[toolingField.name, "tooling_name"]} label="Name" className="!mb-0">
+                                <Input placeholder="e.g. Stamp Die EMA-LV7" />
+                              </Form.Item>
+                              <Button danger type="text" icon={<DeleteOutlined />} onClick={() => removeTooling(toolingField.name)} />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </Form.List>
                   </div>
                 </div>
               ))}
@@ -588,6 +673,12 @@ export default function BomEditPage() {
         <Form.Item name={[...fieldPath, "material_spec", "length_mm"]} label="Length (mm)">
           <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
         </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "cycle_time_sec"]} label="Cycle Time (sec)">
+          <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "setup_time_min"]} label="Setup Time (min)">
+          <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
+        </Form.Item>
       </div>
     </div>
   );
@@ -615,26 +706,16 @@ export default function BomEditPage() {
         const dynamicForm = form as any;
         const existingChildAssetUrl = resolveAssetUrl(dynamicForm.getFieldValue([...itemPath, "asset_url"]));
 
-        return (
-          <Card key={field.key} className="border border-gray-200" styles={{ body: { paddingTop: 16 } }}>
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">Level {level}</span>
-                <Title level={5} className="!mb-0">Child #{numbering.join(".")}</Title>
-              </div>
-              <Button danger type="text" icon={<DeleteOutlined />} onClick={() => remove(field.name)}>
-                Remove
-              </Button>
-            </div>
-
+        const childContent = (
+          <div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Form.Item name={[field.name, "uniq_code"]} label="UNIQ" rules={[{ required: true, message: "UNIQ is required" }]}> 
+              <Form.Item name={[field.name, "uniq_code"]} label="UNIQ" rules={[{ required: true, message: "UNIQ is required" }]}>
                 <Input placeholder="Child UNIQ" size="large" />
               </Form.Item>
-              <Form.Item name={[field.name, "part_name"]} label="Part Name" rules={[{ required: true, message: "Part name is required" }]}> 
+              <Form.Item name={[field.name, "part_name"]} label="Part Name" rules={[{ required: true, message: "Part name is required" }]}>
                 <Input placeholder="Part name" size="large" />
               </Form.Item>
-              <Form.Item name={[field.name, "part_number"]} label="Part Number" rules={[{ required: true, message: "Part number is required" }]}> 
+              <Form.Item name={[field.name, "part_number"]} label="Part Number" rules={[{ required: true, message: "Part number is required" }]}>
                 <Input placeholder="Part number" size="large" />
               </Form.Item>
               <Form.Item name={[field.name, "model"]} label="Model">
@@ -643,7 +724,7 @@ export default function BomEditPage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Form.Item name={[field.name, "uom"]} label="UOM" rules={[{ required: true, message: "UOM is required" }]}> 
+              <Form.Item name={[field.name, "uom"]} label="UOM" rules={[{ required: true, message: "UOM is required" }]}>
                 <Select
                   showSearch
                   placeholder="Select UOM"
@@ -652,7 +733,7 @@ export default function BomEditPage() {
                   optionFilterProp="label"
                 />
               </Form.Item>
-              <Form.Item name={[field.name, "qty_per_uniq"]} label="Qty per UNIQ" rules={[{ required: true, message: "Qty per UNIQ is required" }]}> 
+              <Form.Item name={[field.name, "qty_per_uniq"]} label="Qty per UNIQ" rules={[{ required: true, message: "Qty per UNIQ is required" }]}>
                 <InputNumber min={0} style={{ width: "100%" }} />
               </Form.Item>
               <Form.Item name={[field.name, "scrap_factor"]} label="Scrap Factor">
@@ -677,10 +758,7 @@ export default function BomEditPage() {
                   fileList={childFileLists[childFileKey] ?? []}
                   beforeUpload={() => false}
                   onChange={({ fileList: next }) =>
-                    setChildFileLists((prev) => ({
-                      ...prev,
-                      [childFileKey]: next,
-                    }))
+                    setChildFileLists((prev) => ({ ...prev, [childFileKey]: next }))
                   }
                   maxCount={1}
                 >
@@ -724,7 +802,38 @@ export default function BomEditPage() {
                 )}
               </Form.List>
             ) : null}
-          </Card>
+          </div>
+        );
+
+        return (
+          <Collapse
+            key={field.key}
+            defaultActiveKey={[]}
+            className="border border-gray-200 rounded-lg overflow-hidden"
+            items={[{
+              key: "1",
+              label: (
+                <ChildCollapseHeader
+                  form={form}
+                  itemPath={itemPath}
+                  numbering={numbering}
+                  level={level}
+                />
+              ),
+              extra: (
+                <Button
+                  danger
+                  type="text"
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  onClick={(e) => { e.stopPropagation(); remove(field.name); }}
+                >
+                  Remove
+                </Button>
+              ),
+              children: childContent,
+            }]}
+          />
         );
       })}
     </div>
@@ -803,6 +912,8 @@ export default function BomEditPage() {
           thickness_mm: typeof spec?.thickness_mm === "number" && Number.isFinite(spec.thickness_mm) ? spec.thickness_mm : null,
           length_mm: typeof spec?.length_mm === "number" && Number.isFinite(spec.length_mm) ? spec.length_mm : null,
           weight_kg: typeof spec?.weight_kg === "number" && Number.isFinite(spec.weight_kg) ? spec.weight_kg : null,
+          cycle_time_sec: typeof spec?.cycle_time_sec === "number" && Number.isFinite(spec.cycle_time_sec) ? spec.cycle_time_sec : null,
+          setup_time_min: typeof spec?.setup_time_min === "number" && Number.isFinite(spec.setup_time_min) ? spec.setup_time_min : null,
         };
         if (supplierRaw) {
           const supplierId = toNumberId(supplierRaw);
@@ -826,11 +937,21 @@ export default function BomEditPage() {
             const body: Record<string, unknown> = {
               op_seq: typeof route.op_seq === "number" && Number.isFinite(route.op_seq) ? route.op_seq : (index + 1) * 10,
               process_id: processId,
+              machine_id: route.machine_id != null && Number.isFinite(route.machine_id) ? route.machine_id : null,
             };
             if (typeof route.cycle_time_sec === "number" && Number.isFinite(route.cycle_time_sec)) body.cycle_time_sec = route.cycle_time_sec;
             if (typeof route.setup_time_min === "number" && Number.isFinite(route.setup_time_min)) body.setup_time_min = route.setup_time_min;
             if (cleanText(route.machine_stroke)) body.machine_stroke = cleanText(route.machine_stroke);
             if (cleanText(route.tooling_ref)) body.tooling_ref = cleanText(route.tooling_ref);
+            body.toolings = Array.isArray(route.toolings)
+              ? route.toolings
+                  .map((t) => ({
+                    tooling_type: cleanText(t.tooling_type) ?? null,
+                    tooling_code: cleanText(t.tooling_code) ?? null,
+                    tooling_name: cleanText(t.tooling_name) ?? null,
+                  }))
+                  .filter((t) => t.tooling_type || t.tooling_code || t.tooling_name)
+              : [];
             return body;
           })
           .filter((item): item is Record<string, unknown> => Boolean(item));
@@ -860,7 +981,10 @@ export default function BomEditPage() {
 
           const childFileKey = toChildFileKey(["child_parts", ...currentPath.flatMap((pathIndex, depth) => depth === 0 ? [pathIndex] : ["children", pathIndex])]);
           const childFile = asFile(childFileLists?.[childFileKey]?.[0]?.originFileObj);
-          if (childFile) files.push({ key: `upload_child_${uniqCode}`, file: childFile });
+          const childUploadKey = childFile
+            ? childFile.name.replace(/\.[^.]+$/, "").replace(/\s+/g, "_").toLowerCase()
+            : null;
+          if (childFile && childUploadKey) files.push({ key: `upload_${childUploadKey}`, file: childFile });
 
           return {
             uniq_code: uniqCode,
@@ -874,7 +998,7 @@ export default function BomEditPage() {
             model: cleanNullableText(child.model),
             uom: childUom,
             asset_id: childFile ? null : child.asset_id ?? null,
-            upload_key: childFile ? `child_${uniqCode}` : null,
+            upload_key: childUploadKey ?? null,
             material_spec: mapMaterialSpec(child.material_spec),
             process_routes: mapProcessRoutes(child.process_routes),
             children: mapChildParts(child.children, level + 1, uniqCode, currentPath),
@@ -889,7 +1013,7 @@ export default function BomEditPage() {
       }
 
       const parentFile = asFile(fileList?.[0]?.originFileObj);
-      if (parentFile) files.push({ key: "upload_header", file: parentFile });
+      if (parentFile) files.push({ key: "upload_parent", file: parentFile });
 
       const parentRoutes = assemblyMode ? mapAssemblyParentRoutes(values.process_routes) : mapProcessRoutes(values.process_routes);
       const parentMaterialSpec = assemblyMode ? null : mapMaterialSpec(values.material_spec);
@@ -915,7 +1039,7 @@ export default function BomEditPage() {
           status: cleanText(values.status) ?? "Draft",
           description: cleanNullableText(values.description),
           asset_id: parentFile ? null : values.asset_id ?? null,
-          upload_key: parentFile ? "header" : null,
+          upload_key: parentFile ? "parent" : null,
           material_spec: parentMaterialSpec,
           process_routes: parentRoutes,
           children: childrenPayload,

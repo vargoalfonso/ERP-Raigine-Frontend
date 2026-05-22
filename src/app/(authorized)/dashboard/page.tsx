@@ -107,8 +107,10 @@ export default function Dashboard() {
   const rawData = rawMaterialQuery.data?.data;
 
   const error = mainSummaryQuery.error || rawMaterialQuery.error;
-  const isMainLoading = mainSummaryQuery.isLoading || mainSummaryQuery.isFetching;
-  const isRawLoading = rawMaterialQuery.isLoading || rawMaterialQuery.isFetching;
+  const isMainLoading =
+    mainSummaryQuery.isLoading || mainSummaryQuery.isFetching;
+  const isRawLoading =
+    rawMaterialQuery.isLoading || rawMaterialQuery.isFetching;
 
   const errorMessage = error
     ? getApiErrorMessage(error, "Failed to load dashboard data")
@@ -120,32 +122,37 @@ export default function Dashboard() {
   return (
     <div className="p-8 bg-[#F8FAFC] min-h-screen">
       {/* Header & Filters Card */}
-      <Card className="mb-8 rounded-2xl shadow-sm border-gray-100 p-0 overflow-hidden" bodyStyle={{ padding: '24px' }}>
+      <Card
+        className="mb-8 rounded-2xl shadow-sm border-gray-100 p-0 overflow-hidden"
+        styles={{ body: { padding: "24px" } }}>
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 mb-1">
               AI ERP Dashboard
             </h1>
             <p className="text-sm text-gray-500 font-medium">
-              Comprehensive manufacturing intelligence and real-time business insights
+              Comprehensive manufacturing intelligence and real-time business
+              insights
             </p>
           </div>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 rounded-full border border-green-100">
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-              <span className="text-[11px] font-bold text-green-700 uppercase tracking-wider">Live Data</span>
+              <span className="text-[11px] font-bold text-green-700 uppercase tracking-wider">
+                Live Data
+              </span>
             </div>
-            <Button 
-              icon={<FiRefreshCw className={isMainLoading ? 'animate-spin' : ''} />} 
+            <Button
+              icon={
+                <FiRefreshCw className={isMainLoading ? "animate-spin" : ""} />
+              }
               className="rounded-xl border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-200 flex items-center justify-center h-10 font-medium"
-              onClick={() => mainSummaryQuery.refetch()}
-            >
+              onClick={() => mainSummaryQuery.refetch()}>
               Refresh
             </Button>
-            <Button 
-              icon={<FiDownload />} 
-              className="rounded-xl border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-200 flex items-center justify-center h-10 font-medium"
-            >
+            <Button
+              icon={<FiDownload />}
+              className="rounded-xl border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-200 flex items-center justify-center h-10 font-medium">
               Export
             </Button>
           </div>
@@ -153,47 +160,61 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 pt-6 border-t border-gray-50">
           <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Period</label>
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">
+              Period
+            </label>
             <Select
               defaultValue="current_period"
               className="w-full custom-select"
               variant="filled"
-              style={{ backgroundColor: '#F9FAFB', borderRadius: '12px' }}
+              style={{ backgroundColor: "#F9FAFB", borderRadius: "12px" }}
               suffixIcon={<FiChevronDown className="w-4 h-4 text-gray-400" />}>
-              <Select.Option value="current_period">Current Period</Select.Option>
+              <Select.Option value="current_period">
+                Current Period
+              </Select.Option>
             </Select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Summaries</label>
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">
+              Summaries
+            </label>
             <Select
               defaultValue="all_summaries"
               className="w-full custom-select"
               variant="filled"
-              style={{ backgroundColor: '#F9FAFB', borderRadius: '12px' }}
+              style={{ backgroundColor: "#F9FAFB", borderRadius: "12px" }}
               suffixIcon={<FiChevronDown className="w-4 h-4 text-gray-400" />}>
               <Select.Option value="all_summaries">All Summaries</Select.Option>
             </Select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Deliveries</label>
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">
+              Deliveries
+            </label>
             <Select
               defaultValue="all_deliveries"
               className="w-full custom-select"
               variant="filled"
-              style={{ backgroundColor: '#F9FAFB', borderRadius: '12px' }}
+              style={{ backgroundColor: "#F9FAFB", borderRadius: "12px" }}
               suffixIcon={<FiChevronDown className="w-4 h-4 text-gray-400" />}>
-              <Select.Option value="all_deliveries">All Deliveries</Select.Option>
+              <Select.Option value="all_deliveries">
+                All Deliveries
+              </Select.Option>
             </Select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">Production</label>
+            <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-1">
+              Production
+            </label>
             <Select
               defaultValue="all_production"
               className="w-full custom-select"
               variant="filled"
-              style={{ backgroundColor: '#F9FAFB', borderRadius: '12px' }}
+              style={{ backgroundColor: "#F9FAFB", borderRadius: "12px" }}
               suffixIcon={<FiChevronDown className="w-4 h-4 text-gray-400" />}>
-              <Select.Option value="all_production">All Production</Select.Option>
+              <Select.Option value="all_production">
+                All Production
+              </Select.Option>
             </Select>
           </div>
         </div>
@@ -643,12 +664,14 @@ export default function Dashboard() {
                     paddingAngle={5}
                     dataKey="share_percent"
                     nameKey="category">
-                    {(rawData?.category_distribution ?? []).map((entry, index) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={COLORS[index % COLORS.length]}
-                      />
-                    ))}
+                    {(rawData?.category_distribution ?? []).map(
+                      (entry, index) => (
+                        <Cell
+                          key={`cell-${index}`}
+                          fill={COLORS[index % COLORS.length]}
+                        />
+                      ),
+                    )}
                   </Pie>
                   <Tooltip />
                 </PieChart>
