@@ -36,7 +36,7 @@ import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetProcessesQuery, useGetUomsQuery } from "@/lib/api/system-settings/api";
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 
-const { Title, Text, Link } = Typography;
+const { Title, Text } = Typography;
 const { TextArea } = Input;
 
 type ToolingForm = {
@@ -154,6 +154,9 @@ const resolveAssetUrl = (url: unknown): string => {
   const trimmed = url.trim();
   if (!trimmed) return "";
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  // /uploads/ paths are proxied via Next.js rewrites — serve as-is
+  if (trimmed.startsWith("/uploads/")) return trimmed;
+  if (!apiBaseUrl) return trimmed;
   if (trimmed.startsWith("/")) return `${apiBaseUrl}${trimmed}`;
   return `${apiBaseUrl}/${trimmed}`;
 };
@@ -765,7 +768,14 @@ export default function BomEditPage() {
                   <Button icon={<UploadOutlined />}>Choose File</Button>
                 </Upload>
                 {existingChildAssetUrl ? (
-                  <Link href={existingChildAssetUrl} target="_blank">Current asset</Link>
+                  <a href={existingChildAssetUrl} target="_blank" rel="noreferrer" className="inline-block">
+                    <img
+                      src={existingChildAssetUrl}
+                      alt="Current asset"
+                      className="h-16 w-16 rounded-lg border border-gray-200 object-cover hover:opacity-80 transition-opacity"
+                    />
+                    <div className="mt-1 text-xs text-blue-500">View full</div>
+                  </a>
                 ) : (
                   <Text type="secondary">No existing asset</Text>
                 )}
@@ -1145,7 +1155,18 @@ export default function BomEditPage() {
                     <Upload fileList={fileList} beforeUpload={() => false} onChange={({ fileList: next }) => setFileList(next)} maxCount={1}>
                       <Button icon={<UploadOutlined />}>Choose File</Button>
                     </Upload>
-                    {existingParentAssetUrl ? <Link href={existingParentAssetUrl} target="_blank">Current asset</Link> : <Text type="secondary">No existing asset</Text>}
+                    {existingParentAssetUrl ? (
+                      <a href={existingParentAssetUrl} target="_blank" rel="noreferrer" className="inline-block">
+                        <img
+                          src={existingParentAssetUrl}
+                          alt="Current asset"
+                          className="h-20 w-20 rounded-lg border border-gray-200 object-cover hover:opacity-80 transition-opacity"
+                        />
+                        <div className="mt-1 text-xs text-blue-500">View full</div>
+                      </a>
+                    ) : (
+                      <Text type="secondary">No existing asset</Text>
+                    )}
                   </div>
                 </Form.Item>
 
