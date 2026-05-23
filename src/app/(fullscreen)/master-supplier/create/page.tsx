@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Alert,
@@ -21,6 +21,7 @@ import { ArrowLeftOutlined, SaveOutlined } from "@ant-design/icons";
 import {
   type BackendBomNode,
   useGetBomsBySupplierQuery,
+  useGetBomByIdQuery,
 } from "@/lib/api/bom/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
@@ -33,6 +34,12 @@ import {
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 import { useGetUomsQuery } from "@/lib/api/system-settings/api";
 import { useListWarehousesQuery } from "@/lib/api/warehouse/api";
+import { setFlashMessage } from "@/lib/utils/flashMessage";
+import {
+  focusFirstInvalidField,
+  getValidationMessage,
+  isAntdFormValidationError,
+} from "@/lib/utils/formValidation";
 
 type SupplierSection = "raw-material" | "indirect-raw-material" | "subcon";
 type PageMode = "create" | "edit" | "view";
@@ -60,6 +67,7 @@ type FormValues = {
 type BomOption = {
   value: string;
   label: string;
+  lookupId?: string;
   productModel?: string;
   partName?: string;
   partNumber?: string;
@@ -68,6 +76,14 @@ type BomOption = {
   size?: string;
   uom?: string;
   weight?: number;
+  quantity?: number;
+  description?: string;
+  status?: string;
+};
+
+type BomTreeLookupResult = {
+  rootBomId?: string;
+  matchedNode?: BackendBomNode;
 };
 
 const SECTION_OPTIONS: Array<{ label: string; value: SupplierSection }> = [
@@ -179,6 +195,67 @@ const extractWeightFromMaterialSpec = (
   return undefined;
 };
 
+const extractNumber = (...values: unknown[]): number | undefined => {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return undefined;
+};
+
+const normalizeFormStatus = (value: unknown): string | undefined => {
+  const raw = pickText(value).toLowerCase();
+  if (raw === "active" || raw === "released") return "active";
+  if (raw === "inactive" || raw === "obsolete") return "inactive";
+  return undefined;
+};
+
+const resolveMaterialSpec = (node: BackendBomNode): Record<string, unknown> | undefined => {
+  return isRecord(node.material_specifications)
+    ? node.material_specifications
+    : isRecord((node as Record<string, unknown>).material_spec)
+      ? ((node as Record<string, unknown>).material_spec as Record<string, unknown>)
+      : undefined;
+};
+
+const findBomTreeLookupByUniq = (
+  nodes: BackendBomNode[],
+  uniqCode: string,
+  currentRootBomId?: string
+): BomTreeLookupResult | null => {
+  for (const node of nodes) {
+    const nextRootBomId = pickText(node.bom_id) || currentRootBomId;
+    const nodeUniq = pickText(node.uniq_code, node.uniq);
+
+    if (nodeUniq === uniqCode) {
+      return { rootBomId: nextRootBomId, matchedNode: node };
+    }
+
+    if (Array.isArray(node.children) && node.children.length > 0) {
+      const found = findBomTreeLookupByUniq(node.children, uniqCode, nextRootBomId);
+      if (found) return found;
+    }
+  }
+
+  return null;
+};
+
+const findNodeByUniq = (node: BackendBomNode | undefined, uniqCode: string): BackendBomNode | null => {
+  if (!node) return null;
+  if (pickText(node.uniq_code, node.uniq) === uniqCode) return node;
+
+  if (!Array.isArray(node.children)) return null;
+  for (const child of node.children) {
+    const found = findNodeByUniq(child, uniqCode);
+    if (found) return found;
+  }
+
+  return null;
+};
+
 const flattenBomTree = (nodes: BackendBomNode[]): BackendBomNode[] => {
   const flattened: BackendBomNode[] = [];
 
@@ -198,9 +275,7 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
   const uniqCode = pickText(node.uniq_code, node.uniq);
   if (!uniqCode) return null;
 
-  const materialSpec = isRecord(node.material_specifications)
-    ? node.material_specifications
-    : undefined;
+  const materialSpec = resolveMaterialSpec(node);
   const size =
     pickText(
       materialSpec?.size,
@@ -211,6 +286,7 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
   return {
     value: uniqCode,
     label: uniqCode,
+    lookupId: pickText(node.bom_id, node.id, node.uuid, (node as Record<string, unknown>)._id),
     productModel: pickText((node as any).model, node.assembly_code),
     partName: pickText(node.part_name, node.description),
     partNumber: pickText(node.part_number),
@@ -223,8 +299,11 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
     ),
     grade: pickText(materialSpec?.material_grade, materialSpec?.grade),
     size,
-    uom: pickText(node.unit_measurement),
+    uom: pickText(node.unit_measurement, (node as Record<string, unknown>).uom),
     weight: extractWeightFromMaterialSpec(materialSpec),
+    quantity: extractNumber(node.quantity, node.qpu, (node as Record<string, unknown>).qty_per_uniq),
+    description: pickText(node.description, node.part_name),
+    status: pickText((node as Record<string, unknown>).status, (node as Record<string, unknown>).bom_status),
   };
 };
 
@@ -233,6 +312,8 @@ function MasterSupplierCreatePageContent() {
   const searchParams = useSearchParams();
   const [messageApi, contextHolder] = message.useMessage();
   const [form] = Form.useForm<FormValues>();
+  const [selectedBomLookupId, setSelectedBomLookupId] = useState("");
+  const [selectedUniqCode, setSelectedUniqCode] = useState("");
 
   const apiEnabled = Boolean(apiBaseUrl);
   const section = normalizeSection(searchParams.get("section"));
@@ -242,7 +323,6 @@ function MasterSupplierCreatePageContent() {
   const readOnly = mode === "view";
   const itemId = String(searchParams.get("id") ?? "").trim();
   const isEditing = mode === "edit";
-
   const { data: suppliers = [], isLoading: suppliersLoading } =
     useListSuppliersQuery(undefined, {
       skip: !apiEnabled,
@@ -264,7 +344,9 @@ function MasterSupplierCreatePageContent() {
     { supplier_id: selectedSupplierId ?? "" },
     { skip: !apiEnabled || !selectedSupplierId },
   );
-
+  const bomDetailQuery = useGetBomByIdQuery(selectedBomLookupId, {
+    skip: !apiEnabled || !selectedBomLookupId,
+  });
   const detailQuery = useGetSupplierItemByIdQuery(itemId, {
     skip: !apiEnabled || mode === "create" || !itemId,
   });
@@ -410,6 +492,8 @@ function MasterSupplierCreatePageContent() {
   }, [detailQuery.data, form]);
 
   const handleSupplierChange = () => {
+    setSelectedUniqCode("");
+    setSelectedBomLookupId("");
     form.setFieldsValue({
       uniq_code: undefined,
       product_model: undefined,
@@ -427,6 +511,10 @@ function MasterSupplierCreatePageContent() {
     const matched = bomOptions.find((option) => option.value === value);
     if (!matched) return;
 
+    const bomLookup = findBomTreeLookupByUniq(bomTree?.data ?? [], value);
+    setSelectedUniqCode(value);
+    setSelectedBomLookupId(bomLookup?.rootBomId ?? matched.lookupId ?? "");
+
     const matchedUom = matched.uom
       ? uomOptions.find(
           (option) => option.value.toLowerCase() === matched.uom?.toLowerCase(),
@@ -442,10 +530,51 @@ function MasterSupplierCreatePageContent() {
       grade: matched.grade,
       size: matched.size,
       uom: matchedUom?.value,
+      quantity: matched.quantity,
       weight: matched.weight,
-      description: form.getFieldValue("description") || matched.partName,
+      description: matched.description || matched.partName,
+      status: normalizeFormStatus(matched.status) ?? form.getFieldValue("status") ?? "active",
     });
   };
+
+  useEffect(() => {
+    const bomDetailRoot = bomDetailQuery.data?.data;
+    if (!bomDetailRoot || !selectedUniqCode) return;
+
+    const bomDetail = findNodeByUniq(bomDetailRoot, selectedUniqCode) ?? bomDetailRoot;
+
+    const materialSpec = resolveMaterialSpec(bomDetail);
+    const matchedUom = pickText(bomDetail.unit_measurement, (bomDetail as Record<string, unknown>).uom)
+      ? uomOptions.find(
+          (option) =>
+            option.value.toLowerCase() ===
+            pickText(bomDetail.unit_measurement, (bomDetail as Record<string, unknown>).uom).toLowerCase()
+        )
+      : undefined;
+
+    form.setFieldsValue({
+      uniq_code: pickText(bomDetail.uniq_code, bomDetail.uniq),
+      product_model: pickText((bomDetail as Record<string, unknown>).model, bomDetail.assembly_code),
+      part_name: pickText(bomDetail.part_name, bomDetail.description),
+      part_number: pickText(bomDetail.part_number),
+      type: pickText(
+        materialSpec?.material_type,
+        materialSpec?.type,
+        materialSpec?.item_type,
+        materialSpec?.form,
+        bomDetail.material_code,
+      ),
+      grade: pickText(materialSpec?.material_grade, materialSpec?.grade),
+      size:
+        pickText(materialSpec?.size, materialSpec?.material_size, materialSpec?.thickness) ||
+        formatSizeFromMaterialSpec(materialSpec),
+      uom: matchedUom?.value ?? pickText(bomDetail.unit_measurement, (bomDetail as Record<string, unknown>).uom),
+      quantity: extractNumber(bomDetail.quantity, bomDetail.qpu, (bomDetail as Record<string, unknown>).qty_per_uniq),
+      weight: extractWeightFromMaterialSpec(materialSpec),
+      description: pickText(bomDetail.description, bomDetail.part_name, bomDetail.uniq_code),
+      status: normalizeFormStatus((bomDetail as Record<string, unknown>).status ?? (bomDetail as Record<string, unknown>).bom_status) ?? form.getFieldValue("status") ?? "active",
+    });
+  }, [bomDetailQuery.data, form, selectedUniqCode, uomOptions]);
 
   const handleSave = async () => {
     if (!apiEnabled) {
@@ -480,16 +609,29 @@ function MasterSupplierCreatePageContent() {
 
       if (isEditing) {
         await updateSupplierItem({ id: itemId, body: payload }).unwrap();
-        messageApi.success("Supplier item updated");
+        setFlashMessage({
+          type: "success",
+          content: "Supplier item updated",
+          targetPath: "/master-supplier",
+        });
       } else {
         await createSupplierItem(payload).unwrap();
-        messageApi.success("Supplier item created");
+        setFlashMessage({
+          type: "success",
+          content: "Supplier item created",
+          targetPath: "/master-supplier",
+        });
       }
 
       router.push("/master-supplier");
     } catch (saveError) {
-      if (isRecord(saveError) && Array.isArray(saveError.errorFields)) {
-        messageApi.error("Please complete all required fields");
+      if (isAntdFormValidationError(saveError)) {
+        focusFirstInvalidField(form, saveError);
+        messageApi.error(
+          getValidationMessage(saveError, {
+            fallback: "Please complete all required fields.",
+          }),
+        );
         return;
       }
       messageApi.error(
@@ -672,7 +814,16 @@ function MasterSupplierCreatePageContent() {
 
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <Form.Item label="Type of Material" name="type">
-                    <Input placeholder="Auto-filled from BOM material spec" />
+                    <Select
+                      placeholder="Select material type"
+                      options={[
+                        { label: "Steel Bar", value: "steel_bar" },
+                        { label: "Pipe", value: "pipe" },
+                        { label: "Coil", value: "coil" },
+                        { label: "Wire", value: "wire" },
+                        { label: "Steel Plate", value: "steel_plate" },
+                      ]}
+                    />
                   </Form.Item>
                   <Form.Item label="Product Model" name="product_model">
                     <Input placeholder="Auto-filled from BOM" />

@@ -10,7 +10,6 @@ import {
   Input,
   InputNumber,
   Select,
-  AutoComplete,
   Tag,
   Typography,
   message,
@@ -23,6 +22,11 @@ import {
 } from "@/lib/api/suppliers/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { BANK_SELECT_OPTIONS } from "@/lib/constants/banks";
+import {
+  focusFirstInvalidField,
+  getValidationMessage,
+  isAntdFormValidationError,
+} from "@/lib/utils/formValidation";
 
 type SupplierStatusUi = "Active" | "Inactive";
 
@@ -167,6 +171,15 @@ export default function EditSupplierOnlyPage() {
       messageApi.success("Supplier updated");
       backToList();
     } catch (e) {
+      if (isAntdFormValidationError(e)) {
+        focusFirstInvalidField(form, e);
+        messageApi.error(
+          getValidationMessage(e, {
+            fallback: "Please complete all required fields.",
+          }),
+        );
+        return;
+      }
       messageApi.error(getApiErrorMessage(e, "Failed to update supplier"));
     }
   };
@@ -349,28 +362,51 @@ export default function EditSupplierOnlyPage() {
                   {bankFreeText ? (
                     <Input placeholder="Type bank name" className="!rounded-lg" />
                   ) : (
-                    <AutoComplete
+                    <Select
                       options={BANK_SELECT_OPTIONS}
                       placeholder="Select or type bank name"
+                      showSearch
+                      optionFilterProp="label"
                       filterOption={(inputValue, option) =>
                         String(option?.label ?? option?.value ?? "")
                           .toLowerCase()
                           .includes(String(inputValue ?? "").toLowerCase())
                       }
+                      optionRender={(option) => {
+                        const optionValue = String(option.data.value ?? option.value ?? "");
+                        const isLastBank = optionValue === BANK_SELECT_OPTIONS[BANK_SELECT_OPTIONS.length - 1]?.value;
+
+                        return (
+                          <div className="flex items-center justify-between gap-3">
+                            <span>{String(option.data.label ?? option.label ?? optionValue)}</span>
+                            {isLastBank ? (
+                              <Button
+                                type="link"
+                                size="small"
+                                className="!h-auto !p-0"
+                                onMouseDown={(event) => event.preventDefault()}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setBankFreeText(true);
+                                  form.setFieldValue("bankName", "");
+                                }}
+                              >
+                                Add new
+                              </Button>
+                            ) : null}
+                          </div>
+                        );
+                      }}
                       className="!rounded-lg"
                     />
                   )}
                 </Form.Item>
                 <div className="-mt-4 md:col-start-2">
-                  {!bankFreeText ? (
-                    <Button type="link" className="!px-0" onClick={() => setBankFreeText(true)}>
-                      + Add new bank
-                    </Button>
-                  ) : (
+                  {bankFreeText ? (
                     <Button type="link" className="!px-0" onClick={() => setBankFreeText(false)}>
                       ← Use bank list
                     </Button>
-                  )}
+                  ) : null}
                 </div>
 
                 <Form.Item

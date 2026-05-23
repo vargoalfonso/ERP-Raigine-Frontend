@@ -37,12 +37,10 @@ import { useGetMachinesQuery } from "@/lib/api/machines/api";
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 
-type BomStatus = "Active" | "Inactive";
-
 type ProcessRoute = {
+  sequence?: number;
   process_id?: number | string;
   machine_id?: number | string;
-  sequence?: number;
   cycle_time_sec_per_pc?: number;
   setup_time_min?: number;
   tooling?: string;
@@ -67,7 +65,7 @@ type ChildPart = {
   model?: string;
   qpu?: number;
   version?: string;
-  status?: BomStatus;
+  status?: string;
   process_routes?: ProcessRoute[];
   material_spec?: MaterialSpec;
   children?: ChildPart[];
@@ -79,7 +77,7 @@ type Step1Values = {
   part_number?: string;
   model?: string;
   uom?: string | number;
-  status?: BomStatus;
+  status?: string;
   bom_status?: string;
   description?: string;
   process_routes?: ProcessRoute[];
@@ -92,59 +90,46 @@ type FormPath = Array<string | number>;
 const MAX_CHILDREN_PER_PARENT = 6;
 const MAX_BOM_LEVEL = 6;
 
+const getLevelBadgeClass = (level: number) => {
+  if (level <= 1) return "bg-blue-50 text-blue-700";
+  if (level === 2) return "bg-emerald-50 text-emerald-700";
+  if (level === 3) return "bg-amber-50 text-amber-700";
+  if (level === 4) return "bg-purple-50 text-purple-700";
+  return "bg-gray-100 text-gray-700";
+};
+
+const toApiStatus = (value: unknown) => (String(value ?? "").trim() === "Inactive" ? "Inactive" : "Active");
+
+const asFile = (v: unknown): File | null => (v instanceof File ? v : null);
+
+const toChildFileKey = (path: Array<string | number>): string => path.join(".");
+
 const createDefaultChildPart = (): ChildPart => ({
-  status: "Active",
-  version: "v1.0",
+  uniq: "",
+  part_name: "",
+  part_number: "",
+  model: "",
   qpu: 1,
-  process_routes: [{ sequence: 1 }],
+  version: "",
+  status: "Active",
+  process_routes: [],
   material_spec: {},
   children: [],
 });
 
-const getLevelBadgeClass = (level: number): string => {
-  const palette: Record<number, string> = {
-    1: "bg-blue-50 text-blue-700",
-    2: "bg-indigo-50 text-indigo-700",
-    3: "bg-purple-50 text-purple-700",
-    4: "bg-fuchsia-50 text-fuchsia-700",
-    5: "bg-pink-50 text-pink-700",
-    6: "bg-rose-50 text-rose-700",
-  };
-
-  return palette[level] ?? "bg-gray-100 text-gray-700";
-};
-
-const toApiStatus = (status?: BomStatus): string | undefined => {
-  const s = typeof status === "string" ? status.trim() : "";
-  if (s === "Active" || s === "Inactive") return s;
-  const lower = s.toLowerCase();
-  if (lower === "active") return "Active";
-  if (lower === "inactive") return "Inactive";
-  return undefined;
-};
-
-const asFile = (v: unknown): File | null => {
-  if (v instanceof File) return v;
-  return null;
-};
-
-const toChildFileKey = (path: Array<string | number>): string => path.join(".");
-
-export default function CreateBomPage() {
+export default function Page() {
   const router = useRouter();
-  const [step, setStep] = useState(0);
   const [messageApi, contextHolder] = message.useMessage();
   const [form] = Form.useForm<Step1Values>();
   const rootAddChildRef = useRef<(() => void) | null>(null);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
-  const [childFileLists, setChildFileLists] = useState<
-    Record<string, UploadFile[]>
-  >({});
-  const [openProcessRouteIndex, setOpenProcessRouteIndex] = useState<
-    number | null
-  >(0);
+  const [childFileLists, setChildFileLists] = useState<Record<string, UploadFile[]>>({});
+  const [step, setStep] = useState<number>(0);
+  const [openProcessRouteIndex, setOpenProcessRouteIndex] = useState<number | null>(null);
+  const apiEnabled = Boolean(apiBaseUrl);
 
-  const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
+
+ 
 
   const [createBom, { isLoading: isCreating }] = useCreateBomMutation();
 
@@ -394,172 +379,144 @@ export default function CreateBomPage() {
     rootAddChildRef.current?.();
   };
 
-  const renderChildProcessAndMaterial = (
+  const renderProcessRoutesEditor = (
     fieldPath: Array<string | number>,
     absolutePath: Array<string | number>,
-    options?: {
-      processTitle?: string;
-      materialTitle?: string;
-      className?: string;
-    }
+    options?: { hideAddWhenAssembly?: boolean; isAssemblyMode?: boolean }
   ) => {
-    const processTitle = options?.processTitle ?? "Process Routes";
-    const materialTitle = options?.materialTitle ?? "Material List";
-    const sectionClassName = options?.className ?? "mt-6";
+    const isAssemblyMode = options?.isAssemblyMode === true;
+    const hideAddWhenAssembly = options?.hideAddWhenAssembly === true;
 
     return (
-      <div className={sectionClassName}>
-        <div className="flex items-center justify-between mb-3">
-          <Title level={5} className="!mb-0">
-            {processTitle}
-          </Title>
-          <Button
-            icon={<PlusOutlined />}
-            onClick={() => {
-              const dynamicForm = form as any;
-              const current = dynamicForm.getFieldValue([...absolutePath, "process_routes"]) ?? [];
-              dynamicForm.setFieldValue([...absolutePath, "process_routes"], [
-                ...current,
-                { sequence: (current.length ?? 0) + 1 },
-              ]);
-            }}
-          >
-            Add Process
-          </Button>
-        </div>
+      <div className="space-y-3">
+        {!(hideAddWhenAssembly && isAssemblyMode) ? (
+          <div className="flex items-center justify-between">
+            <Text strong>Process Routes</Text>
+            <Button
+              icon={<PlusOutlined />}
+              onClick={() => {
+                const dynamicForm = form as any;
+                const current = dynamicForm.getFieldValue([...absolutePath, "process_routes"]) ?? [];
+                dynamicForm.setFieldValue([...absolutePath, "process_routes"], [
+                  ...current,
+                  { sequence: (current.length ?? 0) + 1 },
+                ]);
+              }}
+            >
+              Add Process
+            </Button>
+          </div>
+        ) : (
+          <Text strong>Process Routes</Text>
+        )}
 
         <Form.List name={[...fieldPath, "process_routes"]}>
-          {(procFields, { remove: removeProc }) => (
-            <div className="space-y-3 mb-6">
-              {procFields.map((pf) => {
-                const procKey = pf.key;
+          {(routeFields, { remove }) => (
+            <div className="space-y-3">
+              {routeFields.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-4 text-sm text-gray-500">
+                  No process route yet.
+                </div>
+              ) : null}
 
-                return (
-                <div
-                  key={procKey}
-                  className="grid grid-cols-1 md:grid-cols-8 gap-3 items-start"
-                >
-                  <Form.Item
-                    name={[pf.name, "process_id"]}
-                    label="Process"
-                    rules={[{ required: true, message: "Process is required" }]}
-                  >
-                    <Select
-                      showSearch
-                      placeholder="Select process"
-                      options={processOptions}
-                      loading={isProcessesLoading}
-                      optionFilterProp="label"
-                    />
-                  </Form.Item>
-                  <Form.Item
-                    name={[pf.name, "machine_id"]}
-                    label="Machine"
-                    rules={[{ required: true, message: "Machine is required" }]}
-                  >
-                    <Select
-                      showSearch
-                      placeholder="Select machine"
-                      options={machineOptions}
-                      loading={isMachinesLoading}
-                      optionFilterProp="label"
-                    />
-                  </Form.Item>
-                  <Form.Item name={[pf.name, "sequence"]} label="Sequence">
-                    <InputNumber min={1} style={{ width: "100%" }} />
-                  </Form.Item>
-                  <Form.Item
-                    name={[pf.name, "cycle_time_sec_per_pc"]}
-                    label="Cycle Time (sec/pcs)"
-                  >
-                    <InputNumber min={0} style={{ width: "100%" }} />
-                  </Form.Item>
-                  <Form.Item
-                    name={[pf.name, "setup_time_min"]}
-                    label="Setup Time (min)"
-                  >
-                    <InputNumber min={0} style={{ width: "100%" }} />
-                  </Form.Item>
-                  <Form.Item name={[pf.name, "tooling"]} label="Tooling">
-                    <Select
-                      placeholder="Select tooling"
-                      options={[
-                        { label: "Dies", value: "Dies" },
-                        { label: "JIG", value: "JIG" },
-                        { label: "CF", value: "CF" },
-                      ]}
-                      allowClear
-                    />
-                  </Form.Item>
-                  <Form.Item
-                    name={[pf.name, "machine_stroke"]}
-                    label="Machine Stroke"
-                  >
-                    <Input placeholder="machine stroke" />
-                  </Form.Item>
-                  <div className="flex items-center pt-7">
-                    <Button
-                      danger
-                      type="text"
-                      icon={<DeleteOutlined />}
-                      onClick={() => removeProc(pf.name)}
-                    />
+              {routeFields.map((routeField) => (
+                <div key={routeField.key} className="rounded-lg border border-gray-200 p-4">
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <Form.Item name={[routeField.name, "process_id"]} label="Process" rules={[{ required: true, message: "Process is required" }]}> 
+                        <Select
+                          size="large"
+                          showSearch
+                          placeholder="Select process"
+                          options={processOptions}
+                          loading={isProcessesLoading}
+                          optionFilterProp="label"
+                          filterOption={(input, option) =>
+                            String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                          }
+                          style={{ width: "100%" }}
+                        />
+                      </Form.Item>
+
+                      <Form.Item name={[routeField.name, "machine_id"]} label="Machine" rules={[{ required: true, message: "Machine is required" }]}> 
+                        <Select
+                          size="large"
+                          showSearch
+                          placeholder="Select machine"
+                          options={machineOptions}
+                          loading={isMachinesLoading}
+                          optionFilterProp="label"
+                          filterOption={(input, option) =>
+                            String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                          }
+                          style={{ width: "100%" }}
+                        />
+                      </Form.Item>
+
+                      <Form.Item name={[routeField.name, "sequence"]} label="Sequence">
+                        <InputNumber size="large" min={1} style={{ width: "100%" }} />
+                      </Form.Item>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                      <Form.Item name={[routeField.name, "cycle_time_sec_per_pc"]} label="Cycle Time (sec/pcs)"> 
+                        <InputNumber size="large" min={0} style={{ width: "100%" }} placeholder="e.g., 30" />
+                      </Form.Item>
+                      <Form.Item name={[routeField.name, "setup_time_min"]} label="Setup Time (min)"> 
+                        <InputNumber size="large" min={0} style={{ width: "100%" }} placeholder="e.g., 15" />
+                      </Form.Item>
+                      <Form.Item name={[routeField.name, "tooling"]} label="Add Tooling"> 
+                        <Select size="large" placeholder="Select tooling" options={[{ label: "Dies", value: "Dies" },{ label: "JIG", value: "JIG" },{ label: "CF", value: "CF" }]} allowClear style={{ width: "100%" }} />
+                      </Form.Item>
+                      <Form.Item name={[routeField.name, "machine_stroke"]} label="Machine Stroke"> 
+                        <Input size="large" placeholder="machine stroke" style={{ width: "100%" }} />
+                      </Form.Item>
+                    </div>
+
+                    <div className="flex items-end justify-end">
+                      <Button danger type="text" icon={<DeleteOutlined />} onClick={() => remove(routeField.name)}>Remove</Button>
+                    </div>
                   </div>
                 </div>
-              )})}
+              ))}
             </div>
           )}
         </Form.List>
-
-        <Title level={5} className="!mb-3">
-          {materialTitle}
-        </Title>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Form.Item name={[...fieldPath, "material_spec", "material_code"]} label="Material Code">
-            <Input placeholder="Material Code" />
-          </Form.Item>
-          <Form.Item name={[...fieldPath, "material_spec", "form"]} label="Form">
-            <Select
-              placeholder="Select form"
-              options={[
-                { label: "Plate", value: "Plate" },
-                { label: "Coil", value: "Coil" },
-                { label: "Pipe", value: "Pipe" },
-                { label: "Rod", value: "Rod" },
-                { label: "Wire", value: "Wire" },
-                { label: "Other", value: "Other" },
-              ]}
-              allowClear
-            />
-          </Form.Item>
-          <Form.Item name={[...fieldPath, "material_spec", "supplier"]} label="Supplier">
-            <Select
-              placeholder="Select supplier"
-              options={supplierOptions}
-              loading={isSuppliersLoading}
-              showSearch
-              optionFilterProp="label"
-              allowClear
-            />
-          </Form.Item>
-          <Form.Item name={[...fieldPath, "material_spec", "width_mm"]} label="Width (mm)">
-            <InputNumber min={0} style={{ width: "100%" }} />
-          </Form.Item>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Form.Item name={[...fieldPath, "material_spec", "diameter_mm"]} label="Ø (mm)">
-            <InputNumber min={0} style={{ width: "100%" }} />
-          </Form.Item>
-          <Form.Item name={[...fieldPath, "material_spec", "thickness_mm"]} label="Thickness (mm)">
-            <InputNumber min={0} style={{ width: "100%" }} />
-          </Form.Item>
-          <Form.Item name={[...fieldPath, "material_spec", "length_mm"]} label="Length (mm)">
-            <InputNumber min={0} style={{ width: "100%" }} />
-          </Form.Item>
-        </div>
       </div>
     );
   };
+
+  const renderMaterialSpecEditor = (fieldPath: Array<string | number>, disabled = false) => (
+    <div className="space-y-3">
+      <Text strong>Material Specifications</Text>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Form.Item name={[...fieldPath, "material_spec", "material_code"]} label="Material Code" rules={disabled ? [] : [{ required: true, message: "Material Code is required" }]}> 
+          <Input placeholder="e.g., STKM550" disabled={disabled} />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "form"]} label="Form" rules={disabled ? [] : [{ required: true, message: "Form is required" }]}> 
+          <Select placeholder="Select form" disabled={disabled} options={[{ label: "Plate", value: "Plate" },{ label: "Coil", value: "Coil" },{ label: "Pipe", value: "Pipe" },{ label: "Rod", value: "Rod" },{ label: "Wire", value: "Wire" },{ label: "Other", value: "Other" }]} allowClear />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "supplier"]} label="Supplier" rules={disabled ? [] : [{ required: true, message: "Supplier is required" }]}> 
+          <Select placeholder="Select supplier" disabled={disabled} options={supplierOptions} loading={isSuppliersLoading} showSearch optionFilterProp="label" allowClear />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "width_mm"]} label="Width (mm)"> 
+          <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
+        </Form.Item>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Form.Item name={[...fieldPath, "material_spec", "diameter_mm"]} label="Diameter (mm)"> <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} /></Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "thickness_mm"]} label="Thickness (mm)"> <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} /></Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "length_mm"]} label="Length (mm)"> <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} /></Form.Item>
+      </div>
+    </div>
+  );
+
+  const renderChildProcessAndMaterial = (fieldPath: Array<string | number>, absolutePath: Array<string | number>) => (
+    <div className="mt-6 space-y-6">
+      {renderProcessRoutesEditor(fieldPath, absolutePath, { hideAddWhenAssembly: false, isAssemblyMode: isParentAssembly })}
+      {renderMaterialSpecEditor(fieldPath, isParentAssembly)}
+    </div>
+  );
 
   const renderChildCards = (
     fields: Array<{ key: number; name: number }>,
@@ -1497,109 +1454,127 @@ export default function CreateBomPage() {
                             </div>
                           ),
                           children: (
-                              <div className="border border-gray-200 rounded-lg p-4">
-                                {(() => {
-                                  const { key: _ignoredKey, ...routeField } = field;
-                                  return (
-                              <div className="grid grid-cols-1 md:grid-cols-7 gap-3">
-                                <Form.Item
-                                  {...routeField}
-                                  name={[field.name, "process_id"]}
-                                  label="Process"
-                                  rules={[{ required: true, message: "Process is required" }]}
-                                >
-                                  <Select
-                                    showSearch
-                                    placeholder="Select process"
-                                    options={processOptions}
-                                    loading={isProcessesLoading}
-                                    optionFilterProp="label"
-                                    filterOption={(input, opt) =>
-                                      String(opt?.label ?? "")
-                                        .toLowerCase()
-                                        .includes(input.toLowerCase())
-                                    }
-                                  />
-                                </Form.Item>
+                            <div className="border border-gray-200 rounded-lg p-4">
+                              {(() => {
+                                const { key: _ignoredKey, ...routeField } = field;
+                                return (
+                                  <div className="space-y-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                      <Form.Item
+                                        {...routeField}
+                                        name={[field.name, "process_id"]}
+                                        label="Process"
+                                        rules={[{ required: true, message: "Process is required" }]}
+                                      >
+                                        <Select
+                                          size="large"
+                                          showSearch
+                                          placeholder="Select process"
+                                          options={processOptions}
+                                          loading={isProcessesLoading}
+                                          optionFilterProp="label"
+                                          style={{ width: "100%" }}
+                                          filterOption={(input, opt) =>
+                                            String(opt?.label ?? "")
+                                              .toLowerCase()
+                                              .includes(input.toLowerCase())
+                                          }
+                                        />
+                                      </Form.Item>
 
-                                <Form.Item
-                                  {...routeField}
-                                  name={[field.name, "machine_id"]}
-                                  label="Machine"
-                                  rules={[{ required: true, message: "Machine is required" }]}
-                                >
-                                  <Select
-                                    showSearch
-                                    placeholder="Select machine"
-                                    options={machineOptions}
-                                    loading={isMachinesLoading}
-                                    optionFilterProp="label"
-                                    filterOption={(input, opt) =>
-                                      String(opt?.label ?? "")
-                                        .toLowerCase()
-                                        .includes(input.toLowerCase())
-                                    }
-                                  />
-                                </Form.Item>
+                                      <Form.Item
+                                        {...routeField}
+                                        name={[field.name, "machine_id"]}
+                                        label="Machine"
+                                        rules={[{ required: true, message: "Machine is required" }]}
+                                      >
+                                        <Select
+                                          size="large"
+                                          showSearch
+                                          placeholder="Select machine"
+                                          options={machineOptions}
+                                          loading={isMachinesLoading}
+                                          optionFilterProp="label"
+                                          style={{ width: "100%" }}
+                                          filterOption={(input, opt) =>
+                                            String(opt?.label ?? "")
+                                              .toLowerCase()
+                                              .includes(input.toLowerCase())
+                                          }
+                                        />
+                                      </Form.Item>
 
-                                <Form.Item
-                                  {...routeField}
-                                  name={[field.name, "sequence"]}
-                                  label="Sequence"
-                                >
-                                  <InputNumber min={1} style={{ width: "100%" }} />
-                                </Form.Item>
+                                      <Form.Item
+                                        {...routeField}
+                                        name={[field.name, "sequence"]}
+                                        label="Sequence"
+                                      >
+                                        <InputNumber size="large" min={1} style={{ width: "100%" }} />
+                                      </Form.Item>
+                                    </div>
 
-                                <Form.Item
-                                  {...routeField}
-                                  name={[field.name, "cycle_time_sec_per_pc"]}
-                                  label="Cycle Time (sec/pcs)"
-                                >
-                                  <InputNumber
-                                    min={0}
-                                    style={{ width: "100%" }}
-                                    placeholder="e.g., 30"
-                                  />
-                                </Form.Item>
+                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                                      <Form.Item
+                                        {...routeField}
+                                        name={[field.name, "cycle_time_sec_per_pc"]}
+                                        label="Cycle Time (sec/pcs)"
+                                      >
+                                        <InputNumber
+                                          size="large"
+                                          min={0}
+                                          style={{ width: "100%" }}
+                                          placeholder="e.g., 30"
+                                        />
+                                      </Form.Item>
 
-                                <Form.Item
-                                  {...routeField}
-                                  name={[field.name, "setup_time_min"]}
-                                  label="Setup Time (min)"
-                                >
-                                  <InputNumber
-                                    min={0}
-                                    style={{ width: "100%" }}
-                                    placeholder="e.g., 15"
-                                  />
-                                </Form.Item>
+                                      <Form.Item
+                                        {...routeField}
+                                        name={[field.name, "setup_time_min"]}
+                                        label="Setup Time (min)"
+                                      >
+                                        <InputNumber
+                                          size="large"
+                                          min={0}
+                                          style={{ width: "100%" }}
+                                          placeholder="e.g., 15"
+                                        />
+                                      </Form.Item>
 
-                                <Form.Item
-                                  {...routeField}
-                                  name={[field.name, "tooling"]}
-                                  label="Add Tooling"
-                                >
-                                  <Select
-                                    placeholder="Select tooling"
-                                    options={[
-                                      { label: "Dies", value: "Dies" },
-                                      { label: "JIG", value: "JIG" },
-                                      { label: "CF", value: "CF" },
-                                    ]}
-                                    allowClear
-                                  />
-                                </Form.Item>
+                                      <Form.Item
+                                        {...routeField}
+                                        name={[field.name, "tooling"]}
+                                        label="Add Tooling"
+                                      >
+                                        <Select
+                                          size="large"
+                                          placeholder="Select tooling"
+                                          options={[
+                                            { label: "Dies", value: "Dies" },
+                                            { label: "JIG", value: "JIG" },
+                                            { label: "CF", value: "CF" },
+                                          ]}
+                                          allowClear
+                                          style={{ width: "100%" }}
+                                        />
+                                      </Form.Item>
 
-                                <Form.Item
-                                  {...routeField}
-                                  name={[field.name, "machine_stroke"]}
-                                  label="Machine Stroke"
-                                >
-                                  <Input placeholder="machine stroke" />
-                                </Form.Item>
-                              </div>
-                                  );
-                                })()}
+                                      <Form.Item
+                                        {...routeField}
+                                        name={[field.name, "machine_stroke"]}
+                                        label="Machine Stroke"
+                                      >
+                                        <Input size="large" placeholder="machine stroke" style={{ width: "100%" }} />
+                                      </Form.Item>
+                                    </div>
+
+                                    <div className="flex items-end justify-end">
+                                      <Button danger type="text" icon={<DeleteOutlined />} onClick={() => remove(field.name)}>
+                                        Remove
+                                      </Button>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           ),
                         }))}

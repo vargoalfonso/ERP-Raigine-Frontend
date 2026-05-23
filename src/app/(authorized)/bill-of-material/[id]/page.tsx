@@ -131,6 +131,21 @@ const parseToolings = (raw: unknown): ToolingRow[] => {
   }));
 };
 
+const resolveMaterialSpec = (bom: unknown): Record<string, unknown> | null => {
+  if (!bom || typeof bom !== "object") return null;
+  const record = bom as Record<string, unknown>;
+
+  if (record.material_spec && typeof record.material_spec === "object") {
+    return record.material_spec as Record<string, unknown>;
+  }
+
+  if (record.material_specifications && typeof record.material_specifications === "object") {
+    return record.material_specifications as Record<string, unknown>;
+  }
+
+  return null;
+};
+
 const parseProcessRoutes = (raw: unknown): ProcessRouteRow[] => {
   if (!Array.isArray(raw)) return [];
   return raw.map((r: any, idx: number) => ({
@@ -226,7 +241,6 @@ const MaterialSpecDesc = ({ spec }: { spec: MaterialSpec | null | undefined }) =
 };
 
 // ─── page ─────────────────────────────────────────────────────────────────────
-
 export default function BomDetailPage() {
   const router = useRouter();
   const params = useParams<{ id?: string | string[] }>();
@@ -309,7 +323,7 @@ export default function BomDetailPage() {
 
   const parentAssetUrl = pickAssetUrl((bom as any)?.asset) ?? pickAssetUrl((bom as any)?.image_url);
   const processRoutes = useMemo(() => parseProcessRoutes((bom as any)?.process_routes), [bom]);
-  const materialSpec = useMemo(() => parseMaterialSpec((bom as any)?.material_spec), [bom]);
+  const materialSpec = useMemo(() => parseMaterialSpec(resolveMaterialSpec(bom)), [bom]);
 
   const childRows = useMemo<ChildRow[]>(() => {
     const walk = (nodes: any[], depth: number): ChildRow[] =>
@@ -327,7 +341,7 @@ export default function BomDetailPage() {
           level: depth,
           status: asStr(n?.bom_status ?? n?.status) ?? "—",
           assetUrl: pickAssetUrl(n?.asset) ?? pickAssetUrl(n?.image_url),
-          materialSpec: parseMaterialSpec(n?.material_spec),
+          materialSpec: parseMaterialSpec(resolveMaterialSpec(n)),
           processRoutes: parseProcessRoutes(n?.process_routes),
           children: nested.length ? nested : undefined,
         };

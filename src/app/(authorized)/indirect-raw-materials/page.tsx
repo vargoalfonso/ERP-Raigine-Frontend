@@ -21,6 +21,7 @@ import type { ColumnsType } from "antd/es/table";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { type InventoryRecord, useGetInventoryListQuery } from "@/lib/api/inventory/api";
+import { consumeFlashMessage } from "@/lib/utils/flashMessage";
 
 type IndirectRawMaterialRow = {
   id: string;
@@ -103,6 +104,13 @@ export default function IndirectRawMaterialsPage() {
     { type: "indirect-materials", page: 1, limit: 20 },
     { skip: !apiEnabled }
   );
+
+  useEffect(() => {
+    const flash = consumeFlashMessage("/indirect-raw-materials");
+    if (flash) {
+      messageApi.open({ type: flash.type, content: flash.content });
+    }
+  }, [messageApi]);
 
   useEffect(() => {
     if (!apiEnabled || !listQuery.error) return;

@@ -85,6 +85,8 @@ type DepartmentRow = {
 const STORAGE_EMPLOYEES = "ai-erp-employees";
 const STORAGE_DEPARTMENTS = "ai-erp-departments";
 
+const normalizeLookupText = (value: unknown) => String(value ?? "").trim().toLowerCase();
+
 export default function EmployeeDeptPage() {
   return (
     <Suspense fallback={null}>
@@ -500,9 +502,40 @@ const reportsToOptionsApi = useMemo(() => {
     return { totalEmployees, managers, departmentsCount, activeUsers };
   }, [employees, departments, apiEmployeesRows, apiEnabled, departmentOptionsApi]);
 
+  const countEmployeesForDepartment = useMemo(() => {
+    return (departmentId?: string, departmentName?: string) => {
+      const normalizedDepartmentId = normalizeLookupText(departmentId);
+      const normalizedDepartmentName = normalizeLookupText(departmentName);
+
+      const source = apiEnabled ? apiEmployeesRows : employees;
+
+      return source.filter((employee) => {
+        const employeeDepartmentId = normalizeLookupText(employee.departmentId);
+        const employeeDepartmentName = normalizeLookupText(employee.department);
+
+        if (normalizedDepartmentId && employeeDepartmentId) {
+          return employeeDepartmentId === normalizedDepartmentId;
+        }
+
+        if (normalizedDepartmentName) {
+          return employeeDepartmentName === normalizedDepartmentName;
+        }
+
+        return false;
+      }).length;
+    };
+  }, [apiEnabled, apiEmployeesRows, employees]);
+
+  const departmentsWithCounts = useMemo(() => {
+    return departments.map((department) => ({
+      ...department,
+      employeeCount: countEmployeesForDepartment(department.apiId, department.name),
+    }));
+  }, [countEmployeesForDepartment, departments]);
+
   const filteredDepartments = useMemo(() => {
     const q = deptSearch.trim().toLowerCase();
-    const source = apiEnabled ? [] : departments;
+    const source = apiEnabled ? [] : departmentsWithCounts;
     return source.filter((d) => {
       const matchesSearch =
         !q ||
@@ -512,7 +545,7 @@ const reportsToOptionsApi = useMemo(() => {
       const matchesStatus = deptStatus === "All" ? true : d.status === deptStatus;
       return matchesSearch && matchesStatus;
     });
-  }, [departments, deptSearch, deptStatus]);
+  }, [departmentsWithCounts, deptSearch, deptStatus, apiEnabled]);
 
   const tabButtonClass = (on: boolean) =>
     "rounded-lg px-4 py-2 text-sm font-medium transition-colors border " +
@@ -757,7 +790,7 @@ const reportsToOptionsApi = useMemo(() => {
   const departmentsReadOnlyApi: DepartmentRow[] = useMemo(() => {
     if (!apiEnabled) return [];
     return (departmentsApiData ?? []).map((dept) => {
-      const employeeCount = apiEmployeesRows.filter((employee) => employee.departmentId === dept.id).length;
+      const employeeCount = countEmployeesForDepartment(String(dept.id ?? ""), dept.department_name);
       const status: DepartmentRow["status"] = String(dept.status ?? "Active").toLowerCase() === "inactive" ? "Inactive" : "Active";
       return {
         key: dept.id,
@@ -772,7 +805,7 @@ const reportsToOptionsApi = useMemo(() => {
         status,
       };
     });
-  }, [apiEnabled, apiEmployeesRows, departmentsApiData]);
+  }, [apiEnabled, countEmployeesForDepartment, departmentsApiData]);
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">

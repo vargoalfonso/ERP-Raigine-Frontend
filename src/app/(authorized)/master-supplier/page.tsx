@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Alert,
@@ -36,6 +36,7 @@ import {
 } from "@/lib/api/suppliers/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
+import { consumeFlashMessage } from "@/lib/utils/flashMessage";
 
 type SupplierSection = "supplier-only" | "raw-material" | "indirect-raw-material" | "subcon";
 type SupplierItemSection = Exclude<SupplierSection, "supplier-only">;
@@ -44,6 +45,8 @@ type SupplierRow = {
   key: string;
   id?: string;
   section: SupplierItemSection;
+  supplierUuid?: string;
+  supplierCode?: string;
   supplierName: string;
   uniqCode: string;
   sebangoCode: string;
@@ -60,6 +63,22 @@ type SupplierRow = {
   warehouse: string;
   status: string;
 };
+
+type SupplierGroupedRow = {
+  key: string;
+  isGroup: true;
+  supplierName: string;
+  supplierCode: string;
+  itemCount: number;
+  children: SupplierTableRow[];
+};
+
+type SupplierTableRow =
+  | (SupplierRow & {
+      isGroup?: false;
+      children?: never;
+    })
+  | SupplierGroupedRow;
 
 type SupplierOnlyRow = {
   key: string;
@@ -138,6 +157,8 @@ const toSupplierRow = (record: SupplierItemRecord, index: number): SupplierRow =
     key: String(record.id ?? record.supplier_item_uuid ?? record.uniq_code ?? index),
     id: pickText(record.id, record.supplier_item_uuid),
     section,
+    supplierUuid: pickText(record.supplier_uuid),
+    supplierCode: pickText(record.supplier_code),
     supplierName: pickText(record.supplier_name, record.supplier_code) || "-",
     uniqCode: pickText(record.uniq_code) || "-",
     sebangoCode: pickText(record.sebango_code) || "-",
@@ -199,6 +220,13 @@ export default function MasterSupplierPage() {
     skip: !apiEnabled || !detailOpen || !selectedSupplierId,
   });
 
+  useEffect(() => {
+    const flash = consumeFlashMessage("/master-supplier");
+    if (flash) {
+      messageApi.open({ type: flash.type, content: flash.content });
+    }
+  }, [messageApi]);
+
   const supplierRows = useMemo(
     () => (supplierItemsQuery.data ?? []).map((record, index) => toSupplierRow(record, index)),
     [supplierItemsQuery.data]
@@ -247,6 +275,29 @@ export default function MasterSupplierPage() {
       });
   }, [activeSection, supplierRows, searchValue, typeFilter]);
 
+  const groupedSupplierRows = useMemo<SupplierTableRow[]>(() => {
+    const grouped = new Map<string, Array<SupplierRow & { isGroup?: false }>>();
+
+    filteredSupplierRows.forEach((row) => {
+      const groupKey = row.supplierUuid || row.supplierCode || row.supplierName || row.key;
+      const current = grouped.get(groupKey) ?? [];
+      current.push({ ...row, isGroup: false });
+      grouped.set(groupKey, current);
+    });
+
+    return Array.from(grouped.entries()).map(([groupKey, rows]) => {
+      const first = rows[0];
+      return {
+        key: `group-${groupKey}`,
+        isGroup: true,
+        supplierName: first?.supplierName || "-",
+        supplierCode: first?.supplierCode || "-",
+        itemCount: rows.length,
+        children: rows,
+      };
+    });
+  }, [filteredSupplierRows]);
+
   const filteredSupplierOnlyRows = useMemo(() => {
     const query = searchValue.trim().toLowerCase();
     return supplierOnlyRows
@@ -292,55 +343,76 @@ export default function MasterSupplierPage() {
     }
   };
 
-  const supplierColumns: ColumnsType<SupplierRow> = [
+  const supplierColumns: ColumnsType<SupplierTableRow> = [
     {
-      title: "UNIQ",
+      title: "Supplier",
+      dataIndex: "supplierName",
+      key: "supplierName",
+      width: 280,
+      render: (_value: string, row) => {
+        if (row.isGroup) {
+          return (
+            <div>
+              <div className="font-semibold text-gray-900">{row.supplierName}</div>
+              <div className="text-xs text-gray-500">{row.supplierCode} • {row.itemCount} item{row.itemCount > 1 ? "s" : ""}</div>
+            </div>
+          );
+        }
+
+        return <span className="text-gray-400">—</span>;
+      },
+    },
+    {
+      title: "Sebango",
       dataIndex: "uniqCode",
       key: "uniqCode",
       width: 130,
-      render: (value: string) => (
-        <span className="inline-flex items-center rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white">
-          {value}
-        </span>
-      ),
+      render: (value: string, row) =>
+        row.isGroup ? (
+          <span className="text-gray-400">—</span>
+        ) : (
+          <span className="inline-flex items-center rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white">
+            {value}
+          </span>
+        ),
     },
-    { title: "Sebango", dataIndex: "sebangoCode", key: "sebangoCode", width: 150 },
+    { title: "Material Code", dataIndex: "sebangoCode", key: "sebangoCode", width: 150, render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
     {
       title: "Type",
       dataIndex: "type",
       key: "type",
       width: 170,
-      render: (value: string) => <Tag color="purple">{value}</Tag>,
+      render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : <Tag color="purple">{value}</Tag>,
     },
-    { title: "Product Model", dataIndex: "productModel", key: "productModel", width: 160 },
+    { title: "Product Model", dataIndex: "productModel", key: "productModel", width: 160, render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
     {
       title: "Part Name",
       dataIndex: "partName",
       key: "partName",
       width: 220,
-      render: (value: string) => <span className="font-semibold text-gray-900">{value}</span>,
+      render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : <span className="font-semibold text-gray-900">{value}</span>,
     },
-    { title: "Part Number", dataIndex: "partNumber", key: "partNumber", width: 160 },
-    { title: "Grade / Size", dataIndex: "gradeSize", key: "gradeSize", width: 160 },
-    { title: "Qty", dataIndex: "quantity", key: "quantity", width: 100 },
-    { title: "Pcs / Kanban", dataIndex: "pcsPerKanban", key: "pcsPerKanban", width: 120 },
+    { title: "Part Number", dataIndex: "partNumber", key: "partNumber", width: 160, render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
+    { title: "Grade / Size", dataIndex: "gradeSize", key: "gradeSize", width: 160, render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
+    { title: "Qty", dataIndex: "quantity", key: "quantity", width: 100, render: (value: number, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
+    { title: "Pcs / Kanban", dataIndex: "pcsPerKanban", key: "pcsPerKanban", width: 120, render: (value: number, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
     {
       title: "Cycle",
       dataIndex: "customerCycle",
       key: "customerCycle",
       width: 100,
-      render: (value: string) => value,
+      render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value,
     },
-    { title: "UOM", dataIndex: "uom", key: "uom", width: 100 },
-    { title: "Weight", dataIndex: "weight", key: "weight", width: 100 },
-    { title: "Warehouse", dataIndex: "warehouse", key: "warehouse", width: 180 },
-    { title: "Supplier", dataIndex: "supplierName", key: "supplierName", width: 220 },
+    { title: "UOM", dataIndex: "uom", key: "uom", width: 100, render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
+    { title: "Weight", dataIndex: "weight", key: "weight", width: 100, render: (value: number, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
+    { title: "Warehouse", dataIndex: "warehouse", key: "warehouse", width: 180, render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
     {
       title: "Status",
       dataIndex: "status",
       key: "status",
       width: 110,
-      render: (value: string) => {
+      render: (value: string, row) => {
+        if (row.isGroup) return <span className="text-gray-400">—</span>;
         const lowered = value.toLowerCase();
         return <Tag color={lowered === "active" ? "green" : "default"}>{value}</Tag>;
       },
@@ -351,20 +423,22 @@ export default function MasterSupplierPage() {
       width: 140,
       fixed: "right",
       render: (_value, row) => (
-        <div className="flex items-center gap-1">
-          <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openCreatePage("view", row)} />
-          <Button type="text" size="small" icon={<EditOutlined />} onClick={() => openCreatePage("edit", row)} />
-          <Popconfirm
-            title="Delete supplier item?"
-            description={`Remove ${row.partName} from ${sectionLabel(row.section)}.`}
-            okText="Delete"
-            cancelText="Cancel"
-            okButtonProps={{ danger: true, loading: deleteSupplierItemState.isLoading }}
-            onConfirm={() => handleDeleteSupplierItem(row)}
-          >
-            <Button type="text" size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        </div>
+        row.isGroup ? null : (
+          <div className="flex items-center gap-1">
+            <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openCreatePage("view", row)} />
+            <Button type="text" size="small" icon={<EditOutlined />} onClick={() => openCreatePage("edit", row)} />
+            <Popconfirm
+              title="Delete supplier item?"
+              description={`Remove ${row.partName} from ${sectionLabel(row.section)}.`}
+              okText="Delete"
+              cancelText="Cancel"
+              okButtonProps={{ danger: true, loading: deleteSupplierItemState.isLoading }}
+              onConfirm={() => handleDeleteSupplierItem(row)}
+            >
+              <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          </div>
+        )
       ),
     },
   ];
@@ -463,7 +537,7 @@ export default function MasterSupplierPage() {
   ];
 
   const isSupplierOnly = activeSection === "supplier-only";
-  const visibleCount = isSupplierOnly ? filteredSupplierOnlyRows.length : filteredSupplierRows.length;
+  const visibleCount = isSupplierOnly ? filteredSupplierOnlyRows.length : groupedSupplierRows.length;
 
   return (
     <div className="p-6 space-y-6 bg-gray-50 min-h-screen">
@@ -582,12 +656,16 @@ export default function MasterSupplierPage() {
             scroll={{ x: 1200 }}
           />
         ) : (
-          <Table<SupplierRow>
+          <Table<SupplierTableRow>
             columns={supplierColumns}
-            dataSource={apiEnabled ? filteredSupplierRows : []}
+            dataSource={apiEnabled ? groupedSupplierRows : []}
             rowKey="key"
             loading={apiEnabled && supplierItemsQuery.isLoading}
             pagination={{ pageSize: 10 }}
+            expandable={{
+              rowExpandable: (record) => Boolean(record.isGroup && record.children.length > 0),
+            }}
+            rowClassName={(record) => (record.isGroup ? "bg-gray-50" : "")}
             scroll={{ x: 1800 }}
           />
         )}

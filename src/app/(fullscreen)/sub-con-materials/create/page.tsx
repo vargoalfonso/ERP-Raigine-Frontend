@@ -27,6 +27,12 @@ import { useListProcurementDnsQuery } from "@/lib/api/procurement-dn/api";
 import { useListProcurementPosQuery, type ProcurementPoRecord } from "@/lib/api/procurement-po/api";
 import { useListWarehousesQuery, type WarehouseRecord } from "@/lib/api/warehouse/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import {
+  focusFirstInvalidField,
+  getValidationMessage,
+  isAntdFormValidationError,
+} from "@/lib/utils/formValidation";
+import { setFlashMessage } from "@/lib/utils/flashMessage";
 
 const { Title, Text } = Typography;
 
@@ -395,7 +401,21 @@ export default function CreateSubConStockReceivedPage() {
       for (const entry of entries) {
         const form = entry.formRef.current;
         if (!form) continue;
-        await form.validateFields();
+        try {
+          await form.validateFields();
+        } catch (error) {
+          if (isAntdFormValidationError(error)) {
+            focusFirstInvalidField(form, error);
+            message.error(
+              getValidationMessage(error, {
+                prefix: `Entry ${entry.id}`,
+                fallback: `Entry ${entry.id}: please complete all required fields.`,
+              }),
+            );
+            return;
+          }
+          throw error;
+        }
 
         const values = form.getFieldsValue() as SubConStockReceivedFormData;
         await createInventory({
@@ -411,13 +431,16 @@ export default function CreateSubConStockReceivedPage() {
           },
         }).unwrap();
       }
-
-      message.success("Stock received saved");
+      setFlashMessage({
+        type: "success",
+        content: "Stock received saved",
+        targetPath: "/sub-con-materials",
+      });
       router.push("/sub-con-materials");
     } catch (error) {
       message.error(
         (error as { data?: { message?: string } })?.data?.message ||
-          "Please complete all required fields"
+          "Failed to save stock received."
       );
     } finally {
       setLoading(false);

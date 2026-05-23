@@ -26,6 +26,12 @@ import { useCreateInventoryMutation } from "@/lib/api/inventory/api";
 import { useListProcurementDnsQuery } from "@/lib/api/procurement-dn/api";
 import { useListProcurementPosQuery, type ProcurementPoRecord } from "@/lib/api/procurement-po/api";
 import { useListWarehousesQuery, type WarehouseRecord } from "@/lib/api/warehouse/api";
+import {
+  focusFirstInvalidField,
+  getValidationMessage,
+  isAntdFormValidationError,
+} from "@/lib/utils/formValidation";
+import { setFlashMessage } from "@/lib/utils/flashMessage";
 
 const { Title, Text } = Typography;
 
@@ -380,7 +386,21 @@ export default function CreateIndirectRawMaterialPage() {
       for (const entry of entries) {
         const form = entry.formRef.current;
         if (!form) continue;
-        await form.validateFields();
+        try {
+          await form.validateFields();
+        } catch (error) {
+          if (isAntdFormValidationError(error)) {
+            focusFirstInvalidField(form, error);
+            message.error(
+              getValidationMessage(error, {
+                prefix: `Entry ${entry.id}`,
+                fallback: `Entry ${entry.id}: please complete all required fields.`,
+              }),
+            );
+            return;
+          }
+          throw error;
+        }
         const values = form.getFieldsValue();
         await createInventory({
           type: "indirect-materials",
@@ -395,11 +415,14 @@ export default function CreateIndirectRawMaterialPage() {
           },
         }).unwrap();
       }
-
-      message.success("Indirect raw material saved");
+      setFlashMessage({
+        type: "success",
+        content: "Indirect raw material saved",
+        targetPath: "/indirect-raw-materials",
+      });
       router.push("/indirect-raw-materials");
     } catch (error) {
-      message.error((error as { data?: { message?: string } })?.data?.message || "Please complete all required fields");
+      message.error((error as { data?: { message?: string } })?.data?.message || "Failed to save indirect raw material.");
     } finally {
       setLoading(false);
     }
