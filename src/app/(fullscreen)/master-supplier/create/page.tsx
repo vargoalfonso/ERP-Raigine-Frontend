@@ -20,7 +20,7 @@ import {
 import { ArrowLeftOutlined, SaveOutlined } from "@ant-design/icons";
 import {
   type BackendBomNode,
-  useGetBomTreeQuery,
+  useGetBomsBySupplierQuery,
 } from "@/lib/api/bom/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
@@ -93,14 +93,18 @@ const pickText = (...values: unknown[]) => {
 };
 
 const normalizeSection = (value: string | null): SupplierSection => {
-  const raw = String(value ?? "").trim().toLowerCase();
-  if (raw === "indirect" || raw === "indirect-raw-material") return "indirect-raw-material";
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (raw === "indirect" || raw === "indirect-raw-material")
+    return "indirect-raw-material";
   if (raw === "subcon" || raw === "sub-con") return "subcon";
   return "raw-material";
 };
 
 const sectionLabel = (section: SupplierSection) =>
-  SECTION_OPTIONS.find((option) => option.value === section)?.label ?? "Raw Material";
+  SECTION_OPTIONS.find((option) => option.value === section)?.label ??
+  "Raw Material";
 
 const sectionApiValue = (section: SupplierSection) => {
   if (section === "indirect-raw-material") return "indirect_raw_material";
@@ -121,17 +125,21 @@ const normalizeSupplierCategory = (value: unknown): SupplierSection => {
   return "raw-material";
 };
 
-const resolveSupplierCategory = (supplier: Record<string, unknown>): SupplierSection =>
+const resolveSupplierCategory = (
+  supplier: Record<string, unknown>,
+): SupplierSection =>
   normalizeSupplierCategory(
     pickText(
       supplier.material_category,
       supplier.materialCategory,
       supplier.category,
       supplier.type,
-    )
+    ),
   );
 
-const formatSizeFromMaterialSpec = (materialSpec?: Record<string, unknown>): string => {
+const formatSizeFromMaterialSpec = (
+  materialSpec?: Record<string, unknown>,
+): string => {
   if (!materialSpec) return "";
 
   const diameter = pickText(materialSpec.diameter_mm);
@@ -149,12 +157,19 @@ const formatSizeFromMaterialSpec = (materialSpec?: Record<string, unknown>): str
   return parts.join(" x ");
 };
 
-const extractWeightFromMaterialSpec = (materialSpec?: Record<string, unknown>): number | undefined => {
+const extractWeightFromMaterialSpec = (
+  materialSpec?: Record<string, unknown>,
+): number | undefined => {
   if (!materialSpec) return undefined;
 
-  const candidates = [materialSpec.weight_kg, materialSpec.weight, materialSpec.unit_weight];
+  const candidates = [
+    materialSpec.weight_kg,
+    materialSpec.weight,
+    materialSpec.unit_weight,
+  ];
   for (const candidate of candidates) {
-    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+    if (typeof candidate === "number" && Number.isFinite(candidate))
+      return candidate;
     if (typeof candidate === "string") {
       const parsed = Number(candidate);
       if (Number.isFinite(parsed)) return parsed;
@@ -170,7 +185,8 @@ const flattenBomTree = (nodes: BackendBomNode[]): BackendBomNode[] => {
   const walk = (items: BackendBomNode[]) => {
     items.forEach((item) => {
       flattened.push(item);
-      if (Array.isArray(item.children) && item.children.length > 0) walk(item.children);
+      if (Array.isArray(item.children) && item.children.length > 0)
+        walk(item.children);
     });
   };
 
@@ -221,23 +237,34 @@ function MasterSupplierCreatePageContent() {
   const apiEnabled = Boolean(apiBaseUrl);
   const section = normalizeSection(searchParams.get("section"));
   const rawMode = String(searchParams.get("mode") ?? "create").toLowerCase();
-  const mode: PageMode = rawMode === "edit" || rawMode === "view" ? (rawMode as PageMode) : "create";
+  const mode: PageMode =
+    rawMode === "edit" || rawMode === "view" ? (rawMode as PageMode) : "create";
   const readOnly = mode === "view";
   const itemId = String(searchParams.get("id") ?? "").trim();
   const isEditing = mode === "edit";
 
-  const { data: suppliers = [], isLoading: suppliersLoading } = useListSuppliersQuery(undefined, {
-    skip: !apiEnabled,
-  });
-  const { data: warehouses = [], isLoading: warehousesLoading } = useListWarehousesQuery(undefined, {
-    skip: !apiEnabled,
-  });
-  const { data: uoms = [], isLoading: uomsLoading } = useGetUomsQuery(undefined, {
-    skip: !apiEnabled,
-  });
-  const { data: bomTree } = useGetBomTreeQuery(undefined, {
-    skip: !apiEnabled,
-  });
+  const { data: suppliers = [], isLoading: suppliersLoading } =
+    useListSuppliersQuery(undefined, {
+      skip: !apiEnabled,
+    });
+  const { data: warehouses = [], isLoading: warehousesLoading } =
+    useListWarehousesQuery(undefined, {
+      skip: !apiEnabled,
+    });
+  const { data: uoms = [], isLoading: uomsLoading } = useGetUomsQuery(
+    undefined,
+    {
+      skip: !apiEnabled,
+    },
+  );
+
+  const selectedSupplierId = Form.useWatch("supplier_uuid", form);
+
+  const { data: bomTree, isFetching: bomFetching } = useGetBomsBySupplierQuery(
+    { supplier_id: selectedSupplierId ?? "" },
+    { skip: !apiEnabled || !selectedSupplierId },
+  );
+
   const detailQuery = useGetSupplierItemByIdQuery(itemId, {
     skip: !apiEnabled || mode === "create" || !itemId,
   });
@@ -249,8 +276,12 @@ function MasterSupplierCreatePageContent() {
     () =>
       suppliers
         .filter((supplier) => {
-          const status = String(supplier.status ?? "active").trim().toLowerCase();
-          const category = resolveSupplierCategory(supplier as Record<string, unknown>);
+          const status = String(supplier.status ?? "active")
+            .trim()
+            .toLowerCase();
+          const category = resolveSupplierCategory(
+            supplier as Record<string, unknown>,
+          );
           return (!status || status === "active") && category === section;
         })
         .map((supplier) => {
@@ -272,20 +303,32 @@ function MasterSupplierCreatePageContent() {
             supplierCode,
           };
         })
-        .filter((option): option is { value: string; label: string; supplierCode: string } => Boolean(option))
+        .filter(
+          (
+            option,
+          ): option is { value: string; label: string; supplierCode: string } =>
+            Boolean(option),
+        )
         .sort((left, right) => left.label.localeCompare(right.label)),
-      [section, suppliers]
+    [section, suppliers],
   );
 
   const uomOptions = useMemo(
     () =>
       uoms
         .map((uom) => {
-          const value = pickText(uom.name, uom.unit_name, uom.code, uom.unit_code);
+          const value = pickText(
+            uom.name,
+            uom.unit_name,
+            uom.code,
+            uom.unit_code,
+          );
           if (!value) return null;
           return { label: value, value };
         })
-        .filter((option): option is { label: string; value: string } => Boolean(option))
+        .filter((option): option is { label: string; value: string } =>
+          Boolean(option),
+        )
         .sort((left, right) => left.label.localeCompare(right.label)),
     [uoms],
   );
@@ -303,33 +346,40 @@ function MasterSupplierCreatePageContent() {
             type: pickText(warehouse.type_warehouse),
           };
         })
-        .filter((option): option is { value: string; label: string; type: string } => Boolean(option))
+        .filter(
+          (option): option is { value: string; label: string; type: string } =>
+            Boolean(option),
+        )
         .sort((left, right) => left.label.localeCompare(right.label)),
-    [warehouses]
+    [warehouses],
   );
 
   const bomOptions = useMemo(() => {
     const items = flattenBomTree(bomTree?.data ?? []);
-    const mapped = items.map(toBomOption).filter((option): option is BomOption => Boolean(option));
+    const mapped = items
+      .map(toBomOption)
+      .filter((option): option is BomOption => Boolean(option));
     const deduped = new Map<string, BomOption>();
 
     mapped.forEach((option) => {
       if (!deduped.has(option.value)) deduped.set(option.value, option);
     });
 
-    return Array.from(deduped.values()).sort((left, right) => left.label.localeCompare(right.label));
+    return Array.from(deduped.values()).sort((left, right) =>
+      left.label.localeCompare(right.label),
+    );
   }, [bomTree]);
 
-  const selectedSupplierId = Form.useWatch("supplier_uuid", form);
   const selectedWarehouseId = Form.useWatch("warehouse_uuid", form);
 
   const selectedSupplier = useMemo(
     () => supplierOptions.find((option) => option.value === selectedSupplierId),
-    [selectedSupplierId, supplierOptions]
+    [selectedSupplierId, supplierOptions],
   );
   const selectedWarehouse = useMemo(
-    () => warehouseOptions.find((option) => option.value === selectedWarehouseId),
-    [selectedWarehouseId, warehouseOptions]
+    () =>
+      warehouseOptions.find((option) => option.value === selectedWarehouseId),
+    [selectedWarehouseId, warehouseOptions],
   );
 
   useEffect(() => {
@@ -337,7 +387,10 @@ function MasterSupplierCreatePageContent() {
 
     form.setFieldsValue({
       supplier_uuid: pickText(detailQuery.data.supplier_uuid),
-      warehouse_uuid: pickText(detailQuery.data.warehouse_uuid, detailQuery.data.warehouse_id),
+      warehouse_uuid: pickText(
+        detailQuery.data.warehouse_uuid,
+        detailQuery.data.warehouse_id,
+      ),
       uniq_code: pickText(detailQuery.data.uniq_code),
       sebango_code: pickText(detailQuery.data.sebango_code),
       type: pickText(detailQuery.data.type),
@@ -356,12 +409,28 @@ function MasterSupplierCreatePageContent() {
     });
   }, [detailQuery.data, form]);
 
+  const handleSupplierChange = () => {
+    form.setFieldsValue({
+      uniq_code: undefined,
+      product_model: undefined,
+      part_name: undefined,
+      part_number: undefined,
+      type: undefined,
+      grade: undefined,
+      size: undefined,
+      uom: undefined,
+      weight: undefined,
+    });
+  };
+
   const handleUniqChange = (value: string) => {
     const matched = bomOptions.find((option) => option.value === value);
     if (!matched) return;
 
     const matchedUom = matched.uom
-      ? uomOptions.find((option) => option.value.toLowerCase() === matched.uom?.toLowerCase())
+      ? uomOptions.find(
+          (option) => option.value.toLowerCase() === matched.uom?.toLowerCase(),
+        )
       : undefined;
 
     form.setFieldsValue({
@@ -380,7 +449,9 @@ function MasterSupplierCreatePageContent() {
 
   const handleSave = async () => {
     if (!apiEnabled) {
-      messageApi.warning("Set NEXT_PUBLIC_API_URL before saving supplier items.");
+      messageApi.warning(
+        "Set NEXT_PUBLIC_API_URL before saving supplier items.",
+      );
       return;
     }
 
@@ -391,13 +462,20 @@ function MasterSupplierCreatePageContent() {
         sebango_code: pickText(values.sebango_code),
         uniq_code: pickText(values.uniq_code),
         type: sectionPayloadTypeValue(section),
-        description: pickText(values.description, values.part_name, values.uniq_code),
+        description: pickText(
+          values.description,
+          values.part_name,
+          values.uniq_code,
+        ),
         quantity: String(values.quantity ?? 0),
         uom: pickText(values.uom),
         weight: String(values.weight ?? 0),
         pcs_per_kanban: String(values.pcs_per_kanban ?? 0),
         customer_cycle: pickText(values.customer_cycle),
-        status: pickText(values.status) || pickText(detailQuery.data?.status) || "active",
+        status:
+          pickText(values.status) ||
+          pickText(detailQuery.data?.status) ||
+          "active",
       };
 
       if (isEditing) {
@@ -414,12 +492,18 @@ function MasterSupplierCreatePageContent() {
         messageApi.error("Please complete all required fields");
         return;
       }
-      messageApi.error(getApiErrorMessage(saveError, "Failed to save supplier item"));
+      messageApi.error(
+        getApiErrorMessage(saveError, "Failed to save supplier item"),
+      );
     }
   };
 
   const pageTitle =
-    mode === "view" ? "View Supplier Item" : mode === "edit" ? "Edit Supplier Item" : "Create Supplier Item";
+    mode === "view"
+      ? "View Supplier Item"
+      : mode === "edit"
+        ? "Edit Supplier Item"
+        : "Create Supplier Item";
   const pageSubtitle = `${sectionLabel(section)} • ${mode === "create" ? "new entry" : `mode: ${mode}`}`;
 
   return (
@@ -429,7 +513,10 @@ function MasterSupplierCreatePageContent() {
       <div className="border-b border-gray-200 bg-white px-6 py-4">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => router.push("/master-supplier")}>
+            <Button
+              type="text"
+              icon={<ArrowLeftOutlined />}
+              onClick={() => router.push("/master-supplier")}>
               Back to Master Supplier
             </Button>
             <Typography.Title level={3} className="!mb-1 !mt-2">
@@ -437,7 +524,14 @@ function MasterSupplierCreatePageContent() {
             </Typography.Title>
             <Space wrap>
               <Typography.Text type="secondary">{pageSubtitle}</Typography.Text>
-              <Tag color={section === "subcon" ? "orange" : section === "indirect-raw-material" ? "purple" : "blue"}>
+              <Tag
+                color={
+                  section === "subcon"
+                    ? "orange"
+                    : section === "indirect-raw-material"
+                      ? "purple"
+                      : "blue"
+                }>
                 {sectionLabel(section)}
               </Tag>
               {readOnly ? <Tag>Read only</Tag> : null}
@@ -445,14 +539,15 @@ function MasterSupplierCreatePageContent() {
           </div>
 
           <Space>
-            <Button onClick={() => router.push("/master-supplier")}>Cancel</Button>
+            <Button onClick={() => router.push("/master-supplier")}>
+              Cancel
+            </Button>
             {!readOnly ? (
               <Button
                 type="primary"
                 icon={<SaveOutlined />}
                 loading={createState.isLoading || updateState.isLoading}
-                onClick={handleSave}
-              >
+                onClick={handleSave}>
                 {isEditing ? "Update" : "Save"}
               </Button>
             ) : null}
@@ -475,23 +570,37 @@ function MasterSupplierCreatePageContent() {
             type="error"
             showIcon
             message="Failed to load supplier item"
-            description={getApiErrorMessage(detailQuery.error, "Unable to fetch supplier item detail")}
+            description={getApiErrorMessage(
+              detailQuery.error,
+              "Unable to fetch supplier item detail",
+            )}
           />
         ) : null}
 
-        {apiEnabled && (detailQuery.isLoading || (suppliersLoading && mode !== "view") || warehousesLoading || uomsLoading) ? (
+        {apiEnabled &&
+        (detailQuery.isLoading ||
+          (suppliersLoading && mode !== "view") ||
+          warehousesLoading ||
+          uomsLoading) ? (
           <Card className="rounded-2xl border border-gray-100 shadow-sm">
             <Skeleton active paragraph={{ rows: 8 }} />
           </Card>
         ) : null}
 
-        {(!apiEnabled || !detailQuery.isLoading) && (!apiEnabled || !detailQuery.error) ? (
+        {(!apiEnabled || !detailQuery.isLoading) &&
+        (!apiEnabled || !detailQuery.error) ? (
           <>
             <Card className="rounded-2xl border border-gray-100 shadow-sm">
               <Descriptions title="Selection Summary" column={{ xs: 1, md: 3 }}>
-                <Descriptions.Item label="Supplier">{selectedSupplier?.label ?? "-"}</Descriptions.Item>
-                <Descriptions.Item label="Warehouse">{selectedWarehouse?.label ?? "-"}</Descriptions.Item>
-                <Descriptions.Item label="Material Section">{sectionLabel(section)}</Descriptions.Item>
+                <Descriptions.Item label="Supplier">
+                  {selectedSupplier?.label ?? "-"}
+                </Descriptions.Item>
+                <Descriptions.Item label="Warehouse">
+                  {selectedWarehouse?.label ?? "-"}
+                </Descriptions.Item>
+                <Descriptions.Item label="Material Section">
+                  {sectionLabel(section)}
+                </Descriptions.Item>
               </Descriptions>
             </Card>
 
@@ -501,21 +610,24 @@ function MasterSupplierCreatePageContent() {
                   <Form.Item
                     label="Supplier"
                     name="supplier_uuid"
-                    rules={[{ required: true, message: "Please select a supplier" }]}
-                  >
+                    rules={[
+                      { required: true, message: "Please select a supplier" },
+                    ]}>
                     <Select
                       showSearch
                       placeholder="Select supplier"
                       options={supplierOptions}
                       optionFilterProp="label"
+                      onChange={handleSupplierChange}
                     />
                   </Form.Item>
 
                   <Form.Item
                     label="Warehouse"
                     name="warehouse_uuid"
-                    rules={[{ required: true, message: "Please select a warehouse" }]}
-                  >
+                    rules={[
+                      { required: true, message: "Please select a warehouse" },
+                    ]}>
                     <Select
                       showSearch
                       placeholder="Select warehouse"
@@ -527,22 +639,33 @@ function MasterSupplierCreatePageContent() {
                   <Form.Item
                     label="Sebango Code"
                     name="uniq_code"
-                    rules={[{ required: true, message: "Please select a Sebango Code" }]}
-                  >
+                    rules={[
+                      {
+                        required: true,
+                        message: "Please select a Sebango Code",
+                      },
+                    ]}>
                     <Select
                       showSearch
-                      placeholder="Select UNIQ code from BOM"
+                      placeholder={
+                        selectedSupplierId
+                          ? "Select UNIQ code from BOM"
+                          : "Select supplier first"
+                      }
                       options={bomOptions}
                       optionFilterProp="label"
                       onChange={handleUniqChange}
+                      loading={bomFetching}
+                      disabled={!selectedSupplierId || readOnly}
                     />
                   </Form.Item>
 
                   <Form.Item
                     label="Material Code"
                     name="sebango_code"
-                    rules={[{ required: true, message: "Please input material code" }]}
-                  >
+                    rules={[
+                      { required: true, message: "Please input material code" },
+                    ]}>
                     <Input placeholder="Enter material code" />
                   </Form.Item>
                 </div>
@@ -580,9 +703,14 @@ function MasterSupplierCreatePageContent() {
                   <Form.Item
                     label="Quantity"
                     name="quantity"
-                    rules={[{ required: true, message: "Please input quantity" }]}
-                  >
-                    <InputNumber min={0} className="w-full" placeholder="Enter quantity" />
+                    rules={[
+                      { required: true, message: "Please input quantity" },
+                    ]}>
+                    <InputNumber
+                      min={0}
+                      className="w-full"
+                      placeholder="Enter quantity"
+                    />
                   </Form.Item>
                 </div>
 
@@ -590,22 +718,39 @@ function MasterSupplierCreatePageContent() {
                   <Form.Item
                     label="Weight"
                     name="weight"
-                    rules={[{ required: true, message: "Please input weight" }]}
-                  >
-                    <InputNumber min={0} className="w-full" placeholder="Enter weight" />
+                    rules={[
+                      { required: true, message: "Please input weight" },
+                    ]}>
+                    <InputNumber
+                      min={0}
+                      className="w-full"
+                      placeholder="Enter weight"
+                    />
                   </Form.Item>
                   <Form.Item
                     label="Pcs per Kanban"
                     name="pcs_per_kanban"
-                    rules={[{ required: true, message: "Please input pcs per kanban" }]}
-                  >
-                    <InputNumber min={0} className="w-full" placeholder="Enter pcs per kanban" />
+                    rules={[
+                      {
+                        required: true,
+                        message: "Please input pcs per kanban",
+                      },
+                    ]}>
+                    <InputNumber
+                      min={0}
+                      className="w-full"
+                      placeholder="Enter pcs per kanban"
+                    />
                   </Form.Item>
                   <Form.Item
                     label="Customer Cycle"
                     name="customer_cycle"
-                    rules={[{ required: true, message: "Please input customer cycle" }]}
-                  >
+                    rules={[
+                      {
+                        required: true,
+                        message: "Please input customer cycle",
+                      },
+                    ]}>
                     <Input placeholder="e.g. Daily / Weekly / Monthly" />
                   </Form.Item>
                   <Form.Item label="Description" name="description">
