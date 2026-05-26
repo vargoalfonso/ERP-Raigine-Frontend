@@ -1018,7 +1018,7 @@ function MasterSupplierCreatePageContent() {
                         />
                       </Form.Item>
 
-                      <Form.Item
+                      {/* <Form.Item
                         label="Quantity"
                         name="quantity"
                         rules={[
@@ -1032,7 +1032,7 @@ function MasterSupplierCreatePageContent() {
                           placeholder="Enter quantity"
                           disabled={autofilled}
                         />
-                      </Form.Item>
+                      </Form.Item> */}
 
                       <Form.Item
                         label="Weight"
