@@ -33,6 +33,7 @@ import {
   useReplaceBomMutation,
 } from "@/lib/api/bom/api";
 import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetMachinesQuery } from "@/lib/api/machines/api";
 import { useGetProcessesQuery, useGetUomsQuery } from "@/lib/api/system-settings/api";
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 
@@ -252,6 +253,8 @@ export default function BomEditPage() {
 
   const { data: processes = [], isLoading: isProcessesLoading } =
     useGetProcessesQuery(undefined, { skip: !apiEnabled });
+  const { data: machines = [], isLoading: isMachinesLoading } =
+    useGetMachinesQuery(undefined, { skip: !apiEnabled });
   const { data: suppliers = [], isLoading: isSuppliersLoading } = useListSuppliersQuery();
   const {
     data: uoms = [],
@@ -296,6 +299,24 @@ export default function BomEditPage() {
         .filter((item): item is { value: string; label: string } => Boolean(item)),
     [suppliers]
   );
+
+  const machineOptions = useMemo<Array<{ value: string | number; label: string }>>(() => {
+    return (machines ?? [])
+      .map((machine: any) => {
+        const rawId = machine?.id ?? machine?.ID;
+        const idStr = typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
+        if (!idStr) return null;
+        const asNumber = Number(idStr);
+        const value: string | number = Number.isFinite(asNumber) ? asNumber : idStr;
+        const name = typeof machine?.machine_name === "string" ? machine.machine_name.trim() : "";
+        const number = typeof machine?.machine_number === "string" ? machine.machine_number.trim() : "";
+        return {
+          value,
+          label: number && name ? `${number} — ${name}` : name || number || idStr,
+        };
+      })
+      .filter((item): item is { value: string | number; label: string } => Boolean(item));
+  }, [machines]);
 
   const supplierNameByValue = useMemo(() => {
     const map = new Map<string, string>();
@@ -529,8 +550,17 @@ export default function BomEditPage() {
                         }
                       />
                     </Form.Item>
-                    <Form.Item name={[routeField.name, "machine_id"]} label="Machine ID">
-                      <InputNumber min={0} style={{ width: "100%" }} placeholder="e.g. 1" />
+                    <Form.Item name={[routeField.name, "machine_id"]} label="Machine" rules={[{ required: true, message: "Machine is required" }] }>
+                      <Select
+                        showSearch
+                        placeholder="Select machine"
+                        options={machineOptions}
+                        loading={isMachinesLoading}
+                        optionFilterProp="label"
+                        filterOption={(input, option) =>
+                          String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                        }
+                      />
                     </Form.Item>
                     {/* <Form.Item name={[routeField.name, "cycle_time_sec"]} label="Cycle Time (sec)">
                       <InputNumber min={0} style={{ width: "100%" }} />
@@ -620,12 +650,12 @@ export default function BomEditPage() {
         <Form.Item name={[...fieldPath, "material_spec", "length_mm"]} label="Length (mm)">
           <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "cycle_time_sec"]} label="Cycle Time (sec)">
+        {/* <Form.Item name={[...fieldPath, "material_spec", "cycle_time_sec"]} label="Cycle Time (sec)">
           <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
         </Form.Item>
         <Form.Item name={[...fieldPath, "material_spec", "setup_time_min"]} label="Setup Time (min)">
           <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
-        </Form.Item>
+        </Form.Item> */}
         <Form.Item name={[...fieldPath, "material_spec", "customer_cycle"]} label="Customer Cycle">
           <Input placeholder="e.g., Daily / Weekly / Monthly" disabled={disabled} />
         </Form.Item>
