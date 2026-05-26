@@ -61,6 +61,7 @@ type MaterialSpec = {
   supplier_name?: string | null;
   cycle_time_sec?: number | null;
   setup_time_min?: number | null;
+  customer_cycle?: string | null;
 };
 
 type ChildRow = {
@@ -123,12 +124,32 @@ const pickAssetUrl = (asset: unknown): string | undefined => {
 };
 
 const parseToolings = (raw: unknown): ToolingRow[] => {
-  if (!Array.isArray(raw)) return [];
-  return raw.map((t: any) => ({
-    tooling_type: asStr(t?.tooling_type) ?? null,
-    tooling_code: asStr(t?.tooling_code) ?? null,
-    tooling_name: asStr(t?.tooling_name) ?? null,
-  }));
+  if (Array.isArray(raw)) {
+    return raw.map((t: any) => ({
+      tooling_type: asStr(t?.tooling_type) ?? null,
+      tooling_code: asStr(t?.tooling_code) ?? null,
+      tooling_name: asStr(t?.tooling_name) ?? null,
+    }));
+  }
+
+  if (raw && typeof raw === "object") {
+    const route = raw as Record<string, unknown>;
+    const fallbackTooling: ToolingRow = {
+      tooling_type: asStr(route.tooling_type ?? route.tooling_ref) ?? null,
+      tooling_code: asStr(route.tooling_code) ?? null,
+      tooling_name: asStr(route.tooling_name) ?? null,
+    };
+
+    if (
+      fallbackTooling.tooling_type ||
+      fallbackTooling.tooling_code ||
+      fallbackTooling.tooling_name
+    ) {
+      return [fallbackTooling];
+    }
+  }
+
+  return [];
 };
 
 const resolveMaterialSpec = (bom: unknown): Record<string, unknown> | null => {
@@ -156,7 +177,7 @@ const parseProcessRoutes = (raw: unknown): ProcessRouteRow[] => {
     cycle_time_sec: typeof r?.cycle_time_sec === "number" ? r.cycle_time_sec : null,
     setup_time_min: typeof r?.setup_time_min === "number" ? r.setup_time_min : null,
     machine_stroke: asStr(r?.machine_stroke) ?? null,
-    toolings: parseToolings(r?.toolings),
+    toolings: parseToolings(Array.isArray(r?.toolings) ? r.toolings : r),
   }));
 };
 
@@ -174,6 +195,12 @@ const parseMaterialSpec = (raw: unknown): MaterialSpec | null => {
     supplier_name: asStr(s.supplier_name) ?? null,
     cycle_time_sec: asNum(s.cycle_time_sec),
     setup_time_min: asNum(s.setup_time_min),
+    customer_cycle:
+      asStr(s.customer_cycle) ??
+      asStr(s.customerCycle) ??
+      asStr(s.cycle) ??
+      asStr(s.cycle_days) ??
+      null,
   };
 };
 
@@ -230,6 +257,7 @@ const MaterialSpecDesc = ({ spec }: { spec: MaterialSpec | null | undefined }) =
       <Descriptions.Item label="Form">{spec.form ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Supplier">{spec.supplier_name ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Weight">{fmt(spec.weight_kg, "kg")}</Descriptions.Item>
+      <Descriptions.Item label="Customer Cycle">{spec.customer_cycle ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Width">{fmt(spec.width_mm, "mm")}</Descriptions.Item>
       <Descriptions.Item label="Diameter">{fmt(spec.diameter_mm, "mm")}</Descriptions.Item>
       <Descriptions.Item label="Thickness">{fmt(spec.thickness_mm, "mm")}</Descriptions.Item>
@@ -372,7 +400,7 @@ export default function BomDetailPage() {
       render: (v: string) => <span className="font-semibold text-gray-900">{v}</span>,
     },
     { title: "Part Number", dataIndex: "partNumber", key: "partNumber", width: 150 },
-    { title: "Model", dataIndex: "model", key: "model", width: 100 },
+    { title: "Product Model", dataIndex: "model", key: "model", width: 120 },
     {
       title: "Qty/UNIQ",
       dataIndex: "qpu",
@@ -534,7 +562,7 @@ export default function BomDetailPage() {
                   <Descriptions.Item label="Part Number">
                     {asStr((bom as any)?.part_number) ?? "—"}
                   </Descriptions.Item>
-                  <Descriptions.Item label="Model">
+                  <Descriptions.Item label="Product Model">
                     {asStr((bom as any)?.model) ?? "—"}
                   </Descriptions.Item>
                   <Descriptions.Item label="UOM">

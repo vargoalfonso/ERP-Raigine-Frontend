@@ -42,6 +42,8 @@ type BomRow = {
   uniq: string;
   partName: string;
   partNumber: string;
+  model?: string;
+  customerCycle?: string;
   imageSrc?: string;
   assetLabel: string;
   assetType: string;
@@ -374,6 +376,12 @@ const mapNodeToRow = (
   const qpu = !isParent && qpuNumber != null ? `${qpuNumber} pcs` : "-";
   const version = typeof node.version === "string" && node.version.trim() ? node.version : "-";
   const imageSrc = typeof node.asset === "string" && node.asset.trim() ? node.asset : node.image_url;
+  const materialSpec = isRecord((node as any).material_specifications)
+    ? (node as any).material_specifications as Record<string, unknown>
+    : isRecord((node as any).material_spec)
+      ? (node as any).material_spec as Record<string, unknown>
+      : undefined;
+  const customerCycleText = materialSpec ? String(materialSpec.customer_cycle ?? materialSpec.customerCycle ?? "").trim() || "-" : "-";
   const assetLabel = node.asset_label || (imageSrc ? "2D Available" : "-");
   const assetType = node.asset_type || "";
   const cadViewable = Boolean(node.cad_viewable);
@@ -391,6 +399,7 @@ const mapNodeToRow = (
     uniq: uniq || "-",
     partName: String(node.part_name ?? "-") || "-",
     partNumber: String(node.part_number ?? "-") || "-",
+    model: String(node.model ?? "").trim() || "-",
     imageSrc: imageSrc || undefined,
     assetLabel,
     assetType,
@@ -400,6 +409,7 @@ const mapNodeToRow = (
     qpu,
     version,
     status: toStatusLabel((isRecord(node) ? node.bom_status : undefined) ?? node.status),
+    customerCycle: customerCycleText,
     children,
     bomId,
     internalId,
@@ -693,6 +703,22 @@ export default function BillOfMaterialPage() {
         <span className="text-gray-700">{record.partNumber}</span>
       ),
     },
+    {
+      title: "Product Model",
+      key: "model",
+      width: 140,
+      render: (_: unknown, record: BomRow) => (
+        <span className="text-gray-700">{record.model ?? "-"}</span>
+      ),
+    },
+    // {
+    //   title: "Customer Cycle",
+    //   key: "customerCycle",
+    //   width: 160,
+    //   render: (_: unknown, record: BomRow) => (
+    //     <span className="text-gray-700">{record.customerCycle ?? "-"}</span>
+    //   ),
+    // },
     {
       title: "Image",
       key: "image",

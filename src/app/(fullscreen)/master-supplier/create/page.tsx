@@ -20,6 +20,7 @@ import {
 import { ArrowLeftOutlined, SaveOutlined } from "@ant-design/icons";
 import {
   type BackendBomNode,
+  useGetBomTreeQuery,
   useGetBomsBySupplierQuery,
   useGetBomByIdQuery,
 } from "@/lib/api/bom/api";
@@ -77,8 +78,17 @@ type BomOption = {
   uom?: string;
   weight?: number;
   quantity?: number;
+  customerCycle?: string;
   description?: string;
   status?: string;
+};
+
+type SupplierOption = {
+  value: string;
+  label: string;
+  supplierCode: string;
+  queryValue: string;
+  matchValues: string[];
 };
 
 type BomTreeLookupResult = {
@@ -271,6 +281,44 @@ const flattenBomTree = (nodes: BackendBomNode[]): BackendBomNode[] => {
   return flattened;
 };
 
+const collectBomSupplierReferences = (nodes: BackendBomNode[]): Set<string> => {
+  const refs = new Set<string>();
+
+  flattenBomTree(nodes).forEach((node) => {
+    const materialSpec = resolveMaterialSpec(node);
+    [
+      materialSpec?.supplier_id,
+      materialSpec?.supplier_uuid,
+      materialSpec?.supplierId,
+      materialSpec?.supplierUuid,
+      materialSpec?.supplier_name,
+      materialSpec?.supplierName,
+    ]
+      .map((value) => pickText(value))
+      .filter(Boolean)
+      .forEach((value) => {
+        refs.add(value.toLowerCase());
+      });
+  });
+
+  return refs;
+};
+
+const getNodeSupplierReferences = (node: BackendBomNode): string[] => {
+  const materialSpec = resolveMaterialSpec(node);
+  return [
+    materialSpec?.supplier_id,
+    materialSpec?.supplier_uuid,
+    materialSpec?.supplierId,
+    materialSpec?.supplierUuid,
+    materialSpec?.supplier_name,
+    materialSpec?.supplierName,
+  ]
+    .map((value) => pickText(value))
+    .filter(Boolean)
+    .map((value) => value.toLowerCase());
+};
+
 const toBomOption = (node: BackendBomNode): BomOption | null => {
   const uniqCode = pickText(node.uniq_code, node.uniq);
   if (!uniqCode) return null;
@@ -302,6 +350,7 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
     uom: pickText(node.unit_measurement, (node as Record<string, unknown>).uom),
     weight: extractWeightFromMaterialSpec(materialSpec),
     quantity: extractNumber(node.quantity, node.qpu, (node as Record<string, unknown>).qty_per_uniq),
+    customerCycle: pickText(materialSpec?.customer_cycle),
     description: pickText(node.description, node.part_name),
     status: pickText((node as Record<string, unknown>).status, (node as Record<string, unknown>).bom_status),
   };
@@ -323,6 +372,7 @@ function MasterSupplierCreatePageContent() {
   const readOnly = mode === "view";
   const itemId = String(searchParams.get("id") ?? "").trim();
   const isEditing = mode === "edit";
+  const autofilled = Boolean(selectedUniqCode);
   const { data: suppliers = [], isLoading: suppliersLoading } =
     useListSuppliersQuery(undefined, {
       skip: !apiEnabled,
@@ -337,13 +387,16 @@ function MasterSupplierCreatePageContent() {
       skip: !apiEnabled,
     },
   );
+  const { data: globalBomTree } = useGetBomTreeQuery(undefined, {
+    skip: !apiEnabled,
+  });
+
+  const bomSupplierRefs = useMemo(
+    () => collectBomSupplierReferences(globalBomTree?.data ?? []),
+    [globalBomTree?.data],
+  );
 
   const selectedSupplierId = Form.useWatch("supplier_uuid", form);
-
-  const { data: bomTree, isFetching: bomFetching } = useGetBomsBySupplierQuery(
-    { supplier_id: selectedSupplierId ?? "" },
-    { skip: !apiEnabled || !selectedSupplierId },
-  );
   const bomDetailQuery = useGetBomByIdQuery(selectedBomLookupId, {
     skip: !apiEnabled || !selectedBomLookupId,
   });
@@ -354,7 +407,7 @@ function MasterSupplierCreatePageContent() {
   const [createSupplierItem, createState] = useCreateSupplierItemMutation();
   const [updateSupplierItem, updateState] = useUpdateSupplierItemMutation();
 
-  const supplierOptions = useMemo(
+  const supplierOptions = useMemo<SupplierOption[]>(
     () =>
       suppliers
         .filter((supplier) => {
@@ -364,7 +417,23 @@ function MasterSupplierCreatePageContent() {
           const category = resolveSupplierCategory(
             supplier as Record<string, unknown>,
           );
-          return (!status || status === "active") && category === section;
+          const supplierRefs = [
+            pickText(supplier.supplier_uuid, supplier.uuid, supplier.id),
+            pickText(supplier.supplier_name),
+            pickText(supplier.supplier_code),
+          ]
+            .filter(Boolean)
+            .map((value) => value.toLowerCase());
+
+          const existsInBom =
+            bomSupplierRefs.size === 0 ||
+            supplierRefs.some((value) => bomSupplierRefs.has(value));
+
+          return (
+            (!status || status === "active") &&
+            (bomSupplierRefs.size > 0 ? true : category === section) &&
+            existsInBom
+          );
         })
         .map((supplier) => {
           const value = pickText(
@@ -374,6 +443,13 @@ function MasterSupplierCreatePageContent() {
           );
           const supplierName = pickText(supplier.supplier_name);
           const supplierCode = pickText(supplier.supplier_code);
+          const matchValues = [
+            pickText(supplier.supplier_uuid, supplier.uuid, supplier.id),
+            supplierName,
+            supplierCode,
+          ]
+            .filter(Boolean)
+            .map((entry) => entry.toLowerCase());
           const label =
             supplierCode && supplierName
               ? `${supplierCode} — ${supplierName}`
@@ -383,16 +459,23 @@ function MasterSupplierCreatePageContent() {
             value,
             label,
             supplierCode,
+            queryValue: pickText(supplier.supplier_uuid, supplier.uuid, supplier.id),
+            matchValues,
           };
         })
-        .filter(
-          (
-            option,
-          ): option is { value: string; label: string; supplierCode: string } =>
-            Boolean(option),
-        )
+        .filter((option): option is SupplierOption => Boolean(option))
         .sort((left, right) => left.label.localeCompare(right.label)),
-    [section, suppliers],
+    [bomSupplierRefs, section, suppliers],
+  );
+
+  const selectedSupplier = useMemo(
+    () => supplierOptions.find((option) => option.value === selectedSupplierId),
+    [selectedSupplierId, supplierOptions],
+  );
+
+  const { data: bomTree, isFetching: bomFetching } = useGetBomsBySupplierQuery(
+    { supplier_id: selectedSupplier?.queryValue ?? selectedSupplierId ?? "" },
+    { skip: !apiEnabled || !(selectedSupplier?.queryValue ?? selectedSupplierId) },
   );
 
   const uomOptions = useMemo(
@@ -436,8 +519,19 @@ function MasterSupplierCreatePageContent() {
     [warehouses],
   );
 
+  const supplierMatchedTreeItems = useMemo(() => {
+    if (!selectedSupplier) return [] as BackendBomNode[];
+
+    return flattenBomTree(globalBomTree?.data ?? []).filter((node) => {
+      const refs = getNodeSupplierReferences(node);
+      return refs.some((ref) => selectedSupplier.matchValues.includes(ref));
+    });
+  }, [globalBomTree?.data, selectedSupplier]);
+
   const bomOptions = useMemo(() => {
-    const items = flattenBomTree(bomTree?.data ?? []);
+    const items = supplierMatchedTreeItems.length > 0
+      ? supplierMatchedTreeItems
+      : flattenBomTree(bomTree?.data ?? []);
     const mapped = items
       .map(toBomOption)
       .filter((option): option is BomOption => Boolean(option));
@@ -450,14 +544,10 @@ function MasterSupplierCreatePageContent() {
     return Array.from(deduped.values()).sort((left, right) =>
       left.label.localeCompare(right.label),
     );
-  }, [bomTree]);
+  }, [bomTree, supplierMatchedTreeItems]);
 
   const selectedWarehouseId = Form.useWatch("warehouse_uuid", form);
 
-  const selectedSupplier = useMemo(
-    () => supplierOptions.find((option) => option.value === selectedSupplierId),
-    [selectedSupplierId, supplierOptions],
-  );
   const selectedWarehouse = useMemo(
     () =>
       warehouseOptions.find((option) => option.value === selectedWarehouseId),
@@ -504,6 +594,7 @@ function MasterSupplierCreatePageContent() {
       size: undefined,
       uom: undefined,
       weight: undefined,
+      customer_cycle: undefined,
     });
   };
 
@@ -532,6 +623,7 @@ function MasterSupplierCreatePageContent() {
       uom: matchedUom?.value,
       quantity: matched.quantity,
       weight: matched.weight,
+      customer_cycle: matched.customerCycle,
       description: matched.description || matched.partName,
       status: normalizeFormStatus(matched.status) ?? form.getFieldValue("status") ?? "active",
     });
@@ -571,6 +663,7 @@ function MasterSupplierCreatePageContent() {
       uom: matchedUom?.value ?? pickText(bomDetail.unit_measurement, (bomDetail as Record<string, unknown>).uom),
       quantity: extractNumber(bomDetail.quantity, bomDetail.qpu, (bomDetail as Record<string, unknown>).qty_per_uniq),
       weight: extractWeightFromMaterialSpec(materialSpec),
+      customer_cycle: pickText(materialSpec?.customer_cycle),
       description: pickText(bomDetail.description, bomDetail.part_name, bomDetail.uniq_code),
       status: normalizeFormStatus((bomDetail as Record<string, unknown>).status ?? (bomDetail as Record<string, unknown>).bom_status) ?? form.getFieldValue("status") ?? "active",
     });
@@ -649,11 +742,11 @@ function MasterSupplierCreatePageContent() {
   const pageSubtitle = `${sectionLabel(section)} • ${mode === "create" ? "new entry" : `mode: ${mode}`}`;
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-10">
+    <div className="min-h-screen bg-[#eef4ff] pb-10">
       {contextHolder}
 
-      <div className="border-b border-gray-200 bg-white px-6 py-4">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="border-b border-[#dbe5f3] bg-white px-6 py-4 shadow-sm">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 flex-wrap">
           <div>
             <Button
               type="text"
@@ -697,7 +790,7 @@ function MasterSupplierCreatePageContent() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-6xl p-6 space-y-6">
+      <div className="mx-auto max-w-7xl p-6 space-y-6">
         {!apiEnabled ? (
           <Alert
             type="warning"
@@ -732,192 +825,306 @@ function MasterSupplierCreatePageContent() {
         {(!apiEnabled || !detailQuery.isLoading) &&
         (!apiEnabled || !detailQuery.error) ? (
           <>
-            <Card className="rounded-2xl border border-gray-100 shadow-sm">
-              <Descriptions title="Selection Summary" column={{ xs: 1, md: 3 }}>
-                <Descriptions.Item label="Supplier">
-                  {selectedSupplier?.label ?? "-"}
-                </Descriptions.Item>
-                <Descriptions.Item label="Warehouse">
-                  {selectedWarehouse?.label ?? "-"}
-                </Descriptions.Item>
-                <Descriptions.Item label="Material Section">
-                  {sectionLabel(section)}
-                </Descriptions.Item>
-              </Descriptions>
-            </Card>
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
+              <div className="space-y-6">
+                <Card className="overflow-hidden rounded-2xl border border-[#dfe8f5] shadow-sm">
+                  <div className="flex items-start justify-between gap-4 border-b border-[#eef2f6] pb-5">
+                    <div>
+                      <Typography.Title level={4} className="!mb-1">
+                        Step 1: Select Supplier
+                      </Typography.Title>
+                      <Typography.Text type="secondary">
+                        Configure supplier details
+                      </Typography.Text>
+                    </div>
+                    <span className="rounded-full bg-[#eef4ff] px-3 py-1 text-xs font-semibold text-[#316cff]">
+                      Required
+                    </span>
+                  </div>
 
-            <Card className="rounded-2xl border border-gray-100 shadow-sm">
-              <Form form={form} layout="vertical" disabled={readOnly}>
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <Form.Item
-                    label="Supplier"
-                    name="supplier_uuid"
-                    rules={[
-                      { required: true, message: "Please select a supplier" },
-                    ]}>
-                    <Select
-                      showSearch
-                      placeholder="Select supplier"
-                      options={supplierOptions}
-                      optionFilterProp="label"
-                      onChange={handleSupplierChange}
-                    />
-                  </Form.Item>
+                  <Form form={form} layout="vertical" disabled={readOnly} className="mt-6">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                      <Form.Item
+                        label="Supplier Name"
+                        name="supplier_uuid"
+                        rules={[
+                          { required: true, message: "Please select a supplier" },
+                        ]}
+                      >
+                        <Select
+                          size="large"
+                          showSearch
+                          placeholder="Select supplier"
+                          options={supplierOptions}
+                          optionFilterProp="label"
+                          onChange={handleSupplierChange}
+                        />
+                      </Form.Item>
 
-                  <Form.Item
-                    label="Warehouse"
-                    name="warehouse_uuid"
-                    rules={[
-                      { required: true, message: "Please select a warehouse" },
-                    ]}>
-                    <Select
-                      showSearch
-                      placeholder="Select warehouse"
-                      options={warehouseOptions}
-                      optionFilterProp="label"
-                    />
-                  </Form.Item>
+                      <Form.Item label="Supplier ID">
+                        <Input
+                          size="large"
+                          value={selectedSupplier?.supplierCode || selectedSupplier?.value || ""}
+                          placeholder="Auto-filled from supplier selection"
+                          disabled
+                        />
+                      </Form.Item>
 
-                  <Form.Item
-                    label="Sebango Code"
-                    name="uniq_code"
-                    rules={[
-                      {
-                        required: true,
-                        message: "Please select a Sebango Code",
-                      },
-                    ]}>
-                    <Select
-                      showSearch
-                      placeholder={
-                        selectedSupplierId
-                          ? "Select UNIQ code from BOM"
-                          : "Select supplier first"
-                      }
-                      options={bomOptions}
-                      optionFilterProp="label"
-                      onChange={handleUniqChange}
-                      loading={bomFetching}
-                      disabled={!selectedSupplierId || readOnly}
-                    />
-                  </Form.Item>
+                      <Form.Item
+                        label="Warehouse"
+                        name="warehouse_uuid"
+                        rules={[
+                          { required: true, message: "Please select a warehouse" },
+                        ]}
+                      >
+                        <Select
+                          size="large"
+                          showSearch
+                          placeholder="Select warehouse"
+                          options={warehouseOptions}
+                          optionFilterProp="label"
+                        />
+                      </Form.Item>
+                    </div>
+                  </Form>
+                </Card>
 
-                  <Form.Item
-                    label="Material Code"
-                    name="sebango_code"
-                    rules={[
-                      { required: true, message: "Please input material code" },
-                    ]}>
-                    <Input placeholder="Enter material code" />
-                  </Form.Item>
-                </div>
+                <Card className="overflow-hidden rounded-2xl border border-[#dfe8f5] shadow-sm">
+                  <div className="flex items-start justify-between gap-4 border-b border-[#eef2f6] pb-5">
+                    <div>
+                      <Typography.Title level={4} className="!mb-1">
+                        Step 2: Input Data
+                      </Typography.Title>
+                      <Typography.Text type="secondary">
+                        Configure product codes and identification information
+                      </Typography.Text>
+                    </div>
+                    <span className="rounded-full bg-[#eef4ff] px-3 py-1 text-xs font-semibold text-[#316cff]">
+                      Required
+                    </span>
+                  </div>
 
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <Form.Item label="Type of Material" name="type">
-                    <Select
-                      placeholder="Select material type"
-                      options={[
-                        { label: "Steel Bar", value: "steel_bar" },
-                        { label: "Pipe", value: "pipe" },
-                        { label: "Coil", value: "coil" },
-                        { label: "Wire", value: "wire" },
-                        { label: "Steel Plate", value: "steel_plate" },
-                      ]}
-                    />
-                  </Form.Item>
-                  <Form.Item label="Product Model" name="product_model">
-                    <Input placeholder="Auto-filled from BOM" />
-                  </Form.Item>
-                  <Form.Item label="Part Name" name="part_name">
-                    <Input placeholder="Auto-filled from BOM" />
-                  </Form.Item>
-                  <Form.Item label="Part Number" name="part_number">
-                    <Input placeholder="Auto-filled from BOM" />
-                  </Form.Item>
-                </div>
+                  <Form form={form} layout="vertical" disabled={readOnly} className="mt-6">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      <Form.Item
+                        label="Uniq"
+                        name="uniq_code"
+                        rules={[
+                          {
+                            required: true,
+                            message: "Please select a Sebango Code",
+                          },
+                        ]}
+                      >
+                        <Select
+                          size="large"
+                          showSearch
+                          placeholder={
+                            selectedSupplierId
+                              ? "Select uniq from BOM"
+                              : "Select supplier first"
+                          }
+                          options={bomOptions.map((option) => ({
+                            ...option,
+                            label: [
+                              option.label,
+                              option.partName,
+                              option.productModel,
+                            ]
+                              .filter(Boolean)
+                              .join(" — "),
+                          }))}
+                          optionFilterProp="label"
+                          onChange={handleUniqChange}
+                          loading={bomFetching}
+                          disabled={!selectedSupplierId || readOnly}
+                        />
+                      </Form.Item>
 
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <Form.Item label="Grade" name="grade">
-                    <Input placeholder="Auto-filled from BOM" />
-                  </Form.Item>
-                  <Form.Item label="Size" name="size">
-                    <Input placeholder="Auto-filled from BOM" />
-                  </Form.Item>
-                  <Form.Item label="UOM" name="uom">
-                    <Select
-                      showSearch
-                      placeholder="Select UOM from system setting"
-                      options={uomOptions}
-                      optionFilterProp="label"
-                    />
-                  </Form.Item>
-                  <Form.Item
-                    label="Quantity"
-                    name="quantity"
-                    rules={[
-                      { required: true, message: "Please input quantity" },
-                    ]}>
-                    <InputNumber
-                      min={0}
-                      className="w-full"
-                      placeholder="Enter quantity"
-                    />
-                  </Form.Item>
-                </div>
+                      <Form.Item label="Product Model" name="product_model">
+                        <Input size="large" placeholder="Auto-filled from BOM" disabled={autofilled} />
+                      </Form.Item>
 
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  <Form.Item
-                    label="Weight"
-                    name="weight"
-                    rules={[
-                      { required: true, message: "Please input weight" },
-                    ]}>
-                    <InputNumber
-                      min={0}
-                      className="w-full"
-                      placeholder="Enter weight"
-                    />
-                  </Form.Item>
-                  <Form.Item
-                    label="Pcs per Kanban"
-                    name="pcs_per_kanban"
-                    rules={[
-                      {
-                        required: true,
-                        message: "Please input pcs per kanban",
-                      },
-                    ]}>
-                    <InputNumber
-                      min={0}
-                      className="w-full"
-                      placeholder="Enter pcs per kanban"
-                    />
-                  </Form.Item>
-                  <Form.Item
-                    label="Customer Cycle"
-                    name="customer_cycle"
-                    rules={[
-                      {
-                        required: true,
-                        message: "Please input customer cycle",
-                      },
-                    ]}>
-                    <Input placeholder="e.g. Daily / Weekly / Monthly" />
-                  </Form.Item>
-                  <Form.Item label="Description" name="description">
-                    <Input placeholder="Optional description" />
-                  </Form.Item>
-                  <Form.Item label="Status" name="status" initialValue="active">
-                    <Select
-                      options={[
-                        { label: "Active", value: "active" },
-                        { label: "Inactive", value: "inactive" },
-                      ]}
-                    />
-                  </Form.Item>
-                </div>
-              </Form>
-            </Card>
+                      <Form.Item label="Part Name" name="part_name">
+                        <Input size="large" placeholder="Auto-filled from BOM" disabled={autofilled} />
+                      </Form.Item>
+
+                      <Form.Item label="Part Number" name="part_number">
+                        <Input size="large" placeholder="Auto-filled from BOM" disabled={autofilled} />
+                      </Form.Item>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      <Form.Item
+                        label="Material Code"
+                        name="sebango_code"
+                        rules={[
+                          { required: true, message: "Please input material code" },
+                        ]}
+                      >
+                        <Input size="large" placeholder="Enter material code" />
+                      </Form.Item>
+
+                      <Form.Item label="Grade/Size" name="grade">
+                        <Input size="large" placeholder="Auto-filled grade" disabled={autofilled} />
+                      </Form.Item>
+
+                      <Form.Item label="Size" name="size">
+                        <Input size="large" placeholder="Auto-filled size" disabled={autofilled} />
+                      </Form.Item>
+
+                      <Form.Item label="UOM" name="uom">
+                        <Select
+                          size="large"
+                          showSearch
+                          placeholder="Select UOM"
+                          options={uomOptions}
+                          optionFilterProp="label"
+                        />
+                      </Form.Item>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      <Form.Item label="Type" name="type">
+                        <Select
+                          size="large"
+                          placeholder="Select Type"
+                          options={[
+                            { label: "Steel Bar", value: "steel_bar" },
+                            { label: "Pipe", value: "pipe" },
+                            { label: "Coil", value: "coil" },
+                            { label: "Wire", value: "wire" },
+                            { label: "Steel Plate", value: "steel_plate" },
+                          ]}
+                          disabled={autofilled}
+                        />
+                      </Form.Item>
+
+                      <Form.Item
+                        label="Quantity/Kanban"
+                        name="pcs_per_kanban"
+                        rules={[
+                          {
+                            required: true,
+                            message: "Please input Quantity per kanban",
+                          },
+                        ]}
+                      >
+                        <InputNumber
+                          min={0}
+                          size="large"
+                          className="w-full"
+                          placeholder="qty/kanban"
+                        />
+                      </Form.Item>
+
+                      <Form.Item
+                        label="Quantity"
+                        name="quantity"
+                        rules={[
+                          {  message: "Please input quantity" },
+                        ]}
+                      >
+                        <InputNumber
+                          min={0}
+                          size="large"
+                          className="w-full"
+                          placeholder="Enter quantity"
+                          disabled={autofilled}
+                        />
+                      </Form.Item>
+
+                      <Form.Item
+                        label="Weight"
+                        name="weight"
+                        rules={[
+                          { required: true, message: "Please input weight" },
+                        ]}
+                      >
+                        <InputNumber
+                          min={0}
+                          size="large"
+                          className="w-full"
+                          placeholder="Weight"
+                          disabled={autofilled}
+                        />
+                      </Form.Item>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      <Form.Item
+                        label="Customer Cycle"
+                        name="customer_cycle"
+                        rules={[
+                          {
+                            // required: true,
+                            message: "Please input customer cycle",
+                          },
+                        ]}
+                      >
+                        <Input size="large" placeholder="e.g. Daily / Weekly / Monthly" disabled={autofilled} />
+                      </Form.Item>
+
+                      <Form.Item label="Description" name="description">
+                        <Input size="large" placeholder="Optional description" />
+                      </Form.Item>
+
+                      <Form.Item label="Status" name="status" initialValue="active">
+                        <Select
+                          size="large"
+                          options={[
+                            { label: "Active", value: "active" },
+                            { label: "Inactive", value: "inactive" },
+                          ]}
+                        />
+                      </Form.Item>
+                    </div>
+                  </Form>
+                </Card>
+              </div>
+
+              <div className="space-y-6">
+                <Card className="rounded-2xl border border-[#dfe8f5] shadow-sm">
+                  <Typography.Title level={5} className="!mb-4">
+                    Summary
+                  </Typography.Title>
+                  <div className="space-y-4">
+                    <div className="rounded-xl bg-[#f8fbff] p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-[#7a8ca8]">
+                        Supplier
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-[#1f2d3d]">
+                        {selectedSupplier?.label ?? "-"}
+                      </div>
+                    </div>
+                    <div className="rounded-xl bg-[#f8fbff] p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-[#7a8ca8]">
+                        Warehouse
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-[#1f2d3d]">
+                        {selectedWarehouse?.label ?? "-"}
+                      </div>
+                    </div>
+                    <div className="rounded-xl bg-[#f8fbff] p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-[#7a8ca8]">
+                        Material Section
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-[#1f2d3d]">
+                        {sectionLabel(section)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl bg-[#f8fbff] p-4">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-[#7a8ca8]">
+                        Selected Uniq
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-[#1f2d3d]">
+                        {selectedUniqCode || form.getFieldValue("uniq_code") || "-"}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+            </div>
           </>
         ) : null}
       </div>

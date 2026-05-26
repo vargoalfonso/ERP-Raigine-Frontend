@@ -56,6 +56,9 @@ type MaterialSpec = {
   diameter_mm?: number;
   thickness_mm?: number;
   length_mm?: number;
+  cycle_time_sec?: number;
+  setup_time_min?: number;
+  customer_cycle?: string;
 };
 
 type ChildPart = {
@@ -507,6 +510,18 @@ export default function Page() {
         <Form.Item name={[...fieldPath, "material_spec", "diameter_mm"]} label="Diameter (mm)"> <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} /></Form.Item>
         <Form.Item name={[...fieldPath, "material_spec", "thickness_mm"]} label="Thickness (mm)"> <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} /></Form.Item>
         <Form.Item name={[...fieldPath, "material_spec", "length_mm"]} label="Length (mm)"> <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} /></Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "weight_kg"]} label="Weight (kg)"> <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} /></Form.Item>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Form.Item name={[...fieldPath, "material_spec", "cycle_time_sec"]} label="Cycle Time (sec)">
+          <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "setup_time_min"]} label="Setup Time (min)">
+          <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "customer_cycle"]} label="Customer Cycle">
+          <Input placeholder="e.g., Daily / Weekly / Monthly" disabled={disabled} />
+        </Form.Item>
       </div>
     </div>
   );
@@ -922,6 +937,9 @@ export default function Page() {
           thickness_mm: s.thickness_mm,
           length_mm: s.length_mm,
           weight_kg: s.weight_kg,
+          cycle_time_sec: s.cycle_time_sec,
+          setup_time_min: s.setup_time_min,
+          customer_cycle: cleanText(s.customer_cycle),
           ...(supplierName ? { supplier_name: supplierName } : {}),
         };
         const cleanedEntries = Object.entries(raw).filter(
@@ -939,6 +957,7 @@ export default function Page() {
             const uniq_code = cleanText(c.uniq);
             const part_name = cleanText(c.part_name);
             const part_number = cleanText(c.part_number);
+            const model = cleanText(c.model);
 
             const anyChildFieldFilled =
               Boolean(uniq_code) ||
@@ -960,6 +979,7 @@ export default function Page() {
               uniq_code,
               part_name,
               part_number,
+              model,
               uom: parentUomValue,
               level,
               qty_per_uniq:
@@ -1010,6 +1030,7 @@ export default function Page() {
         uniq_code: parentUniq,
         part_name: cleanText(values.part_name),
         part_number: cleanText(values.part_number),
+        model: cleanText(values.model),
         uom: parentUomValue,
         description: cleanText(values.description),
       };
@@ -1344,7 +1365,7 @@ export default function Page() {
                         <Button icon={<UploadOutlined />}>Choose File</Button>
                       </Upload>
 
-                      <Button
+                      {/* <Button
                         icon={<UploadOutlined />}
                         onClick={() =>
                           messageApi.info(
@@ -1353,7 +1374,7 @@ export default function Page() {
                         }
                       >
                         Upload
-                      </Button>
+                      </Button> */}
                     </div>
                     <Text type="secondary" className="block mt-2">
                       Upload image for 3D/2D CAD reference
@@ -1597,7 +1618,7 @@ export default function Page() {
                   className="mb-6"
                   styles={{ body: { paddingTop: 16 } }}
                 >
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <Form.Item
                       name={["material_spec", "material_code"]}
                       label="Material Code"
@@ -1626,6 +1647,24 @@ export default function Page() {
                       />
                     </Form.Item>
 
+                    <Form.Item name={["material_spec", "weight_kg"]} label="Weight (kg)">
+                      <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
+                    </Form.Item>
+                    <Form.Item name={[
+                      "material_spec",
+                      "cycle_time_sec",
+                    ]} label="Cycle Time (sec)">
+                      <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
+                    </Form.Item>
+                    <Form.Item name={[
+                      "material_spec",
+                      "setup_time_min",
+                    ]} label="Setup Time (min)">
+                      <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
+                    </Form.Item>
+                    <Form.Item name={["material_spec", "customer_cycle"]} label="Customer Cycle">
+                      <Input placeholder="e.g., Daily / Weekly / Monthly" size="large" disabled={isParentAssembly} />
+                    </Form.Item>
                     <Form.Item
                       name={["material_spec", "supplier"]}
                       label="Supplier"

@@ -67,6 +67,7 @@ type MaterialSpecForm = {
   length_mm?: number;
   cycle_time_sec?: number;
   setup_time_min?: number;
+  customer_cycle?: string;
 };
 
 type ChildPartForm = {
@@ -432,6 +433,7 @@ export default function BomEditPage() {
         length_mm: typeof spec.length_mm === "number" ? spec.length_mm : undefined,
         cycle_time_sec: typeof spec.cycle_time_sec === "number" ? spec.cycle_time_sec : undefined,
         setup_time_min: typeof spec.setup_time_min === "number" ? spec.setup_time_min : undefined,
+        customer_cycle: typeof spec.customer_cycle === "string" ? spec.customer_cycle : undefined,
       };
     };
 
@@ -682,6 +684,9 @@ export default function BomEditPage() {
         <Form.Item name={[...fieldPath, "material_spec", "setup_time_min"]} label="Setup Time (min)">
           <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
         </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "customer_cycle"]} label="Customer Cycle">
+          <Input placeholder="e.g., Daily / Weekly / Monthly" disabled={disabled} />
+        </Form.Item>
       </div>
     </div>
   );
@@ -924,6 +929,7 @@ export default function BomEditPage() {
           weight_kg: typeof spec?.weight_kg === "number" && Number.isFinite(spec.weight_kg) ? spec.weight_kg : null,
           cycle_time_sec: typeof spec?.cycle_time_sec === "number" && Number.isFinite(spec.cycle_time_sec) ? spec.cycle_time_sec : null,
           setup_time_min: typeof spec?.setup_time_min === "number" && Number.isFinite(spec.setup_time_min) ? spec.setup_time_min : null,
+          customer_cycle: cleanText(spec?.customer_cycle) ?? null,
         };
         if (supplierRaw) {
           const supplierId = toNumberId(supplierRaw);
