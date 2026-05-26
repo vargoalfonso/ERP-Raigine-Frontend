@@ -300,10 +300,10 @@ export default function Page() {
       ],
       child_parts: [],
       material_spec: {
-        width_mm: 200,
-        diameter_mm: 25,
-        thickness_mm: 5,
-        length_mm: 300,
+        // width_mm: 200,
+        // diameter_mm: 25,
+        // thickness_mm: 5,
+        // length_mm: 300,
       },
     }),
     []
@@ -356,27 +356,6 @@ export default function Page() {
 
     return watchedParentProcessRoutes.some((route) => isAssemblyProcessValue(route?.process_id));
   }, [watchedParentProcessRoutes, processOptions]);
-
-  useEffect(() => {
-    if (!isParentAssembly) return;
-
-    const currentRoutes = form.getFieldValue("process_routes");
-    const currentFirst = Array.isArray(currentRoutes) && currentRoutes.length > 0
-      ? currentRoutes[0]
-      : {};
-
-    form.setFieldValue("process_routes", [
-      {
-        ...currentFirst,
-        sequence:
-          typeof currentFirst?.sequence === "number" && Number.isFinite(currentFirst.sequence)
-            ? currentFirst.sequence
-            : 1,
-      },
-    ]);
-    form.setFieldValue("material_spec", {});
-    setOpenProcessRouteIndex(0);
-  }, [form, isParentAssembly]);
 
   const addLevel1Child = () => {
     rootAddChildRef.current?.();
@@ -909,19 +888,6 @@ export default function Page() {
           })
           .filter((r) => r.process_id !== undefined && r.machine_id !== undefined);
 
-      const mapAssemblyParentRoutes = (routes?: ProcessRoute[]) => {
-        const first = Array.isArray(routes) ? routes[0] : undefined;
-        const process_id = toNumberId(first?.process_id);
-        if (process_id === undefined) return [];
-
-        return [
-          {
-            op_seq: 10,
-            process_id,
-          },
-        ];
-      };
-
       const mapMaterialSpec = (spec?: MaterialSpec) => {
         const s = spec ?? {};
         const supplierRaw = cleanText(s.supplier);
@@ -1001,9 +967,7 @@ export default function Page() {
         return;
       }
 
-      const parentRoutes = assemblyMode
-        ? mapAssemblyParentRoutes(values.process_routes)
-        : mapProcessRoutes(values.process_routes);
+      const parentRoutes = mapProcessRoutes(values.process_routes);
       const parentSpec = assemblyMode ? undefined : mapMaterialSpec(values.material_spec);
       if (!assemblyMode && !parentSpec) {
         messageApi.destroy("bom-save");
@@ -1391,28 +1355,26 @@ export default function Page() {
                     <div className="space-y-4">
                       {isParentAssembly ? (
                         <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
-                          Process yang dipilih bertipe <span className="font-semibold">Assembly</span>, sehingga material parent disabled dan child minimal 2 item.
+                          Process yang dipilih bertipe <span className="font-semibold">Assembly</span>, parent tetap bisa menambah process route, material parent disabled, dan child minimal 2 item.
                         </div>
                       ) : null}
 
                       <div className="flex items-center justify-between">
                         <span>Process Routes</span>
-                        {!isParentAssembly ? (
-                          <Button
-                            type="primary"
-                            icon={<PlusOutlined />}
-                            onClick={() => {
-                              const current = form.getFieldValue("process_routes") ?? [];
-                              form.setFieldValue("process_routes", [
-                                ...current,
-                                { sequence: (current.length ?? 0) + 1 },
-                              ]);
-                              setOpenProcessRouteIndex(current.length ?? 0);
-                            }}
-                          >
-                            Add Process Route
-                          </Button>
-                        ) : null}
+                        <Button
+                          type="primary"
+                          icon={<PlusOutlined />}
+                          onClick={() => {
+                            const current = form.getFieldValue("process_routes") ?? [];
+                            form.setFieldValue("process_routes", [
+                              ...current,
+                              { sequence: (current.length ?? 0) + 1 },
+                            ]);
+                            setOpenProcessRouteIndex(current.length ?? 0);
+                          }}
+                        >
+                          Add Process Route
+                        </Button>
                       </div>
                     </div>
                   }
@@ -1456,7 +1418,6 @@ export default function Page() {
                                 <Button
                                   type="text"
                                   danger
-                                  disabled={isParentAssembly}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     remove(field.name);
@@ -1551,7 +1512,7 @@ export default function Page() {
                                       <Form.Item
                                         {...routeField}
                                         name={[field.name, "setup_time_min"]}
-                                        label="Setup Time (min)"
+                                        label="Setup Time/Dandori (min)"
                                       >
                                         <InputNumber
                                           size="large"
@@ -1650,7 +1611,7 @@ export default function Page() {
                     <Form.Item name={["material_spec", "weight_kg"]} label="Weight (kg)">
                       <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
                     </Form.Item>
-                    <Form.Item name={[
+                    {/* <Form.Item name={[
                       "material_spec",
                       "cycle_time_sec",
                     ]} label="Cycle Time (sec)">
@@ -1661,7 +1622,7 @@ export default function Page() {
                       "setup_time_min",
                     ]} label="Setup Time (min)">
                       <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
-                    </Form.Item>
+                    </Form.Item> */}
                     <Form.Item name={["material_spec", "customer_cycle"]} label="Customer Cycle">
                       <Input placeholder="e.g., Daily / Weekly / Monthly" size="large" disabled={isParentAssembly} />
                     </Form.Item>

@@ -489,12 +489,21 @@ const BOM_TAG = { type: "BOM" as const, id: "TREE" as const };
 
 export const bomSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
-    getBomTree: builder.query<ApiResponse<BackendBomNode[]>, void>({
-      query: () => ({
-        url: "/products/bom",
-        method: "GET",
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
+    getBomTree: builder.query<ApiResponse<BackendBomNode[]>, { page?: number; limit?: number } | void>({
+      query: (params) => {
+        const page = params?.page ?? 1;
+        const limit = params?.limit ?? 1000;
+        const searchParams = new URLSearchParams({
+          page: String(page),
+          limit: String(limit),
+        });
+
+        return {
+          url: `/products/bom?${searchParams.toString()}`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        };
+      },
       transformResponse: (response: unknown) => {
         const arr = parseTreeResponse(response);
         const mapped = arr.map(mapNewNodeToLegacy);

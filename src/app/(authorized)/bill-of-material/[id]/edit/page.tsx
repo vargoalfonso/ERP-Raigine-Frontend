@@ -39,12 +39,6 @@ import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 
-type ToolingForm = {
-  tooling_type?: string;
-  tooling_code?: string;
-  tooling_name?: string;
-};
-
 type ProcessRouteForm = {
   op_seq?: number;
   process_id?: number | string;
@@ -53,7 +47,7 @@ type ProcessRouteForm = {
   setup_time_min?: number;
   machine_stroke?: string;
   tooling_ref?: string;
-  toolings?: ToolingForm[];
+  tooling_type?: string;
 };
 
 type MaterialSpecForm = {
@@ -374,22 +368,6 @@ export default function BomEditPage() {
   }, [watchedParentProcessRoutes, processOptions]);
 
   useEffect(() => {
-    if (!isParentAssembly) return;
-    const currentRoutes = form.getFieldValue("process_routes");
-    const currentFirst = Array.isArray(currentRoutes) && currentRoutes.length > 0 ? currentRoutes[0] : {};
-    form.setFieldValue("process_routes", [
-      {
-        ...currentFirst,
-        op_seq:
-          typeof currentFirst?.op_seq === "number" && Number.isFinite(currentFirst.op_seq)
-            ? currentFirst.op_seq
-            : 10,
-      },
-    ]);
-    form.setFieldValue("material_spec", {});
-  }, [form, isParentAssembly]);
-
-  useEffect(() => {
     if (!bom) return;
     const mapRouteFromApi = (route: any): ProcessRouteForm => ({
       op_seq: typeof route?.op_seq === "number" ? route.op_seq : undefined,
@@ -399,13 +377,11 @@ export default function BomEditPage() {
       setup_time_min: typeof route?.setup_time_min === "number" ? route.setup_time_min : undefined,
       machine_stroke: typeof route?.machine_stroke === "string" ? route.machine_stroke : undefined,
       tooling_ref: typeof route?.tooling_ref === "string" ? route.tooling_ref : undefined,
-      toolings: Array.isArray(route?.toolings)
-        ? route.toolings.map((t: any): ToolingForm => ({
-            tooling_type: typeof t?.tooling_type === "string" ? t.tooling_type : undefined,
-            tooling_code: typeof t?.tooling_code === "string" ? t.tooling_code : undefined,
-            tooling_name: typeof t?.tooling_name === "string" ? t.tooling_name : undefined,
-          }))
-        : [],
+      tooling_type: Array.isArray(route?.toolings)
+        ? typeof route.toolings[0]?.tooling_type === "string"
+          ? route.toolings[0].tooling_type
+          : undefined
+        : undefined,
     });
 
     const mapMaterialSpecFromApi = (spec: any): MaterialSpecForm | undefined => {
@@ -556,68 +532,34 @@ export default function BomEditPage() {
                     <Form.Item name={[routeField.name, "machine_id"]} label="Machine ID">
                       <InputNumber min={0} style={{ width: "100%" }} placeholder="e.g. 1" />
                     </Form.Item>
-                    <Form.Item name={[routeField.name, "cycle_time_sec"]} label="Cycle Time (sec)">
+                    {/* <Form.Item name={[routeField.name, "cycle_time_sec"]} label="Cycle Time (sec)">
                       <InputNumber min={0} style={{ width: "100%" }} />
                     </Form.Item>
                     <Form.Item name={[routeField.name, "setup_time_min"]} label="Setup Time (min)">
                       <InputNumber min={0} style={{ width: "100%" }} />
-                    </Form.Item>
+                    </Form.Item> */}
                     <Form.Item name={[routeField.name, "machine_stroke"]} label="Machine Stroke" className="md:col-span-4">
                       <Input placeholder="Machine stroke" />
                     </Form.Item>
                     <div className="flex items-end justify-end md:col-span-1">
-                      <Button danger type="text" icon={<DeleteOutlined />} disabled={isAssemblyMode && idx === 0} onClick={() => remove(routeField.name)}>
+                      <Button danger type="text" icon={<DeleteOutlined />} onClick={() => remove(routeField.name)}>
                         Remove
                       </Button>
                     </div>
                   </div>
 
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <Text className="text-sm font-medium">Toolings</Text>
-                      <Button
-                        size="small"
-                        icon={<PlusOutlined />}
-                        onClick={() => {
-                          const dynamicForm = form as any;
-                          const current = dynamicForm.getFieldValue([...absolutePath, "process_routes", routeField.name, "toolings"]) ?? [];
-                          dynamicForm.setFieldValue([...absolutePath, "process_routes", routeField.name, "toolings"], [...current, {}]);
-                        }}
-                      >
-                        Add Tooling
-                      </Button>
-                    </div>
-                    <Form.List name={[routeField.name, "toolings"]}>
-                      {(toolingFields, { remove: removeTooling }) => (
-                        <div className="space-y-2">
-                          {toolingFields.length === 0 ? (
-                            <div className="text-xs text-gray-400 py-1">No toolings</div>
-                          ) : null}
-                          {toolingFields.map((toolingField) => (
-                            <div key={toolingField.key} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end rounded border border-gray-100 bg-gray-50 p-2">
-                              <Form.Item name={[toolingField.name, "tooling_type"]} label="Type" className="!mb-0">
-                                <Select
-                                  placeholder="Type"
-                                  options={[
-                                    { label: "Dies", value: "Dies" },
-                                    { label: "JIG", value: "JIG" },
-                                    { label: "CF", value: "CF" },
-                                  ]}
-                                  allowClear
-                                />
-                              </Form.Item>
-                              <Form.Item name={[toolingField.name, "tooling_code"]} label="Code" className="!mb-0">
-                                <Input placeholder="e.g. DIE-EMA-001" />
-                              </Form.Item>
-                              <Form.Item name={[toolingField.name, "tooling_name"]} label="Name" className="!mb-0">
-                                <Input placeholder="e.g. Stamp Die EMA-LV7" />
-                              </Form.Item>
-                              <Button danger type="text" icon={<DeleteOutlined />} onClick={() => removeTooling(toolingField.name)} />
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </Form.List>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    <Form.Item name={[routeField.name, "tooling_type"]} label="Tooling Type">
+                      <Select
+                        placeholder="Select tooling type"
+                        options={[
+                          { label: "Dies", value: "Dies" },
+                          { label: "JIG", value: "JIG" },
+                          { label: "CF", value: "CF" },
+                        ]}
+                        allowClear
+                      />
+                    </Form.Item>
                   </div>
                 </div>
               ))}
@@ -959,25 +901,12 @@ export default function BomEditPage() {
             if (typeof route.setup_time_min === "number" && Number.isFinite(route.setup_time_min)) body.setup_time_min = route.setup_time_min;
             if (cleanText(route.machine_stroke)) body.machine_stroke = cleanText(route.machine_stroke);
             if (cleanText(route.tooling_ref)) body.tooling_ref = cleanText(route.tooling_ref);
-            body.toolings = Array.isArray(route.toolings)
-              ? route.toolings
-                  .map((t) => ({
-                    tooling_type: cleanText(t.tooling_type) ?? null,
-                    tooling_code: cleanText(t.tooling_code) ?? null,
-                    tooling_name: cleanText(t.tooling_name) ?? null,
-                  }))
-                  .filter((t) => t.tooling_type || t.tooling_code || t.tooling_name)
+            body.toolings = cleanText(route.tooling_type)
+              ? [{ tooling_type: cleanText(route.tooling_type) }]
               : [];
             return body;
           })
           .filter((item): item is Record<string, unknown> => Boolean(item));
-
-      const mapAssemblyParentRoutes = (routes?: ProcessRouteForm[]) => {
-        const first = Array.isArray(routes) ? routes[0] : undefined;
-        const processId = toNumberId(first?.process_id);
-        if (processId === undefined) return [];
-        return [{ op_seq: typeof first?.op_seq === "number" && Number.isFinite(first.op_seq) ? first.op_seq : 10, process_id: processId }];
-      };
 
       const files: Array<{ key: string; file: File }> = [];
       const seenUniqs = new Set<string>();
@@ -1031,7 +960,7 @@ export default function BomEditPage() {
       const parentFile = asFile(fileList?.[0]?.originFileObj);
       if (parentFile) files.push({ key: "upload_parent", file: parentFile });
 
-      const parentRoutes = assemblyMode ? mapAssemblyParentRoutes(values.process_routes) : mapProcessRoutes(values.process_routes);
+      const parentRoutes = mapProcessRoutes(values.process_routes);
       const parentMaterialSpec = assemblyMode ? null : mapMaterialSpec(values.material_spec);
       const childrenPayload = mapChildParts(values.child_parts, 1, rootUniq);
 
@@ -1184,7 +1113,7 @@ export default function BomEditPage() {
                   <div className="space-y-4">
                     {isParentAssembly ? (
                       <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
-                        Process yang dipilih bertipe <span className="font-semibold">Assembly</span>, sehingga material parent disabled dan child minimal 2 item.
+                        Process yang dipilih bertipe <span className="font-semibold">Assembly</span>, parent tetap bisa menambah process route, material parent disabled, dan child minimal 2 item.
                       </div>
                     ) : null}
                     <span>Parent Process & Material</span>
@@ -1193,7 +1122,7 @@ export default function BomEditPage() {
                 className="mb-6"
                 styles={{ body: { paddingTop: 16 } }}
               >
-                {renderProcessRoutesEditor([], [], { hideAddWhenAssembly: true, isAssemblyMode: isParentAssembly })}
+                {renderProcessRoutesEditor([], [], { hideAddWhenAssembly: false, isAssemblyMode: isParentAssembly })}
                 <div className="mt-6">{renderMaterialSpecEditor([], isParentAssembly)}</div>
               </Card>
 
