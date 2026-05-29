@@ -133,12 +133,12 @@ export default function KanbanParameterCreatePage() {
               <Form.Item name="kanban_qty" label="Kanban Qty" rules={[{ required: true }]}> 
                 <InputNumber className="w-full !rounded-lg" min={0} />
               </Form.Item>
-              <Form.Item name="min_stock" label="Min Stock" rules={[{ required: true }]}> 
+              {/* <Form.Item name="min_stock" label="Min Stock" rules={[{ required: true }]}> 
                 <InputNumber className="w-full !rounded-lg" min={0} />
               </Form.Item>
               <Form.Item name="max_stock" label="Max Stock" rules={[{ required: true }]}> 
                 <InputNumber className="w-full !rounded-lg" min={0} />
-              </Form.Item>
+              </Form.Item> */}
             </div>
           </Form>
         </Card>

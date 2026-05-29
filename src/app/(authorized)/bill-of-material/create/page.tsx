@@ -498,9 +498,9 @@ export default function Page() {
         <Form.Item name={[...fieldPath, "material_spec", "setup_time_min"]} label="Setup Time (min)">
           <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "customer_cycle"]} label="Customer Cycle">
+        {/* <Form.Item name={[...fieldPath, "material_spec", "customer_cycle"]} label="Customer Cycle">
           <Input placeholder="e.g., Daily / Weekly / Monthly" disabled={disabled} />
-        </Form.Item>
+        </Form.Item> */}
       </div>
     </div>
   );
@@ -1623,9 +1623,9 @@ export default function Page() {
                     ]} label="Setup Time (min)">
                       <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
                     </Form.Item> */}
-                    <Form.Item name={["material_spec", "customer_cycle"]} label="Customer Cycle">
+                    {/* <Form.Item name={["material_spec", "customer_cycle"]} label="Customer Cycle">
                       <Input placeholder="e.g., Daily / Weekly / Monthly" size="large" disabled={isParentAssembly} />
-                    </Form.Item>
+                    </Form.Item> */}
                     <Form.Item
                       name={["material_spec", "supplier"]}
                       label="Supplier"

@@ -1,10 +1,14 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Button, Card, Input, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
-import { useRouter } from "next/navigation";
-import { useCreateTypeParameterMutation } from "@/lib/api/system-settings/api";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  useCreateTypeParameterMutation,
+  useGetTypeParameterByIdQuery,
+  useUpdateTypeParameterMutation,
+} from "@/lib/api/system-settings/api";
 import { apiBaseUrl } from "@/lib/api/instance";
 
 type StatusType = "Active" | "Inactive";
@@ -51,14 +55,19 @@ const computeNextWipCode = (existing: Array<string | undefined>): string => {
 
   const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
 
-  return `WIP-${String(next).padStart(3, "0")}`;
+  return `WI-${String(next).padStart(3, "0")}`;
 };
 
 export default function TypeParametersCreatePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const rawMode = String(searchParams.get("mode") ?? "create").toLowerCase();
+  const mode = rawMode === "edit" ? "edit" : "create";
+  const isEditing = mode === "edit";
+  const typeParameterId = String(searchParams.get("id") ?? "").trim();
 
   const [entries, setEntries] = useState<Entry[]>([
-    makeEntry(1, "WIP-001", true),
+    makeEntry(1, computeNextWipCode([]), true),
   ]);
 
   const completeCount = useMemo(
@@ -89,8 +98,32 @@ export default function TypeParametersCreatePage() {
   };
 
   const [createTypeParameter, createState] = useCreateTypeParameterMutation();
+  const [updateTypeParameter, updateState] = useUpdateTypeParameterMutation();
 
   const apiEnabled = Boolean(apiBaseUrl);
+  const { data: typeParameterDetail, isLoading: detailLoading } = useGetTypeParameterByIdQuery(
+    typeParameterId,
+    { skip: !apiEnabled || !isEditing || !typeParameterId },
+  );
+
+  useEffect(() => {
+    if (!isEditing || !typeParameterDetail) return;
+
+    setEntries([
+      {
+        id: typeParameterId || "entry-1",
+        typeCode: String(typeParameterDetail.type_code ?? "").trim(),
+        typeName: String(typeParameterDetail.type_name ?? "").trim(),
+        description: String(typeParameterDetail.description ?? "").trim(),
+        status:
+          String(typeParameterDetail.status ?? "active").toLowerCase() === "inactive"
+            ? "Inactive"
+            : "Active",
+        readonlyCode: true,
+        created: false,
+      },
+    ]);
+  }, [isEditing, typeParameterDetail, typeParameterId]);
 
   const onSave = async () => {
     for (const e of entries) {
@@ -108,20 +141,38 @@ export default function TypeParametersCreatePage() {
     }
 
     try {
-      for (const e of entries) {
-        await createTypeParameter({
-          type_code: String(e.typeCode ?? "").trim(),
-          type_name: String(e.typeName ?? "").trim(),
-          description: String(e.description ?? "").trim(),
-          status: e.status === "Active" ? "active" : "inactive",
+      if (isEditing) {
+        const entry = entries[0];
+        if (!entry || !typeParameterId) {
+          message.error("Type Parameter ID is missing");
+          return;
+        }
+
+        await updateTypeParameter({
+          id: typeParameterId,
+          body: {
+            type_code: String(entry.typeCode ?? "").trim(),
+            type_name: String(entry.typeName ?? "").trim(),
+            description: String(entry.description ?? "").trim(),
+            status: entry.status === "Active" ? "active" : "inactive",
+          },
         }).unwrap();
+      } else {
+        for (const e of entries) {
+          await createTypeParameter({
+            type_code: String(e.typeCode ?? "").trim(),
+            type_name: String(e.typeName ?? "").trim(),
+            description: String(e.description ?? "").trim(),
+            status: e.status === "Active" ? "active" : "inactive",
+          }).unwrap();
+        }
       }
 
-      message.success("Type Parameter(s) saved");
+      message.success(isEditing ? "Type Parameter updated" : "Type Parameter(s) saved");
       router.push("/system-settings");
     } catch (err) {
       console.error(err);
-      message.error("Failed to save Type Parameter(s)");
+      message.error(isEditing ? "Failed to update Type Parameter" : "Failed to save Type Parameter(s)");
     }
   };
 
@@ -142,18 +193,23 @@ export default function TypeParametersCreatePage() {
               <Button onClick={() => router.push("/system-settings")}>
                 Cancel
               </Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave}>
-                Save Parameter
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                onClick={onSave}
+                loading={createState.isLoading || updateState.isLoading}
+              >
+                {isEditing ? "Update Parameter" : "Save Parameter"}
               </Button>
             </div>
           </div>
 
           <div className="mt-2">
             <div className="text-xl font-semibold text-gray-900">
-              Add WIP Type
+              {isEditing ? "Edit WIP Type" : "Add WIP Type"}
             </div>
             <div className="text-sm text-gray-500">
-              Create WIP Type <span className="mx-2">•</span> {entries.length}{" "}
+              {isEditing ? "Update WIP Type" : "Create WIP Type"} <span className="mx-2">•</span> {entries.length}{" "}
               entry
             </div>
           </div>
@@ -162,6 +218,12 @@ export default function TypeParametersCreatePage() {
 
       <div className="px-6 py-6">
         <div className="max-w-6xl mx-auto space-y-5">
+          {isEditing && detailLoading ? (
+            <Card className="rounded-2xl" bodyStyle={{ padding: 24 }}>
+              <div className="text-sm text-gray-500">Loading type parameter...</div>
+            </Card>
+          ) : null}
+
           {entries.map((e, idx) => (
             <Card
               key={e.id}
@@ -209,8 +271,8 @@ export default function TypeParametersCreatePage() {
                     value={e.typeName}
                     onChange={(ev) =>
                       updateEntry(e.id, {
+                        typeCode: ev.target.value,
                         typeName: ev.target.value,
-                        typeCode: ev.target.value.toLowerCase().replace(" ", "-"),
                         created: false,
                       })
                     }
@@ -256,9 +318,11 @@ export default function TypeParametersCreatePage() {
           ))}
 
           <div className="flex items-center justify-center">
-            <Button icon={<PlusOutlined />} onClick={addAnother}>
-              Add Another Parameter
-            </Button>
+            {!isEditing ? (
+              <Button icon={<PlusOutlined />} onClick={addAnother}>
+                Add Another Parameter
+              </Button>
+            ) : null}
           </div>
 
           <Card className="rounded-2xl" bodyStyle={{ padding: 18 }}>

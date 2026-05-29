@@ -656,9 +656,9 @@ export default function BomEditPage() {
         <Form.Item name={[...fieldPath, "material_spec", "setup_time_min"]} label="Setup Time (min)">
           <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
         </Form.Item> */}
-        <Form.Item name={[...fieldPath, "material_spec", "customer_cycle"]} label="Customer Cycle">
+        {/* <Form.Item name={[...fieldPath, "material_spec", "customer_cycle"]} label="Customer Cycle">
           <Input placeholder="e.g., Daily / Weekly / Monthly" disabled={disabled} />
-        </Form.Item>
+        </Form.Item> */}
       </div>
     </div>
   );

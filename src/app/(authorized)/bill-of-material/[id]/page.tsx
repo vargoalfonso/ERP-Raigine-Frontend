@@ -257,7 +257,7 @@ const MaterialSpecDesc = ({ spec }: { spec: MaterialSpec | null | undefined }) =
       <Descriptions.Item label="Form">{spec.form ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Supplier">{spec.supplier_name ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Weight">{fmt(spec.weight_kg, "kg")}</Descriptions.Item>
-      <Descriptions.Item label="Customer Cycle">{spec.customer_cycle ?? "—"}</Descriptions.Item>
+      {/* <Descriptions.Item label="Customer Cycle">{spec.customer_cycle ?? "—"}</Descriptions.Item> */}
       <Descriptions.Item label="Width">{fmt(spec.width_mm, "mm")}</Descriptions.Item>
       <Descriptions.Item label="Diameter">{fmt(spec.diameter_mm, "mm")}</Descriptions.Item>
       <Descriptions.Item label="Thickness">{fmt(spec.thickness_mm, "mm")}</Descriptions.Item>

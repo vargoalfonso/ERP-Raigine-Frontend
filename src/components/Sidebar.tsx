@@ -97,7 +97,7 @@ const menuItems: MenuItem[] = [
       },
       {
         id: "po-budget",
-        label: "PO Budget",
+        label: "PR Budget",
         icon: MdReceiptLong,
         href: "/po-budget",
       },

@@ -907,7 +907,7 @@ function MasterSupplierCreatePageContent() {
                   <Form form={form} layout="vertical" disabled={readOnly} className="mt-6">
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                       <Form.Item
-                        label="Uniq"
+                        label="Uniq / Sebanggo"
                         name="uniq_code"
                         rules={[
                           {
@@ -965,7 +965,7 @@ function MasterSupplierCreatePageContent() {
                         <Input size="large" placeholder="Enter material code" />
                       </Form.Item>
 
-                      <Form.Item label="Grade/Size" name="grade">
+                      <Form.Item label="Grade" name="grade">
                         <Input size="large" placeholder="Auto-filled grade" disabled={autofilled} />
                       </Form.Item>
 
@@ -1062,7 +1062,7 @@ function MasterSupplierCreatePageContent() {
                           },
                         ]}
                       >
-                        <Input size="large" placeholder="e.g. Daily / Weekly / Monthly" disabled={autofilled} />
+                        <Input size="large" placeholder="e.g. Daily / Weekly / Monthly"/>
                       </Form.Item>
 
                       <Form.Item label="Description" name="description">

@@ -191,7 +191,7 @@ export default function KanbanParameterCreateFullscreenPage() {
               >
                 <InputNumber className="w-full !rounded-lg" min={0} />
               </Form.Item>
-              <Form.Item
+              {/* <Form.Item
                 name="min_stock"
                 label="Min Stock"
                 rules={[{ required: true }]}
@@ -204,7 +204,7 @@ export default function KanbanParameterCreateFullscreenPage() {
                 rules={[{ required: true }]}
               >
                 <InputNumber className="w-full !rounded-lg" min={0} />
-              </Form.Item>
+              </Form.Item> */}
             </div>
           </Form>
         </Card>

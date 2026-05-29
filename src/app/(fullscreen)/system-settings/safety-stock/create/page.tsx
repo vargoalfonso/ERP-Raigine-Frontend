@@ -40,6 +40,8 @@ const CALCULATION_OPTIONS = [
   { label: "Using PRL/working days * days (C)", value: "Using PRL/working days * days (C)" },
 ];
 
+const CALCULATION_TYPE_WIDTH_CLASS = "w-full lg:w-[720px]";
+
 function makeEntry(idx: number): Entry {
   return {
     id: `entry-${idx}`,
@@ -261,16 +263,7 @@ export default function SafetyStockCreatePage() {
                       />
                     </div>
 
-                    <div className="lg:col-span-4">
-                      <div className="text-sm text-gray-700 mb-2 max-w-2xl">Calculation Type</div>
-                      <Select
-                        className="safetystock-select max-w-2xl"
-                        popupClassName="safetystock-select-popup"
-                        value={e.calculationType}
-                        onChange={(v) => updateEntry(e.id, { calculationType: v, created: false })}
-                        options={CALCULATION_OPTIONS}
-                      />
-                    </div>
+                    
 
                     <div className="lg:col-span-3">
                       <div className="text-sm text-gray-700 mb-2">Constanta</div>
@@ -283,9 +276,22 @@ export default function SafetyStockCreatePage() {
                       />
                     </div>
 
-                    <div className="lg:col-span-2">
+                   
+                    
+                  </div>
+<div className={CALCULATION_TYPE_WIDTH_CLASS}>
+                      <div className="text-sm text-gray-700 mb-2 ">Calculation Type</div>
+                      <Select
+                        className={`safetystock-select w-full ${CALCULATION_TYPE_WIDTH_CLASS}`}
+                        popupClassName="safetystock-select-popup"
+                        value={e.calculationType}
+                        onChange={(v) => updateEntry(e.id, { calculationType: v, created: false })}
+                        options={CALCULATION_OPTIONS}
+                      />
+                       <div className="lg:col-span-2 flex items-end mt-10">
                       <Button
                         type="primary"
+                         block
                         className="w-full"
                         icon={<PlusOutlined />}
                         onClick={() => onCreateStockDays(e.id)}
@@ -294,10 +300,10 @@ export default function SafetyStockCreatePage() {
                         Create Stock days
                       </Button>
                     </div>
-                  </div>
-
+                    </div>
                   {idx < entries.length - 1 && <div className="mt-6 border-t border-gray-200" />}
                 </div>
+                
               ))}
             </div>
           </Card>

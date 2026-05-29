@@ -1753,10 +1753,10 @@ export default function PoBudgetPage() {
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 mb-1">
-              PO Budget Management
+              PR Budget Management
             </h1>
             <p className="text-sm text-gray-500">
-              Manage PO budget for creating Purchase Orders across Raw Material,
+              Manage PR budget for creating Purchase Orders across Raw Material,
               Subcon, and Indirect categories
             </p>
           </div>

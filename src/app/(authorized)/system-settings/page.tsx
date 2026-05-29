@@ -37,6 +37,10 @@ import {
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
+  rememberSystemSettingsModule,
+  readSystemSettingsModule,
+} from "@/lib/utils/systemSettingsNavigation";
+import {
   useDeleteMachinePatternMutation,
   useGetMachinePatternsQuery,
 } from "@/lib/api/machine-patterns/api";
@@ -800,8 +804,12 @@ export default function SystemSettingsPage() {
 
   const apiEnabled = Boolean(apiBaseUrl);
   const [selectedModuleId, setSelectedModuleId] = useState<string>(
-    "access-control-matrix",
+    () => readSystemSettingsModule(),
   );
+
+  useEffect(() => {
+    rememberSystemSettingsModule(selectedModuleId);
+  }, [selectedModuleId]);
   const shouldLoadAccessControl =
     apiEnabled && selectedModuleId === "access-control-matrix";
   const shouldLoadRoles =
@@ -3880,20 +3888,20 @@ export default function SystemSettingsPage() {
         </span>
       ),
     },
-    {
-      title: "Min Stock",
-      dataIndex: "minStock",
-      key: "minStock",
-      width: 120,
-      render: (v: number) => <span className="text-red-500">{v} units</span>,
-    },
-    {
-      title: "Max Stock",
-      dataIndex: "maxStock",
-      key: "maxStock",
-      width: 120,
-      render: (v: number) => <span className="text-blue-600">{v} units</span>,
-    },
+    // {
+    //   title: "Min Stock",
+    //   dataIndex: "minStock",
+    //   key: "minStock",
+    //   width: 120,
+    //   render: (v: number) => <span className="text-red-500">{v} units</span>,
+    // },
+    // {
+    //   title: "Max Stock",
+    //   dataIndex: "maxStock",
+    //   key: "maxStock",
+    //   width: 120,
+    //   render: (v: number) => <span className="text-blue-600">{v} units</span>,
+    // },
     {
       title: "Status",
       dataIndex: "status",
@@ -5677,7 +5685,7 @@ export default function SystemSettingsPage() {
             >
               <InputNumber className="w-full" min={0} placeholder="50" />
             </Form.Item>
-            <Form.Item
+            {/* <Form.Item
               label="Min Stock"
               name="minStock"
               rules={[{ required: true }]}
@@ -5690,7 +5698,7 @@ export default function SystemSettingsPage() {
               rules={[{ required: true }]}
             >
               <InputNumber className="w-full" min={0} placeholder="500" />
-            </Form.Item>
+            </Form.Item> */}
           </div>
 
           <Form.Item label="Status" name="status" rules={[{ required: true }]}>

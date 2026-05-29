@@ -294,12 +294,27 @@ function PageContent() {
                     />
                   </Form.Item>
 
+                 
+
                   <Form.Item
+                    label="Constanta"
+                    name="constanta"
+                  >
+                    <InputNumber
+                      className="w-full"
+                      min={0}
+                    />
+                  </Form.Item>
+
+                 
+                   <Form.Item
+                    className="lg:col-span-4"
                     label="Calculation Type"
                     name="calculationType"
                     rules={[{ required: true }]}
                   >
                     <Select
+                     className="w-full"
                       options={[
                         {
                           label:
@@ -314,18 +329,8 @@ function PageContent() {
                       ]}
                     />
                   </Form.Item>
-
-                  <Form.Item
-                    label="Constanta"
-                    name="constanta"
-                  >
-                    <InputNumber
-                      className="w-full"
-                      min={0}
-                    />
-                  </Form.Item>
-
-                  <div className="flex items-end">
+                </div>
+                 <div className="flex items-end">
                     <Button
                       type="primary"
                       block
@@ -334,7 +339,6 @@ function PageContent() {
                       + Create Stock days
                     </Button>
                   </div>
-                </div>
               </div>
             </Form>
           </Card>
