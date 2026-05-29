@@ -1053,12 +1053,12 @@ function MasterSupplierCreatePageContent() {
 
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                       <Form.Item
-                        label="Customer Cycle"
+                        label="Supplier Cycle"
                         name="customer_cycle"
                         rules={[
                           {
                             // required: true,
-                            message: "Please input customer cycle",
+                            message: "Please input Supplier cycle",
                           },
                         ]}
                       >

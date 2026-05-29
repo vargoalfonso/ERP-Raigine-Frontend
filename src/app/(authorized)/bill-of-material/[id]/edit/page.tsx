@@ -534,6 +534,10 @@ export default function BomEditPage() {
 
               {routeFields.map((routeField, idx) => (
                 <div key={routeField.key} className="rounded-lg border border-gray-200 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Text strong>{`Route ${idx + 1}`}</Text>
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                     <Form.Item name={[routeField.name, "op_seq"]} label="Op Seq" rules={[{ required: true, message: "Op Seq is required" }]}>
                       <InputNumber min={1} step={10} style={{ width: "100%" }} />

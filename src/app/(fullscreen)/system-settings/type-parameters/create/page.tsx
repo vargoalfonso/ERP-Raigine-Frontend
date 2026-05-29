@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { Button, Card, Input, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -58,7 +58,7 @@ const computeNextWipCode = (existing: Array<string | undefined>): string => {
   return `WI-${String(next).padStart(3, "0")}`;
 };
 
-export default function TypeParametersCreatePage() {
+function TypeParametersCreatePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const rawMode = String(searchParams.get("mode") ?? "create").toLowerCase();
@@ -354,5 +354,13 @@ export default function TypeParametersCreatePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function TypeParametersCreatePage() {
+  return (
+    <Suspense fallback={null}>
+      <TypeParametersCreatePageContent />
+    </Suspense>
   );
 }
