@@ -108,7 +108,7 @@ export default function ProcessCreatePage() {
           <div className="mt-2">
             <div className="text-xl font-semibold text-gray-900">Add Process</div>
             <div className="text-sm text-gray-500">
-              Create process for Work In Progress <span className="mx-2">•</span> {entries.length} entry
+              Create process for Work In Proccess <span className="mx-2">•</span> {entries.length} entry
             </div>
           </div>
         </div>
@@ -121,7 +121,7 @@ export default function ProcessCreatePage() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <div className="text-base font-semibold text-gray-900">Add New Parameter #{idx + 1}</div>
-                  <div className="text-sm text-gray-500">Configure Parameter for process for Work In Progress</div>
+                  <div className="text-sm text-gray-500">Configure Parameter for process for Work In Proccess</div>
                 </div>
                 <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">Entry {idx + 1}</Tag>
               </div>

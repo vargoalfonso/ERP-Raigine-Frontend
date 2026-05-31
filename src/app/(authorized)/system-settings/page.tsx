@@ -101,6 +101,7 @@ import {
 } from "@/lib/api/system-settings/api";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
+import { useGetInventoryListQuery } from "@/lib/api/inventory/api";
 import MachineSettingsPanel from "@/components/system-settings/MachineSettingsPanel";
 
 type StatusType = "Active" | "Inactive";
@@ -175,6 +176,10 @@ type PurchaseOrderRow = {
   materialType: string;
   po1Pct: number;
   po2Pct: number;
+  po1FromDate?: string;
+  po1ToDate?: string;
+  po2FromDate?: string;
+  po2ToDate?: string;
   description?: string;
   minOrderQty: number;
   maxSplitLines: number;
@@ -351,7 +356,7 @@ const modules: ModuleItem[] = [
   {
     id: "process",
     name: "Process",
-    description: "Configure Process for Work In Progress",
+    description: "Configure Process for Work In Proccess",
     icon: <AppstoreOutlined />,
     iconBgClass: "bg-green-50",
     iconTextClass: "text-green-700",
@@ -654,6 +659,7 @@ type SafetyStockFormValues = {
   inventoryType: string;
   parameter: string;
   constanta: number;
+  uniqCode?: string;
   status: StatusType;
 };
 
@@ -675,6 +681,10 @@ type PurchaseOrderFormValues = {
   materialType: string;
   po1Pct: number;
   po2Pct: number;
+  po1FromDate?: string;
+  po1ToDate?: string;
+  po2FromDate?: string;
+  po2ToDate?: string;
   vendor?: string;
   description?: string;
   minOrderQty: number;
@@ -687,6 +697,10 @@ const PURCHASE_ORDER_DEFAULT_VALUES: PurchaseOrderFormValues = {
   materialType: "raw_material",
   po1Pct: 50,
   po2Pct: 50,
+  po1FromDate: undefined,
+  po1ToDate: undefined,
+  po2FromDate: undefined,
+  po2ToDate: undefined,
   vendor: undefined,
   description: "",
   minOrderQty: 10,
@@ -1064,6 +1078,86 @@ export default function SystemSettingsPage() {
   );
   const [safetyForm] = Form.useForm<SafetyStockFormValues>();
 
+  // reactively watch selected inventory type from the safety form to fetch inventory uniq codes
+  const safetyInventoryTypeWatch = (Form.useWatch("inventoryType", safetyForm) as string | undefined) ?? safetyEditingRow?.inventoryType ?? "";
+  const normalizedInventoryType = String(safetyInventoryTypeWatch ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  const inventoryApiType = (() => {
+    switch (normalizedInventoryType) {
+      case "raw_material":
+        return "raw-materials";
+      case "indirect_raw_material":
+        return "indirect-materials";
+      case "subcon":
+        return "subcon-materials";
+      case "finished_goods":
+        return "finished-goods";
+      default:
+        return undefined;
+    }
+  })();
+
+  const { data: inventoryListResp } = useGetInventoryListQuery(
+    inventoryApiType ? { type: inventoryApiType as any, page: 1, limit: 1000 } : ({} as any),
+    { skip: !inventoryApiType || !shouldLoadSafetyStock },
+  );
+
+  const { data: safetyStockList } = useGetSafetyStockQuery(undefined, { skip: !apiEnabled });
+
+  const uniqOptions = React.useMemo(() => {
+    const items = (inventoryListResp as any)?.data ?? inventoryListResp ?? [];
+    const fromApi = (items as any[])
+      .map((r) => {
+        const uniq = r?.uniq_code ?? r?.uniq ?? r?.UniqCode ?? r?.uniqCode;
+        if (!uniq) return null;
+        return { label: String(uniq), value: String(uniq) };
+      })
+      .filter(Boolean) as { label: string; value: string }[];
+
+    // include current editing uniq so it stays selectable when editing
+    const existing = [String(safetyForm.getFieldValue("uniqCode") ?? safetyEditingRow?.itemUniqCode ?? "")].filter(Boolean).map(String);
+    for (const u of existing) {
+      if (u && !fromApi.some((o) => o.value === u)) {
+        fromApi.push({ label: u, value: u });
+      }
+    }
+
+    // compute used uniqs for the selected inventoryApiType and exclude them
+    const used = new Set<string>();
+    try {
+      for (const rec of safetyStockList ?? []) {
+        const inv = String((rec as any).inventory_type ?? "");
+        const uniq = String((rec as any).item_uniq_code ?? "");
+        if (!inv || !uniq) continue;
+        if (inventoryApiType && inv === inventoryApiType) used.add(uniq);
+      }
+    } catch (err) {
+      // ignore
+    }
+
+    const existingSet = new Set(existing.map(String));
+
+    const filtered = fromApi.filter((o) => {
+      const v = String(o.value);
+      if (existingSet.has(v)) return true;
+      if (used.has(v)) return false;
+      return true;
+    });
+
+    return filtered;
+  }, [inventoryListResp, safetyEditingRow, safetyStockList, inventoryApiType]);
+
+  // when inventory type or uniqOptions change, ensure the form's uniqCode is set to a valid option
+  useEffect(() => {
+    if (!uniqOptions || uniqOptions.length === 0) {
+      safetyForm.setFieldsValue({ uniqCode: undefined });
+      return;
+    }
+    const current = String(safetyForm.getFieldValue("uniqCode") ?? "");
+    if (!current || !uniqOptions.some((o) => String(o.value) === current)) {
+      safetyForm.setFieldsValue({ uniqCode: uniqOptions[0].value });
+    }
+  }, [uniqOptions, safetyForm]);
+
   const [typeParameterEditOpen, setTypeParameterEditOpen] = useState(false);
   const [typeParameterEditingRow, setTypeParameterEditingRow] =
     useState<TypeParameterRow | null>(null);
@@ -1099,6 +1193,14 @@ export default function SystemSettingsPage() {
     Form.useWatch("maxSplitLines", purchaseOrderForm) ?? 0;
   const purchaseOrderPo1Pct = Form.useWatch("po1Pct", purchaseOrderForm) ?? 0;
   const purchaseOrderPo2Pct = Form.useWatch("po2Pct", purchaseOrderForm) ?? 0;
+  const purchaseOrderPo1FromDate =
+    Form.useWatch("po1FromDate", purchaseOrderForm) ?? "";
+  const purchaseOrderPo1ToDate =
+    Form.useWatch("po1ToDate", purchaseOrderForm) ?? "";
+  const purchaseOrderPo2FromDate =
+    Form.useWatch("po2FromDate", purchaseOrderForm) ?? "";
+  const purchaseOrderPo2ToDate =
+    Form.useWatch("po2ToDate", purchaseOrderForm) ?? "";
   const purchaseOrderPctTotal =
     Number(purchaseOrderPo1Pct || 0) + Number(purchaseOrderPo2Pct || 0);
   const purchaseOrderIsHistory =
@@ -1340,19 +1442,49 @@ export default function SystemSettingsPage() {
 
   const roleRowsView = useMemo<RoleRow[]>(() => {
     if (!apiEnabled || !rolesApiData) return roleRows;
+    const peopleCountByRoleId = new Map<string, number>();
+    const peopleCountByRoleName = new Map<string, number>();
+
+    for (const row of rowsView) {
+      const normalizedRoleName = String(row.role ?? "")
+        .trim()
+        .toLowerCase();
+
+      if (row.roleId) {
+        peopleCountByRoleId.set(
+          row.roleId,
+          (peopleCountByRoleId.get(row.roleId) ?? 0) + 1,
+        );
+      }
+
+      if (normalizedRoleName) {
+        peopleCountByRoleName.set(
+          normalizedRoleName,
+          (peopleCountByRoleName.get(normalizedRoleName) ?? 0) + 1,
+        );
+      }
+    }
+
     return rolesApiData
       .filter((r) => Boolean(r?.id))
       .map((r) => {
         const d = r.updated_at || r.created_at;
         const lastUpdated = d ? new Date(d).toLocaleDateString("en-US") : "-";
+        const roleId = String(r.id);
+        const normalizedRoleName = String(r.name ?? "")
+          .trim()
+          .toLowerCase();
         return {
           id: r.id,
           roleName: r.name,
-          numberOfPeople: 0,
+          numberOfPeople:
+            peopleCountByRoleId.get(roleId) ??
+            peopleCountByRoleName.get(normalizedRoleName) ??
+            0,
           lastUpdated,
         };
       });
-  }, [apiEnabled, roleRows, rolesApiData]);
+  }, [apiEnabled, roleRows, rolesApiData, rowsView]);
 
   const kanbanRowsView = useMemo<KanbanRow[]>(() => {
     if (!apiEnabled || !kanbanApiData) return kanbanRows;
@@ -1663,6 +1795,22 @@ export default function SystemSettingsPage() {
               description: record.description
                 ? String(record.description)
                 : undefined,
+              po1FromDate:
+                record.po1_from_date != null
+                  ? String(record.po1_from_date)
+                  : undefined,
+              po1ToDate:
+                record.po1_to_date != null
+                  ? String(record.po1_to_date)
+                  : undefined,
+              po2FromDate:
+                record.po2_from_date != null
+                  ? String(record.po2_from_date)
+                  : undefined,
+              po2ToDate:
+                record.po2_to_date != null
+                  ? String(record.po2_to_date)
+                  : undefined,
               minOrderQty: Number(record.min_order_qty ?? 0),
               maxSplitLines: Number(record.max_split_lines ?? 0),
               splitRule: String(record.split_rule ?? ""),
@@ -1803,15 +1951,7 @@ export default function SystemSettingsPage() {
   };
 
   const openCreateSafety = () => {
-    setSafetyEditMode("create");
-    setSafetyEditingRow(null);
-    safetyForm.resetFields();
-    safetyForm.setFieldsValue({
-      parameter: SAFETY_STOCK_PARAMETER_OPTIONS[0]?.value,
-      constanta: 7,
-      status: "Active",
-    });
-    setSafetyEditOpen(true);
+    router.push("/system-settings/safety-stock/create");
   };
 
   const openCreateRole = () => {
@@ -1842,15 +1982,9 @@ export default function SystemSettingsPage() {
   };
 
   const openEditSafety = (row: SafetyStockRow) => {
-    setSafetyEditMode("edit");
-    setSafetyEditingRow(row);
-    safetyForm.setFieldsValue({
-      inventoryType: row.inventoryType,
-      parameter: row.parameter,
-      constanta: row.constanta,
-      status: row.status,
-    });
-    setSafetyEditOpen(true);
+    router.push(
+      `/system-settings/safety-stock/create?id=${encodeURIComponent(row.id)}`,
+    );
   };
 
   const openCreateTypeParameter = () => {
@@ -1902,6 +2036,10 @@ export default function SystemSettingsPage() {
       materialType: row.materialType,
       po1Pct: row.po1Pct,
       po2Pct: row.po2Pct,
+      po1FromDate: row.po1FromDate,
+      po1ToDate: row.po1ToDate,
+      po2FromDate: row.po2FromDate,
+      po2ToDate: row.po2ToDate,
       vendor: row.description,
       description: row.description,
       minOrderQty: row.minOrderQty,
@@ -2071,6 +2209,10 @@ export default function SystemSettingsPage() {
         materialType: purchaseOrderEditingRow.materialType,
         po1Pct: purchaseOrderEditingRow.po1Pct,
         po2Pct: purchaseOrderEditingRow.po2Pct,
+        po1FromDate: purchaseOrderEditingRow.po1FromDate,
+        po1ToDate: purchaseOrderEditingRow.po1ToDate,
+        po2FromDate: purchaseOrderEditingRow.po2FromDate,
+        po2ToDate: purchaseOrderEditingRow.po2ToDate,
         vendor: purchaseOrderEditingRow.description,
         description: purchaseOrderEditingRow.description,
         minOrderQty: purchaseOrderEditingRow.minOrderQty,
@@ -2398,6 +2540,18 @@ export default function SystemSettingsPage() {
           budget_type: String(values.materialType ?? "").trim(),
           po1_pct: Number(values.po1Pct ?? 0),
           po2_pct: Number(values.po2Pct ?? 0),
+          po1_from_date: values.po1FromDate
+            ? String(values.po1FromDate).trim()
+            : undefined,
+          po1_to_date: values.po1ToDate
+            ? String(values.po1ToDate).trim()
+            : undefined,
+          po2_from_date: values.po2FromDate
+            ? String(values.po2FromDate).trim()
+            : undefined,
+          po2_to_date: values.po2ToDate
+            ? String(values.po2ToDate).trim()
+            : undefined,
           description: vendorValue,
           min_order_qty: Number(values.minOrderQty ?? 0),
           max_split_lines: Number(values.maxSplitLines ?? 0),
@@ -2431,6 +2585,18 @@ export default function SystemSettingsPage() {
         materialType: values.materialType,
         po1Pct: Number(values.po1Pct ?? 0),
         po2Pct: Number(values.po2Pct ?? 0),
+        po1FromDate: values.po1FromDate
+          ? String(values.po1FromDate).trim()
+          : undefined,
+        po1ToDate: values.po1ToDate
+          ? String(values.po1ToDate).trim()
+          : undefined,
+        po2FromDate: values.po2FromDate
+          ? String(values.po2FromDate).trim()
+          : undefined,
+        po2ToDate: values.po2ToDate
+          ? String(values.po2ToDate).trim()
+          : undefined,
         description: String(values.vendor ?? values.description ?? "").trim(),
         minOrderQty: Number(values.minOrderQty ?? 0),
         maxSplitLines: Number(values.maxSplitLines ?? 0),
@@ -3376,6 +3542,7 @@ export default function SystemSettingsPage() {
         <div className="font-medium text-gray-900">{v}</div>
       ),
     },
+    
     {
       title: "Parameter",
       dataIndex: "parameter",
@@ -4127,6 +4294,457 @@ export default function SystemSettingsPage() {
     },
   ];
 
+  const renderPurchaseOrderEditor = () => (
+    <div className="space-y-5">
+      <div className="rounded-2xl border border-[#d6e5ff] bg-[#eef5ff] px-5 py-4 shadow-sm">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
+              <SettingOutlined />
+            </div>
+            <div>
+              <div className="text-[22px] font-semibold text-gray-900">
+                System Parameters
+              </div>
+              <div className="text-sm text-gray-500">
+                Comprehensive ERP parameter management and configuration
+              </div>
+            </div>
+          </div>
+          <Button type="primary" className="rounded-lg px-4">
+            19 Configuration Modules
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-[28px] font-semibold leading-tight text-gray-900">
+            PO - Split Settings
+          </div>
+          <div className="mt-1 text-sm text-gray-500">
+            Configure purchase order split settings
+          </div>
+        </div>
+        <Button className="rounded-lg" onClick={closePurchaseOrderEdit}>
+          Back to List
+        </Button>
+      </div>
+
+      <Form
+        form={purchaseOrderForm}
+        layout="vertical"
+        requiredMark={false}
+        colon={false}
+      >
+        <Form.Item name="splitRule" hidden>
+          <Input />
+        </Form.Item>
+
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="text-lg font-semibold text-gray-900">
+            Purchase Order Split Method
+          </div>
+          <div className="mt-1 text-sm text-gray-500">
+            Choose how to split purchase orders between PO1 and PO2. Total
+            must equal 100% of Purchase Request.
+          </div>
+
+          <div className="mt-5 space-y-4">
+            <button
+              type="button"
+              className={`w-full rounded-2xl border p-4 text-left transition ${!purchaseOrderIsHistory ? "border-blue-500 bg-blue-50/50 shadow-[0_0_0_1px_rgba(59,130,246,0.16)]" : "border-gray-200 bg-white"}`}
+              onClick={() =>
+                purchaseOrderForm.setFieldsValue({
+                  splitRule: "percentage",
+                })
+              }
+            >
+              <div className="flex items-start gap-3">
+                <div className="mt-1 flex h-4 w-4 items-center justify-center rounded-full border border-blue-500">
+                  <div
+                    className={`h-2 w-2 rounded-full ${!purchaseOrderIsHistory ? "bg-blue-600" : "bg-transparent"}`}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[17px] font-semibold text-gray-900">
+                    Option 1: PO based on Percentage
+                  </div>
+                  <div className="mt-1 text-sm text-gray-500">
+                    Applied for all UNIQ. Set fixed percentage split between
+                    PO1 and PO2.
+                  </div>
+
+                  {!purchaseOrderIsHistory ? (
+                    <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-4">
+                      <div className="rounded-xl border border-blue-200 bg-[#f5f9ff] px-4 py-3 text-sm text-blue-700">
+                        <div className="font-semibold">Information:</div>
+                        <div className="mt-1">
+                          You can fill the percentage at menu PO Budget. Total
+                          percentage must equal 100%.
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+                        <Form.Item
+                          label={
+                            <span className="text-sm font-medium text-gray-700">
+                              PO 1 Percentage <span className="text-red-500">*</span>
+                            </span>
+                          }
+                          name="po1Pct"
+                          rules={[
+                            {
+                              required: true,
+                              message: "PO 1 Percentage is required",
+                            },
+                          ]}
+                        >
+                          <InputNumber
+                            className="w-full"
+                            size="large"
+                            min={0}
+                            max={100}
+                            addonAfter="%"
+                          />
+                        </Form.Item>
+
+                        <Form.Item
+                          label={
+                            <span className="text-sm font-medium text-gray-700">
+                              PO 2 Percentage <span className="text-red-500">*</span>
+                            </span>
+                          }
+                          name="po2Pct"
+                          rules={[
+                            {
+                              required: true,
+                              message: "PO 2 Percentage is required",
+                            },
+                          ]}
+                        >
+                          <InputNumber
+                            className="w-full"
+                            size="large"
+                            min={0}
+                            max={100}
+                            addonAfter="%"
+                          />
+                        </Form.Item>
+
+                        <div>
+                          <div className="mb-2 text-sm font-medium text-gray-700">
+                            Total Percentage
+                          </div>
+                          <div
+                            className={`flex h-10 items-center rounded-lg border px-4 text-lg font-semibold ${purchaseOrderPctTotal === 100 ? "border-emerald-400 bg-emerald-50 text-emerald-600" : "border-amber-300 bg-amber-50 text-amber-600"}`}
+                          >
+                            {purchaseOrderPctTotal}%
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                        <div>
+                          <span className="font-semibold text-gray-700">
+                            Logic:
+                          </span>{" "}
+                          If percentage is created, then number of PR will be
+                          divided based on PO 1 and PO 2 percentage.
+                        </div>
+                        <div className="mt-2">
+                          Example: If PR = 1000 pcs, PO1 (50%) = 500 pcs, PO2
+                          (50%) = 500 pcs
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              className={`w-full rounded-2xl border p-4 text-left transition ${purchaseOrderIsHistory ? "border-fuchsia-400 bg-fuchsia-50/40 shadow-[0_0_0_1px_rgba(217,70,239,0.14)]" : "border-gray-200 bg-white"}`}
+              onClick={() => purchaseOrderForm.setFieldsValue({ splitRule: "history" })}
+            >
+              <div className="flex items-start gap-3">
+                <div
+                  className={`mt-1 flex h-4 w-4 items-center justify-center rounded-full border ${purchaseOrderIsHistory ? "border-blue-500" : "border-gray-400"}`}
+                >
+                  <div
+                    className={`h-2 w-2 rounded-full ${purchaseOrderIsHistory ? "bg-blue-600" : "bg-transparent"}`}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[17px] font-semibold text-gray-900">
+                    Option 2: PO based on History Forecasting
+                  </div>
+                  <div className="mt-1 text-sm text-gray-500">
+                    Can be applied per UNIQ. Based on historical delivery data
+                    from specific date ranges.
+                  </div>
+
+                  {purchaseOrderIsHistory ? (
+                    <div className="mt-4 rounded-2xl border border-fuchsia-200 bg-white p-4">
+                      <div className="rounded-xl border border-fuchsia-100 bg-fuchsia-50 px-4 py-3 text-sm text-fuchsia-700">
+                        <div className="font-semibold">Information:</div>
+                        <div className="mt-1">
+                          Set date ranges for historical delivery analysis.
+                          System will calculate optimal split based on
+                          historical data.
+                        </div>
+                      </div>
+
+                      <div className="mt-4 rounded-xl border border-fuchsia-100 bg-[#fcfcfd] p-4">
+                        <div className="space-y-4">
+                          <div>
+                            <div className="inline-flex rounded bg-fuchsia-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-fuchsia-700">
+                              PO 1
+                            </div>
+                            <div className="mt-2 text-sm text-gray-700">
+                              Based on history delivery
+                            </div>
+                            <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+                              <Form.Item
+                                label={
+                                  <span className="text-sm font-medium text-gray-700">
+                                    From Date <span className="text-red-500">*</span>
+                                  </span>
+                                }
+                                name="po1FromDate"
+                                rules={purchaseOrderIsHistory ? [{ required: true, message: "PO 1 From Date is required" }] : []}
+                              >
+                                <Input size="large" type="date" className="w-full" />
+                              </Form.Item>
+
+                              <Form.Item
+                                label={
+                                  <span className="text-sm font-medium text-gray-700">
+                                    To Date <span className="text-red-500">*</span>
+                                  </span>
+                                }
+                                name="po1ToDate"
+                                rules={purchaseOrderIsHistory ? [{ required: true, message: "PO 1 To Date is required" }] : []}
+                              >
+                                <Input size="large" type="date" className="w-full" />
+                              </Form.Item>
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="inline-flex rounded bg-fuchsia-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-fuchsia-700">
+                              PO 2
+                            </div>
+                            <div className="mt-2 text-sm text-gray-700">
+                              Based on history delivery
+                            </div>
+                            <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
+                              <Form.Item
+                                label={
+                                  <span className="text-sm font-medium text-gray-700">
+                                    From Date <span className="text-red-500">*</span>
+                                  </span>
+                                }
+                                name="po2FromDate"
+                                rules={purchaseOrderIsHistory ? [{ required: true, message: "PO 2 From Date is required" }] : []}
+                              >
+                                <Input size="large" type="date" className="w-full" />
+                              </Form.Item>
+
+                              <Form.Item
+                                label={
+                                  <span className="text-sm font-medium text-gray-700">
+                                    To Date <span className="text-red-500">*</span>
+                                  </span>
+                                }
+                                name="po2ToDate"
+                                rules={purchaseOrderIsHistory ? [{ required: true, message: "PO 2 To Date is required" }] : []}
+                              >
+                                <Input size="large" type="date" className="w-full" />
+                              </Form.Item>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                        <div>
+                          <span className="font-semibold text-gray-700">
+                            Logic:
+                          </span>{" "}
+                          System analyzes historical delivery data to determine
+                          optimal split ratios for PO1 and PO2.
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+            {/* <Form.Item
+              label={
+                <span className="text-sm font-medium text-gray-700">
+                  Material Type <span className="text-red-500">*</span>
+                </span>
+              }
+              name="materialType"
+              rules={[
+                { required: true, message: "Material Type is required" },
+              ]}
+            >
+              <Select size="large" options={PURCHASE_ORDER_MATERIAL_OPTIONS} />
+            </Form.Item>
+
+            <Form.Item
+              label={
+                <span className="text-sm font-medium text-gray-700">
+                  Vendor <span className="text-red-500">*</span>
+                </span>
+              }
+              name="vendor"
+              rules={[{ required: true, message: "Vendor is required" }]}
+            >
+              <Select
+                size="large"
+                placeholder="Select vendor"
+                options={purchaseOrderVendorOptions}
+                showSearch
+                filterOption={(input, option) =>
+                  String(option?.label ?? "")
+                    .toLowerCase()
+                    .includes(input.toLowerCase())
+                }
+              />
+            </Form.Item>
+
+            <Form.Item
+              label={
+                <span className="text-sm font-medium text-gray-700">
+                  Status <span className="text-red-500">*</span>
+                </span>
+              }
+              name="status"
+              rules={[{ required: true, message: "Status is required" }]}
+            >
+              <Select size="large" options={PURCHASE_ORDER_STATUS_OPTIONS} />
+            </Form.Item>
+
+            <Form.Item
+              label={<span className="text-sm font-medium text-gray-700">Description</span>}
+              name="description"
+              className="md:col-span-2"
+            >
+              <Input size="large" placeholder="Optional note" />
+            </Form.Item> */}
+
+            {/* <Form.Item
+              label={
+                <span className="text-sm font-medium text-gray-700">
+                  Min Order Qty <span className="text-red-500">*</span>
+                </span>
+              }
+              name="minOrderQty"
+              rules={[
+                { required: true, message: "Min Order Qty is required" },
+              ]}
+            >
+              <InputNumber className="w-full" size="large" min={0} />
+            </Form.Item>
+
+            <Form.Item
+              label={
+                <span className="text-sm font-medium text-gray-700">
+                  Max Split Lines <span className="text-red-500">*</span>
+                </span>
+              }
+              name="maxSplitLines"
+              rules={[
+                { required: true, message: "Max Split Lines is required" },
+              ]}
+            >
+              <InputNumber className="w-full" size="large" min={1} />
+            </Form.Item> */}
+          </div>
+
+          <div className="mt-5 flex items-center justify-end gap-3 border-t border-gray-100 pt-4">
+            <Button className="rounded-lg" onClick={resetPurchaseOrderEdit}>
+              Reset to Default
+            </Button>
+            <Button type="primary" className="rounded-lg" onClick={savePurchaseOrderEdit}>
+              Save Configuration
+            </Button>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+          <div className="text-lg font-semibold text-gray-900">
+            Configuration Summary
+          </div>
+          <div className="mt-5 space-y-3 text-sm">
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-gray-500">Selected Method:</span>
+              <span className="inline-flex rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
+                {purchaseOrderIsHistory ? "History Forecasting" : "Percentage Based"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-gray-500">PO 1 Percentage:</span>
+              <span className="font-semibold text-gray-900">
+                {Number(purchaseOrderPo1Pct || 0)}%
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-gray-500">PO 2 Percentage:</span>
+              <span className="font-semibold text-gray-900">
+                {Number(purchaseOrderPo2Pct || 0)}%
+              </span>
+            </div>
+            {/* <div className="flex items-center justify-between gap-4">
+              <span className="text-gray-500">Material Type:</span>
+              <span className="font-semibold text-gray-900">
+                {PURCHASE_ORDER_MATERIAL_OPTIONS.find(
+                  (option) => option.value === purchaseOrderMaterialType,
+                )?.label ?? purchaseOrderMaterialType}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-gray-500">Status:</span>
+              <span className="font-semibold text-gray-900">{purchaseOrderStatus}</span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-gray-500">Min / Max Split:</span>
+              <span className="font-semibold text-gray-900">
+                {Number(purchaseOrderMinOrderQty || 0)} / {Number(purchaseOrderMaxSplitLines || 0)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-gray-500">Vendor:</span>
+              <span className="max-w-[55%] truncate text-right font-semibold text-gray-900">
+                {purchaseOrderVendor || "-"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-gray-500">Description:</span>
+              <span className="max-w-[55%] truncate text-right font-medium text-gray-900">
+                {purchaseOrderDescription || "-"}
+              </span>
+            </div> */}
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-gray-500">Total:</span>
+              <span className={`font-semibold ${purchaseOrderPctTotal === 100 ? "text-emerald-600" : "text-amber-600"}`}>
+                {purchaseOrderPctTotal}%
+              </span>
+            </div>
+          </div>
+        </div>
+      </Form>
+    </div>
+  );
+
   return (
     <div className="p-6">
       <Modal
@@ -4531,63 +5149,69 @@ export default function SystemSettingsPage() {
             <div>
               <div className="text-xs text-gray-500">Material Type</div>
               <div className="font-medium text-gray-900">
-                {poSplitDetailApiData?.budget_type ||
-                  purchaseOrderDetailRow.materialType}
+                {poSplitDetailApiData?.budget_type || purchaseOrderDetailRow.materialType}
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <div className="text-xs text-gray-500">PO 1 Percentage</div>
                 <div className="font-medium text-gray-900">
-                  {Number(
-                    poSplitDetailApiData?.po1_pct ??
-                      purchaseOrderDetailRow.po1Pct,
-                  )}
-                  %
+                  {Number(poSplitDetailApiData?.po1_pct ?? purchaseOrderDetailRow.po1Pct)}%
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">PO 2 Percentage</div>
                 <div className="font-medium text-gray-900">
-                  {Number(
-                    poSplitDetailApiData?.po2_pct ??
-                      purchaseOrderDetailRow.po2Pct,
-                  )}
-                  %
+                  {Number(poSplitDetailApiData?.po2_pct ?? purchaseOrderDetailRow.po2Pct)}%
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Min Order Qty</div>
                 <div className="font-medium text-gray-900">
                   {Number(
-                    poSplitDetailApiData?.min_order_qty ??
-                      purchaseOrderDetailRow.minOrderQty,
+                    poSplitDetailApiData?.min_order_qty ?? purchaseOrderDetailRow.minOrderQty,
                   ).toLocaleString("en-US")}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Max Split Lines</div>
                 <div className="font-medium text-gray-900">
-                  {Number(
-                    poSplitDetailApiData?.max_split_lines ??
-                      purchaseOrderDetailRow.maxSplitLines,
-                  )}
+                  {Number(poSplitDetailApiData?.max_split_lines ?? purchaseOrderDetailRow.maxSplitLines)}
                 </div>
               </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Split Rule</div>
               <div className="font-medium text-gray-900">
-                {poSplitDetailApiData?.split_rule ||
-                  purchaseOrderDetailRow.splitRule}
+                {poSplitDetailApiData?.split_rule || purchaseOrderDetailRow.splitRule}
               </div>
             </div>
+            {String(poSplitDetailApiData?.split_rule ?? purchaseOrderDetailRow.splitRule).toLowerCase() === "history" ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <div className="text-xs text-gray-500">PO 1 Range</div>
+                  <div className="font-medium text-gray-900">
+                    {(poSplitDetailApiData?.po1_from_date ?? purchaseOrderDetailRow.po1FromDate) &&
+                    (poSplitDetailApiData?.po1_to_date ?? purchaseOrderDetailRow.po1ToDate)
+                      ? `${poSplitDetailApiData?.po1_from_date ?? purchaseOrderDetailRow.po1FromDate} → ${poSplitDetailApiData?.po1_to_date ?? purchaseOrderDetailRow.po1ToDate}`
+                      : "-"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-gray-500">PO 2 Range</div>
+                  <div className="font-medium text-gray-900">
+                    {(poSplitDetailApiData?.po2_from_date ?? purchaseOrderDetailRow.po2FromDate) &&
+                    (poSplitDetailApiData?.po2_to_date ?? purchaseOrderDetailRow.po2ToDate)
+                      ? `${poSplitDetailApiData?.po2_from_date ?? purchaseOrderDetailRow.po2FromDate} → ${poSplitDetailApiData?.po2_to_date ?? purchaseOrderDetailRow.po2ToDate}`
+                      : "-"}
+                  </div>
+                </div>
+              </div>
+            ) : null}
             <div>
               <div className="text-xs text-gray-500">Description</div>
               <div className="font-medium text-gray-900">
-                {poSplitDetailApiData?.description ||
-                  purchaseOrderDetailRow.description ||
-                  "-"}
+                {poSplitDetailApiData?.description || purchaseOrderDetailRow.description || "-"}
               </div>
             </div>
             <div>
@@ -4615,37 +5239,32 @@ export default function SystemSettingsPage() {
             <div>
               <div className="text-xs text-gray-500">Menu/Action</div>
               <div className="font-medium text-gray-900">
-                {approvalWorkflowDetailApiData?.action_name ||
-                  approvalWorkflowDetailRow.menuAction}
+                {approvalWorkflowDetailApiData?.action_name || approvalWorkflowDetailRow.menuAction}
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <div className="text-xs text-gray-500">Level 1 Role</div>
                 <div className="font-medium text-gray-900">
-                  {approvalWorkflowDetailApiData?.level_1_role ||
-                    approvalWorkflowDetailRow.level1Role}
+                  {approvalWorkflowDetailApiData?.level_1_role || approvalWorkflowDetailRow.level1Role || "-"}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Level 2 Role</div>
                 <div className="font-medium text-gray-900">
-                  {approvalWorkflowDetailApiData?.level_2_role ||
-                    approvalWorkflowDetailRow.level2Role}
+                  {approvalWorkflowDetailApiData?.level_2_role || approvalWorkflowDetailRow.level2Role || "-"}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Level 3 Role</div>
                 <div className="font-medium text-gray-900">
-                  {approvalWorkflowDetailApiData?.level_3_role ||
-                    approvalWorkflowDetailRow.level3Role}
+                  {approvalWorkflowDetailApiData?.level_3_role || approvalWorkflowDetailRow.level3Role || "-"}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Level 4 Role</div>
                 <div className="font-medium text-gray-900">
-                  {approvalWorkflowDetailApiData?.level_4_role ||
-                    approvalWorkflowDetailRow.level4Role}
+                  {approvalWorkflowDetailApiData?.level_4_role || approvalWorkflowDetailRow.level4Role || "-"}
                 </div>
               </div>
             </div>
@@ -4662,7 +5281,7 @@ export default function SystemSettingsPage() {
       </Modal>
 
       <Modal
-        title="Kanban Standard Details"
+        title="Kanban Details"
         open={kanbanDetailOpen}
         footer={null}
         onCancel={closeKanbanDetail}
@@ -4672,38 +5291,29 @@ export default function SystemSettingsPage() {
         {kanbanDetailRow && (
           <div className="space-y-3">
             <div>
-              <div className="text-xs text-gray-500">Product</div>
-              <div className="font-medium text-gray-900">
-                {kanbanDetailRow.productName}
-              </div>
-              <div className="text-xs text-gray-500">
-                {kanbanDetailRow.productCode}
-              </div>
+              <div className="text-xs text-gray-500">Product Name</div>
+              <div className="font-medium text-gray-900">{kanbanDetailRow.productName}</div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <div className="text-xs text-gray-500">Product Code</div>
+              <div className="font-medium text-gray-900">{kanbanDetailRow.productCode}</div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <div className="text-xs text-gray-500">Kanban Qty</div>
-                <div className="font-medium text-gray-900">
-                  {kanbanDetailRow.kanbanQty} units
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-gray-500">Status</div>
-                <div className="font-medium text-gray-900">
-                  {kanbanDetailRow.status}
-                </div>
+                <div className="font-medium text-gray-900">{kanbanDetailRow.kanbanQty} units</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Min Stock</div>
-                <div className="font-medium text-gray-900">
-                  {kanbanDetailRow.minStock} units
-                </div>
+                <div className="font-medium text-gray-900">{kanbanDetailRow.minStock} units</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Max Stock</div>
-                <div className="font-medium text-gray-900">
-                  {kanbanDetailRow.maxStock} units
-                </div>
+                <div className="font-medium text-gray-900">{kanbanDetailRow.maxStock} units</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">Status</div>
+                <div className="font-medium text-gray-900">{kanbanDetailRow.status}</div>
               </div>
             </div>
           </div>
@@ -4968,75 +5578,154 @@ export default function SystemSettingsPage() {
       </Drawer>
 
       <Drawer
-        title={safetyEditMode === "create" ? "Add Parameter" : "Edit"}
+        title={
+          safetyEditMode === "create"
+            ? "Add Parameter for Safety Stock"
+            : "Edit Parameter for Safety Stock"
+        }
         placement="right"
         open={safetyEditOpen}
         onClose={closeSafetyEdit}
-        width={420}
+        width={760}
         destroyOnClose
+        styles={{ body: { padding: 24, background: "#EEF5FF" } }}
         footer={
           <div className="flex items-center justify-end gap-2">
             <Button onClick={closeSafetyEdit}>Cancel</Button>
             <Button type="primary" onClick={saveSafetyEdit}>
-              Save
+              Save Parameter
             </Button>
           </div>
         }
       >
         <Form form={safetyForm} layout="vertical">
-          <Form.Item
-            label="Inventory Type"
-            name="inventoryType"
-            rules={[{ required: true }]}
-          >
-            <Select
-              placeholder="Select inventory type"
-              options={[
-                { label: "Raw Material", value: "Raw Material" },
-                {
-                  label: "Indirect Raw Material",
-                  value: "Indirect Raw Material",
-                },
-                { label: "SubCon", value: "SubCon" },
-                { label: "Finished Goods", value: "Finished Goods" },
-              ]}
-            />
-          </Form.Item>
+          <div className="space-y-5">
+            <Card className="rounded-2xl" styles={{ body: { padding: 24 } }}>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-base font-semibold text-gray-900">
+                    Step 1: Select Type
+                  </div>
+                  <div className="text-sm text-gray-500">
+                    Select Type before edit Safety Stock
+                  </div>
+                </div>
+                <Tag className="rounded-full border border-blue-100 bg-blue-50 text-blue-700">
+                  Required
+                </Tag>
+              </div>
 
-          <Form.Item
-            label="Parameter"
-            name="parameter"
-            rules={[{ required: true }]}
-          >
-            <Select
-              placeholder="Select Type"
-              options={SAFETY_STOCK_PARAMETER_OPTIONS}
-              showSearch
-              optionFilterProp="label"
-              filterOption={(input, option) =>
-                String(option?.label ?? "")
-                  .toLowerCase()
-                  .includes(input.toLowerCase())
-              }
-            />
-          </Form.Item>
+              <div className="mt-4 flex items-center gap-3">
+                <div className="w-24 text-sm text-gray-700">Type</div>
+                <div className="w-full max-w-[320px]">
+                  <Form.Item
+                    name="inventoryType"
+                    rules={[{ required: true }]}
+                    className="!mb-0"
+                  >
+                    <Select
+                      placeholder="Select inventory type"
+                      options={[
+                        { label: "Raw Material", value: "Raw Material" },
+                        {
+                          label: "Indirect Raw Material",
+                          value: "Indirect Raw Material",
+                        },
+                        { label: "SubCon", value: "SubCon" },
+                        { label: "Finished Goods", value: "Finished Goods" },
+                      ]}
+                    />
+                  </Form.Item>
+                </div>
+                <InfoCircleOutlined className="text-blue-600" />
+              </div>
+            </Card>
 
-          <Form.Item
-            label="Constanta"
-            name="constanta"
-            rules={[{ required: true }]}
-          >
-            <InputNumber className="w-full" min={0} placeholder="7" />
-          </Form.Item>
+            <Card className="rounded-2xl" styles={{ body: { padding: 24 } }}>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-base font-semibold text-gray-900">
+                    Step 2: Input Data
+                  </div>
+                  <div className="text-sm text-gray-500">
+                    Input data for this safety stock parameter
+                  </div>
+                </div>
+                <Tag className="rounded-full border border-blue-100 bg-blue-50 text-blue-700">
+                  Entry 1
+                </Tag>
+              </div>
 
-          <Form.Item label="Status" name="status" rules={[{ required: true }]}>
-            <Select
-              options={[
-                { label: "Active", value: "Active" },
-                { label: "Inactive", value: "Inactive" },
-              ]}
-            />
-          </Form.Item>
+              <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <Form.Item
+                  label="Uniq"
+                  name="uniqCode"
+                  rules={[{ required: true }]}
+                  className="!mb-0"
+                >
+                  <Select
+                    placeholder="Select Uniq"
+                    options={uniqOptions}
+                    showSearch
+                    optionFilterProp="label"
+                    filterOption={(input, option) =>
+                      String(option?.label ?? "")
+                        .toLowerCase()
+                        .includes(input.toLowerCase())
+                    }
+                  />
+                </Form.Item>
+
+                <Form.Item
+                  label="Constanta (days)"
+                  name="constanta"
+                  rules={[{ required: true }]}
+                  className="!mb-0"
+                >
+                  <InputNumber
+                    className="w-full"
+                    min={0}
+                    placeholder="Input Constanta"
+                  />
+                </Form.Item>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                <Form.Item
+                  label="Calculation Type"
+                  name="parameter"
+                  rules={[{ required: true }]}
+                  className="!mb-0"
+                >
+                  <Select
+                    placeholder="Select Type"
+                    options={SAFETY_STOCK_PARAMETER_OPTIONS}
+                    showSearch
+                    optionFilterProp="label"
+                    filterOption={(input, option) =>
+                      String(option?.label ?? "")
+                        .toLowerCase()
+                        .includes(input.toLowerCase())
+                    }
+                  />
+                </Form.Item>
+
+                <Form.Item
+                  label="Status"
+                  name="status"
+                  rules={[{ required: true }]}
+                  className="!mb-0"
+                >
+                  <Select
+                    options={[
+                      { label: "Active", value: "Active" },
+                      { label: "Inactive", value: "Inactive" },
+                    ]}
+                  />
+                </Form.Item>
+              </div>
+            </Card>
+          </div>
         </Form>
       </Drawer>
 
@@ -5143,7 +5832,7 @@ export default function SystemSettingsPage() {
             ? "Add Parameter"
             : "Edit Parameter"
         }
-        open={purchaseOrderEditOpen}
+        open={false}
         onCancel={closePurchaseOrderEdit}
         width={940}
         centered
@@ -5151,411 +5840,7 @@ export default function SystemSettingsPage() {
         styles={{ body: { padding: 24, background: "#f8fbff" } }}
         footer={null}
       >
-        <div className="space-y-5">
-          <div className="rounded-2xl border border-[#d6e5ff] bg-[#eef5ff] px-5 py-4 shadow-sm">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
-                  <SettingOutlined />
-                </div>
-                <div>
-                  <div className="text-[22px] font-semibold text-gray-900">
-                    System Parameters
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    Comprehensive ERP parameter management and configuration
-                  </div>
-                </div>
-              </div>
-              <Button type="primary" className="rounded-lg px-4">
-                19 Configuration Modules
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="text-[28px] font-semibold leading-tight text-gray-900">
-                PO - Split Settings
-              </div>
-              <div className="mt-1 text-sm text-gray-500">
-                Configure purchase order split settings
-              </div>
-            </div>
-            <Button
-              type="primary"
-              className="rounded-lg"
-              icon={<PlusOutlined />}
-            >
-              Add Parameter
-            </Button>
-          </div>
-
-          <Form
-            form={purchaseOrderForm}
-            layout="vertical"
-            requiredMark={false}
-            colon={false}
-          >
-            <Form.Item name="splitRule" hidden>
-              <Input />
-            </Form.Item>
-
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-              <div className="text-lg font-semibold text-gray-900">
-                Purchase Order Split Method
-              </div>
-              <div className="mt-1 text-sm text-gray-500">
-                Choose how to split purchase orders between PO1 and PO2. Total
-                must equal 100% of Purchase Request.
-              </div>
-
-              <div className="mt-5 space-y-4">
-                <button
-                  type="button"
-                  className={`w-full rounded-2xl border p-4 text-left transition ${!purchaseOrderIsHistory ? "border-blue-500 bg-blue-50/50 shadow-[0_0_0_1px_rgba(59,130,246,0.16)]" : "border-gray-200 bg-white"}`}
-                  onClick={() =>
-                    purchaseOrderForm.setFieldsValue({
-                      splitRule: "percentage",
-                    })
-                  }
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="mt-1 flex h-4 w-4 items-center justify-center rounded-full border border-blue-500">
-                      <div
-                        className={`h-2 w-2 rounded-full ${!purchaseOrderIsHistory ? "bg-blue-600" : "bg-transparent"}`}
-                      />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[17px] font-semibold text-gray-900">
-                        Option 1: PO based on Percentage
-                      </div>
-                      <div className="mt-1 text-sm text-gray-500">
-                        Applied for all UNIQ. Set fixed percentage split between
-                        PO1 and PO2.
-                      </div>
-
-                      {!purchaseOrderIsHistory ? (
-                        <div className="mt-4 rounded-2xl border border-blue-200 bg-white p-4">
-                          <div className="rounded-xl border border-blue-200 bg-[#f5f9ff] px-4 py-3 text-sm text-blue-700">
-                            <div className="font-semibold">Information:</div>
-                            <div className="mt-1">
-                              You can fill the percentage at menu PO Budget.
-                              Total percentage must equal 100%.
-                            </div>
-                          </div>
-
-                          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
-                            <Form.Item
-                              label={
-                                <span className="text-sm font-medium text-gray-700">
-                                  PO 1 Percentage{" "}
-                                  <span className="text-red-500">*</span>
-                                </span>
-                              }
-                              name="po1Pct"
-                              rules={[
-                                {
-                                  required: true,
-                                  message: "PO 1 Percentage is required",
-                                },
-                              ]}
-                            >
-                              <InputNumber
-                                className="w-full"
-                                size="large"
-                                min={0}
-                                max={100}
-                                addonAfter="%"
-                              />
-                            </Form.Item>
-
-                            <Form.Item
-                              label={
-                                <span className="text-sm font-medium text-gray-700">
-                                  PO 2 Percentage{" "}
-                                  <span className="text-red-500">*</span>
-                                </span>
-                              }
-                              name="po2Pct"
-                              rules={[
-                                {
-                                  required: true,
-                                  message: "PO 2 Percentage is required",
-                                },
-                              ]}
-                            >
-                              <InputNumber
-                                className="w-full"
-                                size="large"
-                                min={0}
-                                max={100}
-                                addonAfter="%"
-                              />
-                            </Form.Item>
-
-                            <div>
-                              <div className="mb-2 text-sm font-medium text-gray-700">
-                                Total Percentage
-                              </div>
-                              <div
-                                className={`flex h-10 items-center rounded-lg border px-4 text-lg font-semibold ${purchaseOrderPctTotal === 100 ? "border-emerald-400 bg-emerald-50 text-emerald-600" : "border-amber-300 bg-amber-50 text-amber-600"}`}
-                              >
-                                {purchaseOrderPctTotal}%
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="mt-2 rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
-                            <div>
-                              <span className="font-semibold text-gray-700">
-                                Logic:
-                              </span>{" "}
-                              If percentage is created, then number of PR will
-                              be divided based on PO 1 and PO 2 percentage.
-                            </div>
-                            <div className="mt-2">
-                              Example: If PR = 1000 pcs, PO1 (50%) = 500 pcs,
-                              PO2 (50%) = 500 pcs
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  className={`w-full rounded-2xl border p-4 text-left transition ${purchaseOrderIsHistory ? "border-fuchsia-400 bg-fuchsia-50/40 shadow-[0_0_0_1px_rgba(217,70,239,0.14)]" : "border-gray-200 bg-white"}`}
-                  onClick={() =>
-                    purchaseOrderForm.setFieldsValue({ splitRule: "history" })
-                  }
-                >
-                  <div className="flex items-start gap-3">
-                    <div
-                      className={`mt-1 flex h-4 w-4 items-center justify-center rounded-full border ${purchaseOrderIsHistory ? "border-blue-500" : "border-gray-400"}`}
-                    >
-                      <div
-                        className={`h-2 w-2 rounded-full ${purchaseOrderIsHistory ? "bg-blue-600" : "bg-transparent"}`}
-                      />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[17px] font-semibold text-gray-900">
-                        Option 2: PO based on History Forecasting
-                      </div>
-                      <div className="mt-1 text-sm text-gray-500">
-                        Can be applied per UNIQ. Based on historical delivery
-                        data from specific date ranges.
-                      </div>
-
-                      {purchaseOrderIsHistory ? (
-                        <div className="mt-4 rounded-2xl border border-fuchsia-200 bg-white p-4">
-                          <div className="rounded-xl border border-fuchsia-100 bg-fuchsia-50 px-4 py-3 text-sm text-fuchsia-700">
-                            <div className="font-semibold">Information:</div>
-                            <div className="mt-1">
-                              Set date ranges for historical delivery analysis.
-                              System will calculate optimal split based on
-                              historical data.
-                            </div>
-                          </div>
-
-                          <div className="mt-4 rounded-xl bg-gray-50 px-4 py-3 text-sm text-gray-600">
-                            <div>
-                              <span className="font-semibold text-gray-700">
-                                Logic:
-                              </span>{" "}
-                              System analyzes historical delivery data to
-                              determine optimal split ratios for PO1 and PO2.
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </button>
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Form.Item
-                  label={
-                    <span className="text-sm font-medium text-gray-700">
-                      Material Type <span className="text-red-500">*</span>
-                    </span>
-                  }
-                  name="materialType"
-                  rules={[
-                    { required: true, message: "Material Type is required" },
-                  ]}
-                >
-                  <Select
-                    size="large"
-                    options={PURCHASE_ORDER_MATERIAL_OPTIONS}
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  label={
-                    <span className="text-sm font-medium text-gray-700">
-                      Vendor <span className="text-red-500">*</span>
-                    </span>
-                  }
-                  name="vendor"
-                  rules={[{ required: true, message: "Vendor is required" }]}
-                >
-                  <Select
-                    size="large"
-                    placeholder="Select vendor"
-                    options={purchaseOrderVendorOptions}
-                    showSearch
-                    filterOption={(input, option) =>
-                      String(option?.label ?? "")
-                        .toLowerCase()
-                        .includes(input.toLowerCase())
-                    }
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  label={
-                    <span className="text-sm font-medium text-gray-700">
-                      Status <span className="text-red-500">*</span>
-                    </span>
-                  }
-                  name="status"
-                  rules={[{ required: true, message: "Status is required" }]}
-                >
-                  <Select
-                    size="large"
-                    options={PURCHASE_ORDER_STATUS_OPTIONS}
-                  />
-                </Form.Item>
-
-                <Form.Item
-                  label={
-                    <span className="text-sm font-medium text-gray-700">
-                      Description
-                    </span>
-                  }
-                  name="description"
-                  className="md:col-span-2"
-                >
-                  <Input size="large" placeholder="Optional note" />
-                </Form.Item>
-
-                <Form.Item
-                  label={
-                    <span className="text-sm font-medium text-gray-700">
-                      Min Order Qty <span className="text-red-500">*</span>
-                    </span>
-                  }
-                  name="minOrderQty"
-                  rules={[
-                    { required: true, message: "Min Order Qty is required" },
-                  ]}
-                >
-                  <InputNumber className="w-full" size="large" min={0} />
-                </Form.Item>
-
-                <Form.Item
-                  label={
-                    <span className="text-sm font-medium text-gray-700">
-                      Max Split Lines <span className="text-red-500">*</span>
-                    </span>
-                  }
-                  name="maxSplitLines"
-                  rules={[
-                    { required: true, message: "Max Split Lines is required" },
-                  ]}
-                >
-                  <InputNumber className="w-full" size="large" min={1} />
-                </Form.Item>
-              </div>
-
-              <div className="mt-5 flex items-center justify-end gap-3 border-t border-gray-100 pt-4">
-                <Button className="rounded-lg" onClick={resetPurchaseOrderEdit}>
-                  Reset to Default
-                </Button>
-                <Button
-                  type="primary"
-                  className="rounded-lg"
-                  onClick={savePurchaseOrderEdit}
-                >
-                  Save Configuration
-                </Button>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-              <div className="text-lg font-semibold text-gray-900">
-                Configuration Summary
-              </div>
-              <div className="mt-5 space-y-3 text-sm">
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500">Selected Method:</span>
-                  <span className="inline-flex rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
-                    {purchaseOrderIsHistory
-                      ? "History Forecasting"
-                      : "Percentage Based"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500">PO 1 Percentage:</span>
-                  <span className="font-semibold text-gray-900">
-                    {Number(purchaseOrderPo1Pct || 0)}%
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500">PO 2 Percentage:</span>
-                  <span className="font-semibold text-gray-900">
-                    {Number(purchaseOrderPo2Pct || 0)}%
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500">Material Type:</span>
-                  <span className="font-semibold text-gray-900">
-                    {PURCHASE_ORDER_MATERIAL_OPTIONS.find(
-                      (option) => option.value === purchaseOrderMaterialType,
-                    )?.label ?? purchaseOrderMaterialType}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500">Status:</span>
-                  <span className="font-semibold text-gray-900">
-                    {purchaseOrderStatus}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500">Min / Max Split:</span>
-                  <span className="font-semibold text-gray-900">
-                    {Number(purchaseOrderMinOrderQty || 0)} /{" "}
-                    {Number(purchaseOrderMaxSplitLines || 0)}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500">Vendor:</span>
-                  <span className="max-w-[55%] truncate text-right font-semibold text-gray-900">
-                    {purchaseOrderVendor || "-"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500">Description:</span>
-                  <span className="max-w-[55%] truncate text-right font-medium text-gray-900">
-                    {purchaseOrderDescription || "-"}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-gray-500">Total:</span>
-                  <span
-                    className={`font-semibold ${purchaseOrderPctTotal === 100 ? "text-emerald-600" : "text-amber-600"}`}
-                  >
-                    {purchaseOrderPctTotal}%
-                  </span>
-                </div>
-              </div>
-            </div>
-          </Form>
-        </div>
+        {renderPurchaseOrderEditor()}
       </Modal>
 
       <Drawer
@@ -5870,13 +6155,13 @@ export default function SystemSettingsPage() {
           </Form.Item>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Form.Item
+            {/* <Form.Item
               label="Machine Count"
               name="machineCount"
               rules={[{ required: true }]}
             >
               <InputNumber className="w-full" min={0} placeholder="10" />
-            </Form.Item>
+            </Form.Item> */}
             <Form.Item
               label="Operating Hours"
               name="operatingHours"
@@ -6050,16 +6335,20 @@ export default function SystemSettingsPage() {
                         : selectedModuleId === "global"
                           ? "Configure working days per month"
                           : selectedModuleId === "process"
-                            ? "Configure Process for Work In Progress"
+                            ? "Configure Process for Work In Proccess"
                             : selectedModuleId === "machine"
                               ? "Define machine pattern configurations"
                               : selectedModule.description}
                   </div>
                 </div>
                 <Button
-                  type="primary"
-                  icon={<PlusOutlined />}
+                  type={selectedModuleId === "purchase-order" && purchaseOrderEditOpen ? "default" : "primary"}
+                  icon={selectedModuleId === "purchase-order" && purchaseOrderEditOpen ? undefined : <PlusOutlined />}
                   onClick={() => {
+                    if (selectedModuleId === "purchase-order" && purchaseOrderEditOpen) {
+                      closePurchaseOrderEdit();
+                      return;
+                    }
                     if (selectedModuleId === "access-control-matrix") {
                       router.push(
                         "/system-settings/access-control-matrix/create",
@@ -6091,7 +6380,7 @@ export default function SystemSettingsPage() {
                       return;
                     }
                     if (selectedModuleId === "purchase-order") {
-                      router.push("/system-settings/purchase-order/create");
+                      openCreatePurchaseOrder();
                       return;
                     }
                     if (selectedModuleId === "approval-workflow") {
@@ -6121,10 +6410,15 @@ export default function SystemSettingsPage() {
                     openCreate();
                   }}
                 >
-                  Add Parameter
+                  {selectedModuleId === "purchase-order" && purchaseOrderEditOpen
+                    ? "Back to List"
+                    : "Add Parameter"}
                 </Button>
               </div>
 
+              {selectedModuleId === "purchase-order" && purchaseOrderEditOpen ? (
+                <div className="mt-4">{renderPurchaseOrderEditor()}</div>
+              ) : (
               <div className="mt-4 border rounded-xl overflow-hidden">
                 {selectedModuleId === "roles" ? (
                   <Table<RoleRow>
@@ -6234,6 +6528,7 @@ export default function SystemSettingsPage() {
                   />
                 )}
               </div>
+              )}
             </div>
           </Card>
           )}

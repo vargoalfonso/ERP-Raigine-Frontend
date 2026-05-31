@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { Suspense, useMemo, useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button, Card, InputNumber, Select, Tag, message } from "antd";
 import {
   InfoCircleOutlined,
@@ -13,6 +14,8 @@ import { getApiErrorMessage } from "@/lib/api/error";
 import {
   useCreateSafetyStockBulkMutation,
   useCreateSafetyStockMutation,
+  useGetSafetyStockByIdQuery,
+  useGetSafetyStockQuery,
 } from "@/lib/api/system-settings/api";
 import { useGetInventoryListQuery } from "@/lib/api/inventory/api";
 
@@ -53,15 +56,35 @@ function makeEntry(idx: number): Entry {
 }
 
 export default function SafetyStockCreatePage() {
+  return (
+    <Suspense fallback={null}>
+      <PageContent />
+    </Suspense>
+  );
+}
+
+function PageContent() {
   const router = useRouter();
+  const goBackToSystemSettings = () => {
+    if (typeof window !== "undefined") {
+      window.location.replace("/system-settings");
+      return;
+    }
+    router.replace("/system-settings");
+  };
   const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
   const [createSafetyStock, createSafetyStockState] = useCreateSafetyStockMutation();
   const [createSafetyStockBulk, createSafetyStockBulkState] = useCreateSafetyStockBulkMutation();
 
   const [type, setType] = useState<string | undefined>(undefined);
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
+  const searchParams = useSearchParams();
+  const editId = searchParams.get("id") ?? "";
+  const isEditMode = Boolean(editId);
 
-  const inventoryType = useMemo<"raw-materials" | "indirect-materials" | "subcon-materials" | undefined>(() => {
+  const { data: safetyStockRecord } = useGetSafetyStockByIdQuery(editId, { skip: !editId });
+
+  const inventoryType = useMemo<"raw-materials" | "indirect-materials" | "subcon-materials" | "finished-goods" | undefined>(() => {
     switch (type) {
       case "raw_material":
         return "raw-materials";
@@ -69,27 +92,109 @@ export default function SafetyStockCreatePage() {
         return "indirect-materials";
       case "subcon":
         return "subcon-materials";
+      case "finished_goods":
+        return "finished-goods";
       default:
         return undefined;
     }
   }, [type]);
+
+  // load existing safety stock when editing
+  useEffect(() => {
+    if (!safetyStockRecord) return;
+    try {
+      const rec = safetyStockRecord as any;
+      // map backend inventory_type -> our `type` values
+      const invType = String(rec.inventory_type ?? "");
+      let mappedType: string | undefined = undefined;
+      if (invType === "raw-materials") mappedType = "raw_material";
+      else if (invType === "indirect-materials") mappedType = "indirect_material";
+      else if (invType === "subcon-materials") mappedType = "subcon";
+      else if (invType === "finished-goods") mappedType = "finished_goods";
+
+      setType(mappedType);
+
+      const e: Entry = {
+        id: `entry-1`,
+        uniq: String(rec.item_uniq_code ?? ""),
+        calculationType: String(rec.calculation_type ?? CALCULATION_OPTIONS[0]?.value),
+        constanta: rec.constanta == null ? undefined : Number(rec.constanta),
+        created: true,
+      };
+      setEntries([e]);
+    } catch (err) {
+      // ignore
+    }
+  }, [safetyStockRecord]);
 
   const { data: inventoryListResp } = useGetInventoryListQuery(
     inventoryType ? { type: inventoryType, page: 1, limit: 1000 } : ({} as any),
     { skip: !inventoryType }
   );
 
+  const { data: safetyStockList } = useGetSafetyStockQuery(undefined, { skip: !apiEnabled });
+
   const uniqOptions = useMemo(() => {
     const items = inventoryListResp?.data ?? [];
-    return items
+    const fromApi = items
       .map((r) => {
-        const uniq = (r as any)?.uniq_code ?? (r as any)?.uniq //?? (r as any)?.item_name ?? undefined;
+        const uniq = (r as any)?.uniq_code ?? (r as any)?.uniq;
         if (!uniq) return null;
-        //const part = (r as any)?.part_name ?? (r as any)?.part_number ?? (r as any)?.item_name ?? "";
-        return { label: String(uniq), value: String(uniq)}; //label: part ? `${uniq} — ${part}` : };
+        return { label: String(uniq), value: String(uniq) };
       })
       .filter(Boolean) as { label: string; value: string }[];
-  }, [inventoryListResp]);
+
+    // include any uniqs already present in entries (e.g., when editing)
+    const existing = entries
+      .map((e) => e.uniq)
+      .filter(Boolean)
+      .map((u) => String(u));
+
+    for (const u of existing) {
+      if (!fromApi.some((o) => o.value === u)) {
+        fromApi.push({ label: u, value: u });
+      }
+    }
+
+    // compute used uniqs for the selected inventoryType (exclude them from options)
+    const used = new Set<string>();
+    try {
+      for (const rec of safetyStockList ?? []) {
+        const inv = String((rec as any).inventory_type ?? "");
+        const uniq = String((rec as any).item_uniq_code ?? "");
+        if (!inv || !uniq) continue;
+        if (inventoryType && inv === inventoryType) used.add(uniq);
+      }
+    } catch (err) {
+      // ignore
+    }
+
+    // allow uniqs that are already present in current entries (so editing keeps its own uniq)
+    const existingSet = new Set(existing.map(String));
+
+    const filtered = fromApi.filter((o) => {
+      const v = String(o.value);
+      if (existingSet.has(v)) return true;
+      if (used.has(v)) return false;
+      return true;
+    });
+
+    return filtered;
+  }, [inventoryListResp, entries, safetyStockList, inventoryType]);
+
+  // When type changes and we have options, ensure entries have a sensible default uniq
+  useEffect(() => {
+    if (!inventoryType) return;
+    const first = uniqOptions[0]?.value;
+    setEntries((prev) =>
+      prev.map((e) => {
+        if (e.uniq && uniqOptions.some((option) => option.value === e.uniq)) {
+          return e;
+        }
+        return { ...e, uniq: first };
+      }),
+    );
+  }, [inventoryType, uniqOptions]);
 
   const completeCount = useMemo(() => entries.filter((e) => e.created).length, [entries]);
 
@@ -139,7 +244,7 @@ export default function SafetyStockCreatePage() {
 
       if (!apiEnabled) {
         message.success("Safety stock parameter saved");
-        router.push("/system-settings");
+        goBackToSystemSettings();
         return;
       }
 
@@ -157,7 +262,7 @@ export default function SafetyStockCreatePage() {
       }
 
       message.success("Safety stock parameter saved");
-      router.push("/system-settings");
+      goBackToSystemSettings();
     } catch (err) {
       message.error(getApiErrorMessage(err, "Failed to save safety stock parameter"));
     }
@@ -169,15 +274,16 @@ export default function SafetyStockCreatePage() {
         <div className="px-6 py-4">
           <div className="flex items-center justify-between gap-4">
             <button
+              type="button"
               className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
-              onClick={() => router.push("/system-settings")}
+              onClick={goBackToSystemSettings}
             >
               <LeftOutlined />
               <span>Back to System Parameters</span>
             </button>
 
             <div className="flex items-center gap-2">
-              <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
+              <Button onClick={goBackToSystemSettings}>Cancel</Button>
               <Button
                 type="primary"
                 icon={<SaveOutlined />}
@@ -191,10 +297,14 @@ export default function SafetyStockCreatePage() {
 
           <div className="mt-2">
             <div className="text-xl font-semibold text-gray-900">
-              Add Parameter for Safety Stock
+              {isEditMode
+                ? "Edit Parameter for Safety Stock"
+                : "Add Parameter for Safety Stock"}
             </div>
             <div className="text-sm text-gray-500">
-              Create Stockdays <span className="mx-2">•</span> {entries.length} entry
+              {isEditMode ? "Edit Safety Stock" : "Create Safety Stock"}
+              <span className="mx-2">•</span>
+              {entries.length} entry
             </div>
           </div>
         </div>
@@ -206,7 +316,11 @@ export default function SafetyStockCreatePage() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="text-base font-semibold text-gray-900">Step 1: Select Type</div>
-                <div className="text-sm text-gray-500">Select Type before create Safety Stock</div>
+                  <div className="text-sm text-gray-500">
+                    {isEditMode
+                      ? "Select Type before edit Safety Stock"
+                      : "Select Type before create Safety Stock"}
+                  </div>
               </div>
               <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">
                 Required
@@ -266,7 +380,7 @@ export default function SafetyStockCreatePage() {
                     
 
                     <div className="lg:col-span-3">
-                      <div className="text-sm text-gray-700 mb-2">Constanta</div>
+                      <div className="text-sm text-gray-700 mb-2">Constanta (days)</div>
                       <InputNumber
                         className="w-full"
                         value={e.constanta}

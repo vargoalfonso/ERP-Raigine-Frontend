@@ -161,7 +161,7 @@ export default function MachineSettingsPanel() {
       width: 220,
       render: (value: string) => <span className="font-medium text-gray-900">{value}</span>,
     },
-    { title: "Machine Count", dataIndex: "machineCount", key: "machineCount", width: 140 },
+    // { title: "Machine Count", dataIndex: "machineCount", key: "machineCount", width: 140 },
     { title: "Operating Hours", dataIndex: "operatingHours", key: "operatingHours", width: 150 },
     {
       title: "Status",
@@ -378,9 +378,9 @@ export default function MachineSettingsPanel() {
             <Input placeholder="Standard Production" />
           </Form.Item>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <Form.Item name="machineCount" label="Machine Count" rules={[{ required: true, message: "Required" }]}>
+            {/* <Form.Item name="machineCount" label="Machine Count" rules={[{ required: true, message: "Required" }]}>
               <InputNumber className="w-full" min={0} />
-            </Form.Item>
+            </Form.Item> */}
             <Form.Item name="operatingHours" label="Operating Hours" rules={[{ required: true, message: "Required" }]}>
               <InputNumber className="w-full" min={0} />
             </Form.Item>
@@ -407,9 +407,9 @@ export default function MachineSettingsPanel() {
             <Input />
           </Form.Item>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <Form.Item name="machineCount" label="Machine Count" rules={[{ required: true, message: "Required" }]}>
+            {/* <Form.Item name="machineCount" label="Machine Count" rules={[{ required: true, message: "Required" }]}>
               <InputNumber className="w-full" min={0} />
-            </Form.Item>
+            </Form.Item> */}
             <Form.Item name="operatingHours" label="Operating Hours" rules={[{ required: true, message: "Required" }]}>
               <InputNumber className="w-full" min={0} />
             </Form.Item>

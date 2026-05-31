@@ -61,6 +61,8 @@ type MachineFormValues = {
   status: MachineStatus;
 };
 
+const ADD_NEW_PRODUCTION_LINE_VALUE = "__add_new_production_line__";
+
 const formatNumber = (n: number) => new Intl.NumberFormat("en-US").format(n);
 
 export default function MachineMasterDataPage() {
@@ -212,16 +214,27 @@ export default function MachineMasterDataPage() {
   const [activeRow, setActiveRow] = useState<MachineRow | null>(null);
   const [barcodeRow, setBarcodeRow] = useState<MachineRow | null>(null);
   const [form] = Form.useForm<MachineFormValues>();
+  const [isCustomProductionLine, setIsCustomProductionLine] = useState(false);
   const qrWrapperRef = useRef<HTMLDivElement | null>(null);
+  const selectedProductionLine = Form.useWatch("productionLine", form) ?? "";
 
   const productionLineOptions = useMemo(
-    () => [
-      { label: "Line A", value: "Line A" },
-      { label: "Line B", value: "Line B" },
-      { label: "Line C", value: "Line C" },
-      { label: "Line D", value: "Line D" },
-    ],
-    [],
+    () => {
+      const defaults = ["Line A", "Line B", "Line C", "Line D"];
+      const values = Array.from(
+        new Set(
+          [...defaults, ...rows.map((row) => row.productionLine), selectedProductionLine]
+            .map((value) => String(value ?? "").trim())
+            .filter(Boolean),
+        ),
+      );
+
+      return [
+        ...values.map((value) => ({ label: value, value })),
+        { label: "+ Add New", value: ADD_NEW_PRODUCTION_LINE_VALUE },
+      ];
+    },
+    [rows, selectedProductionLine],
   );
 
   const processOptions = useMemo(() => {
@@ -343,6 +356,7 @@ export default function MachineMasterDataPage() {
               icon={<EditOutlined />}
               onClick={() => {
                 setActiveRow(record);
+                setIsCustomProductionLine(false);
                 form.setFieldsValue({
                   machineName: record.machineName,
                   machineNumber: record.machineNumber,
@@ -454,6 +468,7 @@ export default function MachineMasterDataPage() {
           }).unwrap();
 
           setAddOpen(false);
+          setIsCustomProductionLine(false);
           form.resetFields();
           message.success("Machine added");
           return;
@@ -490,6 +505,7 @@ export default function MachineMasterDataPage() {
 
           setEditOpen(false);
           setActiveRow(null);
+          setIsCustomProductionLine(false);
           form.resetFields();
           message.success("Machine updated");
           return;
@@ -522,6 +538,7 @@ export default function MachineMasterDataPage() {
       if (mode === "add") setAddOpen(false);
       if (mode === "edit") setEditOpen(false);
       setActiveRow(null);
+      setIsCustomProductionLine(false);
       form.resetFields();
       message.success(mode === "add" ? "Machine added" : "Machine updated");
     } catch {
@@ -667,6 +684,7 @@ export default function MachineMasterDataPage() {
                 onClick={() => {
                   form.resetFields();
                   form.setFieldsValue({ status: "Active" });
+                  setIsCustomProductionLine(false);
                   setAddOpen(true);
                 }}
                 loading={createMachineState.isLoading}
@@ -774,6 +792,7 @@ export default function MachineMasterDataPage() {
         open={addOpen}
         onCancel={() => {
           setAddOpen(false);
+          setIsCustomProductionLine(false);
           form.resetFields();
         }}
         footer={
@@ -782,6 +801,7 @@ export default function MachineMasterDataPage() {
               className="!rounded-lg"
               onClick={() => {
                 setAddOpen(false);
+                setIsCustomProductionLine(false);
                 form.resetFields();
               }}
             >
@@ -828,13 +848,44 @@ export default function MachineMasterDataPage() {
               label="Production Line"
               rules={[{ required: true, message: "Required" }]}
             >
-              <Select
-                options={productionLineOptions}
-                placeholder="Select production line"
-                className="w-full"
-                showSearch
-                optionFilterProp="label"
-              />
+              {isCustomProductionLine ? (
+                <Input
+                  className="!rounded-lg"
+                  placeholder="Input production line"
+                  value={String(form.getFieldValue("productionLine") ?? "")}
+                  onChange={(event) =>
+                    form.setFieldsValue({ productionLine: event.target.value })
+                  }
+                  addonAfter={
+                    <button
+                      type="button"
+                      className="text-xs text-blue-600"
+                      onClick={() => {
+                        setIsCustomProductionLine(false);
+                        form.setFieldsValue({ productionLine: undefined as never });
+                      }}
+                    >
+                      Choose existing
+                    </button>
+                  }
+                />
+              ) : (
+                <Select
+                  options={productionLineOptions}
+                  placeholder="Select production line"
+                  className="w-full"
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={(value) => {
+                    if (value === ADD_NEW_PRODUCTION_LINE_VALUE) {
+                      setIsCustomProductionLine(true);
+                      form.setFieldsValue({ productionLine: "" });
+                      return;
+                    }
+                    form.setFieldsValue({ productionLine: value });
+                  }}
+                />
+              )}
             </Form.Item>
             <Form.Item
               name="processId"
@@ -882,6 +933,7 @@ export default function MachineMasterDataPage() {
         onCancel={() => {
           setEditOpen(false);
           setActiveRow(null);
+          setIsCustomProductionLine(false);
           form.resetFields();
         }}
         footer={
@@ -891,6 +943,7 @@ export default function MachineMasterDataPage() {
               onClick={() => {
                 setEditOpen(false);
                 setActiveRow(null);
+                setIsCustomProductionLine(false);
                 form.resetFields();
               }}
             >
@@ -937,7 +990,43 @@ export default function MachineMasterDataPage() {
               label="Production Line"
               rules={[{ required: true, message: "Required" }]}
             >
-              <Select options={productionLineOptions} className="w-full" />
+              {isCustomProductionLine ? (
+                <Input
+                  className="!rounded-lg"
+                  placeholder="Input production line"
+                  value={String(form.getFieldValue("productionLine") ?? "")}
+                  onChange={(event) =>
+                    form.setFieldsValue({ productionLine: event.target.value })
+                  }
+                  addonAfter={
+                    <button
+                      type="button"
+                      className="text-xs text-blue-600"
+                      onClick={() => {
+                        setIsCustomProductionLine(false);
+                        form.setFieldsValue({ productionLine: activeRow?.productionLine ?? undefined });
+                      }}
+                    >
+                      Choose existing
+                    </button>
+                  }
+                />
+              ) : (
+                <Select
+                  options={productionLineOptions}
+                  className="w-full"
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={(value) => {
+                    if (value === ADD_NEW_PRODUCTION_LINE_VALUE) {
+                      setIsCustomProductionLine(true);
+                      form.setFieldsValue({ productionLine: "" });
+                      return;
+                    }
+                    form.setFieldsValue({ productionLine: value });
+                  }}
+                />
+              )}
             </Form.Item>
             <Form.Item
               name="processId"

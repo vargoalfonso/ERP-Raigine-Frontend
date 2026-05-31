@@ -105,9 +105,21 @@ export type ActivateBomRequest = {
 };
 
 export type BomImportResponse = {
+  request_id?: string;
+  status?: number | string;
+  import_status?: string;
+  total?: number;
   imported?: number;
+  success_count?: number;
   failed?: number;
+  failed_count?: number;
+  download_url?: string;
+  error_download_url?: string;
+  failed_download_url?: string;
   errors?: unknown[];
+  validation_errors?: unknown[];
+  failed_rows?: unknown[];
+  invalid_rows?: unknown[];
   message?: string;
 };
 

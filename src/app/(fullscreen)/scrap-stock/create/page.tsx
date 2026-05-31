@@ -21,6 +21,7 @@ import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
 import { useCreateScrapStockMutation } from "@/lib/api/scrap-stock/api";
+import { useGetUomsQuery } from "@/lib/api/system-settings/api";
 import { useGetWorkOrdersQuery } from "@/lib/api/work-orders/api";
 import { useGetScrapTypesQuery } from "@/lib/api/scrap-types/api";
 
@@ -76,6 +77,19 @@ export default function CreateScrapStockPage() {
         .filter((item): item is { label: string; value: string } => Boolean(item)),
     [scrapTypesQuery.data?.items]
   );
+
+  const { data: uomsData, isFetching: isFetchingUoms } = useGetUomsQuery(undefined, { skip: !apiEnabled });
+  const uomOptions = useMemo(() => {
+    const items = uomsData ?? [];
+    return items
+      .map((u) => {
+        const code = String(u.code ?? u.unit_code ?? u.unit_name ?? "").trim();
+        const name = String(u.name ?? u.unit_name ?? "").trim();
+        if (!code && !name) return null;
+        return { label: name ? `${name} (${code})` : code, value: code || name };
+      })
+      .filter(Boolean) as { label: string; value: string }[];
+  }, [uomsData]);
 
   const selectedWorkOrder = useMemo(
     () => workOrders.find((item) => item.wo_number === selectedWoNumber),
@@ -328,16 +342,23 @@ export default function CreateScrapStockPage() {
                 />
               </Form.Item>
 
-              <Form.Item name="disposal_reason" label="Disposal Reason" rules={[{ required: true, message: "Select disposal reason" }]}>
+              {/* <Form.Item name="disposal_reason" label="Disposal Reason" rules={[{ required: true, message: "Select disposal reason" }]}>
                 <Select placeholder="Select reason" options={disposalReasonOptions} />
-              </Form.Item>
+              </Form.Item> */}
 
               <Form.Item name="quantity" label="Quantity" rules={[{ required: true, message: "Enter quantity" }]}>
                 <InputNumber min={0} className="w-full" placeholder="2" />
               </Form.Item>
 
               <Form.Item name="uom" label="UoM" rules={[{ required: true, message: "Enter uom" }]}>
-                <Input placeholder="pcs" />
+                <Select
+                  placeholder="Select UoM"
+                  options={uomOptions}
+                  loading={apiEnabled && isFetchingUoms}
+                  showSearch
+                  optionFilterProp="label"
+                  allowClear
+                />
               </Form.Item>
 
               <Form.Item name="weight_kg" label="Weight (kg)" rules={[{ required: true, message: "Enter weight" }]}>

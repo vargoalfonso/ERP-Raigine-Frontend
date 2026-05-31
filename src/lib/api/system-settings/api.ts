@@ -466,6 +466,10 @@ export type CreatePoSplitRequest = {
   budget_type: string;
   po1_pct: number;
   po2_pct: number;
+  po1_from_date?: string;
+  po1_to_date?: string;
+  po2_from_date?: string;
+  po2_to_date?: string;
   description?: string;
   min_order_qty: number;
   max_split_lines: number;
@@ -478,6 +482,10 @@ export type PoSplitRecord = {
   budget_type: string;
   po1_pct: number;
   po2_pct: number;
+  po1_from_date?: string | null;
+  po1_to_date?: string | null;
+  po2_from_date?: string | null;
+  po2_to_date?: string | null;
   description?: string | null;
   min_order_qty: number;
   max_split_lines: number;

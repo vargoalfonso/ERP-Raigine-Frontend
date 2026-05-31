@@ -82,9 +82,9 @@ function WorkInProgressDetailPageContent() {
           <h1 className="text-2xl font-semibold m-0">Work In-Progress Details</h1>
         </div>
 
-        <div>
+        {/* <div>
           <Button className="rounded-xl">Admin PPIC</Button>
-        </div>
+        </div> */}
       </div>
 
       <div className="p-8">

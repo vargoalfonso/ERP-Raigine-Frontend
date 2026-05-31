@@ -143,7 +143,7 @@ export default function ProcessCreateFullscreenPage() {
 
           <div className="mt-2">
             <div className="text-xl font-semibold text-gray-900">Add Process</div>
-            <div className="text-sm text-gray-500">Create process for Work In Progress <span className="mx-2">•</span> {entries.length} entry</div>
+            <div className="text-sm text-gray-500">Create process for Work In Proccess <span className="mx-2">•</span> {entries.length} entry</div>
           </div>
         </div>
       </div>

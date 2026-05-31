@@ -27,6 +27,12 @@ type FeatureConfig = {
   actions: string[];
 };
 
+type FeatureModuleConfig = {
+  featureKey: string;
+  moduleKeys: string[];
+  actionMap?: Record<string, string | string[]>;
+};
+
 const { Text } = Typography;
 
 const stringifyPretty = (value: unknown) => {
@@ -79,8 +85,8 @@ const FEATURES: FeatureConfig[] = [
   { key: "Machine Pattern", actions: ["View", "Create", "Edit", "Delete", "Download Report"] },
   { key: "Production Dashboard", actions: ["View", "Download Report", "Action UI"] },
   { key: "QC Dashboard", actions: ["View", "Download Report"] },
-  { key: "Finished Goods", actions: ["View", "Download Report"] },
-  { key: "Work In Progress", actions: ["View"] },
+  { key: "Finished Goods", actions: ["View", "Create", "Edit", "Delete","Download Report"] },
+  { key: "Work In Proccess", actions: ["View", "Create", "Edit", "Delete"] },
   { key: "Scrap Stock", actions: ["View", "Create", "Edit", "Delete", "Download Report", "Approval"] },
   { key: "Raw Materials", actions: ["View", "Create", "Edit", "Delete", "Download Report"] },
   { key: "Indirect Raw Material", actions: ["View", "Create", "Edit", "Delete", "Download Report"] },
@@ -109,6 +115,97 @@ const SYSTEM_SETTINGS_BACKEND_KEYS = [
   "unit_measurement",
   "approval_workflow",
 ] as const;
+
+const DEFAULT_ACTION_MAP: Record<string, string | string[]> = {
+  View: "view",
+  Create: "create",
+  Edit: "update",
+  Delete: "delete",
+  "Download Report": "download_report",
+  Approval: "approve",
+  "Action UI": "action_ui",
+};
+
+const FEATURE_MODULE_CONFIGS: FeatureModuleConfig[] = [
+  {
+    featureKey: "PRL Management",
+    moduleKeys: ["prl", "prls", "prl_management"],
+  },
+  {
+    featureKey: "Machine Master Data",
+    moduleKeys: ["machines", "machine", "machine_master_data", "machine_master"],
+  },
+  {
+    featureKey: "Machine Pattern",
+    moduleKeys: ["machine_patterns", "machine-patterns", "machine_pattern", "machine-parameters", "machine_parameters"],
+  },
+  {
+    featureKey: "Supplier - Raw Material",
+    moduleKeys: ["master_supplier", "supplier_raw_material", "supplier_raw", "supplier"],
+  },
+  {
+    featureKey: "Supplier Sub Con",
+    moduleKeys: ["master_supplier_only", "supplier_subcon", "supplier_sub_con", "subcon_supplier"],
+  },
+  {
+    featureKey: "Supplier Indirect",
+    moduleKeys: ["supplier_indirect", "master_supplier_indirect"],
+  },
+  {
+    featureKey: "Finished Goods",
+    moduleKeys: ["finished_goods", "finished-goods"],
+  },
+  {
+    featureKey: "Raw Materials",
+    moduleKeys: ["raw_materials", "raw-material", "raw-materials"],
+  },
+  {
+    featureKey: "Indirect Raw Material",
+    moduleKeys: ["indirect_raw_material", "indirect_raw_materials", "indirect-material", "indirect-materials"],
+  },
+  {
+    featureKey: "Sub Con Raw Materials",
+    moduleKeys: ["subcon_raw_material", "sub_con_raw_materials", "subcon-materials", "subcon_materials"],
+  },
+  {
+    featureKey: "Scrap Stock",
+    moduleKeys: ["scrap_stock", "scrap-stock"],
+  },
+  {
+    featureKey: "Stock Opname",
+    moduleKeys: ["stock_opname", "stock-opname"],
+  },
+  {
+    featureKey: "Customer PO & DN",
+    moduleKeys: ["customer_orders", "customer_po", "customer_po_dn"],
+  },
+  {
+    featureKey: "DN - Raw Material",
+    moduleKeys: ["dn_raw_material", "dn_management", "delivery_note_raw_material"],
+  },
+  {
+    featureKey: "DN - Indirect",
+    moduleKeys: ["dn_indirect", "dn_management_indirect", "delivery_note_indirect"],
+  },
+  {
+    featureKey: "DN - Sub Con",
+    moduleKeys: ["dn_sub_con", "dn_subcon", "delivery_note_subcon"],
+  },
+  {
+    featureKey: "Delivery Scheduling",
+    moduleKeys: ["delivery_scheduling", "delivery_schedule"],
+  },
+  {
+    featureKey: "Robot",
+    moduleKeys: ["robot", "robot_automation"],
+    actionMap: {
+      "View Running Robot": "view_running_robot",
+      "Startup/Stop": "startup_stop",
+      "Control Room": "control_room",
+      "Download Report": "download_report",
+    },
+  },
+];
 
 const getUiPermission = (
   permissions: UiPermissions,
@@ -140,7 +237,58 @@ const anyBackendPermission = (
     return actionKeys.some((actionKey) => Boolean((modulePermissions as Record<string, boolean>)[actionKey]));
   });
 
-const toBackendPermissions = (permissions: UiPermissions): RolePermissions => {
+const resolveModuleKey = (
+  moduleKeys: string[],
+  existingPermissions?: RolePermissions,
+) => moduleKeys.find((moduleKey) => existingPermissions?.[moduleKey] != null) ?? moduleKeys[0];
+
+const getActionKeys = (config: FeatureModuleConfig, action: string) => {
+  const mapped = config.actionMap?.[action] ?? DEFAULT_ACTION_MAP[action];
+  if (!mapped) return [] as string[];
+  return Array.isArray(mapped) ? mapped : [mapped];
+};
+
+const applyFeatureModuleToBackend = (
+  target: RolePermissions,
+  uiPermissions: UiPermissions,
+  config: FeatureModuleConfig,
+  existingPermissions?: RolePermissions,
+) => {
+  const featureState = uiPermissions[config.featureKey];
+  if (!featureState) return;
+  const moduleKey = resolveModuleKey(config.moduleKeys, existingPermissions);
+  for (const action of Object.keys(featureState)) {
+    const backendActionKeys = getActionKeys(config, action);
+    if (!backendActionKeys.length) continue;
+    const checked = Boolean(featureState[action]);
+    for (const backendActionKey of backendActionKeys) {
+      setPermission(target, moduleKey, backendActionKey, checked);
+    }
+  }
+};
+
+const applyFeatureModuleFromBackend = (
+  target: UiPermissions,
+  backendPermissions: RolePermissions,
+  config: FeatureModuleConfig,
+) => {
+  const featureState = target[config.featureKey];
+  if (!featureState) return;
+  for (const action of Object.keys(featureState)) {
+    const backendActionKeys = getActionKeys(config, action);
+    if (!backendActionKeys.length) continue;
+    featureState[action] = anyBackendPermission(
+      backendPermissions,
+      config.moduleKeys,
+      backendActionKeys,
+    ) || featureState[action];
+  }
+};
+
+const toBackendPermissions = (
+  permissions: UiPermissions,
+  existingPermissions?: RolePermissions,
+): RolePermissions => {
   const next: RolePermissions = {};
 
   setPermission(next, "dashboard", "view", getUiPermission(permissions, "Dashboard", "View"));
@@ -151,28 +299,39 @@ const toBackendPermissions = (permissions: UiPermissions): RolePermissions => {
   setPermission(next, "bom", "create", getUiPermission(permissions, "Bill of Material", "Create"));
   setPermission(next, "bom", "update", getUiPermission(permissions, "Bill of Material", "Edit"));
   setPermission(next, "bom", "delete", getUiPermission(permissions, "Bill of Material", "Delete"));
+  setPermission(next, "bom", "approve", getUiPermission(permissions, "Bill of Material", "Approval"));
 
   setPermission(next, "qc", "view", getUiPermission(permissions, "QC Dashboard", "View"));
   setPermission(next, "qc", "create", false);
   setPermission(next, "qc", "update", false);
   setPermission(next, "qc", "delete", false);
+  setPermission(next, "qc", "download_report", getUiPermission(permissions, "QC Dashboard", "Download Report"));
 
   setPermission(next, "po_budget", "view", getUiPermission(permissions, "PO Budget", "View"));
   setPermission(next, "po_budget", "create", getUiPermission(permissions, "PO Budget", "Create"));
   setPermission(next, "po_budget", "update", getUiPermission(permissions, "PO Budget", "Edit"));
   setPermission(next, "po_budget", "delete", getUiPermission(permissions, "PO Budget", "Delete"));
   setPermission(next, "po_budget", "approve", getUiPermission(permissions, "PO Budget", "Approval"));
+  setPermission(next, "po_budget", "download_report", getUiPermission(permissions, "PO Budget", "Download Report"));
 
   setPermission(next, "work_order", "view", getUiPermission(permissions, "Work Orders", "View"));
   setPermission(next, "work_order", "create", getUiPermission(permissions, "Work Orders", "Create"));
   setPermission(next, "work_order", "update", getUiPermission(permissions, "Work Orders", "Edit"));
   setPermission(next, "work_order", "delete", getUiPermission(permissions, "Work Orders", "Delete"));
   setPermission(next, "work_order", "approve", getUiPermission(permissions, "Work Orders", "Approval"));
+  setPermission(next, "work_order", "download_report", getUiPermission(permissions, "Work Orders", "Download Report"));
 
   setPermission(next, "production", "view", getUiPermission(permissions, "Production Dashboard", "View"));
   setPermission(next, "production", "create", false);
   setPermission(next, "production", "update", false);
   setPermission(next, "production", "delete", false);
+  setPermission(next, "production", "download_report", getUiPermission(permissions, "Production Dashboard", "Download Report"));
+
+  // Work In Progress (WIP) mapping
+  setPermission(next, "wip", "view", getUiPermission(permissions, "Work In Proccess", "View"));
+  setPermission(next, "wip", "create", getUiPermission(permissions, "Work In Proccess", "Create"));
+  setPermission(next, "wip", "update", getUiPermission(permissions, "Work In Proccess", "Edit"));
+  setPermission(next, "wip", "delete", getUiPermission(permissions, "Work In Proccess", "Delete"));
 
   const inventoryView = [
     "Raw Materials",
@@ -212,6 +371,12 @@ const toBackendPermissions = (permissions: UiPermissions): RolePermissions => {
   setPermission(next, "inventory", "update", inventoryUpdate);
   setPermission(next, "inventory", "delete", inventoryDelete);
   setPermission(next, "inventory", "download_report", inventoryDownload);
+  setPermission(
+    next,
+    "inventory",
+    "approve",
+    getUiPermission(permissions, "Scrap Stock", "Approval") || getUiPermission(permissions, "Stock Opname", "Approval"),
+  );
 
   const procurementView = ["PO - Raw Materials", "PO - Indirect", "PO - Sub Con"].some((feature) =>
     getUiPermission(permissions, feature, "View"),
@@ -226,6 +391,12 @@ const toBackendPermissions = (permissions: UiPermissions): RolePermissions => {
   setPermission(next, "procurement", "view", procurementView);
   setPermission(next, "procurement", "create", procurementCreate);
   setPermission(next, "procurement", "update", procurementUpdate);
+  setPermission(next, "procurement", "delete", ["PO - Raw Materials", "PO - Indirect", "PO - Sub Con"].some((feature) =>
+    getUiPermission(permissions, feature, "Delete"),
+  ));
+  setPermission(next, "procurement", "download_report", ["PO - Raw Materials", "PO - Indirect", "PO - Sub Con"].some((feature) =>
+    getUiPermission(permissions, feature, "Download Report"),
+  ));
 
   const deliveryView = [
     "Customer PO & DN",
@@ -260,6 +431,13 @@ const toBackendPermissions = (permissions: UiPermissions): RolePermissions => {
   setPermission(next, "delivery_note", "create", deliveryCreate);
   setPermission(next, "delivery_note", "update", deliveryUpdate);
   setPermission(next, "delivery_note", "delete", deliveryDelete);
+  setPermission(next, "delivery_note", "download_report", [
+    "Customer PO & DN",
+    "DN - Raw Material",
+    "DN - Indirect",
+    "DN - Sub Con",
+    "Delivery Scheduling",
+  ].some((feature) => getUiPermission(permissions, feature, "Download Report")));
 
   setPermission(next, "action_ui", "view", getUiPermission(permissions, "Customer PO & DN", "Action UI") || getUiPermission(permissions, "Production Dashboard", "Action UI"));
   setPermission(next, "action_ui", "create", false);
@@ -279,6 +457,8 @@ const toBackendPermissions = (permissions: UiPermissions): RolePermissions => {
   setPermission(next, "manufacturing", "view", getUiPermission(permissions, "Shop Floor", "View"));
   setPermission(next, "manufacturing", "create_wo", getUiPermission(permissions, "Shop Floor", "Create"));
   setPermission(next, "manufacturing", "production_plan", getUiPermission(permissions, "Shop Floor", "Edit"));
+  setPermission(next, "manufacturing", "delete", getUiPermission(permissions, "Shop Floor", "Delete"));
+  setPermission(next, "manufacturing", "download_report", getUiPermission(permissions, "Shop Floor", "Download Report"));
 
   const systemView = getUiPermission(permissions, "System Settings", "View");
   const systemCreate = getUiPermission(permissions, "System Settings", "Create");
@@ -291,8 +471,13 @@ const toBackendPermissions = (permissions: UiPermissions): RolePermissions => {
     setPermission(next, moduleKey, "create", systemCreate);
     setPermission(next, moduleKey, "update", systemUpdate);
     setPermission(next, moduleKey, "delete", systemDelete);
+    setPermission(next, moduleKey, "download_report", getUiPermission(permissions, "System Settings", "Download Report"));
   }
   setPermission(next, "approval_workflow", "approve", systemApprove);
+
+  for (const config of FEATURE_MODULE_CONFIGS) {
+    applyFeatureModuleToBackend(next, permissions, config, existingPermissions);
+  }
 
   return next;
 };
@@ -313,6 +498,7 @@ const fromBackendPermissions = (permissions: RolePermissions | undefined): UiPer
   next["PO Budget"]["Create"] = anyBackendPermission(permissions, ["po_budget"], ["create"]);
   next["PO Budget"]["Edit"] = anyBackendPermission(permissions, ["po_budget"], ["update"]);
   next["PO Budget"]["Delete"] = anyBackendPermission(permissions, ["po_budget"], ["delete"]);
+  next["PO Budget"]["Download Report"] = anyBackendPermission(permissions, ["po_budget"], ["download_report"]);
   next["PO Budget"]["Approval"] = anyBackendPermission(permissions, ["po_budget"], ["approve"]);
 
   next["Work Orders"]["View"] = anyBackendPermission(permissions, ["work_order"], ["view"]);
@@ -323,8 +509,15 @@ const fromBackendPermissions = (permissions: RolePermissions | undefined): UiPer
   next["Work Orders"]["Download Report"] = anyBackendPermission(permissions, ["work_order"], ["download_report"]);
 
   next["QC Dashboard"]["View"] = anyBackendPermission(permissions, ["qc"], ["view"]);
+  next["QC Dashboard"]["Download Report"] = anyBackendPermission(permissions, ["qc"], ["download_report"]);
   next["Production Dashboard"]["View"] = anyBackendPermission(permissions, ["production"], ["view"]);
+  next["Production Dashboard"]["Download Report"] = anyBackendPermission(permissions, ["production"], ["download_report"]);
   next["Production Dashboard"]["Action UI"] = anyBackendPermission(permissions, ["action_ui"], ["view"]);
+
+  next["Work In Proccess"]["View"] = anyBackendPermission(permissions, ["wip", "work_in_progress"], ["view"]);
+  if (next["Work In Proccess"]["Create"] !== undefined) next["Work In Proccess"]["Create"] = anyBackendPermission(permissions, ["wip", "work_in_progress"], ["create"]);
+  if (next["Work In Proccess"]["Edit"] !== undefined) next["Work In Proccess"]["Edit"] = anyBackendPermission(permissions, ["wip", "work_in_progress"], ["update"]);
+  if (next["Work In Proccess"]["Delete"] !== undefined) next["Work In Proccess"]["Delete"] = anyBackendPermission(permissions, ["wip", "work_in_progress"], ["delete"]);
 
   for (const featureKey of [
     "Raw Materials",
@@ -345,6 +538,8 @@ const fromBackendPermissions = (permissions: RolePermissions | undefined): UiPer
     next[featureKey]["View"] = anyBackendPermission(permissions, ["procurement"], ["view"]);
     next[featureKey]["Create"] = anyBackendPermission(permissions, ["procurement"], ["create"]);
     next[featureKey]["Edit"] = anyBackendPermission(permissions, ["procurement"], ["update"]);
+    next[featureKey]["Delete"] = anyBackendPermission(permissions, ["procurement"], ["delete"]);
+    next[featureKey]["Download Report"] = anyBackendPermission(permissions, ["procurement"], ["download_report"]);
   }
 
   for (const featureKey of ["Customer PO & DN", "DN - Raw Material", "DN - Indirect", "DN - Sub Con", "Delivery Scheduling"]) {
@@ -352,6 +547,7 @@ const fromBackendPermissions = (permissions: RolePermissions | undefined): UiPer
     next[featureKey]["Create"] = anyBackendPermission(permissions, ["delivery_note"], ["create"]);
     next[featureKey]["Edit"] = anyBackendPermission(permissions, ["delivery_note"], ["update"]);
     next[featureKey]["Delete"] = anyBackendPermission(permissions, ["delivery_note"], ["delete"]);
+    if (next[featureKey]["Download Report"] !== undefined) next[featureKey]["Download Report"] = anyBackendPermission(permissions, ["delivery_note"], ["download_report"]);
     if (next[featureKey]["Action UI"] !== undefined) next[featureKey]["Action UI"] = anyBackendPermission(permissions, ["action_ui"], ["view"]);
   }
 
@@ -360,12 +556,19 @@ const fromBackendPermissions = (permissions: RolePermissions | undefined): UiPer
   next["Shop Floor"]["View"] = anyBackendPermission(permissions, ["manufacturing"], ["view"]);
   next["Shop Floor"]["Create"] = anyBackendPermission(permissions, ["manufacturing"], ["create_wo"]);
   next["Shop Floor"]["Edit"] = anyBackendPermission(permissions, ["manufacturing", "production"], ["production_plan", "update"]);
+  next["Shop Floor"]["Delete"] = anyBackendPermission(permissions, ["manufacturing"], ["delete"]);
+  next["Shop Floor"]["Download Report"] = anyBackendPermission(permissions, ["manufacturing"], ["download_report"]);
 
   next["System Settings"]["View"] = anyBackendPermission(permissions, [...SYSTEM_SETTINGS_BACKEND_KEYS], ["view"]);
   next["System Settings"]["Create"] = anyBackendPermission(permissions, [...SYSTEM_SETTINGS_BACKEND_KEYS], ["create"]);
   next["System Settings"]["Edit"] = anyBackendPermission(permissions, [...SYSTEM_SETTINGS_BACKEND_KEYS], ["update"]);
   next["System Settings"]["Delete"] = anyBackendPermission(permissions, [...SYSTEM_SETTINGS_BACKEND_KEYS], ["delete"]);
+  next["System Settings"]["Download Report"] = anyBackendPermission(permissions, [...SYSTEM_SETTINGS_BACKEND_KEYS], ["download_report"]);
   next["System Settings"]["Approval"] = anyBackendPermission(permissions, ["approval_workflow"], ["approve"]);
+
+  for (const config of FEATURE_MODULE_CONFIGS) {
+    applyFeatureModuleFromBackend(next, permissions, config);
+  }
 
   return next;
 };
@@ -391,6 +594,7 @@ function RoleCreatePageContent() {
   const [form] = Form.useForm<FormValues>();
   const [allAccess, setAllAccess] = useState(false);
   const [permissions, setPermissions] = useState<UiPermissions>({});
+  const [originalBackendPermissions, setOriginalBackendPermissions] = useState<RolePermissions | undefined>(undefined);
   const [roleName, setRoleName] = useState("");
 
   const mode = (searchParams.get("mode") ?? "create") as Mode;
@@ -416,7 +620,9 @@ function RoleCreatePageContent() {
       return;
     }
     if (!role) return;
-    setPermissions(fromBackendPermissions((role.permissions ?? role.Permissions ?? {}) as RolePermissions));
+    const backendPerms = (role.permissions ?? role.Permissions ?? {}) as RolePermissions;
+    setOriginalBackendPermissions(backendPerms);
+    setPermissions(fromBackendPermissions(backendPerms));
   }, [id, role]);
 
   useEffect(() => {
@@ -460,7 +666,24 @@ function RoleCreatePageContent() {
         return;
       }
 
-      const backendPermissions = toBackendPermissions(permissions);
+      const backendPermissions = toBackendPermissions(permissions, originalBackendPermissions);
+
+      // Merge UI-derived permissions into original backend permissions so we don't
+      // drop keys that the UI does not represent. UI changes overwrite original keys.
+      const mergedPermissions: RolePermissions = {};
+      // start with original backend keys (preserve non-UI keys)
+      if (originalBackendPermissions && typeof originalBackendPermissions === "object") {
+        for (const [k, v] of Object.entries(originalBackendPermissions)) {
+          mergedPermissions[k] = { ...(v as Record<string, boolean>) };
+        }
+      }
+      // overwrite with UI-derived permissions
+      for (const [moduleKey, actions] of Object.entries(backendPermissions)) {
+        mergedPermissions[moduleKey] = {
+          ...(mergedPermissions[moduleKey] ?? {}),
+          ...(actions as Record<string, boolean>),
+        };
+      }
 
       if (mode === "edit") {
         if (!id) throw new Error("Missing role id");
@@ -469,7 +692,7 @@ function RoleCreatePageContent() {
           body: {
             name: normalizedName,
             description: normalizedDescription || "",
-            permissions: backendPermissions,
+            permissions: mergedPermissions,
           },
         }).unwrap();
         message.success("Role updated");

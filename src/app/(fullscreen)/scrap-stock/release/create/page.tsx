@@ -151,7 +151,7 @@ export default function ScrapReleaseCreatePage() {
                 <Select
                   options={[
                     { label: "Sell", value: "Sell" },
-                    { label: "Dump", value: "Dump" },
+                    { label: "Dump / Disposal", value: "Dump" },
                     { label: "Inventory", value: "Inventory" },
                   ]}
                 />
@@ -188,7 +188,7 @@ export default function ScrapReleaseCreatePage() {
               >
                 <Select
                   options={[
-                    { label: "Dump", value: "dump" },
+                    { label: "Dump ", value: "dump" },
                     { label: "Sell", value: "sell" },
                     { label: "Inventory", value: "inventory" },
                   ]}

@@ -468,7 +468,7 @@ export default function WorkInProgressPage() {
           </div>
         </div>
 
-        <Button className="rounded-xl">Admin PPIC</Button>
+        {/* <Button className="rounded-xl">Admin PPIC</Button> */}
       </div>
 
       {/* Summary card */}

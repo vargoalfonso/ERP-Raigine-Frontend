@@ -145,9 +145,9 @@ export default function FinishedGoodDetailPage() {
           <h1 className="text-2xl font-semibold m-0">Finished Good Details</h1>
         </div>
 
-        <div>
+        {/* <div>
           <Button className="rounded-xl">Admin PPIC</Button>
-        </div>
+        </div> */}
       </div>
 
       {/* ================= CARD UTAMA ================= */}

@@ -12,6 +12,7 @@ import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 
 import {
   useCreateStockdaysMutation,
+  useGetStockdaysQuery,
   useGetStockdaysByIdQuery,
   useUpdateStockdaysMutation,
 } from "@/lib/api/system-settings/api";
@@ -41,6 +42,13 @@ export default function StockdaysCreatePage() {
 function PageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const goBackToSystemSettings = () => {
+    if (typeof window !== "undefined") {
+      window.location.replace("/system-settings");
+      return;
+    }
+    router.replace("/system-settings");
+  };
 
   const [form] = Form.useForm<FormValues>();
   const [entries, setEntries] = useState<EntryType[]>([]);
@@ -56,6 +64,9 @@ function PageContent() {
 
   const [createStockdays, createState] = useCreateStockdaysMutation();
   const [updateStockdays, updateState] = useUpdateStockdaysMutation();
+  const { data: stockdaysList } = useGetStockdaysQuery(undefined, {
+    skip: !apiEnabled,
+  });
 
   const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
     skip: !apiEnabled,
@@ -66,16 +77,34 @@ function PageContent() {
     [bomTreeRes?.data]
   );
 
-  const uniqOptions = useMemo(
-    () =>
-      bomIndex.options.map((item) => ({
-        value: item.value,
-        label: bomIndex.partNameByUniq[item.value]
-          ? `${item.value} - ${bomIndex.partNameByUniq[item.value]}`
-          : item.value,
-      })),
-    [bomIndex]
-  );
+  const selectedInventoryType = Form.useWatch("inventoryType", form);
+
+  const uniqOptions = useMemo(() => {
+    const baseOptions = bomIndex.options.map((item) => ({
+      value: item.value,
+      label: bomIndex.partNameByUniq[item.value]
+        ? `${item.value} - ${bomIndex.partNameByUniq[item.value]}`
+        : item.value,
+    }));
+
+    const currentItemCode = String(form.getFieldValue("itemCode") ?? "").trim();
+    const used = new Set<string>();
+
+    for (const item of stockdaysList ?? []) {
+      const uniq = String(item?.item_code ?? "").trim();
+      const inventoryType = String(item?.inventory_type ?? "").trim();
+      if (!uniq) continue;
+      if (selectedInventoryType && inventoryType && inventoryType !== selectedInventoryType) {
+        continue;
+      }
+      used.add(uniq);
+    }
+
+    return baseOptions.filter((option) => {
+      if (currentItemCode && option.value === currentItemCode) return true;
+      return !used.has(option.value);
+    });
+  }, [bomIndex, form, selectedInventoryType, stockdaysList]);
 
   const detailQuery = useGetStockdaysByIdQuery(id, {
     skip: !apiEnabled || !id,
@@ -93,6 +122,14 @@ function PageContent() {
       constanta: item.constanta,
     });
   }, [detailQuery.data, form, id]);
+
+  useEffect(() => {
+    const currentItemCode = form.getFieldValue("itemCode");
+    if (currentItemCode && uniqOptions.some((option) => option.value === currentItemCode)) {
+      return;
+    }
+    form.setFieldsValue({ itemCode: uniqOptions[0]?.value });
+  }, [form, uniqOptions]);
 
   const handleAdd = async () => {
     try {
@@ -147,7 +184,7 @@ function PageContent() {
         }).unwrap();
 
         message.success("Stockdays updated");
-        router.push("/system-settings");
+        goBackToSystemSettings();
         return;
       }
 
@@ -162,7 +199,7 @@ function PageContent() {
       }
 
       message.success("Stockdays created");
-      router.push("/system-settings");
+      goBackToSystemSettings();
     } catch (error) {
       message.error(getApiErrorMessage(error, "Failed save stockdays"));
     }
@@ -174,15 +211,16 @@ function PageContent() {
         <div className="px-6 py-4">
           <div className="flex justify-between items-center">
             <button
+              type="button"
               className="flex items-center gap-2 text-sm text-gray-600"
-              onClick={() => router.push("/system-settings")}
+              onClick={goBackToSystemSettings}
             >
               <LeftOutlined />
               Back to System Parameters
             </button>
 
             <div className="flex gap-2">
-              <Button onClick={() => router.push("/system-settings")}>
+              <Button onClick={goBackToSystemSettings}>
                 Cancel
               </Button>
 
@@ -297,7 +335,7 @@ function PageContent() {
                  
 
                   <Form.Item
-                    label="Constanta"
+                    label="Constanta (days)"
                     name="constanta"
                   >
                     <InputNumber

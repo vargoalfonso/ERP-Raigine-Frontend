@@ -124,9 +124,9 @@ function IndirectRawMaterialDetailPageContent() {
           <h1 className="text-2xl font-semibold m-0">Indirect Raw Material Details</h1>
         </div>
 
-        <div>
+        {/* <div>
           <Button className="rounded-xl">Admin PPIC</Button>
-        </div>
+        </div> */}
       </div>
 
       <div className="p-8">
