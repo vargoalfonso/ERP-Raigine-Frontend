@@ -102,12 +102,14 @@ function ScrapStockDetailPageContent() {
                         <p className="font-semibold">{detailInfo.packing_number || "-"}</p>
                       </div>
 
-                      <div>
-                        <p className="text-gray-400">Disposal Reason</p>
-                        <Tag className="bg-red-100 text-red-600">
-                          {detailInfo.disposal_reason ?? "-"}
-                        </Tag>
-                      </div>
+                      {["dump", "disposal"].includes(
+                        String(detailInfo.scrap_type ?? "").toLowerCase()
+                      ) && (
+                        <div>
+                          <p className="text-gray-400">Disposal Reason</p>
+                          <p className="font-semibold">{detailInfo.disposal_reason || "-"}</p>
+                        </div>
+                      )}
 
                       <div>
                         <p className="text-gray-400">Scrap Type</p>

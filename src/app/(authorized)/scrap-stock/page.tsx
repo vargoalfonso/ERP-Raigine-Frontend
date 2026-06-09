@@ -506,8 +506,7 @@ export default function ScrapStockPage() {
   });
 
   const openReleaseDetail = (record: ReleaseRecord) => {
-    const id = record.uuid || String(record.id);
-    router.push(`/scrap-stock/release/detail?id=${encodeURIComponent(id)}`);
+    router.push(`/scrap-stock/release/detail?id=${encodeURIComponent(String(record.id))}`);
   };
 
   const releaseColumns = makeReleaseColumns({
