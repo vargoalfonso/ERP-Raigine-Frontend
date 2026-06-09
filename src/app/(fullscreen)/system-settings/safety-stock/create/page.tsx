@@ -16,6 +16,7 @@ import {
   useCreateSafetyStockMutation,
   useGetSafetyStockByIdQuery,
   useGetSafetyStockQuery,
+  useUpdateSafetyStockMutation,
 } from "@/lib/api/system-settings/api";
 import { useGetInventoryListQuery } from "@/lib/api/inventory/api";
 
@@ -75,6 +76,7 @@ function PageContent() {
   const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
   const [createSafetyStock, createSafetyStockState] = useCreateSafetyStockMutation();
   const [createSafetyStockBulk, createSafetyStockBulkState] = useCreateSafetyStockBulkMutation();
+  const [updateSafetyStock, updateSafetyStockState] = useUpdateSafetyStockMutation();
 
   const [type, setType] = useState<string | undefined>(undefined);
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
@@ -229,7 +231,7 @@ function PageContent() {
 
   const onSave = async () => {
     try {
-      if (!type) {
+      if (!type && !isEditMode) {
         message.error("Type is required");
         return;
       }
@@ -255,7 +257,14 @@ function PageContent() {
         constanta: Number(entry.constanta ?? 0),
       }));
 
-      if (items.length === 1) {
+      if (isEditMode && editId) {
+        const payload = {
+          calculation_type: String(entries[0]?.calculationType ?? "").trim(),
+          constanta: Number(entries[0]?.constanta ?? 0),
+        };
+
+        await updateSafetyStock({ id: editId, body: payload }).unwrap();
+      } else if (items.length === 1) {
         await createSafetyStock(items[0]).unwrap();
       } else {
         await createSafetyStockBulk({ items }).unwrap();
@@ -288,7 +297,7 @@ function PageContent() {
                 type="primary"
                 icon={<SaveOutlined />}
                 onClick={() => void onSave()}
-                loading={createSafetyStockState.isLoading || createSafetyStockBulkState.isLoading}
+                loading={createSafetyStockState.isLoading || createSafetyStockBulkState.isLoading || updateSafetyStockState.isLoading}
               >
                 Save Parameter
               </Button>
@@ -336,6 +345,7 @@ function PageContent() {
                   placeholder="Select Type"
                   options={TYPE_OPTIONS}
                   optionFilterProp="label"
+                  disabled={isEditMode}
                 />
               </div>
               <InfoCircleOutlined className="text-blue-600" />
@@ -409,7 +419,7 @@ function PageContent() {
                         className="w-full"
                         icon={<PlusOutlined />}
                         onClick={() => onCreateStockDays(e.id)}
-                        loading={createSafetyStockState.isLoading || createSafetyStockBulkState.isLoading}
+                        loading={createSafetyStockState.isLoading || createSafetyStockBulkState.isLoading || updateSafetyStockState.isLoading}
                       >
                         Create Stock days
                       </Button>

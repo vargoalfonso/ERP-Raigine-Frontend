@@ -2364,23 +2364,25 @@ export default function SystemSettingsPage() {
         .toLowerCase()
         .replace(/[\s-]+/g, "_");
       const calculationType = String(values.parameter ?? "").trim();
-      const payload = {
-        inventory_type: inventoryTypeValue,
-        item_uniq_code: String(safetyEditingRow?.itemUniqCode ?? "").trim(),
-        calculation_type: calculationType,
-        constanta: Number(values.constanta ?? 0),
-        status: toBackendStatus(values.status),
-      };
-
       if (apiEnabled) {
         if (safetyEditMode === "edit") {
           if (!safetyEditingRow?.id) throw new Error("Missing safety stock id");
           await updateSafetyStock({
             id: safetyEditingRow.id,
-            body: payload,
+            body: {
+              calculation_type: calculationType,
+              constanta: Number(values.constanta ?? 0),
+            },
           }).unwrap();
           message.success("Safety stock updated");
         } else {
+          const payload = {
+            inventory_type: inventoryTypeValue,
+            item_uniq_code: String(safetyEditingRow?.itemUniqCode ?? "").trim(),
+            calculation_type: calculationType,
+            constanta: Number(values.constanta ?? 0),
+            status: toBackendStatus(values.status),
+          };
           await createSafetyStock(payload).unwrap();
           message.success("Safety stock created");
         }
@@ -2388,6 +2390,14 @@ export default function SystemSettingsPage() {
         closeSafetyEdit();
         return;
       }
+
+      const payload = {
+        inventory_type: inventoryTypeValue,
+        item_uniq_code: String(safetyEditingRow?.itemUniqCode ?? "").trim(),
+        calculation_type: calculationType,
+        constanta: Number(values.constanta ?? 0),
+        status: toBackendStatus(values.status),
+      };
 
       const next: SafetyStockRow = {
         id:
