@@ -18,7 +18,7 @@ type FormValues = {
   release_qty: number;
   customer_name: string;
   price_per_unit: number;
-  disposal_reason: "dump" | "sell" | "inventory";
+  disposal_reason?: string;
   remarks?: string;
 };
 
@@ -63,7 +63,7 @@ export default function ScrapReleaseCreatePage() {
         release_qty: values.release_qty,
         customer_name: values.customer_name,
         price_per_unit: values.price_per_unit,
-        disposal_reason: values.disposal_reason,
+        disposal_reason: values.disposal_reason?.trim() || "",
         remarks: values.remarks?.trim() || null,
       }).unwrap();
 
@@ -95,7 +95,6 @@ export default function ScrapReleaseCreatePage() {
             initialValues={{
               release_date: dayjs(),
               release_type: "Sell",
-              disposal_reason: "sell",
             }}
           >
             <Form.Item
@@ -181,18 +180,19 @@ export default function ScrapReleaseCreatePage() {
                 <Input placeholder="PT Buyer Scrap" />
               </Form.Item>
 
-              <Form.Item
-                label="Disposal Reason"
-                name="disposal_reason"
-                rules={[{ required: true, message: "Disposal reason is required" }]}
-              >
-                <Select
-                  options={[
-                    { label: "Dump ", value: "dump" },
-                    { label: "Sell", value: "sell" },
-                    { label: "Inventory", value: "inventory" },
-                  ]}
-                />
+              <Form.Item shouldUpdate={(prev, cur) => prev.release_type !== cur.release_type} noStyle>
+                {({ getFieldValue }) => {
+                  const isDump = String(getFieldValue("release_type") ?? "").toLowerCase() === "dump";
+                  return (
+                    <Form.Item
+                      label="Disposal Reason"
+                      name="disposal_reason"
+                      rules={isDump ? [{ required: true, message: "Disposal reason is required" }] : []}
+                    >
+                      <Input placeholder="Enter disposal reason" disabled={!isDump} />
+                    </Form.Item>
+                  );
+                }}
               </Form.Item>
             </div>
 
