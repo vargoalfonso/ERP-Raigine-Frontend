@@ -745,7 +745,14 @@ export default function PrlManagementPage() {
             size="small"
             type="text"
             icon={<EditOutlined />}
-            onClick={() => openEditModal(record)}
+            disabled={String(record.status || "").trim().toLowerCase() === "approved"}
+            onClick={() => {
+              if (String(record.status || "").trim().toLowerCase() === "approved") {
+                message.info("Cannot edit an approved PRL entry");
+                return;
+              }
+              openEditModal(record);
+            }}
           />
           <Button
             size="small"

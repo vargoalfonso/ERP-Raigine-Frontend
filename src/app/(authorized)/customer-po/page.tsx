@@ -363,19 +363,19 @@ export default function CustomerPoDnSoPage() {
           <Tag className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold !text-gray-700">{v}</Tag>
         ),
       },
-      {
-        title: "Status",
-        dataIndex: "status",
-        key: "status",
-        render: (v: DnRow["status"]) => (
-          <Tag
-            color={v === "Active" ? "green" : v === "Draft" ? "gold" : "default"}
-            className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
-          >
-            {v}
-          </Tag>
-        ),
-      },
+      // {
+      //   title: "Status",
+      //   dataIndex: "status",
+      //   key: "status",
+      //   render: (v: DnRow["status"]) => (
+      //     <Tag
+      //       color={v === "Active" ? "green" : v === "Draft" ? "gold" : "default"}
+      //       className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+      //     >
+      //       {v}
+      //     </Tag>
+      //   ),
+      // },
       {
         title: "Actions",
         key: "actions",
@@ -433,19 +433,19 @@ export default function CustomerPoDnSoPage() {
           <Tag className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold !text-gray-700">{v}</Tag>
         ),
       },
-      {
-        title: "Status",
-        dataIndex: "status",
-        key: "status",
-        render: (v: PoRow["status"]) => (
-          <Tag
-            color={v === "Active" ? "green" : v === "Draft" ? "gold" : "default"}
-            className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
-          >
-            {v}
-          </Tag>
-        ),
-      },
+      // {
+      //   title: "Status",
+      //   dataIndex: "status",
+      //   key: "status",
+      //   render: (v: PoRow["status"]) => (
+      //     <Tag
+      //       color={v === "Active" ? "green" : v === "Draft" ? "gold" : "default"}
+      //       className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+      //     >
+      //       {v}
+      //     </Tag>
+      //   ),
+      // },
       {
         title: "Actions",
         key: "actions",
@@ -508,19 +508,19 @@ export default function CustomerPoDnSoPage() {
           <Tag className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold !text-gray-700">{v}</Tag>
         ),
       },
-      {
-        title: "Status",
-        dataIndex: "status",
-        key: "status",
-        render: (v: SoRow["status"]) => (
-          <Tag
-            color={v === "Active" ? "green" : v === "Draft" ? "gold" : "default"}
-            className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
-          >
-            {v}
-          </Tag>
-        ),
-      },
+      // {
+      //   title: "Status",
+      //   dataIndex: "status",
+      //   key: "status",
+      //   render: (v: SoRow["status"]) => (
+      //     <Tag
+      //       color={v === "Active" ? "green" : v === "Draft" ? "gold" : "default"}
+      //       className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+      //     >
+      //       {v}
+      //     </Tag>
+      //   ),
+      // },
       {
         title: "Actions",
         key: "actions",

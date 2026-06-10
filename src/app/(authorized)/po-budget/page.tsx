@@ -37,6 +37,7 @@ import {
   Modal,
   Segmented,
   Select,
+  DatePicker,
   Table,
   Tag,
   message,
@@ -57,6 +58,8 @@ import {
   MdInventory2,
   MdSchedule,
 } from "react-icons/md";
+
+import dayjs from "dayjs";
 
 type BudgetTabId = "raw" | "subcon" | "indirect";
 
@@ -687,7 +690,10 @@ export default function PoBudgetPage() {
     const selectedUniq = String(addForm.uniq ?? "").trim();
     if (!selectedUniq) return supplierOptions;
 
-    const filtered = supplierOptions.filter((option) => option.uniqCode === selectedUniq);
+    // supplierItemsByUniq is declared later in the file; use raw supplierItems here to avoid TDZ
+    const related = supplierItems.filter((it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === selectedUniq);
+    const relatedNames = new Set(related.map((r) => String(r.supplier_name ?? r.supplier ?? "").trim()).filter(Boolean));
+    const filtered = supplierOptions.filter((option) => relatedNames.has(String(option.label ?? option.supplierName ?? "").trim()));
     return filtered.length > 0 ? filtered : supplierOptions;
   }, [addForm.uniq, supplierOptions]);
 
@@ -1015,15 +1021,17 @@ export default function PoBudgetPage() {
   const addSupplierModalOptions = useMemo(() => {
     if (!activeAddSupplierItem) return supplierOptions;
 
-    const filteredByUniq = supplierOptions.filter(
-      (option) => option.uniqCode === activeAddSupplierItem.uniq,
-    );
-    const baseOptions = filteredByUniq.length > 0 ? filteredByUniq : supplierOptions;
-    const existingSuppliers = new Set(
-      activeAddSupplierItem.suppliers.map((supplier) => supplier.supplier),
-    );
+    const uniq = String(activeAddSupplierItem.uniq ?? "").trim();
+    let related = supplierItemsByUniq.get(uniq) ?? [];
+    if (!related.length) {
+      related = supplierItems.filter((it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === uniq);
+    }
+    const relatedNames = new Set(related.map((r) => String(r.supplier_name ?? r.supplier ?? "").trim()).filter(Boolean));
+    const existingSuppliers = new Set(activeAddSupplierItem.suppliers.map((s) => s.supplier));
 
-    return baseOptions.filter((option) => !existingSuppliers.has(option.value));
+    const baseOptions = supplierOptions.filter((opt) => relatedNames.has(String(opt.label ?? opt.value ?? "").trim()));
+    const finalBase = baseOptions.length ? baseOptions : supplierOptions;
+    return finalBase.filter((option) => !existingSuppliers.has(option.value));
   }, [activeAddSupplierItem, supplierOptions]);
 
   const addSupplierBudget = activeAddSupplierItem?.quantity ?? 0;
@@ -1593,7 +1601,7 @@ export default function PoBudgetPage() {
             <Button
               size="small"
               className="!rounded-lg"
-              disabled={!r.id}
+              disabled={!r.id || r.status === "approved"}
               onClick={() => openEdit(r)}
             >
               Edit
@@ -1900,6 +1908,53 @@ export default function PoBudgetPage() {
       >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
+            <div className="text-xs text-gray-600 mb-1">PRL (Select)</div>
+            <Select
+              showSearch
+              allowClear
+              value={addForm.prl ?? undefined}
+              options={prlOptions}
+              placeholder="Select PRL to autofill"
+              className="w-full"
+              onChange={(v) => {
+                const prlId = String(v ?? "");
+                const matched = approvedPrls.find(
+                  (p) => String(p.prl_id ?? p.id ?? "") === prlId || String(p.id ?? p.prl_id ?? "") === prlId,
+                );
+                if (!matched) {
+                  setAddForm((p) => ({ ...p, prlId: undefined }));
+                  return;
+                }
+                const uniqCode = String(matched.uniq_code ?? matched.item_uniq_code ?? "").trim();
+                let supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ?? [])[0];
+                if (!supplierItemMatch) {
+                  supplierItemMatch = supplierItems.find((it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === uniqCode) as any;
+                }
+                setAddForm((prev) => ({
+                  ...prev,
+                  prlId,
+                  customer: matched.customer_name ?? matched.customer?.customer_name ?? prev.customer,
+                  customerId: resolvePrlCustomerId(matched as Record<string, unknown>) ?? prev.customerId,
+                  uniq: uniqCode || prev.uniq,
+                  productModel: matched.product_model ?? prev.productModel,
+                  partName: matched.part_name ?? prev.partName,
+                  partNumber: matched.part_number ?? prev.partNumber,
+                  period: getPrlPeriodValue(matched) || prev.period,
+                  salesPlan: Number(matched.quantity ?? prev.salesPlan ?? 0),
+                  uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
+                  weightKg: supplierItemMatch?.weight == null ? prev.weightKg : String(supplierItemMatch.weight),
+                  supplier: String(supplierItemMatch?.supplier_name ?? prev.supplier ?? ""),
+                  supplierId:
+                    resolveSupplierRowId({
+                      supplierUuid: supplierItemMatch?.supplier_uuid,
+                      supplierCode: supplierItemMatch?.supplier_code,
+                      supplierName: supplierItemMatch?.supplier_name,
+                    }) ?? prev.supplierId,
+                }));
+              }}
+            />
+          </div>
+          <div>
             <div className="text-xs text-gray-600 mb-1">Customer Name</div>
             <Select
               showSearch
@@ -1923,24 +1978,33 @@ export default function PoBudgetPage() {
                   String(selected?.label ?? ""),
                   addForm.uniq,
                 );
-                setAddForm((prev) => ({
-                  ...prev,
-                  customerId: selectedCustomerId,
-                  customer: String(selected?.label ?? ""),
-                  supplier: "",
-                  supplierId: null,
-                  uniq: matchedPrl ? prev.uniq : "",
-                  productModel:
-                    matchedPrl?.product_model ??
-                    "",
-                  partName:
-                    matchedPrl?.part_name ??
-                    "",
-                  partNumber:
-                    matchedPrl?.part_number ??
-                    "",
-                  period: getPrlPeriodValue(matchedPrl) || prev.period,
-                }));
+                  // determine uniq from matched PRL if available, otherwise use current addForm.uniq
+                  const resolvedUniq = String(matchedPrl ? (matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "") : (addForm.uniq ?? "")).trim();
+                  let supplierItemMatch = (supplierItemsByUniq.get(resolvedUniq) ?? [])[0];
+                  if (!supplierItemMatch) {
+                    supplierItemMatch = supplierItems.find((it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === resolvedUniq) as any;
+                  }
+                  setAddForm((prev) => ({
+                    ...prev,
+                    customerId: selectedCustomerId,
+                    customer: String(selected?.label ?? ""),
+                    supplier: "",
+                    supplierId: null,
+                    uniq: matchedPrl ? prev.uniq : "",
+                    productModel:
+                      matchedPrl?.product_model ??
+                      "",
+                    partName:
+                      matchedPrl?.part_name ??
+                      "",
+                    partNumber:
+                      matchedPrl?.part_number ??
+                      "",
+                    period: getPrlPeriodValue(matchedPrl) || prev.period,
+                    uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
+                    weightKg: supplierItemMatch?.weight == null ? prev.weightKg : String(supplierItemMatch.weight),
+                    salesPlan: Number(matchedPrl?.quantity ?? prev.salesPlan ?? 0),
+                  }));
               }}
             />
           </div>
@@ -1970,7 +2034,18 @@ export default function PoBudgetPage() {
                   (item) =>
                     String(item.uniq_code ?? item.item_uniq_code ?? "").trim() === uniqCode
                 );
-                const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ?? [])[0];
+                let supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ?? [])[0];
+                const supplierItemMatchFromMap = supplierItemMatch;
+                if (!supplierItemMatch) {
+                  supplierItemMatch = supplierItems.find((it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === uniqCode) as any;
+                }
+                // Debug logging to help trace missing mappings (remove after verification)
+                try {
+                  // eslint-disable-next-line no-console
+                  console.debug("po-budget: uniq lookup", { uniqCode, fromMap: supplierItemMatchFromMap, fromFallback: supplierItemMatch });
+                } catch (e) {
+                  /* ignore */
+                }
                 const partName =
                   matchedPrl?.part_name ??
                   bomIndex.partNameByUniq[uniqCode] ??
@@ -1999,6 +2074,7 @@ export default function PoBudgetPage() {
                     supplierItemMatch?.weight == null
                       ? prev.weightKg
                       : String(supplierItemMatch.weight),
+                  salesPlan: Number(matchedPrl?.quantity ?? prev.salesPlan ?? 0),
                   description: supplierItemMatch?.description ?? prev.description,
                   supplier:
                     String(supplierItemMatch?.supplier_name ?? "") || prev.supplier,
@@ -2198,11 +2274,12 @@ export default function PoBudgetPage() {
           </div>
           <div>
             <div className="text-xs text-gray-600 mb-1">Period</div>
-            <Select
-              value={addForm.period}
-              onChange={(v) => setAddForm((p) => ({ ...p, period: v }))}
-              options={periodOptions}
+            <DatePicker
+              picker="month"
+              value={addForm.period ? dayjs(addForm.period, "MMMM-YYYY") : undefined}
+              onChange={(date) => setAddForm((p) => ({ ...p, period: date ? dayjs(date).format("MMMM-YYYY") : "" }))}
               className="w-full"
+              format={(value) => (value ? dayjs(value).format("MMMM-YYYY") : "")}
             />
           </div>
         </div>
@@ -2337,13 +2414,14 @@ export default function PoBudgetPage() {
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <div className="text-xs text-gray-600 mb-1">Period</div>
-                <Select
-                  value={bulkPeriod}
-                  onChange={(v) => setBulkPeriod(v)}
-                  options={periodOptions}
-                  placeholder="Select period..."
-                  className="w-full"
-                />
+                  <DatePicker
+                    picker="month"
+                    value={bulkPeriod ? dayjs(bulkPeriod, "MMMM-YYYY") : undefined}
+                    onChange={(date) => setBulkPeriod(date ? dayjs(date).format("MMMM-YYYY") : undefined)}
+                    className="w-full"
+                    format={(value) => (value ? dayjs(value).format("MMMM-YYYY") : "")}
+                    placeholder="Select period..."
+                  />
               </div>
 
               <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4">
