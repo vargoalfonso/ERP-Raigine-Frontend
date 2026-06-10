@@ -264,7 +264,7 @@ export const prlApiSlice = apiSlice
           formData.append("file", file);
 
           return {
-            url: "/prls/import",
+            url: "/import/prls",
             method: "POST",
             body: formData,
             meta: { useAuthorization: true, contentType: "multipart/form-data" },

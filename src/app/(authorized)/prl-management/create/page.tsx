@@ -257,7 +257,7 @@ export default function AddForecastPage() {
                     Create PRL forecasts using customer and BOM data <span className="mx-2">•</span> {entries.length} entr{entries.length > 1 ? "ies" : "y"}
                   </>
                 ) : (
-                  <>Upload Excel forecast file through <span className="mx-2">•</span> /prls/import</>
+                  <>Upload Excel forecast file through <span className="mx-2">•</span> /import/prls</>
                 )}
               </div>
             </div>
@@ -318,7 +318,7 @@ export default function AddForecastPage() {
                 <div>
                   <div className="text-sm font-semibold text-blue-800">Bulk PRL Import</div>
                   <div className="text-xs text-blue-700 mt-1">
-                    Use Excel upload for bulk operation. File will be sent to `POST /prls/import`.
+                    Use Excel upload for bulk operation. File will be sent to `POST /import/prls`.
                   </div>
                 </div>
               </div>

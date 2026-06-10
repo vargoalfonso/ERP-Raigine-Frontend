@@ -1062,7 +1062,7 @@ export default function PrlManagementPage() {
             <div className="bg-white rounded-xl border border-gray-100 p-4 mb-4">
               <div className="text-sm font-semibold text-gray-900">PRL Import</div>
               <div className="text-xs text-gray-500 mt-1">
-                Upload PRL data directly from Excel using `POST /prls/import`.
+                Upload PRL data directly from Excel using `POST /import/prls`.
               </div>
 
               <div className="mt-3">
@@ -1291,7 +1291,7 @@ export default function PrlManagementPage() {
           <Button icon={<UploadOutlined />}>Select Excel File</Button>
         </Upload>
         <div className="text-xs text-gray-500 mt-3">
-          {apiEnabled ? "Uses POST /prls/import." : "API disabled: UI-only mock."}
+          {apiEnabled ? "Uses POST /import/prls." : "API disabled: UI-only mock."}
         </div>
       </Modal>
 
