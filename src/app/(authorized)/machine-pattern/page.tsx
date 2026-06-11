@@ -383,6 +383,29 @@ export default function MachinePatternPage() {
     }
   };
 
+  // Auto-calc derived fields in Add form based on parameters
+  const onAddFormValuesChange = (_changed: any, allValues: Partial<PatternFormValues>) => {
+    const prl = Number(allValues.prlReference ?? 0);
+    const wd = Number(allValues.workingDays ?? paramWorkingDays);
+    const cycle = Number(allValues.cycleTime ?? 0);
+    const pattern = Number(allValues.patternValue ?? 0) || 1;
+
+    // determine moving type
+    let moving: MovementType = allValues.movingType ?? "Normal";
+    const dailyReq = wd > 0 ? prl / wd : 0;
+    if (dailyReq > paramFastMovingThreshold) moving = "Fast Moving";
+    if (cycle >= paramPatternCycleThresholdMinutes) moving = "Slow Moving";
+
+    // determine pattern value: default 1 for slow-moving (large cycle), otherwise keep or default 1
+    let patternValue = pattern;
+    if (moving === "Slow Moving") patternValue = 1;
+
+    // compute min output using formula: PRL/workingDays * cycleTime * pattern
+    const minOutput = wd > 0 ? Math.floor((prl / wd) * cycle * patternValue) : 0;
+
+    addForm.setFieldsValue({ movingType: moving, patternValue, minOutput });
+  };
+
   const handleEditSubmit = async () => {
     if (!activeRow) return;
 
@@ -730,7 +753,7 @@ export default function MachinePatternPage() {
                 <div className="flex items-center justify-between"><span className="text-gray-500">Pattern Value</span><span className="font-medium text-gray-900">{activeRow.patternValue}</span></div>
                 <div className="flex items-center justify-between"><span className="text-gray-500">Working Days</span><span className="font-medium text-gray-900">{activeRow.workingDays}</span></div>
                 <div className="flex items-center justify-between"><span className="text-gray-500">Min Output</span><span className="font-medium text-gray-900">{formatNumber(activeRow.minOutput)}</span></div>
-                <div className="flex items-center justify-between"><span className="text-gray-500">PRL Reference</span><span className="font-medium text-gray-900">{formatNumber(activeRow.prlReference)}</span></div>
+                <div className="flex items-center justify-between"><span className="text-gray-500">PRL </span><span className="font-medium text-gray-900">{formatNumber(activeRow.prlReference)}</span></div>
                 <div className="flex items-center justify-between"><span className="text-gray-500">Status</span><span className="font-medium text-gray-900">{activeRow.status}</span></div>
               </div>
 

@@ -100,6 +100,7 @@ import {
   useUpdateKanbanStandardMutation,
 } from "@/lib/api/system-settings/api";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { useListPrlsQuery } from "@/lib/api/prl/api";
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 import { useGetInventoryListQuery } from "@/lib/api/inventory/api";
 import MachineSettingsPanel from "@/components/system-settings/MachineSettingsPanel";
@@ -786,6 +787,14 @@ type ProcessFormValues = {
 
 type MachinePatternFormValues = {
   patternName: string;
+  uniqCode?: string;
+  machineId?: number;
+  cycleTime?: number;
+  prlReference?: number;
+  workingDays?: number;
+  patternValue?: number;
+  movingType?: string;
+  minOutput?: number;
   machineCount: number;
   operatingHours: number;
   status: StatusType;
@@ -949,6 +958,7 @@ export default function SystemSettingsPage() {
   const { data: bomTreeApiData } = useGetBomTreeQuery(undefined, {
     skip: !shouldLoadBomTree,
   });
+  const { data: prlsApiData = [] } = useListPrlsQuery(undefined, { skip: !shouldLoadMachinePatterns });
   const selectedModule = useMemo(
     () => modules.find((m) => m.id === selectedModuleId) ?? modules[0],
     [selectedModuleId],
@@ -2119,6 +2129,68 @@ export default function SystemSettingsPage() {
     });
     setMachinePatternEditOpen(true);
   };
+
+  // Auto-fill logic for Machine Pattern form
+  const MACHINE_PATTERN_FAST_THRESHOLD = 1000; // configurable parameter C for fast-moving threshold
+  const MACHINE_PATTERN_SLOW_CYCLE_MINUTES = 48; // configurable C for slow-moving condition
+
+  const selectedMachineUniq = Form.useWatch("uniqCode", machinePatternForm) as string | undefined;
+  const selectedMachineId = Form.useWatch("machineId", machinePatternForm) as number | undefined;
+
+  useEffect(() => {
+    if (!selectedMachineUniq && !selectedMachineId) return;
+
+    // find cycle time from BOM tree (if available)
+    let cycleTime: number | undefined = undefined;
+    try {
+      const nodes = (bomTreeApiData as any)?.data ?? [];
+      const stack = Array.isArray(nodes) ? [...nodes] : [];
+      while (stack.length) {
+        const n = stack.pop();
+        if (!n) continue;
+        const uniq = String(n.uniq_code ?? "").trim();
+        if (uniq && uniq === String(selectedMachineUniq ?? "").trim()) {
+          cycleTime = Number(n.cycle_time ?? n.cycleTime ?? n.cycle ?? 0) || undefined;
+          break;
+        }
+        if (Array.isArray(n.children)) stack.push(...n.children);
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // find PRL quantity for the uniq (sum across approved PRLs)
+    const prlMatches = (prlsApiData ?? []).filter((p: any) => String(p.uniq_code ?? p.item_uniq_code ?? "").trim() === String(selectedMachineUniq ?? "").trim());
+    const prlTotal = prlMatches.reduce((s: number, p: any) => s + Number(p.quantity ?? 0), 0);
+
+    // working days - pick latest global parameter if exists
+    const latestGlobal = (globalParametersApiData ?? [])[0];
+    const workingDays = Number(latestGlobal?.working_days ?? latestGlobal?.working_days ?? 22);
+
+    // compute patternValue
+    const prlPerDay = workingDays > 0 ? prlTotal / workingDays : 0;
+    let patternValue = 1;
+    if (cycleTime && cycleTime > 0) {
+      patternValue = Math.max(1, Math.round(prlPerDay / (1 / (cycleTime / 60) || 1)));
+    } else {
+      patternValue = Math.max(1, Math.round(prlPerDay / 1000));
+    }
+
+    // determine moving type
+    const movingType = prlPerDay > MACHINE_PATTERN_FAST_THRESHOLD ? "Fast Moving" : (cycleTime && cycleTime >= MACHINE_PATTERN_SLOW_CYCLE_MINUTES ? "Slow Moving" : "Normal");
+
+    // output per machine per uniq = PRL/working days * cycle time * pattern
+    const outputPerMachine = Number(prlPerDay || 0) * Number(cycleTime || 0) * Number(patternValue || 1);
+
+    machinePatternForm.setFieldsValue({
+      cycleTime: cycleTime ?? machinePatternForm.getFieldValue("cycleTime"),
+      prlReference: prlTotal || machinePatternForm.getFieldValue("prlReference"),
+      workingDays: workingDays || machinePatternForm.getFieldValue("workingDays"),
+      patternValue: patternValue || machinePatternForm.getFieldValue("patternValue"),
+      movingType,
+      minOutput: Math.round(outputPerMachine) || machinePatternForm.getFieldValue("minOutput"),
+    });
+  }, [selectedMachineUniq, selectedMachineId, bomTreeApiData, prlsApiData, globalParametersApiData, machinePatternForm]);
 
   const openEditKanban = (row: KanbanRow) => {
     setKanbanEditMode("edit");

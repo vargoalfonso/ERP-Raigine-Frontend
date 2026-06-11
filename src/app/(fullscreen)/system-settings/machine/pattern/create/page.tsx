@@ -5,6 +5,7 @@ import { Button, Card, InputNumber, Select, Tag, message } from "antd";
 import { LeftOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { useListPrlsQuery } from "@/lib/api/prl/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetMachineParametersQuery } from "@/lib/api/machine-parameters/api";
@@ -55,6 +56,7 @@ export default function MachinePatternCreatePage() {
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
   const { data: machineParameters } = useGetMachineParametersQuery({ page: 1, limit: 100 }, { skip: !apiEnabled });
   const { data: bomTreeData } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const { data: prls = [] } = useListPrlsQuery(undefined, { skip: !apiEnabled });
   const [createMachinePattern, createState] = useCreateMachinePatternMutation();
 
   const machines = machineParameters?.items ?? [];
@@ -96,7 +98,85 @@ export default function MachinePatternCreatePage() {
   );
 
   const updateEntry = (id: string, patch: Partial<Entry>) => {
-    setEntries((prev) => prev.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)));
+    setEntries((prev) => {
+      return prev.map((entry) => {
+        if (entry.id !== id) return entry;
+            const updated = { ...entry, ...patch };
+
+            // If uniqCode changed, try to auto-fill cycleTime (from BOM) and prlReference (from PRL list)
+            if (patch.uniqCode) {
+              const uniq = String(patch.uniqCode ?? "").trim();
+              // find node in bomTreeData
+              const nodes = (bomTreeData as any)?.data;
+              let foundNode: any = null;
+              const walk = (arr: any[]) => {
+                for (const n of arr) {
+                  if (!n) continue;
+                  const code = String(n?.uniq_code ?? n?.uniq ?? "").trim();
+                  if (code === uniq) {
+                    foundNode = n;
+                    return true;
+                  }
+                  if (Array.isArray(n.children) && walk(n.children)) return true;
+                }
+                return false;
+              };
+              if (Array.isArray(nodes)) walk(nodes);
+
+              // extract cycle time (seconds) from common BOM keys
+              let cycleMinutes: number | undefined = undefined;
+              if (foundNode) {
+                const mat = foundNode.material_spec ?? foundNode.materialSpec ?? {};
+                const tryNums = [mat.cycle_time_sec_per_pc, mat.cycle_time_sec, foundNode.cycle_time_sec, foundNode.cycle_time_sec_per_pc];
+                for (const v of tryNums) {
+                  const n = Number(v ?? NaN);
+                  if (Number.isFinite(n) && n > 0) {
+                    cycleMinutes = Math.max(1, Math.round(n / 60));
+                    break;
+                  }
+                }
+                // also check process_routes
+                if (cycleMinutes === undefined && Array.isArray(foundNode.process_routes)) {
+                  for (const r of foundNode.process_routes) {
+                    const n = Number(r?.cycle_time_sec_per_pc ?? r?.cycle_time_sec ?? NaN);
+                    if (Number.isFinite(n) && n > 0) {
+                      cycleMinutes = Math.max(1, Math.round(n / 60));
+                      break;
+                    }
+                  }
+                }
+              }
+
+              if (cycleMinutes !== undefined) updated.cycleTime = cycleMinutes;
+
+              // find PRL total for this uniq
+              const matchedPrls = (prls ?? []).filter((p) => String(p.uniq_code ?? p.item_uniq_code ?? "").trim() === uniq);
+              const prlSum = matchedPrls.reduce((s, r) => s + (Number(r.quantity ?? 0)), 0);
+              if (prlSum > 0) updated.prlReference = prlSum;
+            }
+
+            // Derived calculations
+            const prl = Number(updated.prlReference ?? 0);
+            const wd = Number(updated.workingDays ?? 0) || 25; // fallback
+            const cycle = Number(updated.cycleTime ?? 0);
+
+            // fast moving threshold and slow cycle threshold are parameterized constants
+            const FAST_THRESHOLD = 1000; // C — can be hooked to saved params later
+            const SLOW_CYCLE_MINUTES = 48; // C — minutes
+
+            const dailyReq = wd > 0 ? prl / wd : 0;
+
+            let movingType: MovementType = updated.movingType ?? "Normal";
+            if (dailyReq > FAST_THRESHOLD) movingType = "Fast Moving";
+            if (cycle >= SLOW_CYCLE_MINUTES) movingType = "Slow Moving";
+
+            let patternValue = Number(updated.patternValue ?? 0) || 1;
+            if (movingType === "Slow Moving") patternValue = 1;
+
+            // keep minOutput as user-provided (free text); do not overwrite here
+            return { ...updated, movingType, patternValue };
+      });
+    });
   };
 
   const validateEntry = (entry: Entry) => {
@@ -262,10 +342,10 @@ export default function MachinePatternCreatePage() {
                     <div className="mb-2 text-sm text-gray-700">Moving Type</div>
                     <Select
                       value={entry.movingType}
-                      onChange={(value) => updateEntry(entry.id, { movingType: value as MovementType, created: false })}
-                      placeholder="Select moving type"
+                      disabled
+                      placeholder="Auto-calculated"
                       options={MOVEMENT_OPTIONS as unknown as { label: string; value: string }[]}
-                      className="w-full"
+                      className="w-full bg-gray-50"
                     />
                   </div>
                 </div>
