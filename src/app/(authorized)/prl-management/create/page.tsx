@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import dayjs from "dayjs";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Button, Input, Select, Tag, Upload, message } from "antd";
+import { Button, Input, Select, Tag, Upload, message, DatePicker } from "antd";
 import {
   ArrowLeftOutlined,
   FileExcelOutlined,
@@ -413,12 +414,12 @@ export default function AddForecastPage() {
 
                 <div>
                   <div className="text-xs font-semibold text-gray-700 mb-1">Forecast Period</div>
-                  <Select
-                    value={entry.forecastPeriod}
-                    onChange={(v) => updateEntry(entry.id, { forecastPeriod: v })}
-                    options={periodOptions}
-                    placeholder="Select forecast period"
+                  <DatePicker
+                    picker="month"
+                    value={entry.forecastPeriod ? dayjs(entry.forecastPeriod, "MMMM-YYYY") : undefined}
+                    onChange={(date) => updateEntry(entry.id, { forecastPeriod: date ? dayjs(date).format("MMMM-YYYY") : "" })}
                     className="w-full"
+                    format={(value) => (value ? dayjs(value).format("MMMM-YYYY") : "")}
                     allowClear
                   />
                 </div>
