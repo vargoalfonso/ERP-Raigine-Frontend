@@ -40,6 +40,7 @@ import {
   EyeOutlined,
   FileExcelOutlined,
   HistoryOutlined,
+  DownloadOutlined,
   PlusOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
@@ -308,6 +309,38 @@ export default function PrlManagementPage() {
       message.success("PRL export downloaded");
     } catch (error) {
       message.error(getApiErrorMessage(error, "Failed to export PRL data"));
+    }
+  };
+
+  const handleDownloadTemplate = async () => {
+    if (!apiEnabled || !apiBaseUrl) {
+      message.info("Download template is only available in API mode");
+      return;
+    }
+
+    try {
+      const headers = await generateHeaders({ useAuthorization: true });
+      const response = await fetch(`${apiBaseUrl}/template/prls`, {
+        method: "GET",
+        headers,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Template download failed with status ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "prls-template.xlsx";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      message.success("Template downloaded");
+    } catch (error) {
+      message.error(getApiErrorMessage(error, "Failed to download template"));
     }
   };
 
@@ -923,6 +956,9 @@ export default function PrlManagementPage() {
             </Button>
             <Button className="!rounded-lg" icon={<UploadOutlined />} onClick={() => setExcelModalOpen(true)}>
               Excel Upload
+            </Button>
+            <Button className="!rounded-lg" icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>
+              Download Template
             </Button>
             <Button className="!rounded-lg" icon={<FileExcelOutlined />} onClick={handleExport}> 
               Export Data
