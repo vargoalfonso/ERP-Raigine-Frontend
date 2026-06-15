@@ -84,6 +84,23 @@ export type PrlRecord = {
   };
 };
 
+export type PrlListRequest = {
+  page: number;
+  limit: number;
+};
+
+export type PrlListPagination = {
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+};
+
+export type PrlListResponse = {
+  items: PrlRecord[];
+  pagination: PrlListPagination;
+};
+
 export type CreatePrlRequest = {
   customer_uuid: string;
   uniq_code: string;
@@ -175,23 +192,55 @@ const normalizePrlRecord = (raw: unknown): PrlRecord => {
   };
 };
 
+const normalizePrlListResponse = (response: unknown, fallback: PrlListRequest): PrlListResponse => {
+  const root = isRecord(response) ? response : {};
+  const data = isRecord(root.data) ? root.data : {};
+  const items = parseArrayResponse<unknown>(response).map(normalizePrlRecord);
+  const pagination = isRecord(data.pagination) ? data.pagination : {};
+  const total = toNumber(pagination.total) ?? items.length;
+  const page = toNumber(pagination.page) ?? fallback.page;
+  const limit = toNumber(pagination.limit) ?? fallback.limit;
+
+  return {
+    items,
+    pagination: {
+      total,
+      page,
+      limit,
+      total_pages:
+        toNumber(pagination.total_pages) ??
+        Math.max(1, Math.ceil((total || items.length) / Math.max(1, limit))),
+    },
+  };
+};
+
 const TAG = "PRL" as const;
 
 export const prlApiSlice = apiSlice
   .enhanceEndpoints({ addTagTypes: [TAG] })
   .injectEndpoints({
     endpoints: (builder) => ({
-      listPrls: builder.query<PrlRecord[], void>({
-        query: () => ({
+      listPrls: builder.query<PrlListResponse, PrlListRequest | void>({
+        query: (params) => {
+          const page = params?.page ?? 1;
+          const limit = params?.limit ?? 100;
+
+          return {
           url: "/prls",
           method: "GET",
+          params: { page, limit },
           meta: { useAuthorization: true, contentType: "application/json" },
-        }),
-        transformResponse: (response: unknown) => parseArrayResponse<unknown>(response).map(normalizePrlRecord),
+        };
+        },
+        transformResponse: (response: unknown, _meta, arg) =>
+          normalizePrlListResponse(response, {
+            page: arg?.page ?? 1,
+            limit: arg?.limit ?? 100,
+          }),
         providesTags: (result) => {
           const base: Array<{ type: typeof TAG; id: string }> = [{ type: TAG, id: "LIST" }];
           if (!result) return base;
-          return base.concat(result.filter((item) => item.id).map((item) => ({ type: TAG, id: item.id })));
+          return base.concat(result.items.filter((item) => item.id).map((item) => ({ type: TAG, id: item.id })));
         },
       }),
 

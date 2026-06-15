@@ -56,10 +56,11 @@ export default function MachinePatternCreatePage() {
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
   const { data: machineParameters } = useGetMachineParametersQuery({ page: 1, limit: 100 }, { skip: !apiEnabled });
   const { data: bomTreeData } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
-  const { data: prls = [] } = useListPrlsQuery(undefined, { skip: !apiEnabled });
+  const { data: prlsResponse } = useListPrlsQuery(undefined, { skip: !apiEnabled });
   const [createMachinePattern, createState] = useCreateMachinePatternMutation();
 
   const machines = machineParameters?.items ?? [];
+  const prls = prlsResponse?.items ?? [];
 
   const completeCount = useMemo(() => entries.filter((entry) => entry.created).length, [entries]);
 

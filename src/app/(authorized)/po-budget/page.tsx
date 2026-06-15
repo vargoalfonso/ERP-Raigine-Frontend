@@ -420,7 +420,7 @@ export default function PoBudgetPage() {
   const [addBulk] = useAddPoBudgetBulkMutation();
   const [updateEntry] = useUpdatePoBudgetEntryMutation();
   const { data: customers = [] } = useListCustomersQuery(undefined, { skip: !useApi });
-  const { data: prls = [] } = useListPrlsQuery(undefined, { skip: !useApi });
+  const { data: prlsResponse } = useListPrlsQuery(undefined, { skip: !useApi });
   const { data: supplierItems = [] } = useListSupplierItemsQuery(undefined, { skip: !useApi });
   const { data: globalParameters = [] } = useGetGlobalWorkingDaysQuery(undefined, { skip: !useApi });
   const { data: uoms = [] } = useGetUomsQuery(undefined, { skip: !useApi });
@@ -430,6 +430,8 @@ export default function PoBudgetPage() {
     subcon: subconListRes.data,
     indirect: indirectListRes.data,
   }), [rawListRes.data, subconListRes.data, indirectListRes.data]);
+
+  const prls = prlsResponse?.items ?? [];
 
   const paginationMetaByTab = useMemo(() => ({
     raw: rawListRes.pagination,

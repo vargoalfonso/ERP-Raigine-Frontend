@@ -228,6 +228,8 @@ function formatPercent(value: number) {
 export default function PrlManagementPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<PrlTabId>("forecast-table");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState<string>("");
   const [periodFilter, setPeriodFilter] = useState<string>("current");
   const [customerFilter, setCustomerFilter] = useState<string>("");
@@ -249,7 +251,7 @@ export default function PrlManagementPage() {
     skip: !apiEnabled,
   });
 
-  const prlListQuery = useListPrlsQuery(undefined, { skip: !apiEnabled });
+  const prlListQuery = useListPrlsQuery({ page: currentPage, limit: pageSize }, { skip: !apiEnabled });
   const prlDetailQuery = useGetPrlByIdQuery(forecastDetail.record?.key ?? "", {
     skip: !apiEnabled || !forecastDetail.open || !forecastDetail.record?.key,
   });
@@ -346,7 +348,7 @@ export default function PrlManagementPage() {
 
   const resolvedForecastRows = useMemo<ForecastRow[]>(() => {
     if (!apiEnabled) return initialRows;
-    const list = prlListQuery.data;
+    const list = prlListQuery.data?.items;
     if (!list) return initialRows;
 
     return list.map((r) => {
@@ -629,6 +631,19 @@ export default function PrlManagementPage() {
       return matchesQuery && matchesCustomer && matchesPeriod && matchesType;
     });
   }, [resolvedForecastRows, search, customerFilter, periodFilter, typeFilter]);
+
+  const forecastPaginationTotal = useMemo(() => {
+    if (!apiEnabled) return rows.length;
+
+    const hasClientFilters = Boolean(search.trim() || customerFilter.trim() || periodFilter !== "current" || typeFilter !== "all");
+    if (hasClientFilters) return rows.length;
+
+    return prlListQuery.data?.pagination.total ?? rows.length;
+  }, [apiEnabled, customerFilter, periodFilter, prlListQuery.data?.pagination.total, rows.length, search, typeFilter]);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [search, customerFilter, periodFilter, typeFilter]);
 
   const periodOptions = useMemo(
     () => {
@@ -1031,7 +1046,7 @@ export default function PrlManagementPage() {
                 <div className="text-base font-semibold text-gray-900">Production Forecast by Uniq</div>
               </div>
               <div className="flex items-center gap-2">
-                <Badge count={`${rows.length} forecasts`} style={{ backgroundColor: "#EEF2FF", color: "#3730A3" }} />
+                <Badge count={`${forecastPaginationTotal} forecasts`} style={{ backgroundColor: "#EEF2FF", color: "#3730A3" }} />
                 <Button className="!rounded-lg" icon={<BarChartOutlined />} onClick={() => openAnalytics("overview")}> 
                   Analytics View
                 </Button>
@@ -1049,9 +1064,18 @@ export default function PrlManagementPage() {
                 onChange: (keys) => setSelectedRowKeys(keys),
               }}
               pagination={{
-                pageSize: 10,
+                current: currentPage,
+                total: forecastPaginationTotal,
+                pageSize,
                 showSizeChanger: true,
                 pageSizeOptions: ["10", "20", "50"],
+                onChange: (page, nextPageSize) => {
+                  setCurrentPage(page);
+                  if (nextPageSize && nextPageSize !== pageSize) {
+                    setPageSize(nextPageSize);
+                    setCurrentPage(1);
+                  }
+                },
                 showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} Results`,
               }}
             />
