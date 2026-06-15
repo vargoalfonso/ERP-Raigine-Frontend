@@ -96,7 +96,7 @@ export type PrlListPagination = {
   total_pages: number;
 };
 
-export type PrlListResponse = {
+export type PrlListResponse = PrlRecord[] & {
   items: PrlRecord[];
   pagination: PrlListPagination;
 };
@@ -200,18 +200,19 @@ const normalizePrlListResponse = (response: unknown, fallback: PrlListRequest): 
   const total = toNumber(pagination.total) ?? items.length;
   const page = toNumber(pagination.page) ?? fallback.page;
   const limit = toNumber(pagination.limit) ?? fallback.limit;
+  const result = [...items] as PrlListResponse;
 
-  return {
-    items,
-    pagination: {
-      total,
-      page,
-      limit,
-      total_pages:
-        toNumber(pagination.total_pages) ??
-        Math.max(1, Math.ceil((total || items.length) / Math.max(1, limit))),
-    },
+  result.items = items;
+  result.pagination = {
+    total,
+    page,
+    limit,
+    total_pages:
+      toNumber(pagination.total_pages) ??
+      Math.max(1, Math.ceil((total || items.length) / Math.max(1, limit))),
   };
+
+  return result;
 };
 
 const TAG = "PRL" as const;
