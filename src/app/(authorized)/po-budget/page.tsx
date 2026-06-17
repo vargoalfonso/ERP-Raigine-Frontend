@@ -28,6 +28,7 @@ import {
 } from "@/lib/api/supplier-items/api";
 import { useListCustomersQuery, type CustomerRecord } from "@/lib/api/customers/api";
 import { useListPrlsQuery } from "@/lib/api/prl/api";
+import { useListCustomerPosQuery } from "@/lib/api/customer-orders/api";
 import { useGetGlobalWorkingDaysQuery, useGetUomsQuery } from "@/lib/api/system-settings/api";
 const useApi = Boolean(apiBaseUrl);
 import {
@@ -421,6 +422,7 @@ export default function PoBudgetPage() {
   const [updateEntry] = useUpdatePoBudgetEntryMutation();
   const { data: customers = [] } = useListCustomersQuery(undefined, { skip: !useApi });
   const { data: prlsResponse } = useListPrlsQuery({ page: 1, limit: 1000 }, { skip: !useApi });
+  const { data: customerPosResponse } = useListCustomerPosQuery(undefined, { skip: !useApi });
   const { data: supplierItems = [] } = useListSupplierItemsQuery(undefined, { skip: !useApi });
   const { data: globalParameters = [] } = useGetGlobalWorkingDaysQuery(undefined, { skip: !useApi });
   const { data: uoms = [] } = useGetUomsQuery(undefined, { skip: !useApi });
@@ -432,6 +434,7 @@ export default function PoBudgetPage() {
   }), [rawListRes.data, subconListRes.data, indirectListRes.data]);
 
   const prls = prlsResponse?.items ?? [];
+  const customerPos = customerPosResponse ?? [];
 
   const paginationMetaByTab = useMemo(() => ({
     raw: rawListRes.pagination,
@@ -876,16 +879,31 @@ export default function PoBudgetPage() {
   const defaultUom = uomOptions[0]?.value ?? "";
 
   const prlOptions = useMemo(
-    () =>
-      approvedPrls.map((item) => {
+    () => {
+      const fromPrl = approvedPrls.map((item) => {
         const prlId = String(item.prl_id ?? item.id ?? "");
         const customerName = String(item.customer?.customer_name ?? item.customer_name ?? "-");
         return {
           label: `${prlId} - ${customerName}`,
           value: prlId,
         };
-      }),
-    [approvedPrls],
+      });
+
+      const fromPo = (customerPos as any[])
+        .map((po: any) => {
+          const id = String(po.id ?? po.po_id ?? "");
+          const poNumber = String(po.po_number ?? po.number ?? id);
+          const customerName = String(po.customer?.customer_name ?? po.customer_name ?? "-");
+          return {
+            label: `${poNumber} - ${customerName}`,
+            value: `po:${id}`,
+          };
+        })
+        .filter((x: any) => Boolean(x.value));
+
+      return [...fromPrl, ...fromPo];
+    },
+    [approvedPrls, customerPos],
   );
 
   const matchedAddPrl = useMemo(
@@ -924,6 +942,32 @@ export default function PoBudgetPage() {
   );
 
   const buildBulkItemsFromPrl = (prlId?: string): BulkItemRow[] => {
+    if (!prlId) return [];
+    // support selecting a customer PO via `po:<id>` value
+    if (String(prlId).startsWith("po:")) {
+      const poId = String(prlId).slice(3);
+      const po = (customerPos as any[]).find((p: any) => String(p.id ?? p.po_id ?? "") === poId);
+      if (!po || !Array.isArray(po.items)) return [];
+      return (po.items as any[]).map((it: any, index: number) => {
+        const uniqCode = String(it.item_uniq_code ?? it.item_uniq ?? "");
+        const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ?? [])[0];
+        return {
+          key: `po-${poId}-${index}`,
+          prlId: `po:${poId}`,
+          prlItemId: null,
+          uniq: uniqCode,
+          productModel: String(it.product_model ?? bomIndex.assemblyCodeByUniq[uniqCode] ?? "-"),
+          partName: String(it.part_name ?? bomIndex.partNameByUniq[uniqCode] ?? "-"),
+          partNumber: String(it.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "-"),
+          weightKg: Number(supplierItemMatch?.weight ?? 0),
+          uom: String(supplierItemMatch?.uom ?? defaultUom),
+          quantity: Number(it.quantity ?? 0),
+          existingRawMaterial: String(supplierItemMatch?.description ?? "-"),
+          suppliers: [],
+        } as BulkItemRow;
+      });
+    }
+
     const rows = approvedPrls.filter((item) => String(item.prl_id ?? item.id ?? "") === String(prlId ?? ""));
     return rows.map((item, index) => {
       const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "");
