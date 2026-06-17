@@ -48,10 +48,12 @@ type EntryRow = {
 };
 
 function toPositiveIntString(value: unknown): string | null {
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) return String(Math.trunc(value));
+  if (typeof value === "number" && Number.isFinite(value) && value > 0)
+    return String(Math.trunc(value));
   if (typeof value === "string" && value.trim()) {
     const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed > 0) return String(Math.trunc(parsed));
+    if (Number.isFinite(parsed) && parsed > 0)
+      return String(Math.trunc(parsed));
   }
   return null;
 }
@@ -81,9 +83,12 @@ export default function CreateCustomerOrderPage() {
   const [form] = Form.useForm();
 
   const apiEnabled = Boolean(apiBaseUrl);
-  const [createCustomerPo, createCustomerPoState] = useCreateCustomerPoMutation();
-  const [createDeliveryNote, createDeliveryNoteState] = useCreateDeliveryNoteMutation();
-  const [createSpecialOrder, createSpecialOrderState] = useCreateSpecialOrderMutation();
+  const [createCustomerPo, createCustomerPoState] =
+    useCreateCustomerPoMutation();
+  const [createDeliveryNote, createDeliveryNoteState] =
+    useCreateDeliveryNoteMutation();
+  const [createSpecialOrder, createSpecialOrderState] =
+    useCreateSpecialOrderMutation();
 
   const [orderType, setOrderType] = useState<OrderType>("dn");
   const [deliveryDate, setDeliveryDate] = useState<Dayjs | null>(null);
@@ -94,13 +99,15 @@ export default function CreateCustomerOrderPage() {
 
   const [rows, setRows] = useState<EntryRow[]>([]);
 
-  const customersQuery = useListCustomersQuery(undefined, { skip: !apiEnabled });
+  const customersQuery = useListCustomersQuery(undefined, {
+    skip: !apiEnabled,
+  });
   const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
   const uomsQuery = useGetUomsQuery(undefined, { skip: !apiEnabled });
 
   const bomIndex = useMemo(
     () => buildBomUniqIndex((bomTreeQuery.data?.data ?? []) as unknown),
-    [bomTreeQuery.data]
+    [bomTreeQuery.data],
   );
 
   const uniqOptions = useMemo(() => {
@@ -128,7 +135,10 @@ export default function CreateCustomerOrderPage() {
         { value: "1", label: "Toyota Motor" },
         { value: "2", label: "Honda Motor" },
         { value: "3", label: "Nissan Group" },
-      ].map((o) => ({ ...o, customer: { customer_name: o.label, shipping_address: "" } }));
+      ].map((o) => ({
+        ...o,
+        customer: { customer_name: o.label, shipping_address: "" },
+      }));
     }
     const customers = customersQuery.data ?? [];
     return customers
@@ -161,14 +171,22 @@ export default function CreateCustomerOrderPage() {
     const list = uomsQuery.data ?? [];
     return list
       .map((u) => {
-        const name = String(u.name ?? u.unit_name ?? u.code ?? u.unit_code ?? "").trim();
+        const name = String(
+          u.name ?? u.unit_name ?? u.code ?? u.unit_code ?? "",
+        ).trim();
         if (!name) return null;
         return { label: name, value: name };
       })
       .filter((x): x is NonNullable<typeof x> => Boolean(x));
   }, [apiEnabled, uomsQuery.data]);
 
-  const customerName = Form.useWatch("customerName", form) as string | undefined;
+  const customerName = Form.useWatch("customerName", form) as
+    | string
+    | undefined;
+  const externalOrderNumberWatch = Form.useWatch(
+    "externalOrderNumber",
+    form,
+  ) as string | undefined;
 
   const orderNumber = useMemo(() => {
     const code = customerCode(customerName ?? "");
@@ -177,6 +195,11 @@ export default function CreateCustomerOrderPage() {
     if (orderType === "po") return `PO-${code}-${year}-001`;
     return `SO-${code}-${year}-001`;
   }, [customerName, orderType]);
+
+  const displayOrderNumber = useMemo(() => {
+    const ext = String(externalOrderNumberWatch ?? "").trim();
+    return ext || orderNumber;
+  }, [externalOrderNumberWatch, orderNumber]);
 
   const summary = useMemo(() => {
     const totalQty = rows.reduce((acc, r) => acc + (r.qty ?? 0), 0);
@@ -187,8 +210,18 @@ export default function CreateCustomerOrderPage() {
     };
   }, [rows]);
 
-  const actionLabel = orderType === "dn" ? "Create DN" : orderType === "po" ? "Create PO" : "Create SO";
-  const orderNumberLabel = orderType === "dn" ? "DN Number" : orderType === "po" ? "PO Number" : "SO Number";
+  const actionLabel =
+    orderType === "dn"
+      ? "Create DN"
+      : orderType === "po"
+        ? "Create PO"
+        : "Create SO";
+  const orderNumberLabel =
+    orderType === "dn"
+      ? "DN Number"
+      : orderType === "po"
+        ? "PO Number"
+        : "SO Number";
 
   const columns = useMemo<ColumnsType<EntryRow>>(
     () => [
@@ -198,7 +231,10 @@ export default function CreateCustomerOrderPage() {
         dataIndex: "partNumber",
         key: "partNumber",
         render: (v: string) => (
-          <Tag className="!rounded-lg !px-2 !py-0.5 !text-xs !text-gray-700" color="default">
+          <Tag
+            className="!rounded-lg !px-2 !py-0.5 !text-xs !text-gray-700"
+            color="default"
+          >
             {v}
           </Tag>
         ),
@@ -211,7 +247,9 @@ export default function CreateCustomerOrderPage() {
         key: "qty",
         align: "right",
         width: 110,
-        render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
+        render: (v: number) => (
+          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+        ),
       },
       {
         title: "Actions",
@@ -234,7 +272,7 @@ export default function CreateCustomerOrderPage() {
         ),
       },
     ],
-    []
+    [],
   );
 
   function onAddEntry() {
@@ -289,16 +327,20 @@ export default function CreateCustomerOrderPage() {
       }
 
       if (!apiEnabled) {
-        message.success(`Created ${orderType.toUpperCase()} for ${values.customerName || `Customer #${customerId}`}`);
+        message.success(
+          `Created ${orderType.toUpperCase()} for ${values.customerName || `Customer #${customerId}`}`,
+        );
         router.push("/customer-po");
         return;
       }
 
       const dateStr = deliveryDate.format("YYYY-MM-DD");
+      const externalNumber =
+        String(values.externalOrderNumber ?? "").trim() || undefined;
 
       if (orderType === "po") {
         await createCustomerPo({
-          po_number: orderNumber,
+          po_number: externalNumber ?? orderNumber,
           customer_id: customerId,
           contact_person: values.contactPerson,
           delivery_address: values.deliveryAddress,
@@ -312,7 +354,7 @@ export default function CreateCustomerOrderPage() {
         }).unwrap();
       } else if (orderType === "dn") {
         await createDeliveryNote({
-          dn_number: orderNumber,
+          dn_number: externalNumber ?? orderNumber,
           customer_id: customerId,
           delivery_date: dateStr,
           contact_person: values.contactPerson,
@@ -326,7 +368,7 @@ export default function CreateCustomerOrderPage() {
         }).unwrap();
       } else {
         await createSpecialOrder({
-          so_number: orderNumber,
+          so_number: externalNumber ?? orderNumber,
           customer_id: customerId,
           order_date: dateStr,
           special_instructions: values.specialInstructions,
@@ -341,7 +383,9 @@ export default function CreateCustomerOrderPage() {
         }).unwrap();
       }
 
-      message.success(`Created ${orderType.toUpperCase()} for ${values.customerName || `Customer #${customerId}`}`);
+      message.success(
+        `Created ${orderType.toUpperCase()} for ${values.customerName || `Customer #${customerId}`}`,
+      );
       router.push("/customer-po");
     } catch (err) {
       if (apiEnabled && err) {
@@ -365,12 +409,21 @@ export default function CreateCustomerOrderPage() {
         </button>
 
         <div className="flex items-center gap-2">
-          <Button className="!rounded-lg" onClick={() => router.push("/customer-po")}
+          <Button
+            className="!rounded-lg"
+            onClick={() => router.push("/customer-po")}
           >
             Cancel
           </Button>
-          <Button type="primary" className="!rounded-lg" onClick={onCreateOrder}
-            loading={createCustomerPoState.isLoading || createDeliveryNoteState.isLoading || createSpecialOrderState.isLoading}
+          <Button
+            type="primary"
+            className="!rounded-lg"
+            onClick={onCreateOrder}
+            loading={
+              createCustomerPoState.isLoading ||
+              createDeliveryNoteState.isLoading ||
+              createSpecialOrderState.isLoading
+            }
           >
             Create Order
           </Button>
@@ -379,8 +432,12 @@ export default function CreateCustomerOrderPage() {
 
       <div className="mb-5">
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
-          <h1 className="text-xl font-bold text-gray-900">Create New Customer Order</h1>
-          <p className="text-sm text-gray-500">Create Purchase Orders, Delivery Notes, or Special Orders</p>
+          <h1 className="text-xl font-bold text-gray-900">
+            Create New Customer Order
+          </h1>
+          <p className="text-sm text-gray-500">
+            Create Purchase Orders, Delivery Notes, or Special Orders
+          </p>
         </div>
       </div>
 
@@ -391,14 +448,23 @@ export default function CreateCustomerOrderPage() {
           title={
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-semibold text-gray-900">Step 1: Select Order Type</div>
-                <div className="text-xs text-gray-500">Select the type of customer order to create</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Step 1: Select Order Type
+                </div>
+                <div className="text-xs text-gray-500">
+                  Select the type of customer order to create
+                </div>
               </div>
               {requiredPill()}
             </div>
           }
         >
-          <Form.Item label="Order Type" name="orderType" initialValue={"dn"} rules={[{ required: true }]}>
+          <Form.Item
+            label="Order Type"
+            name="orderType"
+            initialValue={"dn"}
+            rules={[{ required: true }]}
+          >
             <Select
               className="max-w-[420px]"
               value={orderType}
@@ -420,8 +486,12 @@ export default function CreateCustomerOrderPage() {
           title={
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-semibold text-gray-900">Step 2: Customer & Order Information</div>
-                <div className="text-xs text-gray-500">Configure customer details and order information</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Step 2: Customer & Order Information
+                </div>
+                <div className="text-xs text-gray-500">
+                  Configure customer details and order information
+                </div>
               </div>
               {requiredPill()}
             </div>
@@ -456,23 +526,56 @@ export default function CreateCustomerOrderPage() {
                     | undefined;
 
                   const nextName =
-                    typeof customer?.customer_name === "string" ? customer.customer_name : (option as any)?.label;
-                  if (typeof nextName === "string") form.setFieldValue("customerName", nextName);
+                    typeof customer?.customer_name === "string"
+                      ? customer.customer_name
+                      : (option as any)?.label;
+                  if (typeof nextName === "string")
+                    form.setFieldValue("customerName", nextName);
 
-                  const deliveryAddress = form.getFieldValue("deliveryAddress") as string | undefined;
-                  const shippingAddr = typeof customer?.shipping_address === "string" ? customer.shipping_address : "";
-                  if (!String(deliveryAddress ?? "").trim() && shippingAddr.trim()) {
+                  // always set/override delivery address from master customer when selection changes
+                  const shippingAddr =
+                    typeof customer?.shipping_address === "string"
+                      ? customer.shipping_address
+                      : "";
+                  if (shippingAddr.trim()) {
                     form.setFieldValue("deliveryAddress", shippingAddr.trim());
+                  } else {
+                    form.setFieldValue("deliveryAddress", undefined);
+                  }
+
+                  // always set/override contact person from common customer fields when selection changes
+                  const candidate =
+                    (customer &&
+                      String((customer as any).contact_person ?? "").trim()) ||
+                    (customer &&
+                      String((customer as any).contactName ?? "").trim()) ||
+                    (customer &&
+                      String((customer as any).contact_name ?? "").trim()) ||
+                    (customer &&
+                      String((customer as any).pic_name ?? "").trim()) ||
+                    (customer &&
+                      String((customer as any).phone_number ?? "").trim());
+                  if (candidate) {
+                    form.setFieldValue("contactPerson", candidate);
+                  } else {
+                    form.setFieldValue("contactPerson", undefined);
                   }
                 }}
               />
             </Form.Item>
 
-            <Form.Item name="customerName" rules={[{ required: true, message: "Select Customer" }]} hidden>
+            <Form.Item
+              name="customerName"
+              rules={[{ required: true, message: "Select Customer" }]}
+              hidden
+            >
               <Input />
             </Form.Item>
 
-            <Form.Item label="Contact Person" name="contactPerson" rules={[{ required: true, message: "Input Contact Person" }]}
+            <Form.Item
+              label="Contact Person"
+              name="contactPerson"
+              rules={[{ required: true, message: "Input Contact Person" }]}
             >
               <Input placeholder="Input Contact Person" />
             </Form.Item>
@@ -487,12 +590,19 @@ export default function CreateCustomerOrderPage() {
               />
             </Form.Item>
 
-            <Form.Item label="Delivery Address" name="deliveryAddress" rules={[{ required: true, message: "Input Delivery Address" }]}
+            <Form.Item
+              label="Delivery Address"
+              name="deliveryAddress"
+              rules={[{ required: true, message: "Input Delivery Address" }]}
             >
               <Input placeholder="Input Delivery Address" />
             </Form.Item>
 
-            <Form.Item label="Special Instructions" name="specialInstructions" className="lg:col-span-2">
+            <Form.Item
+              label="Special Instructions"
+              name="specialInstructions"
+              className="lg:col-span-2"
+            >
               <Input.TextArea
                 placeholder="Enter any special handling or delivery requirements"
                 rows={4}
@@ -509,10 +619,16 @@ export default function CreateCustomerOrderPage() {
           title={
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-semibold text-gray-900">Step 3: Input Data</div>
-                <div className="text-xs text-gray-500">Configure order detail specifications</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Step 3: Input Data
+                </div>
+                <div className="text-xs text-gray-500">
+                  Configure order detail specifications
+                </div>
               </div>
-              <Tag className="!rounded-full !text-xs !px-3 !py-0.5">Entry 1</Tag>
+              <Tag className="!rounded-full !text-xs !px-3 !py-0.5">
+                Entry 1
+              </Tag>
             </div>
           }
         >
@@ -525,8 +641,14 @@ export default function CreateCustomerOrderPage() {
                 onChange={(v) => {
                   setEntryUniq(v);
                   const bomUom = bomIndex.uomByUniq[v];
-                  if (!entryUom && typeof bomUom === "string" && bomUom.trim()) {
-                    const hasUom = uomOptions.some((o) => o.value === bomUom.trim());
+                  if (
+                    !entryUom &&
+                    typeof bomUom === "string" &&
+                    bomUom.trim()
+                  ) {
+                    const hasUom = uomOptions.some(
+                      (o) => o.value === bomUom.trim(),
+                    );
                     if (hasUom) setEntryUom(bomUom.trim());
                   }
                 }}
@@ -568,6 +690,15 @@ export default function CreateCustomerOrderPage() {
                 onChange={(v) => setEntryQty(typeof v === "number" ? v : null)}
               />
             </div>
+            <div className="lg:col-span-3">
+              <label className="block mb-2 font-medium text-gray-700">
+                Customer PO / DN / SO Number
+              </label>
+
+              <Form.Item name="externalOrderNumber" noStyle>
+                <Input placeholder="Masukkan nomor PO/DN/SO (free-text) — akan menggantikan nomor yang digenerate" />
+              </Form.Item>
+            </div>
 
             <Button
               type="primary"
@@ -579,20 +710,28 @@ export default function CreateCustomerOrderPage() {
             </Button>
           </div>
 
-          <div className="text-base font-bold text-gray-900 mb-3">{orderNumber}</div>
+          <div className="text-base font-bold text-gray-900 mb-3">
+            {orderNumber}
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
             <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
               <div className="text-xs text-gray-500">Total Qty</div>
-              <div className="text-lg font-bold text-gray-900">{formatNumber(summary.totalQty)}</div>
+              <div className="text-lg font-bold text-gray-900">
+                {formatNumber(summary.totalQty)}
+              </div>
             </div>
             <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
               <div className="text-xs text-gray-500">{orderNumberLabel}</div>
-              <div className="text-sm font-semibold text-gray-900">{orderNumber}</div>
+              <div className="text-sm font-semibold text-gray-900">
+                {displayOrderNumber}
+              </div>
             </div>
             <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
               <div className="text-xs text-gray-500">Total Uniq Chosen</div>
-              <div className="text-lg font-bold text-gray-900">{summary.uniqCount}</div>
+              <div className="text-lg font-bold text-gray-900">
+                {summary.uniqCount}
+              </div>
             </div>
           </div>
 

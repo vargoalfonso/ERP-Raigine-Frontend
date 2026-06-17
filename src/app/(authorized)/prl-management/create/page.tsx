@@ -33,6 +33,7 @@ type ForecastEntry = {
   partName: string;
   partNumber: string;
   quantity: string; // keep as string for input UX
+  remarks?: string;
 };
 
 function newEntry(seed?: Partial<ForecastEntry>): ForecastEntry {
@@ -46,6 +47,7 @@ function newEntry(seed?: Partial<ForecastEntry>): ForecastEntry {
     partName: seed?.partName ?? "",
     partNumber: seed?.partNumber ?? "",
     quantity: seed?.quantity ?? "",
+    remarks: seed?.remarks ?? "",
   };
 }
 
@@ -189,8 +191,8 @@ export default function AddForecastPage() {
 
     try {
       await Promise.all(
-        entries.map((entry) =>
-          createPrl({
+        entries.map((entry) => {
+          const payload: any = {
             customer_uuid: String(entry.customerUuid ?? "").trim(),
             uniq_code: entry.uniqCode.trim(),
             product_model: entry.productModel.trim(),
@@ -198,8 +200,11 @@ export default function AddForecastPage() {
             part_number: entry.partNumber.trim(),
             forecast_period: String(entry.forecastPeriod ?? ""),
             quantity: Number(entry.quantity),
-          }).unwrap(),
-        ),
+          };
+          const r = String(entry.remarks ?? "").trim();
+          if (r) payload.remarks = r;
+          return createPrl(payload as any).unwrap();
+        })
       );
 
       message.success(`Saved ${entries.length} PRL entr${entries.length > 1 ? "ies" : "y"}`);
@@ -480,6 +485,16 @@ export default function AddForecastPage() {
                     placeholder="e.g., 2500"
                     className="!rounded-lg"
                     inputMode="numeric"
+                  />
+                </div>
+
+                <div className="lg:col-span-2">
+                  <div className="text-xs font-semibold text-gray-700 mb-1">Remarks (optional)</div>
+                  <Input
+                    value={entry.remarks}
+                    onChange={(e) => updateEntry(entry.id, { remarks: e.target.value })}
+                    placeholder="Optional remarks or note"
+                    className="!rounded-lg"
                   />
                 </div>
 

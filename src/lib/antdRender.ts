@@ -9,12 +9,24 @@ unstableSetRender(
     node: ReactElement,
     container: Element | DocumentFragment
   ) => {
-    const root = createRoot(container);
+    // reuse existing root if createRoot was already called for this container
+    const key = "__rc_root__";
+    let root = (container as any)[key] as ReturnType<typeof createRoot> | undefined;
+    if (!root) {
+      root = createRoot(container as Element);
+      (container as any)[key] = root;
+    }
     root.render(node);
 
-    // ✅ HARUS return Promise<void>
+    // return async unmount function
     return async () => {
-      root.unmount();
+      try {
+        root!.unmount();
+      } finally {
+        try {
+          delete (container as any)[key];
+        } catch {}
+      }
     };
   }
 );

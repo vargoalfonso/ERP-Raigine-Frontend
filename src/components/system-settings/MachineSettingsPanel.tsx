@@ -366,6 +366,10 @@ export default function MachineSettingsPanel() {
         title={<span className="text-sm font-semibold">Add Machine Master</span>}
         open={createOpen}
         onCancel={closeMachineEditor}
+        maskClosable={true}
+        keyboard={true}
+        destroyOnClose={true}
+        closable={true}
         footer={
           <div className="flex items-center justify-end gap-2">
             <Button onClick={closeMachineEditor}>Cancel</Button>
@@ -395,6 +399,10 @@ export default function MachineSettingsPanel() {
         title={<span className="text-sm font-semibold">Edit Machine Master</span>}
         open={editOpen}
         onCancel={closeMachineEditor}
+        maskClosable={true}
+        keyboard={true}
+        destroyOnClose={true}
+        closable={true}
         footer={
           <div className="flex items-center justify-end gap-2">
             <Button onClick={closeMachineEditor}>Cancel</Button>
@@ -426,6 +434,10 @@ export default function MachineSettingsPanel() {
         okText="Delete"
         okButtonProps={{ danger: true, loading: deleteState.isLoading }}
         onCancel={() => setDeletingMachine(null)}
+        maskClosable={true}
+        keyboard={true}
+        destroyOnClose={true}
+        closable={true}
         onOk={async () => {
           try {
             if (!deletingMachine?.id) return;
@@ -447,6 +459,10 @@ export default function MachineSettingsPanel() {
           setPatternViewOpen(false);
           setViewingPattern(null);
         }}
+        maskClosable={true}
+        keyboard={true}
+        destroyOnClose={true}
+        closable={true}
         footer={<Button onClick={() => { setPatternViewOpen(false); setViewingPattern(null); }}>Close</Button>}
       >
         {viewingPattern ? (
@@ -469,6 +485,10 @@ export default function MachineSettingsPanel() {
         okText="Delete"
         okButtonProps={{ danger: true, loading: deletePatternState.isLoading }}
         onCancel={() => setDeletingPattern(null)}
+        maskClosable={true}
+        keyboard={true}
+        destroyOnClose={true}
+        closable={true}
         onOk={async () => {
           try {
             if (!deletingPattern?.id) return;

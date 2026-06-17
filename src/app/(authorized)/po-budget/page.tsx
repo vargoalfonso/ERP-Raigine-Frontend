@@ -420,7 +420,7 @@ export default function PoBudgetPage() {
   const [addBulk] = useAddPoBudgetBulkMutation();
   const [updateEntry] = useUpdatePoBudgetEntryMutation();
   const { data: customers = [] } = useListCustomersQuery(undefined, { skip: !useApi });
-  const { data: prlsResponse } = useListPrlsQuery(undefined, { skip: !useApi });
+  const { data: prlsResponse } = useListPrlsQuery({ page: 1, limit: 1000 }, { skip: !useApi });
   const { data: supplierItems = [] } = useListSupplierItemsQuery(undefined, { skip: !useApi });
   const { data: globalParameters = [] } = useGetGlobalWorkingDaysQuery(undefined, { skip: !useApi });
   const { data: uoms = [] } = useGetUomsQuery(undefined, { skip: !useApi });
@@ -2351,7 +2351,7 @@ export default function PoBudgetPage() {
                   value={bulkBudgetType}
                   onChange={(v) => setBulkBudgetType(v as BulkBudgetType)}
                   options={[
-                    { label: "PO Adhoc", value: "adhoc" },
+                    { label: "PO Additional", value: "adhoc" },
                     { label: "PO Kanban", value: "kanban" },
                   ]}
                   className="w-full"

@@ -9,7 +9,7 @@ import { useListPrlsQuery } from "@/lib/api/prl/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetMachineParametersQuery } from "@/lib/api/machine-parameters/api";
-import { useCreateMachinePatternMutation } from "@/lib/api/machine-patterns/api";
+import { useCreateMachinePatternMutation, useGetMachinePatternsQuery } from "@/lib/api/machine-patterns/api";
 
 type MovementType = "Fast Moving" | "Slow Moving" | "Normal";
 type StatusType = "Active" | "Inactive";
@@ -85,18 +85,25 @@ export default function MachinePatternCreatePage() {
     return options.sort((a, b) => a.value.localeCompare(b.value));
   }, [bomTreeData]);
 
-  const machineOptions = useMemo(
-    () =>
-      machines
-        .map((machine) => {
-          const id = Number(machine.id ?? 0);
-          const name = String(machine.machine_name ?? "").trim();
-          if (!Number.isFinite(id) || !name) return null;
-          return { label: name, value: id };
-        })
-        .filter((option): option is { label: string; value: number } => Boolean(option)),
-    [machines]
-  );
+  const { data: machinePatternsData } = useGetMachinePatternsQuery({ page: 1, limit: 200 }, { skip: !apiEnabled });
+
+  const machineOptions = useMemo(() => {
+    const used = new Set<number>();
+    for (const p of machinePatternsData?.items ?? []) {
+      const mid = Number(p.machine_id ?? 0);
+      if (Number.isFinite(mid) && mid > 0) used.add(mid);
+    }
+
+    return machines
+      .map((machine) => {
+        const id = Number(machine.id ?? 0);
+        const name = String(machine.machine_name ?? "").trim();
+        if (!Number.isFinite(id) || !name) return null;
+        if (used.has(id)) return null; // exclude machines already used in patterns
+        return { label: name, value: id };
+      })
+      .filter((option): option is { label: string; value: number } => Boolean(option));
+  }, [machines, machinePatternsData]);
 
   const updateEntry = (id: string, patch: Partial<Entry>) => {
     setEntries((prev) => {

@@ -268,11 +268,14 @@ export default function MachineMasterDataPage() {
     if (!apiEnabled) {
       return mockRows.map((row) => ({ label: row.machineName, value: row.machineName }));
     }
+    // exclude machines that are already present in the master list (rows)
+    const existingNames = new Set<string>(rows.map((r) => String(r.machineName ?? "").trim()).filter(Boolean));
 
     return (machineParameters?.items ?? [])
       .map((machine) => {
         const name = String(machine.machine_name ?? "").trim();
         if (!name) return null;
+        if (existingNames.has(name)) return null;
         return { label: name, value: name };
       })
       .filter((option): option is { label: string; value: string } => Boolean(option));

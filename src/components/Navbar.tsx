@@ -3,6 +3,7 @@
 import { apiBaseUrl, getCookiesFromBrowser } from "@/lib/api/instance";
 import { getCurrentUserProfile, getCurrentUserTokenPayload, getCurrentUserUid } from "@/lib/utils/currentUser";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { usePathname } from "next/navigation";
 import { MdCircle } from "react-icons/md";
 
@@ -90,7 +91,9 @@ export default function Navbar() {
   const pathname = usePathname();
   const pageTitle = getPageTitle(pathname);
   const currentDate = getCurrentDate();
+  const router = useRouter();
   const [currentUser, setCurrentUser] = useState(() => getCurrentUserProfile());
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -218,7 +221,7 @@ export default function Navbar() {
           {/* Profile Dropdown */}
           <div className="relative">
             <button
-              //   onClick={() => setShowProfileMenu(!showProfileMenu)}
+              onClick={() => setShowProfileMenu((s) => !s)}
               className="flex items-center space-x-2 p-2 bg-[#F1F5FF] hover:bg-gray-100 rounded-lg transition-colors duration-200"
             >
               <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
@@ -235,30 +238,48 @@ export default function Navbar() {
               {/* <MdExpandMore className="w-4 h-4 text-gray-500" /> */}
             </button>
 
-            {/* Dropdown Menu */}
-            {/* {showProfileMenu && (
-              <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50">
-                <a
-                  href="#"
-                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+            {showProfileMenu && (
+              <div className="absolute right-0 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50">
+                <button
+                  type="button"
+                  onClick={() => {
+                    // navigate to profile settings (placeholder)
+                    setShowProfileMenu(false);
+                    router.push("/profile");
+                  }}
+                  className="w-full text-left block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 >
                   Profile Settings
-                </a>
-                <a
-                  href="#"
-                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    router.push("/account");
+                  }}
+                  className="w-full text-left block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 >
                   Account Settings
-                </a>
+                </button>
                 <hr className="my-2" />
-                <a
-                  href="#"
-                  className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Clear auth cookies/token and redirect to login
+                    try {
+                      document.cookie = "Authorization=; path=/; max-age=0";
+                    } catch (e) {
+                      // ignore
+                    }
+                    setShowProfileMenu(false);
+                    router.push("/login");
+                  }}
+                  className="w-full text-left block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 >
                   Sign Out
-                </a>
+                </button>
               </div>
-            )} */}
+            )}
           </div>
         </div>
       </div>
