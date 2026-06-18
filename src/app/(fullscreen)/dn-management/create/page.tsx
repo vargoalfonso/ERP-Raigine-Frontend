@@ -59,6 +59,7 @@ type Step2Draft = {
   packing?: string;
   pcsPerKanban?: number;
   dateIncoming?: Dayjs;
+  weightKg?: number;
 };
 
 type UniqOption = {
@@ -135,6 +136,11 @@ const typeCopy = (type: DnManagementType) => {
   if (type === "subcon") return { label: "SubCon", title: "DN SubCon", back: "SubCon", codePrefix: "DN-SUB" };
   if (type === "indirect") return { label: "Indirect Raw Material", title: "DN Indirect Raw Material", back: "Indirect Raw Material", codePrefix: "DN-IND" };
   return { label: "Raw Material", title: "DN Raw Material", back: "Raw Material", codePrefix: "DN-RM" };
+};
+
+const formatDisplayNumber = (value?: number) => {
+  if (value == null || !Number.isFinite(value)) return "";
+  return String(value);
 };
 
 function DnRawMaterialCreatePageContent() {
@@ -354,6 +360,7 @@ function DnRawMaterialCreatePageContent() {
   const dnCode = useMemo(() => `${copy.codePrefix}-${step1.period?.replace(/[^0-9A-Za-z]/g, "") ?? "202401"}-001`, [copy.codePrefix, step1.period]);
   const totalUniqChosen = useMemo(() => items.length, [items]);
   const totalQty = useMemo(() => items.reduce((sum, it) => sum + Number(it.orderQty ?? 0), 0), [items]);
+  const tableRows = useMemo(() => items, [items]);
 
   const requestPreview = async (poNumber: string, periodValue?: string) => {
     if (!apiEnabled || !poNumber) return;
@@ -464,6 +471,7 @@ function DnRawMaterialCreatePageContent() {
       packing: found?.packingNumber ?? prev.packing,
       pcsPerKanban: resolvedPcs ?? prev.pcsPerKanban,
       dateIncoming: parseIncomingDate(found?.dateIncoming) ?? prev.dateIncoming,
+      weightKg: prev.weightKg,
     }));
   };
 
@@ -523,10 +531,7 @@ function DnRawMaterialCreatePageContent() {
       return;
     }
 
-    if (items.length === 0) {
-      message.error("Add at least one DN item first");
-      return;
-    }
+    // allow saving even when no items are added
 
     if (!apiEnabled) {
       message.success(`${copy.title} saved`);
@@ -577,156 +582,237 @@ function DnRawMaterialCreatePageContent() {
           </div>
 
           <div className="mt-2">
-            <div className="text-xl font-semibold text-gray-900">Add Delivery Note</div>
-            <div className="text-sm text-gray-500">Create DN for incoming raw material receipt and tracking • 1 entry</div>
+            <div className="text-xl font-semibold text-gray-900">{copy.title} Management</div>
+            <div className="text-sm text-gray-500">Initialize new {copy.label} • 1 entry</div>
           </div>
         </div>
       </div>
 
       <div className="px-6 py-6">
         <div className="max-w-6xl mx-auto space-y-5">
-          <Card className="rounded-2xl" bodyStyle={{ padding: 24 }}>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-base font-semibold text-gray-900">Add Delivery Note #1</div>
-                <div className="text-sm text-gray-500">Create DN for incoming raw material receipt and tracking</div>
-              </div>
-              <Tag className="rounded-full bg-blue-50 text-blue-700 border border-blue-100">Entry 1</Tag>
-            </div>
-
-            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div>
-                <div className="text-sm text-gray-700 mb-2">Schedule ID</div>
-                <Input value={dnCode} disabled />
-              </div>
-              <div>
-                <div className="text-sm text-gray-700 mb-2">Schedule Date</div>
-                <DatePicker className="w-full" value={scheduleDate} onChange={(v) => setScheduleDate(v)} format="DD/MM/YYYY" />
-              </div>
-              <div>
-                <div className="text-sm text-gray-700 mb-2">Supplier</div>
-                <Input value={step1.supplier ?? ""} disabled placeholder="Auto-filled from PO" />
-              </div>
-              <div>
-                <div className="text-sm text-gray-700 mb-2">PO Number</div>
-                <Select
-                  value={step1.poNumber}
-                  onChange={onPickPo}
-                  options={poOptions.map((p) => ({ label: p.label, value: p.value }))}
-                  placeholder="Select PO Number"
-                  className="w-full"
-                  disabled={previewing}
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                />
+          <Card className="rounded-2xl border border-gray-200" bodyStyle={{ padding: 24 }}>
+            <div className="rounded-2xl border-2 border-sky-400 p-5 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.35)]">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-lg font-semibold text-gray-900">Step 1: Input General Data</div>
+                  <div className="text-sm text-gray-500">Input General Data</div>
+                </div>
+                <Tag className="rounded-full border border-blue-100 bg-blue-50 px-3 py-0.5 text-xs font-semibold text-blue-700">Required</Tag>
               </div>
 
-              <div>
-                <div className="text-sm text-gray-700 mb-2">Period</div>
-                <Select
-                  value={step1.period}
-                  onChange={(value) => void onPickPeriod(value)}
-                  options={periodOptions}
-                  placeholder="Select period"
-                  className="w-full"
-                  disabled={previewing}
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                />
-              </div>
-              <div>
-                <div className="text-sm text-gray-700 mb-2">Total PO</div>
-                <InputNumber value={step1.totalPo} disabled className="w-full" />
-              </div>
-              <div>
-                <div className="text-sm text-gray-700 mb-2">Total Incoming</div>
-                <InputNumber value={step1.totalIncoming} disabled className="w-full" />
-              </div>
-              <div>
-                <div className="text-sm text-gray-700 mb-2">DN Created</div>
-                <InputNumber value={step1.dnCreated} disabled className="w-full" />
-              </div>
-              <div>
-                <div className="text-sm text-gray-700 mb-2">DN Incoming</div>
-                <InputNumber value={step1.dnIncoming} disabled className="w-full" />
-              </div>
-              <div>
-                <div className="text-sm text-gray-700 mb-2">Priority</div>
-                <Select
-                  className="w-full"
-                  value={priority}
-                  onChange={(v) => setPriority(v)}
-                  options={[
-                    { label: "Select Priority", value: "" },
-                    { label: "normal", value: "normal" },
-                    { label: "high", value: "high" },
-                  ]}
-                />
-              </div>
-            </div>
+              <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div>
+                  <div className="mb-2 text-sm font-medium text-gray-700">Period</div>
+                  <Select
+                    value={step1.period}
+                    onChange={(value) => void onPickPeriod(value)}
+                    options={periodOptions}
+                    placeholder="Select period"
+                    className="w-full"
+                    disabled={previewing}
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                  />
+                </div>
+                <div>
+                  <div className="mb-2 text-sm font-medium text-gray-700">PO Number</div>
+                  <Select
+                    value={step1.poNumber}
+                    onChange={onPickPo}
+                    options={poOptions.map((p) => ({ label: p.label, value: p.value }))}
+                    placeholder="Select PO Number"
+                    className="w-full"
+                    disabled={previewing}
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                  />
+                </div>
+                <div className="xl:col-span-2">
+                  <div className="mb-2 text-sm font-medium text-gray-700">Supplier</div>
+                  <Input value={step1.supplier ?? ""} disabled placeholder="Autofilled" />
+                </div>
 
-            <div className="mt-6">
-              <div className="text-sm font-semibold text-gray-900">Delivery Items</div>
-              <div className="mt-3 space-y-3">
-                {items.map((it) => (
-                  <div key={it.key} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div>
-                      <div className="text-sm text-gray-700 mb-2">DN Number</div>
-                      <Input value={it.uniq} disabled />
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-700 mb-2">Product Name</div>
-                      <Input value={it.materialInfo.name} disabled />
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-700 mb-2">Total Quantity</div>
-                      <InputNumber value={it.orderQty} disabled className="w-full" />
-                    </div>
-                    <div className="flex items-end justify-end">
-                      <Button danger onClick={() => setItems((prev) => prev.filter((p) => p.key !== it.key))} className="!rounded-lg">
-                        Remove
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div>
-                    <div className="text-sm text-gray-700 mb-2">DN Number</div>
-                    <Select
-                      value={draft.uniq}
-                      onChange={onPickUniq}
-                      placeholder={step1.poNumber ? "Select DN Number" : "Select PO Number first"}
-                      options={uniqOptions.map((u) => ({ label: u.label, value: u.value }))}
-                      className="w-full"
-                      disabled={!step1.poNumber || previewing}
-                    />
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-700 mb-2">Product Name</div>
-                    <Input value={selectedDraftItem?.material?.name ?? ""} disabled placeholder="Auto-filled" />
-                  </div>
-                  <div>
-                    <div className="text-sm text-gray-700 mb-2">Total Quantity</div>
-                    <InputNumber
-                      value={draft.orderQty}
-                      onChange={(v) => setDraft((p) => ({ ...p, orderQty: v ?? undefined }))}
-                      className="w-full"
-                      min={0}
-                    />
-                  </div>
-                  <div className="flex items-end justify-end">
-                    <Button type="primary" className="!rounded-lg" onClick={addItem} icon={<PlusOutlined />} disabled={!step1.poNumber || previewing}>
-                      Add More Delivery Items
-                    </Button>
-                  </div>
+                <div>
+                  <div className="mb-2 text-sm font-medium text-gray-700">Total PO</div>
+                  <Input value={formatDisplayNumber(step1.totalPo)} disabled />
+                </div>
+                <div>
+                  <div className="mb-2 text-sm font-medium text-gray-700">Total Incoming</div>
+                  <Input value={formatDisplayNumber(step1.totalIncoming)} disabled />
+                </div>
+                <div>
+                  <div className="mb-2 text-sm font-medium text-gray-700">DN Created</div>
+                  <Input value={formatDisplayNumber(step1.dnCreated)} disabled />
+                </div>
+                <div>
+                  <div className="mb-2 text-sm font-medium text-gray-700">DN Incoming</div>
+                  <Input value={formatDisplayNumber(step1.dnIncoming)} disabled />
                 </div>
               </div>
             </div>
 
-            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="mt-6 rounded-2xl border border-gray-200 p-5">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-lg font-semibold text-gray-900">Step 2: Input Data</div>
+                  <div className="text-sm text-gray-500">Input Data for each items</div>
+                </div>
+                <Tag className="rounded-full border border-blue-100 bg-blue-50 px-3 py-0.5 text-xs font-semibold text-blue-700">Entry 1</Tag>
+              </div>
+
+              <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div>
+                  <div className="mb-2 text-sm font-medium text-gray-700">Uniq</div>
+                  <Select
+                    value={draft.uniq}
+                    onChange={onPickUniq}
+                    placeholder={step1.poNumber ? "Select Uniq" : "Select PO Number first"}
+                    options={uniqOptions.map((u) => ({ label: u.label, value: u.value }))}
+                    className="w-full"
+                    disabled={!step1.poNumber || previewing}
+                  />
+                </div>
+                <div>
+                  <div className="mb-2 text-sm font-medium text-gray-700">Order Qty</div>
+                  <InputNumber
+                    value={draft.orderQty}
+                    onChange={(v) => setDraft((p) => ({ ...p, orderQty: v ?? undefined }))}
+                    className="w-full"
+                    min={0}
+                    placeholder="Input Quantity"
+                  />
+                </div>
+                <div>
+                  <div className="mb-2 text-sm font-medium text-gray-700">Unit of Measurement</div>
+                  <Input value={draft.uom ?? selectedDraftItem?.uom ?? ""} disabled placeholder="Select UoM" />
+                </div>
+                <div>
+                  <div className="mb-2 text-sm font-medium text-gray-700">Packing</div>
+                  <Input value={draft.packing ?? selectedDraftItem?.packingNumber ?? ""} disabled placeholder="Select Packing" />
+                </div>
+
+                <div>
+                  <div className="mb-2 text-sm font-medium text-gray-700">Pcs/Kanban</div>
+                  <InputNumber
+                    value={draft.pcsPerKanban}
+                    onChange={(v) => setDraft((p) => ({ ...p, pcsPerKanban: v ?? undefined }))}
+                    className="w-full"
+                    min={0}
+                    placeholder="Input pcs/kanban"
+                  />
+                </div>
+                <div>
+                  <div className="mb-2 text-sm font-medium text-gray-700">Weight (kg)</div>
+                  <InputNumber
+                    value={draft.weightKg}
+                    onChange={(v) => setDraft((p) => ({ ...p, weightKg: v ?? undefined }))}
+                    className="w-full"
+                    min={0}
+                    placeholder="Input weight"
+                    style={{ backgroundColor: "#fff200" }}
+                  />
+                </div>
+                <div>
+                  <div className="mb-2 text-sm font-medium text-gray-700">Date Incoming</div>
+                  <DatePicker
+                    className="w-full"
+                    value={draft.dateIncoming ?? null}
+                    onChange={(value) => setDraft((p) => ({ ...p, dateIncoming: value ?? undefined }))}
+                    format="DD/MM/YYYY"
+                  />
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    type="primary"
+                    className="!h-10 !w-full !rounded-lg"
+                    onClick={addItem}
+                    icon={<PlusOutlined />}
+                    disabled={!step1.poNumber || previewing}
+                  >
+                    Create DN
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-6 rounded-xl border border-gray-100 bg-white p-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="text-lg font-semibold text-gray-900">{dnCode}</div>
+                  <div className="grid grid-cols-1 gap-3 text-sm text-gray-600 md:grid-cols-3 md:gap-8">
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Period</div>
+                      <div className="mt-1 font-medium text-gray-800">{step1.period ?? "-"}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">PO Number</div>
+                      <div className="mt-1 font-medium text-gray-800">{step1.poNumber ?? "-"}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-gray-400">Total Uniq Choosen</div>
+                      <div className="mt-1 font-medium text-gray-800">{totalUniqChosen}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 overflow-x-auto">
+                  <table className="min-w-full border-separate border-spacing-0 text-sm">
+                    <thead>
+                      <tr className="text-left text-gray-500">
+                        <th className="border-b border-gray-200 px-3 py-3 font-medium">Uniq</th>
+                        <th className="border-b border-gray-200 px-3 py-3 font-medium">Material Info</th>
+                        <th className="border-b border-gray-200 px-3 py-3 font-medium">Total Qty</th>
+                        <th className="border-b border-gray-200 px-3 py-3 font-medium">Remaining Qty</th>
+                        <th className="border-b border-gray-200 px-3 py-3 font-medium">UoM</th>
+                        <th className="border-b border-gray-200 px-3 py-3 font-medium">Order Qty</th>
+                        <th className="border-b border-gray-200 px-3 py-3 font-medium">Packing Number</th>
+                        <th className="border-b border-gray-200 px-3 py-3 font-medium">Pcs/Kanban</th>
+                        <th className="border-b border-gray-200 px-3 py-3 font-medium">Date Incoming</th>
+                        <th className="border-b border-gray-200 px-3 py-3 font-medium">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tableRows.length > 0 ? (
+                        tableRows.map((it) => (
+                          <tr key={it.key} className="align-top text-gray-700">
+                            <td className="border-b border-gray-100 px-3 py-4 font-medium">{it.uniq}</td>
+                            <td className="border-b border-gray-100 px-3 py-4">
+                              <div className="font-medium text-gray-900">{it.materialInfo.name}</div>
+                              <div className="text-xs text-gray-500">{it.materialInfo.model}</div>
+                            </td>
+                            <td className="border-b border-gray-100 px-3 py-4">{it.totalQty}</td>
+                            <td className="border-b border-gray-100 px-3 py-4">{it.remainingQty}</td>
+                            <td className="border-b border-gray-100 px-3 py-4">{it.uom}</td>
+                            <td className="border-b border-gray-100 px-3 py-4">{it.orderQty}</td>
+                            <td className="border-b border-gray-100 px-3 py-4">{it.packingNumber}</td>
+                            <td className="border-b border-gray-100 px-3 py-4">{it.pcsPerKanban}</td>
+                            <td className="border-b border-gray-100 px-3 py-4">{it.dateIncoming ? it.dateIncoming.format("M/D/YYYY") : "-"}</td>
+                            <td className="border-b border-gray-100 px-3 py-4">
+                              <Button
+                                danger
+                                size="small"
+                                onClick={() => setItems((prev) => prev.filter((p) => p.key !== it.key))}
+                                className="!rounded-lg"
+                              >
+                                Remove
+                              </Button>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={10} className="px-3 py-8 text-center text-sm text-gray-400">
+                            No DN items added yet.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
               <div>
                 <div className="text-sm text-gray-700 mb-2">Transport Company</div>
                 <Input value={transportCompany} onChange={(e) => setTransportCompany(e.target.value)} placeholder="PT JNE" />
@@ -770,19 +856,19 @@ function DnRawMaterialCreatePageContent() {
                 <div className="text-sm text-gray-700 mb-2">Approval Status</div>
                 <Input value="Status From Manager" disabled />
               </div>
-            </div>
+            </div> */}
 
-            <div className="mt-6">
+            {/* <div className="mt-6">
               <div className="text-sm text-gray-700 mb-2">Remarks & Special Instructions</div>
               <Input.TextArea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={3} placeholder="Require QC Certificate and special handling" />
-            </div>
+            </div> */}
           </Card>
 
-          <div className="flex justify-center">
+          {/* <div className="flex justify-center">
             <Button className="!rounded-lg" disabled>
               + Add Another Schedule
             </Button>
-          </div>
+          </div> */}
 
           <Card className="rounded-2xl" bodyStyle={{ padding: 20 }}>
             <div className="flex items-center justify-between">

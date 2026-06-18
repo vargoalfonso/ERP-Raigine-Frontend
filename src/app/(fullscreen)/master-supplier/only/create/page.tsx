@@ -199,8 +199,8 @@ export default function CreateSupplierOnlyPage() {
             }
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Form.Item label="Supplier Code (Auto-generated)" name="supplierCode" rules={[{ required: true }]}>
-                <Input className="!rounded-lg" disabled />
+              <Form.Item label="Supplier Code" name="supplierCode" rules={[{ required: true }]}>
+                <Input className="!rounded-lg"  />
               </Form.Item>
 
               <Form.Item

@@ -41,7 +41,6 @@ export default function CreateCustomerPage() {
 
   useEffect(() => {
     form.setFieldsValue({
-      customerId: "Auto-generated on save",
       billingSameAsShipping: true,
     });
   }, [form]);
@@ -64,6 +63,7 @@ export default function CreateCustomerPage() {
       const v = await form.validateFields();
 
       await createCustomer({
+        customer_id: v.customerId?.trim() ? String(v.customerId).trim() : undefined,
         customer_name: v.customerName,
         phone_number: v.phoneNumber,
         shipping_address: v.shippingAddress,
@@ -125,7 +125,7 @@ export default function CreateCustomerPage() {
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Form.Item label="Customer ID" name="customerId">
-                  <Input className="!rounded-lg" disabled />
+                  <Input className="!rounded-lg"  />
                 </Form.Item>
 
                 <Form.Item

@@ -383,8 +383,8 @@ function PoProcurementPageContent() {
                 2
               </span>
             )}
-            {activeTab === "indirect" && typeof badge === "number" && (
-              <Tag color="blue" className="!rounded-full !px-2 !py-0 !text-xs">
+            {activeTab === "indirect" && typeof badge === "number" && stage == null && (
+              <Tag color="green" className="!rounded-full !px-2 !py-0 !text-xs">
                 {badge}
               </Tag>
             )}

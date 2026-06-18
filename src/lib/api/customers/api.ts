@@ -58,6 +58,7 @@ export type CustomerRecord = {
 };
 
 export type CreateCustomerRequest = {
+  customer_id?: string;
   customer_name: string;
   phone_number: string;
   shipping_address: string;
