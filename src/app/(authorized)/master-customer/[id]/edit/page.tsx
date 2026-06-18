@@ -20,7 +20,9 @@ import {
   useGetCustomerByIdQuery,
   useUpdateCustomerMutation,
 } from "@/lib/api/customers/api";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { BANK_SELECT_OPTIONS } from "@/lib/constants/banks";
+import { buildBomCodeSelectOptions, normalizeBomCodes } from "@/lib/utils/bomSelectOptions";
 
 type EditCustomerForm = {
   customerId?: string;
@@ -31,6 +33,7 @@ type EditCustomerForm = {
   billingAddress?: string;
   bankAccount?: string;
   bankAccountNumber?: string;
+  bomCodes?: string[];
 };
 
 export default function EditCustomerPage() {
@@ -44,6 +47,7 @@ export default function EditCustomerPage() {
   const customerQueryArg = apiEnabled && customerId ? customerId : skipToken;
 
   const customerQuery = useGetCustomerByIdQuery(customerQueryArg);
+  const bomQuery = useGetBomTreeQuery({ page: 1, limit: 1000 }, { skip: !apiEnabled });
 
   const [billingSame, setBillingSame] = useState(true);
   const [updateCustomer, updateState] = useUpdateCustomerMutation();
@@ -63,6 +67,7 @@ export default function EditCustomerPage() {
       billingAddress: same ? undefined : String(d.billing_address ?? ""),
       bankAccount: d.bank_account == null ? undefined : String(d.bank_account),
       bankAccountNumber: d.bank_account_number == null ? undefined : String(d.bank_account_number),
+      bomCodes: Array.isArray(d.bom_codes) ? normalizeBomCodes(d.bom_codes.map(String)) : [],
     };
   }, [customerQuery.data]);
 
@@ -79,6 +84,11 @@ export default function EditCustomerPage() {
   const billingAddressRules = useMemo(
     () => (billingSame ? [] : [{ required: true, message: "Billing address is required" }]),
     [billingSame]
+  );
+
+  const bomOptions = useMemo(
+    () => buildBomCodeSelectOptions(bomQuery.data?.data ?? []),
+    [bomQuery.data]
   );
 
   const onSave = async () => {
@@ -100,6 +110,7 @@ export default function EditCustomerPage() {
           billing_address: v.billingSameAsShipping ? null : (v.billingAddress?.trim() || null),
           bank_account: v.bankAccount?.trim() ? v.bankAccount.trim() : null,
           bank_account_number: v.bankAccountNumber?.trim() ? v.bankAccountNumber.trim() : null,
+          bom_codes: normalizeBomCodes(v.bomCodes),
         },
       }).unwrap();
 
@@ -234,6 +245,30 @@ export default function EditCustomerPage() {
                   />
                 </Form.Item>
               </div>
+            </Card>
+
+            <Card
+              className="!rounded-xl"
+              title={
+                <div>
+                  <div className="font-semibold">BOM Information</div>
+                  <div className="text-xs text-gray-500">Select one or more BOM uniq codes for this customer</div>
+                </div>
+              }
+            >
+              <Form.Item label="BOM Codes" name="bomCodes">
+                <Select
+                  mode="multiple"
+                  allowClear
+                  showSearch
+                  className="!rounded-lg"
+                  placeholder="Select BOM uniq codes"
+                  loading={bomQuery.isFetching}
+                  options={bomOptions}
+                  optionFilterProp="label"
+                  maxTagCount="responsive"
+                />
+              </Form.Item>
             </Card>
 
             <Card
