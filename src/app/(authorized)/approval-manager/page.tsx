@@ -21,7 +21,7 @@ import {
   useSubmitApprovalManagerDecisionMutation,
 } from "@/lib/api/approval-manager/api";
 
-type ApprovalTab = "All Items" | "BOM" | "PRL" | "PO Budget" | "Stock Opname";
+type ApprovalTab = "All Items" | "BOM" | "PRL" | "PR Budget" | "Stock Opname";
 type ApprovalStatus = "Pending" | "Approved" | "Rejected";
 type ApprovalStatusFilter = "All Status" | ApprovalStatus;
 
@@ -38,7 +38,7 @@ type ApprovalRow = {
   backend?: ApprovalManagerItem;
 };
 
-const TAB_OPTIONS: ApprovalTab[] = ["All Items", "BOM", "PRL", "PO Budget", "Stock Opname"];
+const TAB_OPTIONS: ApprovalTab[] = ["All Items", "BOM", "PRL", "PR Budget", "Stock Opname"];
 
 const MOCK_ROWS: ApprovalRow[] = [
   {
@@ -108,22 +108,22 @@ const MOCK_ROWS: ApprovalRow[] = [
     approvalStatus: "Approved",
   },
   {
-    key: "POB-001",
-    id: "POB-001",
-    tab: "PO Budget",
-    module: "PO Budget",
-    itemName: "PO Budget - Honda Civic Q1",
-    itemCode: "POB-2024-001",
+    key: "PRB-001",
+    id: "PRB-001",
+    tab: "PR Budget",
+    module: "PR Budget",
+    itemName: "PR Budget - Honda Civic Q1",
+    itemCode: "PRB-2024-001",
     submittedBy: "Robert Kim",
     submittedDate: "2024-04-13",
     approvalStatus: "Pending",
   },
   {
-    key: "POB-002",
-    id: "POB-002",
-    tab: "PO Budget",
-    module: "PO Budget",
-    itemName: "PO Budget - Toyota Camry Q1",
+    key: "PRB-002",
+    id: "PRB-002",
+    tab: "PR Budget",
+    module: "PR Budget",
+    itemName: "PR Budget - Toyota Camry Q1",
     itemCode: "POB-2024-002",
     submittedBy: "Lisa Anderson",
     submittedDate: "2024-04-08",
@@ -205,7 +205,7 @@ export default function ApprovalManagerPage() {
         return "bom";
       case "PRL":
         return "prl";
-      case "PO Budget":
+      case "PR Budget":
         return "po_budget";
       case "Stock Opname":
         return "stock_opname";
@@ -300,7 +300,7 @@ export default function ApprovalManagerPage() {
       const v = (moduleLabel || "").toLowerCase();
       if (v.includes("material") || v.includes("bom")) return "BOM";
       if (v.includes("prl")) return "PRL";
-      if (v.includes("budget")) return "PO Budget";
+      if (v.includes("budget")) return "PR Budget";
       if (v.includes("opname")) return "Stock Opname";
       return "All Items";
     };

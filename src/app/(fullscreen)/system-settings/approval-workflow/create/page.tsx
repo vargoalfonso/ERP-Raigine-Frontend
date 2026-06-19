@@ -24,7 +24,7 @@ type Entry = {
 const MENU_ACTION_OPTIONS = [
   { label: "BOM", value: "BOM" },
   { label: "PRL", value: "PRL" },
-  { label: "PO Budget", value: "PO Budget" },
+  { label: "PR Budget", value: "PO Budget" },
   { label: "Stock opname", value: "Stock opname" },
 ] as const;
 

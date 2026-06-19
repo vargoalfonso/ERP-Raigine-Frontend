@@ -120,7 +120,7 @@ type PoBudgetRow = {
   pr: number;
   po1: number;
   po2: number;
-  prl: number;
+  prl?: string | number;
   totalPo: number;
   apoPrl: number;
   period: string;
@@ -160,7 +160,7 @@ type AddFormState = {
   purchaseRequest: number;
   po1Pct: number;
   po2Pct: number;
-  prl: number;
+  prl?: string | number;
   period: string;
 };
 
@@ -2228,8 +2228,9 @@ export default function PoBudgetPage() {
             <Button
               className="!rounded-lg"
               icon={<FileExcelOutlined />}
-              onClick={openBulkPoBudget}>
-              Bulk PO Budget
+              onClick={openBulkPoBudget}
+            >
+              Bulk PR Budget
             </Button>
             <Button
               type="primary"
@@ -2361,7 +2362,7 @@ export default function PoBudgetPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <div className="text-xs text-gray-600 mb-1">PRL (Select)</div>
-            <Select
+              <Select
               showSearch
               allowClear
               value={addForm.prl ?? undefined}
@@ -2376,7 +2377,7 @@ export default function PoBudgetPage() {
                     String(p.id ?? p.prl_id ?? "") === prlId,
                 );
                 if (!matched) {
-                  setAddForm((p) => ({ ...p, prlId: undefined }));
+                  setAddForm((p) => ({ ...p, prl: "" }));
                   return;
                 }
                 const uniqCode = String(
@@ -2393,14 +2394,9 @@ export default function PoBudgetPage() {
                 }
                 setAddForm((prev) => ({
                   ...prev,
-                  prlId,
-                  customer:
-                    matched.customer_name ??
-                    matched.customer?.customer_name ??
-                    prev.customer,
-                  customerId:
-                    resolvePrlCustomerId(matched as Record<string, unknown>) ??
-                    prev.customerId,
+                  prl: prlId,
+                  customer: matched.customer_name ?? matched.customer?.customer_name ?? prev.customer,
+                  customerId: resolvePrlCustomerId(matched as Record<string, unknown>) ?? prev.customerId,
                   uniq: uniqCode || prev.uniq,
                   productModel: matched.product_model ?? prev.productModel,
                   partName: matched.part_name ?? prev.partName,
@@ -2449,42 +2445,38 @@ export default function PoBudgetPage() {
                   String(selected?.label ?? ""),
                   addForm.uniq,
                 );
-                // determine uniq from matched PRL if available, otherwise use current addForm.uniq
-                const resolvedUniq = String(
-                  matchedPrl
-                    ? (matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "")
-                    : (addForm.uniq ?? ""),
-                ).trim();
-                let supplierItemMatch = (supplierItemsByUniq.get(
-                  resolvedUniq,
-                ) ?? [])[0];
-                if (!supplierItemMatch) {
-                  supplierItemMatch = supplierItems.find(
-                    (it) =>
-                      String(it.uniq_code ?? it.item_uniq_code ?? "").trim() ===
-                      resolvedUniq,
-                  ) as any;
-                }
-                setAddForm((prev) => ({
-                  ...prev,
-                  customerId: selectedCustomerId,
-                  customer: String(selected?.label ?? ""),
-                  supplier: "",
-                  supplierId: null,
-                  uniq: matchedPrl ? prev.uniq : "",
-                  productModel: matchedPrl?.product_model ?? "",
-                  partName: matchedPrl?.part_name ?? "",
-                  partNumber: matchedPrl?.part_number ?? "",
-                  period: getPrlPeriodValue(matchedPrl) || prev.period,
-                  uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
-                  weightKg:
-                    supplierItemMatch?.weight == null
-                      ? prev.weightKg
-                      : String(supplierItemMatch.weight),
-                  salesPlan: Number(
-                    matchedPrl?.quantity ?? prev.salesPlan ?? 0,
-                  ),
-                }));
+                  // determine uniq from matched PRL if available, otherwise use current addForm.uniq
+                  const resolvedUniq = String(matchedPrl ? (matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "") : (addForm.uniq ?? "")).trim();
+                  let supplierItemMatch = (supplierItemsByUniq.get(resolvedUniq) ?? [])[0];
+                  if (!supplierItemMatch) {
+                    supplierItemMatch = supplierItems.find((it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === resolvedUniq) as any;
+                  }
+                  setAddForm((prev) => ({
+                    ...prev,
+                    customerId: selectedCustomerId,
+                    customer: String(selected?.label ?? ""),
+                    supplier: supplierItemMatch?.supplier_name ?? prev.supplier ?? "",
+                    supplierId:
+                      resolveSupplierRowId({
+                        supplierUuid: supplierItemMatch?.supplier_uuid,
+                        supplierCode: supplierItemMatch?.supplier_code,
+                        supplierName: supplierItemMatch?.supplier_name,
+                      }) ?? prev.supplierId,
+                    uniq: matchedPrl ? prev.uniq : "",
+                    productModel:
+                      matchedPrl?.product_model ??
+                      "",
+                    partName:
+                      matchedPrl?.part_name ??
+                      "",
+                    partNumber:
+                      matchedPrl?.part_number ??
+                      "",
+                    period: getPrlPeriodValue(matchedPrl) || prev.period,
+                    uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
+                    weightKg: supplierItemMatch?.weight == null ? prev.weightKg : String(supplierItemMatch.weight),
+                    salesPlan: Number(matchedPrl?.quantity ?? prev.salesPlan ?? 0),
+                  }));
               }}
             />
           </div>
@@ -2717,7 +2709,7 @@ export default function PoBudgetPage() {
           <div className="md:col-span-2">
             <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4">
               <div className="text-sm font-semibold text-gray-900">
-                Purchase Order Calculation
+                Purchase Request Calculation
               </div>
               <div className="text-xs text-blue-700 mt-1">
                 PO amounts are calculated based on parameterized % of PR (kanban
@@ -2924,7 +2916,7 @@ export default function PoBudgetPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-gray-900">
-                  Step 3: Period & Purchase Order Calculation
+                  Step 3: Period & Purchase Request Calculation
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
                   Set period and configure PO split percentages
@@ -2952,10 +2944,10 @@ export default function PoBudgetPage() {
 
               <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4">
                 <div className="text-sm font-semibold text-gray-900">
-                  Purchase Order Calculation
+                  Purchase Request Calculation
                 </div>
                 <div className="text-xs text-blue-700 mt-1">
-                  PO amounts are calculated based on parameterized % of PR
+                  PR amounts are calculated based on parameterized % of PR
                   (kanban packing logic)
                 </div>
 

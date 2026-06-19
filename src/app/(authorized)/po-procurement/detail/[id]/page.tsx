@@ -285,13 +285,13 @@ export default function PoProcurementDetailPage() {
             </div>
           </div>
           <div>
-            <div className="text-xs text-gray-500">PO Number</div>
+            <div className="text-xs text-gray-500">PR Number</div>
             <div className="text-sm font-medium text-gray-900">
               {detail.poNumber}
             </div>
           </div>
           <div>
-            <div className="text-xs text-gray-500">PO Budget Number</div>
+            <div className="text-xs text-gray-500">PR Budget Number</div>
             <div className="text-sm font-medium text-gray-900">
               {detail.poBudgetNumber}
             </div>

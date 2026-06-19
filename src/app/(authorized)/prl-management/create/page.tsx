@@ -57,7 +57,6 @@ function isComplete(entry: ForecastEntry): boolean {
     !!entry.customerUuid &&
     !!entry.forecastPeriod &&
     entry.uniqCode.trim().length > 0 &&
-    entry.productModel.trim().length > 0 &&
     entry.partName.trim().length > 0 &&
     entry.partNumber.trim().length > 0 &&
     Number.isFinite(quantityValue) &&

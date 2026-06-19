@@ -342,9 +342,9 @@ export default function CreateScrapStockPage() {
                 />
               </Form.Item>
 
-              {/* <Form.Item name="disposal_reason" label="Disposal Reason" rules={[{ required: true, message: "Select disposal reason" }]}>
-                <Select placeholder="Select reason" options={disposalReasonOptions} />
-              </Form.Item> */}
+              <Form.Item name="disposal_reason" label="Scrap Reason" rules={[]}> 
+                <Select placeholder="Select Reason" options={disposalReasonOptions} />
+              </Form.Item>
 
               <Form.Item name="quantity" label="Quantity" rules={[{ required: true, message: "Enter quantity" }]}>
                 <InputNumber min={0} className="w-full" placeholder="2" />

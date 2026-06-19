@@ -41,6 +41,11 @@ import {
   readSystemSettingsModule,
 } from "@/lib/utils/systemSettingsNavigation";
 import {
+  loadBuyNotBuyFlagRecords,
+  saveBuyNotBuyFlagRecords,
+  type BuyNotBuyFlagRecord,
+} from "@/lib/utils/buyNotBuyFlag";
+import {
   useDeleteMachinePatternMutation,
   useGetMachinePatternsQuery,
 } from "@/lib/api/machine-patterns/api";
@@ -146,6 +151,8 @@ type StockdaysRow = {
   constanta: number;
   status: StatusType;
 };
+
+type BuyNotBuyFlagRow = BuyNotBuyFlagRecord;
 
 type TypeParameterRow = {
   id: string;
@@ -286,6 +293,14 @@ const modules: ModuleItem[] = [
     icon: <AppstoreOutlined />,
     iconBgClass: "bg-purple-50",
     iconTextClass: "text-purple-700",
+  },
+  {
+    id: "buy-not-buy-flag",
+    name: "Buy/Not Buy Flag",
+    description: "Configure buy decision thresholds",
+    icon: <ShoppingCartOutlined />,
+    iconBgClass: "bg-emerald-50",
+    iconTextClass: "text-emerald-700",
   },
   {
     id: "type-parameters",
@@ -501,6 +516,28 @@ const initialStockdaysRows: StockdaysRow[] = [
     calculationType: "percentase",
     constanta: 30,
     status: "Inactive",
+  },
+];
+
+const initialBuyNotBuyFlagRows: BuyNotBuyFlagRow[] = [
+  {
+    id: "BNB-001",
+    uniq: "RM-STEEL-001",
+    materialCode: "RM-ST-001",
+    materialName: "Steel Plate 10mm",
+    inventoryType: "raw-materials",
+    safetyStockParam: "parameter_i_days",
+    deliveryCycle: 14,
+    currentStock: 850,
+    safetyStock: 95,
+    kanbanStd: 50,
+    forecastedUsagePerDay: undefined,
+    stockDays: 17,
+    highRatio: 2,
+    status: "Overstock",
+    buyFlag: "Not Buy",
+    createdAt: new Date("2026-06-19T00:00:00.000Z").toISOString(),
+    updatedAt: new Date("2026-06-19T00:00:00.000Z").toISOString(),
   },
 ];
 
@@ -824,6 +861,14 @@ export default function SystemSettingsPage() {
   useEffect(() => {
     rememberSystemSettingsModule(selectedModuleId);
   }, [selectedModuleId]);
+
+  useEffect(() => {
+    const stored = loadBuyNotBuyFlagRecords();
+    if (stored.length > 0) {
+      setBuyNotBuyRows(stored);
+    }
+  }, []);
+
   const shouldLoadAccessControl =
     apiEnabled && selectedModuleId === "access-control-matrix";
   const shouldLoadRoles =
@@ -963,6 +1008,9 @@ export default function SystemSettingsPage() {
   const [roleRows, setRoleRows] = useState<RoleRow[]>(initialRoleRows);
   const [safetyRows, setSafetyRows] = useState<SafetyStockRow[]>(initialSafetyStockRows);
   const [stockdaysRows, setStockdaysRows] = useState<StockdaysRow[]>(initialStockdaysRows);
+  const [buyNotBuyRows, setBuyNotBuyRows] = useState<BuyNotBuyFlagRow[]>(
+    initialBuyNotBuyFlagRows,
+  );
   const [typeParameterRows, setTypeParameterRows] = useState<TypeParameterRow[]>(
     initialTypeParameterRows
   );
@@ -1274,6 +1322,10 @@ export default function SystemSettingsPage() {
   const [stockdaysDeleteOpen, setStockdaysDeleteOpen] = useState(false);
   const [stockdaysDeletingRow, setStockdaysDeletingRow] =
     useState<StockdaysRow | null>(null);
+
+  const [buyNotBuyDeleteOpen, setBuyNotBuyDeleteOpen] = useState(false);
+  const [buyNotBuyDeletingRow, setBuyNotBuyDeletingRow] =
+    useState<BuyNotBuyFlagRow | null>(null);
 
   const [typeParameterDeleteOpen, setTypeParameterDeleteOpen] = useState(false);
   const [typeParameterDeletingRow, setTypeParameterDeletingRow] = useState<TypeParameterRow | null>(
@@ -1740,6 +1792,23 @@ export default function SystemSettingsPage() {
           .includes(q);
       });
   }, [query, stockdaysRowsView, typeFilter]);
+
+  const filteredBuyNotBuyRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return buyNotBuyRows.filter((row) => {
+      if (!q) return true;
+      return [
+        row.uniq,
+        row.materialCode,
+        row.materialName,
+        row.status,
+        row.buyFlag,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [buyNotBuyRows, query]);
 
   const filteredTypeParameters = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -3058,6 +3127,27 @@ export default function SystemSettingsPage() {
     setStockdaysDeleteOpen(true);
   };
 
+  const openCreateBuyNotBuyFlag = () => {
+    router.push("/system-settings/buy-not-buy-flag/create");
+  };
+
+  const openBuyNotBuyFlagDetail = (row: BuyNotBuyFlagRow) => {
+    router.push(
+      `/system-settings/buy-not-buy-flag/create?mode=detail&id=${encodeURIComponent(row.id)}`,
+    );
+  };
+
+  const openEditBuyNotBuyFlag = (row: BuyNotBuyFlagRow) => {
+    router.push(
+      `/system-settings/buy-not-buy-flag/create?mode=edit&id=${encodeURIComponent(row.id)}`,
+    );
+  };
+
+  const openBuyNotBuyFlagDelete = (row: BuyNotBuyFlagRow) => {
+    setBuyNotBuyDeletingRow(row);
+    setBuyNotBuyDeleteOpen(true);
+  };
+
   const openTypeParameterDelete = (row: TypeParameterRow) => {
     setTypeParameterDeletingRow(row);
     setTypeParameterDeleteOpen(true);
@@ -3134,6 +3224,11 @@ export default function SystemSettingsPage() {
   const closeStockdaysDelete = () => {
     setStockdaysDeleteOpen(false);
     setStockdaysDeletingRow(null);
+  };
+
+  const closeBuyNotBuyDelete = () => {
+    setBuyNotBuyDeleteOpen(false);
+    setBuyNotBuyDeletingRow(null);
   };
 
   const closeTypeParameterDelete = () => {
@@ -3246,6 +3341,16 @@ export default function SystemSettingsPage() {
     } catch (err) {
       message.error(getApiErrorMessage(err, "Failed to delete stockdays"));
     }
+  };
+
+  const confirmBuyNotBuyDelete = () => {
+    if (!buyNotBuyDeletingRow) return;
+
+    const next = buyNotBuyRows.filter((row) => row.id !== buyNotBuyDeletingRow.id);
+    setBuyNotBuyRows(next);
+    saveBuyNotBuyFlagRecords(next);
+    message.success("Buy/Not Buy flag deleted");
+    closeBuyNotBuyDelete();
   };
 
   const confirmTypeParameterDelete = async () => {
@@ -3694,6 +3799,87 @@ export default function SystemSettingsPage() {
             icon={<DeleteOutlined />}
             onClick={() => openStockdaysDelete(r)}
           />
+        </div>
+      ),
+    },
+  ];
+
+  const buyNotBuyFlagColumns: ColumnsType<BuyNotBuyFlagRow> = [
+    {
+      title: "Uniq",
+      dataIndex: "uniq",
+      key: "uniq",
+      width: 170,
+      render: (value: string) => (
+        <div className="font-medium text-gray-900">{value}</div>
+      ),
+    },
+    {
+      title: "Material",
+      key: "material",
+      width: 260,
+      render: (_: unknown, row: BuyNotBuyFlagRow) => (
+        <div>
+          <div className="font-medium text-gray-900">{row.materialCode}</div>
+          <div className="text-sm text-gray-500">{row.materialName}</div>
+        </div>
+      ),
+    },
+    {
+      title: "Stock / Safety",
+      key: "stock",
+      width: 160,
+      render: (_: unknown, row: BuyNotBuyFlagRow) => (
+        <div className="text-sm text-gray-700">
+          {row.currentStock} / {row.safetyStock}
+        </div>
+      ),
+    },
+    {
+      title: "Stock Days",
+      dataIndex: "stockDays",
+      key: "stockDays",
+      width: 120,
+      render: (value: number | undefined) => (
+        <div className="text-gray-700">{Number(value ?? 0).toFixed(2)}</div>
+      ),
+    },
+    {
+      title: "Status",
+      dataIndex: "status",
+      key: "status",
+      width: 140,
+      render: (value: BuyNotBuyFlagRow["status"]) => (
+        <Tag
+          className={`rounded-full border px-3 py-0.5 ${value === "Overstock" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}`}
+        >
+          {value}
+        </Tag>
+      ),
+    },
+    {
+      title: "Buy Flag",
+      dataIndex: "buyFlag",
+      key: "buyFlag",
+      width: 130,
+      render: (value: BuyNotBuyFlagRow["buyFlag"]) => (
+        <Tag
+          className={`rounded-full border px-3 py-0.5 ${value === "Buy" ? "border-blue-200 bg-blue-50 text-blue-700" : "border-gray-200 bg-gray-50 text-gray-700"}`}
+        >
+          {value}
+        </Tag>
+      ),
+    },
+    {
+      title: "Actions",
+      key: "actions",
+      width: 140,
+      fixed: "right",
+      render: (_: unknown, row: BuyNotBuyFlagRow) => (
+        <div className="flex items-center gap-1">
+          <Button type="text" icon={<EyeOutlined />} onClick={() => openBuyNotBuyFlagDetail(row)} />
+          <Button type="text" icon={<EditOutlined />} onClick={() => openEditBuyNotBuyFlag(row)} />
+          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openBuyNotBuyFlagDelete(row)} />
         </div>
       ),
     },
@@ -4390,7 +4576,7 @@ export default function SystemSettingsPage() {
                       <div className="rounded-xl border border-blue-200 bg-[#f5f9ff] px-4 py-3 text-sm text-blue-700">
                         <div className="font-semibold">Information:</div>
                         <div className="mt-1">
-                          You can fill the percentage at menu PO Budget. Total
+                          You can fill the percentage at menu PR Budget. Total
                           percentage must equal 100%.
                         </div>
                       </div>
@@ -4820,6 +5006,20 @@ export default function SystemSettingsPage() {
             {stockdaysDeletingRow?.itemCode}
           </span>
           .
+        </div>
+      </Modal>
+
+      <Modal
+        title="Delete Buy/Not Buy parameter?"
+        open={buyNotBuyDeleteOpen}
+        okText="Delete"
+        okButtonProps={{ danger: true }}
+        cancelText="Cancel"
+        onOk={confirmBuyNotBuyDelete}
+        onCancel={closeBuyNotBuyDelete}
+      >
+        <div className="text-gray-700">
+          This will remove <span className="font-semibold">{buyNotBuyDeletingRow?.materialCode}</span>.
         </div>
       </Modal>
 
@@ -5875,7 +6075,12 @@ export default function SystemSettingsPage() {
             name="menuAction"
             rules={[{ required: true }]}
           >
-            <Input placeholder="Approve Work Order" />
+            <Select placeholder="Select menu/action">
+              <Select.Option value="BOM">BOM</Select.Option>
+              <Select.Option value="PRL">PRL</Select.Option>
+              <Select.Option value="PR Budget">PR Budget</Select.Option>
+              <Select.Option value="Stock Opname">Stock Opname</Select.Option>
+            </Select>
           </Form.Item>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -6377,6 +6582,10 @@ export default function SystemSettingsPage() {
                       router.push("/system-settings/stockdays/create");
                       return;
                     }
+                    if (selectedModuleId === "buy-not-buy-flag") {
+                      openCreateBuyNotBuyFlag();
+                      return;
+                    }
                     if (selectedModuleId === "scrap") {
                       router.push("/system-settings/scrap-type/create");
                       return;
@@ -6450,6 +6659,14 @@ export default function SystemSettingsPage() {
                   <Table<StockdaysRow>
                     columns={stockdaysColumns}
                     dataSource={filteredStockdays}
+                    rowKey="id"
+                    pagination={false}
+                    scroll={{ x: "max-content" }}
+                  />
+                ) : selectedModuleId === "buy-not-buy-flag" ? (
+                  <Table<BuyNotBuyFlagRow>
+                    columns={buyNotBuyFlagColumns}
+                    dataSource={filteredBuyNotBuyRows}
                     rowKey="id"
                     pagination={false}
                     scroll={{ x: "max-content" }}

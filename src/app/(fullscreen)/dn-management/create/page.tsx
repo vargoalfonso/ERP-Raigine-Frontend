@@ -711,7 +711,7 @@ function DnRawMaterialCreatePageContent() {
                     className="w-full"
                     min={0}
                     placeholder="Input weight"
-                    style={{ backgroundColor: "#fff200" }}
+                    style={{ backgroundColor: "white" }}
                   />
                 </div>
                 <div>

@@ -38,6 +38,7 @@ const { Title, Text } = Typography;
 const { TextArea } = Input;
 
 type ProcessRoute = {
+  remark?: string;
   sequence?: number;
   process_id?: number | string;
   machine_id?: number | string;
@@ -452,6 +453,12 @@ export default function Page() {
                       </Form.Item>
                       <Form.Item name={[routeField.name, "machine_stroke"]} label="Machine Stroke"> 
                         <Input size="large" placeholder="machine stroke" style={{ width: "100%" }} />
+                      </Form.Item>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3">
+                      <Form.Item name={[routeField.name, "remark"]} label="Remark / Catatan">
+                        <Input.TextArea rows={2} placeholder="Optional remark for this process route (Catatan)" />
                       </Form.Item>
                     </div>
 
@@ -884,6 +891,7 @@ export default function Page() {
                 typeof r.machine_stroke === "string" && r.machine_stroke.trim()
                   ? r.machine_stroke.trim()
                   : undefined,
+              remark: typeof r.remark === "string" && r.remark.trim() ? r.remark.trim() : undefined,
             };
           })
           .filter((r) => r.process_id !== undefined && r.machine_id !== undefined);
@@ -1546,6 +1554,16 @@ export default function Page() {
                                         label="Machine Stroke"
                                       >
                                         <Input size="large" placeholder="machine stroke" style={{ width: "100%" }} />
+                                      </Form.Item>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 gap-3">
+                                      <Form.Item
+                                        {...routeField}
+                                        name={[field.name, "remark"]}
+                                        label="Remark / Catatan"
+                                      >
+                                        <Input.TextArea rows={2} placeholder="Optional remark for this process route (Catatan)" />
                                       </Form.Item>
                                     </div>
 

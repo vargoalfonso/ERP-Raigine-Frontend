@@ -205,7 +205,7 @@ const menuItems: MenuItem[] = [
       },
       {
         id: "work-in-progress",
-        label: "Work In-Progress",
+        label: "Work In Process",
         icon: MdSchedule,
         href: "/work-in-progress",
       },

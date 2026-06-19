@@ -215,7 +215,7 @@ export default function PurchaseOrderCreatePage() {
                             <div className="mt-3 rounded-lg border border-[#C9D8FF] bg-white p-3">
                               <div className="mb-3 rounded-md border border-[#DCE8FF] bg-[#F3F7FF] p-3 text-[10px] leading-4 text-[#3F6FD9]">
                                 <div className="font-semibold">Information:</div>
-                                <div>You can fill the percentage at menu PO Budget. Total percentage must equal 100%.</div>
+                                <div>You can fill the percentage at menu PR Budget. Total percentage must equal 100%.</div>
                               </div>
 
                               <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
