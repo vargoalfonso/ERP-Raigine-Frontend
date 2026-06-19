@@ -1785,7 +1785,19 @@ export default function PoBudgetPage() {
           );
           return;
         }
-        await addBulk({ type: getApiType(activeTab), body }).unwrap();
+        const result = await addBulk({ type: getApiType(activeTab), body }).unwrap();
+        const created = Number(result.data?.created ?? 0);
+        const errors = Array.isArray(result.data?.errors) ? result.data.errors.filter(Boolean) : [];
+
+        if (errors.length > 0) {
+          message.error(errors.join("; "));
+          if (created <= 0) return;
+        }
+
+        if (created <= 0) {
+          message.warning("No PO Budget entries were created.");
+          return;
+        }
       }
       message.success(
         `Bulk ${getBudgetTypeLabel(activeTab)} PO Budget with ${bulkItems.length} UNIQ saved successfully`,

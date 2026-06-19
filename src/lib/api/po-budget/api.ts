@@ -57,6 +57,11 @@ export interface PoBudgetBulkRequest {
   items: PoBudgetBulkItemRequest[];
 }
 
+export type PoBudgetBulkResult = {
+  created?: number;
+  errors?: string[];
+};
+
 export interface PoBudgetUpdateRequest {
   purchase_request: number;
   prl: number;
@@ -304,14 +309,14 @@ export const poBudgetSlice = apiSlice
         invalidatesTags: (_result, _error, arg) => [{ type: "PoBudget", id: arg.type }],
       }),
 
-      addPoBudgetBulk: builder.mutation<ApiResponse<unknown>, { type: PoBudgetType; body: PoBudgetBulkRequest }>({
+      addPoBudgetBulk: builder.mutation<ApiResponse<PoBudgetBulkResult>, { type: PoBudgetType; body: PoBudgetBulkRequest }>({
         query: ({ type, body }) => ({
           url: `/po-budget/${type}/budget/bulk`,
           method: "POST",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => ok(normalizeObjectResponse(response)),
+        transformResponse: (response: unknown) => ok((normalizeObjectResponse(response) ?? {}) as PoBudgetBulkResult),
         invalidatesTags: (_result, _error, arg) => [{ type: "PoBudget", id: arg.type }],
       }),
 
