@@ -29,6 +29,7 @@ type CustomerRow = {
   shippingAddress: string;
   bankAccount: string;
   bankAccountNumber: string;
+  bomCodes: string[];
   status: string;
 };
 
@@ -43,6 +44,9 @@ const toCustomerRow = (record: CustomerRecord, index: number): CustomerRow => {
     shippingAddress: String(record.shipping_address ?? "-"),
     bankAccount: String(record.bank_account ?? "Not provided"),
     bankAccountNumber: String(record.bank_account_number ?? ""),
+    bomCodes: Array.isArray(record.bom_codes)
+      ? Array.from(new Set(record.bom_codes.map(String).map((code) => code.trim()).filter(Boolean)))
+      : [],
     status: String(record.status ?? "Active"),
   };
 };
@@ -76,7 +80,7 @@ export default function MasterCustomerPage() {
     const q = searchValue.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((row) =>
-      [row.customerId, row.customerName, row.phoneNumber, row.shippingAddress]
+      [row.customerId, row.customerName, row.phoneNumber, row.shippingAddress, row.bomCodes.join(" ")]
         .join(" ")
         .toLowerCase()
         .includes(q)
@@ -269,6 +273,9 @@ export default function MasterCustomerPage() {
               const billingAddress = d?.billing_address == null ? "-" : String(d.billing_address);
               const bankAccount = d?.bank_account == null ? "Not provided" : String(d.bank_account);
               const bankNumber = d?.bank_account_number == null ? "" : String(d.bank_account_number);
+              const bomCodes = Array.isArray(d?.bom_codes)
+                ? Array.from(new Set(d.bom_codes.map(String).map((code) => code.trim()).filter(Boolean)))
+                : selectedRow.bomCodes;
 
               return (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
@@ -303,6 +310,18 @@ export default function MasterCustomerPage() {
                   <div>
                     <div className="text-gray-500">Bank Account Number</div>
                     <div className="text-gray-900">{bankNumber || "-"}</div>
+                  </div>
+                  <div className="md:col-span-2">
+                    <div className="text-gray-500">BOM Codes</div>
+                    {bomCodes.length > 0 ? (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {bomCodes.map((code) => (
+                          <Tag key={code} color="blue">{code}</Tag>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-gray-900">-</div>
+                    )}
                   </div>
                 </div>
               );

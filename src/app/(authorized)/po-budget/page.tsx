@@ -1,5 +1,5 @@
 "use client";
-import { apiBaseUrl } from "@/lib/api/instance";
+import { apiBaseUrl, getCookiesFromBrowser } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import React, { useEffect, useMemo, useState } from "react";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
@@ -26,10 +26,16 @@ import {
   useListSupplierItemsQuery,
   type SupplierItemRecord,
 } from "@/lib/api/supplier-items/api";
-import { useListCustomersQuery, type CustomerRecord } from "@/lib/api/customers/api";
-import { useListPrlsQuery } from "@/lib/api/prl/api";
+import {
+  useListCustomersQuery,
+  type CustomerRecord,
+} from "@/lib/api/customers/api";
+import { useListPrlsQuery, type PrlRecord } from "@/lib/api/prl/api";
 import { useListCustomerPosQuery } from "@/lib/api/customer-orders/api";
-import { useGetGlobalWorkingDaysQuery, useGetUomsQuery } from "@/lib/api/system-settings/api";
+import {
+  useGetGlobalWorkingDaysQuery,
+  useGetUomsQuery,
+} from "@/lib/api/system-settings/api";
 const useApi = Boolean(apiBaseUrl);
 import {
   Button,
@@ -60,11 +66,14 @@ import {
   MdSchedule,
 } from "react-icons/md";
 
-import dayjs from "dayjs";
+import dayjs, { type Dayjs } from "dayjs";
 
 type BudgetTabId = "raw" | "subcon" | "indirect";
 
-type TabPaginationState = Record<BudgetTabId, { page: number; pageSize: number }>;
+type TabPaginationState = Record<
+  BudgetTabId,
+  { page: number; pageSize: number }
+>;
 
 const EMPTY_PO_BUDGET_RESPONSE: ApiResponse<ApiPoBudgetRow[]> = {
   message: "OK",
@@ -73,6 +82,8 @@ const EMPTY_PO_BUDGET_RESPONSE: ApiResponse<ApiPoBudgetRow[]> = {
 };
 
 type BulkBudgetType = "adhoc" | "kanban";
+
+const PRL_LAZY_PAGE_SIZE = 5;
 
 type BulkSupplierLine = {
   id: string;
@@ -204,7 +215,9 @@ function resolveSupplierName(
 }
 
 function normalizeSupplierItemType(value: unknown): BudgetTabId | null {
-  const raw = String(value ?? "").trim().toLowerCase();
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (!raw) return null;
   if (raw.includes("sub")) return "subcon";
   if (raw.includes("indirect")) return "indirect";
@@ -213,7 +226,9 @@ function normalizeSupplierItemType(value: unknown): BudgetTabId | null {
 }
 
 function normalizeCustomerName(value: unknown) {
-  return String(value ?? "").trim().toLowerCase();
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
 }
 
 function isIntegerId(value: string) {
@@ -237,6 +252,37 @@ function getPrlRowId(prl: unknown): number | null {
   return toIntegerId(prl.row_id);
 }
 
+function parsePeriodMonth(value: string | undefined): Dayjs | undefined {
+  const text = String(value ?? "").trim();
+  if (!text) return undefined;
+
+  const isoMonth = text.match(/^(\d{4})-(\d{1,2})/);
+  if (isoMonth) {
+    const parsed = dayjs(`${isoMonth[1]}-${isoMonth[2].padStart(2, "0")}-01`);
+    return parsed.isValid() ? parsed : undefined;
+  }
+
+  const namedMonth = text.match(/^([A-Za-z]+)[\s-]+(\d{4})$/);
+  if (namedMonth) {
+    const parsed = dayjs(`${namedMonth[1]} 1, ${namedMonth[2]}`);
+    return parsed.isValid() ? parsed : undefined;
+  }
+
+  const parsed = dayjs(text);
+  return parsed.isValid() ? parsed : undefined;
+}
+
+function formatPeriodMonth(value: Dayjs | null): string | undefined {
+  return value?.isValid() ? value.format("MMMM YYYY") : undefined;
+}
+
+function normalizePeriodForApi(value: string | undefined): string {
+  return (
+    formatPeriodMonth(parsePeriodMonth(value) ?? null) ??
+    String(value ?? "").trim()
+  );
+}
+
 function StatCard(props: {
   label: string;
   value: React.ReactNode;
@@ -254,8 +300,7 @@ function StatCard(props: {
         className={
           "h-10 w-10 rounded-lg flex items-center justify-center " +
           (accent ?? "bg-blue-50 text-blue-600")
-        }
-      >
+        }>
         {icon}
       </div>
     </div>
@@ -266,7 +311,7 @@ export default function PoBudgetPage() {
   const { data: bomTreeRes } = useGetBomTreeQuery();
   const bomIndex = useMemo(
     () => buildBomUniqIndex(bomTreeRes?.data ?? []),
-    [bomTreeRes?.data]
+    [bomTreeRes?.data],
   );
 
   const [activeTab, setActiveTab] = useState<BudgetTabId>("raw");
@@ -389,61 +434,147 @@ export default function PoBudgetPage() {
     [],
   );
 
-  const {
-    data: rawListRes = EMPTY_PO_BUDGET_RESPONSE,
-  } = useGetPoBudgetListQuery({
-    type: "raw-material" as PoBudgetType,
-    limit: paginationByTab.raw.pageSize,
-    page: paginationByTab.raw.page,
-  }, {
-    skip: !useApi,
-  });
-  const {
-    data: subconListRes = EMPTY_PO_BUDGET_RESPONSE,
-  } = useGetPoBudgetListQuery({
-    type: "subcon" as PoBudgetType,
-    limit: paginationByTab.subcon.pageSize,
-    page: paginationByTab.subcon.page,
-  }, {
-    skip: !useApi,
-  });
-  const {
-    data: indirectListRes = EMPTY_PO_BUDGET_RESPONSE,
-  } = useGetPoBudgetListQuery({
-    type: "indirect" as PoBudgetType,
-    limit: paginationByTab.indirect.pageSize,
-    page: paginationByTab.indirect.page,
-  }, {
-    skip: !useApi,
-  });
+  const { data: rawListRes = EMPTY_PO_BUDGET_RESPONSE } =
+    useGetPoBudgetListQuery(
+      {
+        type: "raw-material" as PoBudgetType,
+        limit: paginationByTab.raw.pageSize,
+        page: paginationByTab.raw.page,
+      },
+      {
+        skip: !useApi,
+      },
+    );
+  const { data: subconListRes = EMPTY_PO_BUDGET_RESPONSE } =
+    useGetPoBudgetListQuery(
+      {
+        type: "subcon" as PoBudgetType,
+        limit: paginationByTab.subcon.pageSize,
+        page: paginationByTab.subcon.page,
+      },
+      {
+        skip: !useApi,
+      },
+    );
+  const { data: indirectListRes = EMPTY_PO_BUDGET_RESPONSE } =
+    useGetPoBudgetListQuery(
+      {
+        type: "indirect" as PoBudgetType,
+        limit: paginationByTab.indirect.pageSize,
+        page: paginationByTab.indirect.page,
+      },
+      {
+        skip: !useApi,
+      },
+    );
 
   const [addEntry] = useAddPoBudgetEntryMutation();
   const [addBulk] = useAddPoBudgetBulkMutation();
   const [updateEntry] = useUpdatePoBudgetEntryMutation();
-  const { data: customers = [] } = useListCustomersQuery(undefined, { skip: !useApi });
-  const { data: prlsResponse } = useListPrlsQuery({ page: 1, limit: 1000 }, { skip: !useApi });
-  const { data: customerPosResponse } = useListCustomerPosQuery(undefined, { skip: !useApi });
-  const { data: supplierItems = [] } = useListSupplierItemsQuery(undefined, { skip: !useApi });
-  const { data: globalParameters = [] } = useGetGlobalWorkingDaysQuery(undefined, { skip: !useApi });
-  const { data: uoms = [] } = useGetUomsQuery(undefined, { skip: !useApi });
-
-  const rowsByTab = useMemo(() => ({
-    raw: rawListRes.data,
-    subcon: subconListRes.data,
-    indirect: indirectListRes.data,
-  }), [rawListRes.data, subconListRes.data, indirectListRes.data]);
-
-  const prls = prlsResponse?.items ?? [];
-  const customerPos = customerPosResponse ?? [];
-
-  const paginationMetaByTab = useMemo(() => ({
-    raw: rawListRes.pagination,
-    subcon: subconListRes.pagination,
-    indirect: indirectListRes.pagination,
-  }), [rawListRes.pagination, subconListRes.pagination, indirectListRes.pagination]);
 
   const [addOpen, setAddOpen] = useState(false);
-  const [detailState, setDetailState] = useState<DetailState>({ open: false, row: null });
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkPrlIds, setBulkPrlIds] = useState<string[]>([]);
+  const [bulkPrlSearch, setBulkPrlSearch] = useState("");
+  const [bulkPrlPage, setBulkPrlPage] = useState(1);
+  const [prlCache, setPrlCache] = useState<PrlRecord[]>([]);
+  const [bulkBudgetType, setBulkBudgetType] = useState<BulkBudgetType>("adhoc");
+  const [bulkPeriod, setBulkPeriod] = useState<string | undefined>(undefined);
+  const [bulkPo1Pct, setBulkPo1Pct] = useState<number>(60);
+  const [bulkPo2Pct, setBulkPo2Pct] = useState<number>(40);
+
+  const { data: customers = [] } = useListCustomersQuery(undefined, {
+    skip: !useApi,
+  });
+  const shouldFetchPrls = useApi && (addOpen || bulkOpen);
+  const { data: prlsResponse, isFetching: prlsFetching } = useListPrlsQuery(
+    {
+      page: bulkPrlPage,
+      limit: PRL_LAZY_PAGE_SIZE,
+      search: bulkPrlSearch.trim() || undefined,
+    },
+    { skip: !shouldFetchPrls },
+  );
+  const { data: customerPosResponse } = useListCustomerPosQuery(undefined, {
+    skip: !useApi,
+  });
+  const { data: supplierItems = [] } = useListSupplierItemsQuery(undefined, {
+    skip: !useApi,
+  });
+  const { data: globalParameters = [] } = useGetGlobalWorkingDaysQuery(
+    undefined,
+    { skip: !useApi },
+  );
+  const { data: uoms = [] } = useGetUomsQuery(undefined, { skip: !useApi });
+
+  const rowsByTab = useMemo(
+    () => ({
+      raw: rawListRes.data,
+      subcon: subconListRes.data,
+      indirect: indirectListRes.data,
+    }),
+    [rawListRes.data, subconListRes.data, indirectListRes.data],
+  );
+
+  useEffect(() => {
+    const incoming = prlsResponse?.items ?? [];
+    if (incoming.length === 0) return;
+
+    setPrlCache((prev) => {
+      if (bulkPrlPage === 1) return incoming;
+
+      const byKey = new Map<string, PrlRecord>();
+      const getKey = (item: PrlRecord, index: number) =>
+        String(
+          item.row_id ??
+            item.id ??
+            `${item.prl_id ?? "prl"}-${item.uniq_code ?? item.item_uniq_code ?? index}`,
+        );
+
+      prev.forEach((item, index) => byKey.set(getKey(item, index), item));
+      incoming.forEach((item, index) => byKey.set(getKey(item, index), item));
+      return Array.from(byKey.values());
+    });
+  }, [bulkPrlPage, prlsResponse]);
+
+  const prls = prlCache;
+  const bulkPrlPagination = prlsResponse?.pagination;
+  const canLoadMoreBulkPrls = Boolean(
+    bulkPrlPagination && bulkPrlPage < bulkPrlPagination.total_pages,
+  );
+
+  const handleBulkPrlSearch = (value: string) => {
+    setBulkPrlSearch(value);
+    setBulkPrlPage(1);
+    setPrlCache([]);
+  };
+
+  const handleBulkPrlPopupScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const target = event.currentTarget;
+    const nearBottom =
+      target.scrollTop + target.clientHeight >= target.scrollHeight - 24;
+    if (!nearBottom || prlsFetching || !canLoadMoreBulkPrls) return;
+    setBulkPrlPage((prev) => prev + 1);
+  };
+  const customerPos = customerPosResponse ?? [];
+
+  const paginationMetaByTab = useMemo(
+    () => ({
+      raw: rawListRes.pagination,
+      subcon: subconListRes.pagination,
+      indirect: indirectListRes.pagination,
+    }),
+    [
+      rawListRes.pagination,
+      subconListRes.pagination,
+      indirectListRes.pagination,
+    ],
+  );
+
+  const [detailState, setDetailState] = useState<DetailState>({
+    open: false,
+    row: null,
+  });
   const [editOpen, setEditOpen] = useState(false);
   const [editRow, setEditRow] = useState<PoBudgetRow | null>(null);
   const [addForm, setAddForm] = useState<AddFormState>({
@@ -466,15 +597,13 @@ export default function PoBudgetPage() {
     period: "",
   });
 
-  const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkPrlId, setBulkPrlId] = useState<string>(
-    "PRL-2024-001 - Toyota Motor Indonesia",
-  );
-  const [bulkBudgetType, setBulkBudgetType] = useState<BulkBudgetType>("adhoc");
-  const [bulkPeriod, setBulkPeriod] = useState<string | undefined>(undefined);
-  const [bulkPo1Pct, setBulkPo1Pct] = useState<number>(60);
-  const [bulkPo2Pct, setBulkPo2Pct] = useState<number>(40);
-  const [editForm, setEditForm] = useState({ purchaseRequest: 0, prl: 0, po1Pct: 50, po2Pct: 50, period: "" });
+  const [editForm, setEditForm] = useState({
+    purchaseRequest: 0,
+    prl: 0,
+    po1Pct: 50,
+    po2Pct: 50,
+    period: "",
+  });
 
   const [addSupplierOpen, setAddSupplierOpen] = useState(false);
   const [addSupplierItemKey, setAddSupplierItemKey] = useState<string | null>(
@@ -489,7 +618,9 @@ export default function PoBudgetPage() {
   }>({});
 
   const detailQuery = useGetPoBudgetDetailQuery(
-    detailState.row?.id ? { type: getApiType(activeTab), id: detailState.row.id } : ({ type: "raw-material", id: "" } as any),
+    detailState.row?.id
+      ? { type: getApiType(activeTab), id: detailState.row.id }
+      : ({ type: "raw-material", id: "" } as any),
     { skip: !useApi || !detailState.open || !detailState.row?.id },
   );
 
@@ -499,18 +630,20 @@ export default function PoBudgetPage() {
         supplierOnlyList
           .flatMap((supplier) => {
             const supplierName =
-              typeof supplier.supplier_name === "string" ? supplier.supplier_name : "";
+              typeof supplier.supplier_name === "string"
+                ? supplier.supplier_name
+                : "";
             if (!supplierName) return [] as Array<readonly [string, string]>;
 
             return [supplier.supplier_code, supplier.id, supplier.supplier_name]
-              .map((value) => (value === undefined || value === null ? "" : String(value)))
+              .map((value) =>
+                value === undefined || value === null ? "" : String(value),
+              )
               .filter(Boolean)
               .map((value) => [value, supplierName] as const);
           })
           .filter(
-            (
-              entry,
-            ): entry is readonly [string, string] =>
+            (entry): entry is readonly [string, string] =>
               Boolean(entry[0]) && Boolean(entry[1]),
           ),
       ),
@@ -535,7 +668,9 @@ export default function PoBudgetPage() {
 
     supplierOnlyList.forEach((supplier) => {
       const rowId = toIntegerId(supplier.row_id);
-      const code = String(supplier.supplier_code ?? "").trim().toLowerCase();
+      const code = String(supplier.supplier_code ?? "")
+        .trim()
+        .toLowerCase();
       if (rowId == null || !code) return;
       map.set(code, rowId);
     });
@@ -548,7 +683,9 @@ export default function PoBudgetPage() {
 
     supplierOnlyList.forEach((supplier) => {
       const rowId = toIntegerId(supplier.row_id);
-      const name = String(supplier.supplier_name ?? "").trim().toLowerCase();
+      const name = String(supplier.supplier_name ?? "")
+        .trim()
+        .toLowerCase();
       if (rowId == null || !name) return;
       map.set(name, rowId);
     });
@@ -568,13 +705,17 @@ export default function PoBudgetPage() {
       if (byUuid != null) return byUuid;
     }
 
-    const supplierCode = String(input.supplierCode ?? "").trim().toLowerCase();
+    const supplierCode = String(input.supplierCode ?? "")
+      .trim()
+      .toLowerCase();
     if (supplierCode) {
       const byCode = supplierRowIdByCode.get(supplierCode);
       if (byCode != null) return byCode;
     }
 
-    const supplierName = String(input.supplierName ?? "").trim().toLowerCase();
+    const supplierName = String(input.supplierName ?? "")
+      .trim()
+      .toLowerCase();
     if (supplierName) {
       const byName = supplierRowIdByName.get(supplierName);
       if (byName != null) return byName;
@@ -589,7 +730,9 @@ export default function PoBudgetPage() {
 
     customers.forEach((customer: CustomerRecord) => {
       const customerName = normalizeCustomerName(customer.customer_name);
-      const customerId = toIntegerId(customer.row_id ?? customer.id ?? customer.customer_id);
+      const customerId = toIntegerId(
+        customer.row_id ?? customer.id ?? customer.customer_id,
+      );
       if (!customerName || customerId == null) return;
       map.set(customerName, customerId);
     });
@@ -608,7 +751,9 @@ export default function PoBudgetPage() {
     const mappedCustomerId = customerIdByName.get(customerName);
     if (mappedCustomerId != null) return mappedCustomerId;
 
-    const nestedId = toIntegerId(nestedCustomer?.id ?? nestedCustomer?.customer_id);
+    const nestedId = toIntegerId(
+      nestedCustomer?.id ?? nestedCustomer?.customer_id,
+    );
     if (nestedId != null) return nestedId;
 
     const directId = toIntegerId(item.customer_id);
@@ -620,11 +765,18 @@ export default function PoBudgetPage() {
   const supplierOptions = useMemo<SupplierOption[]>(() => {
     const deduped = new Map<string, SupplierOption>();
 
-    const activeSupplierItems = supplierItems.filter((item: SupplierItemRecord) => {
-      const status = String(item.status ?? "active").toLowerCase();
-      const itemTab = normalizeSupplierItemType(item.type ?? item.material_type);
-      return (!status || status === "active") && (!itemTab || itemTab === activeTab);
-    });
+    const activeSupplierItems = supplierItems.filter(
+      (item: SupplierItemRecord) => {
+        const status = String(item.status ?? "active").toLowerCase();
+        const itemTab = normalizeSupplierItemType(
+          item.type ?? item.material_type,
+        );
+        return (
+          (!status || status === "active") &&
+          (!itemTab || itemTab === activeTab)
+        );
+      },
+    );
 
     activeSupplierItems.forEach((item) => {
       const supplierName =
@@ -634,11 +786,16 @@ export default function PoBudgetPage() {
         supplierCode: item.supplier_code,
         supplierName,
       });
-      const supplierValue = item.supplier_uuid == null ? supplierName : String(item.supplier_uuid);
-      const uniqCode = typeof item.uniq_code === "string" ? item.uniq_code.trim() : "";
+      const supplierValue =
+        item.supplier_uuid == null ? supplierName : String(item.supplier_uuid);
+      const uniqCode =
+        typeof item.uniq_code === "string" ? item.uniq_code.trim() : "";
       if (!supplierName) return;
 
-      const key = [supplierValue || supplierName.toLowerCase(), uniqCode || "-"].join("::");
+      const key = [
+        supplierValue || supplierName.toLowerCase(),
+        uniqCode || "-",
+      ].join("::");
       deduped.set(key, {
         value: supplierValue || supplierName,
         label: supplierName,
@@ -651,7 +808,9 @@ export default function PoBudgetPage() {
             ? item.weight
             : Number(item.weight ?? 0) || undefined,
         description:
-          typeof item.description === "string" ? item.description.trim() : undefined,
+          typeof item.description === "string"
+            ? item.description.trim()
+            : undefined,
       });
     });
 
@@ -668,7 +827,9 @@ export default function PoBudgetPage() {
       })
       .forEach((supplier) => {
         const supplierName =
-          typeof supplier.supplier_name === "string" ? supplier.supplier_name.trim() : "";
+          typeof supplier.supplier_name === "string"
+            ? supplier.supplier_name.trim()
+            : "";
         if (!supplierName) return;
         const supplierId = resolveSupplierRowId({
           supplierUuid: supplier.id,
@@ -676,7 +837,8 @@ export default function PoBudgetPage() {
           supplierName,
           fallbackValue: supplier.row_id,
         });
-        const supplierValue = supplier.id == null ? supplierName : String(supplier.id);
+        const supplierValue =
+          supplier.id == null ? supplierName : String(supplier.id);
         const key = supplierValue || supplierName.toLowerCase();
         deduped.set(key, {
           value: supplierValue,
@@ -689,16 +851,34 @@ export default function PoBudgetPage() {
     return Array.from(deduped.values()).sort((a, b) =>
       a.label.localeCompare(b.label),
     );
-  }, [activeTab, supplierItems, supplierOnlyList, supplierRowIdByCode, supplierRowIdByName, supplierRowIdByUuid]);
+  }, [
+    activeTab,
+    supplierItems,
+    supplierOnlyList,
+    supplierRowIdByCode,
+    supplierRowIdByName,
+    supplierRowIdByUuid,
+  ]);
 
   const addSupplierOptions = useMemo<SupplierOption[]>(() => {
     const selectedUniq = String(addForm.uniq ?? "").trim();
     if (!selectedUniq) return supplierOptions;
 
     // supplierItemsByUniq is declared later in the file; use raw supplierItems here to avoid TDZ
-    const related = supplierItems.filter((it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === selectedUniq);
-    const relatedNames = new Set(related.map((r) => String(r.supplier_name ?? r.supplier ?? "").trim()).filter(Boolean));
-    const filtered = supplierOptions.filter((option) => relatedNames.has(String(option.label ?? option.supplierName ?? "").trim()));
+    const related = supplierItems.filter(
+      (it) =>
+        String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === selectedUniq,
+    );
+    const relatedNames = new Set(
+      related
+        .map((r) => String(r.supplier_name ?? r.supplier ?? "").trim())
+        .filter(Boolean),
+    );
+    const filtered = supplierOptions.filter((option) =>
+      relatedNames.has(
+        String(option.label ?? option.supplierName ?? "").trim(),
+      ),
+    );
     return filtered.length > 0 ? filtered : supplierOptions;
   }, [addForm.uniq, supplierOptions]);
 
@@ -719,8 +899,14 @@ export default function PoBudgetPage() {
     supplierItems.forEach((item) => {
       const uniqCode = String(item.uniq_code ?? "").trim();
       const status = String(item.status ?? "active").toLowerCase();
-      const itemTab = normalizeSupplierItemType(item.type ?? item.material_type);
-      if (!uniqCode || (status && status !== "active") || (itemTab && itemTab !== activeTab)) {
+      const itemTab = normalizeSupplierItemType(
+        item.type ?? item.material_type,
+      );
+      if (
+        !uniqCode ||
+        (status && status !== "active") ||
+        (itemTab && itemTab !== activeTab)
+      ) {
         return;
       }
 
@@ -741,19 +927,27 @@ export default function PoBudgetPage() {
     if (!normalizedUniq) return undefined;
 
     return approvedPrls.find((item) => {
-      const resolvedCustomerId = resolvePrlCustomerId(item as Record<string, unknown>);
-      const itemUniq = String(item.uniq_code ?? item.item_uniq_code ?? "").trim();
+      const resolvedCustomerId = resolvePrlCustomerId(
+        item as Record<string, unknown>,
+      );
+      const itemUniq = String(
+        item.uniq_code ?? item.item_uniq_code ?? "",
+      ).trim();
       if (itemUniq !== normalizedUniq) return false;
 
       const matchesCustomerId =
-        customerId != null &&
-        resolvedCustomerId === customerId;
+        customerId != null && resolvedCustomerId === customerId;
       const matchesCustomerName =
         customerName &&
-        String(item.customer_name ?? item.customer?.customer_name ?? "").trim().toLowerCase() ===
-          String(customerName).trim().toLowerCase();
+        String(item.customer_name ?? item.customer?.customer_name ?? "")
+          .trim()
+          .toLowerCase() === String(customerName).trim().toLowerCase();
 
-      return Boolean(matchesCustomerId || matchesCustomerName || (!customerId && !customerName));
+      return Boolean(
+        matchesCustomerId ||
+        matchesCustomerName ||
+        (!customerId && !customerName),
+      );
     });
   };
 
@@ -762,7 +956,9 @@ export default function PoBudgetPage() {
 
     approvedPrls.forEach((item) => {
       const value = resolvePrlCustomerId(item as Record<string, unknown>);
-      const label = String(item.customer_name ?? item.customer?.customer_name ?? "").trim();
+      const label = String(
+        item.customer_name ?? item.customer?.customer_name ?? "",
+      ).trim();
       if (!label || value == null) return;
       deduped.set(String(value), {
         value,
@@ -779,11 +975,15 @@ export default function PoBudgetPage() {
   const uniqOptions = useMemo(() => {
     const deduped = new Map<string, { value: string; label: string }>();
     prls.forEach((item) => {
-      const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "").trim();
+      const uniqCode = String(
+        item.uniq_code ?? item.item_uniq_code ?? "",
+      ).trim();
       if (!uniqCode) return;
       deduped.set(uniqCode, { value: uniqCode, label: uniqCode });
     });
-    return Array.from(deduped.values()).sort((a, b) => a.label.localeCompare(b.label));
+    return Array.from(deduped.values()).sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
   }, [prls]);
 
   const filteredRows = useMemo(() => {
@@ -800,7 +1000,10 @@ export default function PoBudgetPage() {
       productModel:
         row.productModel || bomIndex.assemblyCodeByUniq[row.uniq] || "-",
       partName: row.partName || bomIndex.partNameByUniq[row.uniq] || "-",
-      supplier: resolveSupplierName(row.supplier as unknown, supplierNameByCode),
+      supplier: resolveSupplierName(
+        row.supplier as unknown,
+        supplierNameByCode,
+      ),
       key:
         row.key ||
         [
@@ -833,11 +1036,26 @@ export default function PoBudgetPage() {
 
   const fallbackSummary = useMemo(() => {
     const totalEntries = filteredRows.length;
-    const totalSalesPlan = filteredRows.reduce((sum, row) => sum + (Number(row.salesPlan) || 0), 0);
-    const totalPo = filteredRows.reduce((sum, row) => sum + (Number(row.totalPo) || 0), 0);
-    const totalPrl = filteredRows.reduce((sum, row) => sum + (Number(row.prl) || 0), 0);
-    const deltaApoPrl = filteredRows.reduce((sum, row) => sum + (Number(row.apoPrl) || 0), 0);
-    const pendingApprovals = filteredRows.reduce((sum, row) => sum + (row.status === "pending" ? 1 : 0), 0);
+    const totalSalesPlan = filteredRows.reduce(
+      (sum, row) => sum + (Number(row.salesPlan) || 0),
+      0,
+    );
+    const totalPo = filteredRows.reduce(
+      (sum, row) => sum + (Number(row.totalPo) || 0),
+      0,
+    );
+    const totalPrl = filteredRows.reduce(
+      (sum, row) => sum + (Number(row.prl) || 0),
+      0,
+    );
+    const deltaApoPrl = filteredRows.reduce(
+      (sum, row) => sum + (Number(row.apoPrl) || 0),
+      0,
+    );
+    const pendingApprovals = filteredRows.reduce(
+      (sum, row) => sum + (row.status === "pending" ? 1 : 0),
+      0,
+    );
 
     return {
       total_entries: totalEntries,
@@ -868,130 +1086,244 @@ export default function PoBudgetPage() {
     () =>
       uoms
         .map((uom) => {
-          const value = String(uom.name ?? uom.unit_name ?? uom.code ?? uom.unit_code ?? "").trim();
+          const value = String(
+            uom.name ?? uom.unit_name ?? uom.code ?? uom.unit_code ?? "",
+          ).trim();
           if (!value) return null;
           return { label: value, value };
         })
-        .filter((item): item is { label: string; value: string } => Boolean(item)),
+        .filter((item): item is { label: string; value: string } =>
+          Boolean(item),
+        ),
     [uoms],
   );
 
   const defaultUom = uomOptions[0]?.value ?? "";
 
-  const prlOptions = useMemo(
-    () => {
-      const fromPrl = approvedPrls.map((item) => {
-        const prlId = String(item.prl_id ?? item.id ?? "");
-        const customerName = String(item.customer?.customer_name ?? item.customer_name ?? "-");
+  const prlOptions = useMemo(() => {
+    const fromPrl = approvedPrls.map((item, index) => {
+      const prlId = String(item.prl_id ?? item.id ?? "");
+      const prlItemId = String(
+        getPrlRowId(item as Record<string, unknown>) ?? item.id ?? index,
+      );
+      const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "-");
+      const customerName = String(
+        item.customer?.customer_name ?? item.customer_name ?? "-",
+      );
+      return {
+        label: `${prlId} - ${customerName} - ${uniqCode}`,
+        value: `prl::${encodeURIComponent(prlId)}::${encodeURIComponent(prlItemId)}`,
+      };
+    });
+
+    const fromPo = (customerPos as any[])
+      .map((po: any) => {
+        const id = String(po.id ?? po.po_id ?? "");
+        const poNumber = String(po.po_number ?? po.number ?? id);
+        const customerName = String(
+          po.customer?.customer_name ?? po.customer_name ?? "-",
+        );
         return {
-          label: `${prlId} - ${customerName}`,
-          value: prlId,
+          label: `${poNumber} - ${customerName}`,
+          value: `po:${id}`,
         };
-      });
+      })
+      .filter((x: any) => Boolean(x.value));
 
-      const fromPo = (customerPos as any[])
-        .map((po: any) => {
-          const id = String(po.id ?? po.po_id ?? "");
-          const poNumber = String(po.po_number ?? po.number ?? id);
-          const customerName = String(po.customer?.customer_name ?? po.customer_name ?? "-");
-          return {
-            label: `${poNumber} - ${customerName}`,
-            value: `po:${id}`,
-          };
-        })
-        .filter((x: any) => Boolean(x.value));
+    return [...fromPrl, ...fromPo];
+  }, [approvedPrls, customerPos]);
 
-      return [...fromPrl, ...fromPo];
-    },
-    [approvedPrls, customerPos],
-  );
+  const matchedAddPrl = useMemo(() => {
+    const effectiveCustomerId =
+      addForm.customerId ??
+      customerIdByName.get(normalizeCustomerName(addForm.customer)) ??
+      null;
 
-  const matchedAddPrl = useMemo(
-    () => {
-      const effectiveCustomerId =
-        addForm.customerId ??
-        customerIdByName.get(normalizeCustomerName(addForm.customer)) ??
-        null;
-
-      return findApprovedPrlMatch(effectiveCustomerId, addForm.customer, addForm.uniq);
-    },
-    [addForm.customer, addForm.customerId, addForm.uniq, approvedPrls, customerIdByName],
-  );
+    return findApprovedPrlMatch(
+      effectiveCustomerId,
+      addForm.customer,
+      addForm.uniq,
+    );
+  }, [
+    addForm.customer,
+    addForm.customerId,
+    addForm.uniq,
+    approvedPrls,
+    customerIdByName,
+  ]);
 
   const resolvedAddSupplierOption = useMemo(() => {
-    const currentSupplier = String(addForm.supplier ?? "").trim().toLowerCase();
+    const currentSupplier = String(addForm.supplier ?? "")
+      .trim()
+      .toLowerCase();
     if (!currentSupplier) return undefined;
 
     const options = addForm.uniq ? addSupplierOptions : supplierOptions;
     return options.find((option) => {
-      const value = String(option.value ?? "").trim().toLowerCase();
-      const label = String(option.label ?? "").trim().toLowerCase();
-      const supplierName = String(option.supplierName ?? "").trim().toLowerCase();
-      return value === currentSupplier || label === currentSupplier || supplierName === currentSupplier;
+      const value = String(option.value ?? "")
+        .trim()
+        .toLowerCase();
+      const label = String(option.label ?? "")
+        .trim()
+        .toLowerCase();
+      const supplierName = String(option.supplierName ?? "")
+        .trim()
+        .toLowerCase();
+      return (
+        value === currentSupplier ||
+        label === currentSupplier ||
+        supplierName === currentSupplier
+      );
     });
   }, [addForm.supplier, addForm.uniq, addSupplierOptions, supplierOptions]);
 
-  const selectedBulkPrl = useMemo(
-    () =>
-      approvedPrls.find(
-        (item) =>
-          String(item.prl_id ?? item.id ?? "") === String(bulkPrlId ?? "") ||
-          String(item.id ?? item.prl_id ?? "") === String(bulkPrlId ?? ""),
-      ),
-    [approvedPrls, bulkPrlId],
-  );
-
-  const buildBulkItemsFromPrl = (prlId?: string): BulkItemRow[] => {
-    if (!prlId) return [];
-    // support selecting a customer PO via `po:<id>` value
-    if (String(prlId).startsWith("po:")) {
-      const poId = String(prlId).slice(3);
-      const po = (customerPos as any[]).find((p: any) => String(p.id ?? p.po_id ?? "") === poId);
-      if (!po || !Array.isArray(po.items)) return [];
-      return (po.items as any[]).map((it: any, index: number) => {
-        const uniqCode = String(it.item_uniq_code ?? it.item_uniq ?? "");
-        const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ?? [])[0];
-        return {
-          key: `po-${poId}-${index}`,
-          prlId: `po:${poId}`,
-          prlItemId: null,
-          uniq: uniqCode,
-          productModel: String(it.product_model ?? bomIndex.assemblyCodeByUniq[uniqCode] ?? "-"),
-          partName: String(it.part_name ?? bomIndex.partNameByUniq[uniqCode] ?? "-"),
-          partNumber: String(it.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "-"),
-          weightKg: Number(supplierItemMatch?.weight ?? 0),
-          uom: String(supplierItemMatch?.uom ?? defaultUom),
-          quantity: Number(it.quantity ?? 0),
-          existingRawMaterial: String(supplierItemMatch?.description ?? "-"),
-          suppliers: [],
-        } as BulkItemRow;
-      });
-    }
-
-    const rows = approvedPrls.filter((item) => String(item.prl_id ?? item.id ?? "") === String(prlId ?? ""));
-    return rows.map((item, index) => {
-      const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "");
-      const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ?? [])[0];
-      const prlRowId = getPrlRowId(item as Record<string, unknown>);
-
-      return {
-        key: String(prlRowId ?? item.id ?? `${prlId}-${index}`),
-        prlId: String(item.prl_id ?? item.id ?? ""),
-        prlItemId: prlRowId,
-        uniq: uniqCode,
-        productModel: String(item.product_model ?? bomIndex.assemblyCodeByUniq[uniqCode] ?? "-"),
-        partName: String(item.part_name ?? bomIndex.partNameByUniq[uniqCode] ?? "-"),
-        partNumber: String(item.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "-"),
-        weightKg: Number(supplierItemMatch?.weight ?? 0),
-        uom: String(supplierItemMatch?.uom ?? defaultUom),
-        quantity: Number(item.quantity ?? 0),
-        existingRawMaterial: String(supplierItemMatch?.description ?? "-"),
-        suppliers: [],
-      };
-    });
+  const parsePrlSelection = (value: string) => {
+    if (!value.startsWith("prl::")) return null;
+    const parts = value.split("::");
+    return {
+      prlId: decodeURIComponent(parts[1] ?? ""),
+      prlItemId: decodeURIComponent(parts[2] ?? ""),
+    };
   };
 
-  const initialBulkItems = useMemo<BulkItemRow[]>(() => buildBulkItemsFromPrl(prlOptions[0]?.value), [prlOptions, approvedPrls, bomIndex.assemblyCodeByUniq, bomIndex.partNameByUniq, bomIndex.partNumberByUniq, defaultUom, supplierItemsByUniq]);
+  const selectedBulkPrl = useMemo(() => {
+    const first = bulkPrlIds[0];
+    const parsed = first ? parsePrlSelection(first) : null;
+    if (parsed) {
+      return approvedPrls.find((item) => {
+        const itemPrlId = String(item.prl_id ?? item.id ?? "");
+        const itemRowId = String(
+          getPrlRowId(item as Record<string, unknown>) ?? item.id ?? "",
+        );
+        return itemPrlId === parsed.prlId && itemRowId === parsed.prlItemId;
+      });
+    }
+    return approvedPrls.find(
+      (item) => String(item.prl_id ?? item.id ?? "") === String(first ?? ""),
+    );
+  }, [approvedPrls, bulkPrlIds]);
+
+  const buildBulkItemsFromPrl = (
+    selection?: string | string[],
+  ): BulkItemRow[] => {
+    const selectedValues = Array.isArray(selection)
+      ? selection
+      : selection
+        ? [selection]
+        : [];
+    if (selectedValues.length === 0) return [];
+
+    const rows: BulkItemRow[] = [];
+
+    for (const selectedValue of selectedValues) {
+      // support selecting a customer PO via `po:<id>` value
+      if (String(selectedValue).startsWith("po:")) {
+        const poId = String(selectedValue).slice(3);
+        const po = (customerPos as any[]).find(
+          (p: any) => String(p.id ?? p.po_id ?? "") === poId,
+        );
+        if (!po || !Array.isArray(po.items)) continue;
+        rows.push(
+          ...(po.items as any[]).map((it: any, index: number) => {
+            const uniqCode = String(it.item_uniq_code ?? it.item_uniq ?? "");
+            const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ??
+              [])[0];
+            return {
+              key: `po-${poId}-${index}`,
+              prlId: `po:${poId}`,
+              prlItemId: null,
+              uniq: uniqCode,
+              productModel: String(
+                it.product_model ??
+                  bomIndex.assemblyCodeByUniq[uniqCode] ??
+                  "-",
+              ),
+              partName: String(
+                it.part_name ?? bomIndex.partNameByUniq[uniqCode] ?? "-",
+              ),
+              partNumber: String(
+                it.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "-",
+              ),
+              weightKg: Number(supplierItemMatch?.weight ?? 0),
+              uom: String(supplierItemMatch?.uom ?? defaultUom),
+              quantity: Number(it.quantity ?? 0),
+              existingRawMaterial: String(
+                supplierItemMatch?.description ?? "-",
+              ),
+              suppliers: [],
+            } as BulkItemRow;
+          }),
+        );
+        continue;
+      }
+
+      const parsed = parsePrlSelection(selectedValue);
+      const matchedRows = parsed
+        ? approvedPrls.filter((item) => {
+            const itemPrlId = String(item.prl_id ?? item.id ?? "");
+            const itemRowId = String(
+              getPrlRowId(item as Record<string, unknown>) ?? item.id ?? "",
+            );
+            return itemPrlId === parsed.prlId && itemRowId === parsed.prlItemId;
+          })
+        : approvedPrls.filter(
+            (item) =>
+              String(item.prl_id ?? item.id ?? "") ===
+              String(selectedValue ?? ""),
+          );
+
+      rows.push(
+        ...matchedRows.map((item, index) => {
+          const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "");
+          const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ??
+            [])[0];
+          const prlRowId = getPrlRowId(item as Record<string, unknown>);
+
+          return {
+            key: String(
+              prlRowId ?? item.id ?? `${item.prl_id ?? selectedValue}-${index}`,
+            ),
+            prlId: String(item.prl_id ?? item.id ?? ""),
+            prlItemId: prlRowId,
+            uniq: uniqCode,
+            productModel: String(
+              item.product_model ??
+                bomIndex.assemblyCodeByUniq[uniqCode] ??
+                "-",
+            ),
+            partName: String(
+              item.part_name ?? bomIndex.partNameByUniq[uniqCode] ?? "-",
+            ),
+            partNumber: String(
+              item.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "-",
+            ),
+            weightKg: Number(supplierItemMatch?.weight ?? 0),
+            uom: String(supplierItemMatch?.uom ?? defaultUom),
+            quantity: Number(item.quantity ?? 0),
+            existingRawMaterial: String(supplierItemMatch?.description ?? "-"),
+            suppliers: [],
+          };
+        }),
+      );
+    }
+
+    const deduped = new Map<string, BulkItemRow>();
+    rows.forEach((row) => deduped.set(row.key, row));
+    return Array.from(deduped.values());
+  };
+
+  const initialBulkItems = useMemo<BulkItemRow[]>(
+    () => buildBulkItemsFromPrl(prlOptions[0]?.value),
+    [
+      prlOptions,
+      approvedPrls,
+      bomIndex.assemblyCodeByUniq,
+      bomIndex.partNameByUniq,
+      bomIndex.partNumberByUniq,
+      defaultUom,
+      supplierItemsByUniq,
+    ],
+  );
 
   const [bulkItems, setBulkItems] = useState<BulkItemRow[]>(initialBulkItems);
 
@@ -1016,7 +1348,11 @@ export default function PoBudgetPage() {
   useEffect(() => {
     const effectiveCustomerId =
       customerIdByName.get(normalizeCustomerName(addForm.customer)) ?? null;
-    if (!addForm.customer || effectiveCustomerId == null || addForm.customerId === effectiveCustomerId) {
+    if (
+      !addForm.customer ||
+      effectiveCustomerId == null ||
+      addForm.customerId === effectiveCustomerId
+    ) {
       return;
     }
 
@@ -1027,7 +1363,11 @@ export default function PoBudgetPage() {
   }, [addForm.customer, addForm.customerId, customerIdByName]);
 
   useEffect(() => {
-    if (!addForm.supplier || resolvedAddSupplierOption?.supplierId == null || addForm.supplierId === resolvedAddSupplierOption.supplierId) {
+    if (
+      !addForm.supplier ||
+      resolvedAddSupplierOption?.supplierId == null ||
+      addForm.supplierId === resolvedAddSupplierOption.supplierId
+    ) {
       return;
     }
 
@@ -1037,25 +1377,30 @@ export default function PoBudgetPage() {
       supplier: resolvedAddSupplierOption.supplierName ?? prev.supplier,
       uom: resolvedAddSupplierOption.uom ?? prev.uom,
       weightKg:
-        resolvedAddSupplierOption.weight == null ? prev.weightKg : String(resolvedAddSupplierOption.weight),
+        resolvedAddSupplierOption.weight == null
+          ? prev.weightKg
+          : String(resolvedAddSupplierOption.weight),
       description: resolvedAddSupplierOption.description ?? prev.description,
     }));
   }, [addForm.supplier, addForm.supplierId, resolvedAddSupplierOption]);
 
   useEffect(() => {
-    if (!bulkPrlId) return;
-    setBulkItems(buildBulkItemsFromPrl(bulkPrlId));
-  }, [bulkPrlId, approvedPrls.length, defaultUom]);
+    setBulkItems(buildBulkItemsFromPrl(bulkPrlIds));
+  }, [bulkPrlIds, approvedPrls.length, defaultUom]);
 
   useEffect(() => {
     const selectedPeriod = getPrlPeriodValue(selectedBulkPrl);
     if (selectedPeriod) {
-      setBulkPeriod((prev) => (prev === selectedPeriod ? prev : selectedPeriod));
+      setBulkPeriod((prev) =>
+        prev === selectedPeriod ? prev : selectedPeriod,
+      );
       return;
     }
 
     if (periodOptions[0]?.value) {
-      setBulkPeriod((prev) => (prev === periodOptions[0].value ? prev : periodOptions[0].value));
+      setBulkPeriod((prev) =>
+        prev === periodOptions[0].value ? prev : periodOptions[0].value,
+      );
     }
   }, [selectedBulkPrl, periodOptions]);
 
@@ -1070,12 +1415,22 @@ export default function PoBudgetPage() {
     const uniq = String(activeAddSupplierItem.uniq ?? "").trim();
     let related = supplierItemsByUniq.get(uniq) ?? [];
     if (!related.length) {
-      related = supplierItems.filter((it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === uniq);
+      related = supplierItems.filter(
+        (it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === uniq,
+      );
     }
-    const relatedNames = new Set(related.map((r) => String(r.supplier_name ?? r.supplier ?? "").trim()).filter(Boolean));
-    const existingSuppliers = new Set(activeAddSupplierItem.suppliers.map((s) => s.supplier));
+    const relatedNames = new Set(
+      related
+        .map((r) => String(r.supplier_name ?? r.supplier ?? "").trim())
+        .filter(Boolean),
+    );
+    const existingSuppliers = new Set(
+      activeAddSupplierItem.suppliers.map((s) => s.supplier),
+    );
 
-    const baseOptions = supplierOptions.filter((opt) => relatedNames.has(String(opt.label ?? opt.value ?? "").trim()));
+    const baseOptions = supplierOptions.filter((opt) =>
+      relatedNames.has(String(opt.label ?? opt.value ?? "").trim()),
+    );
     const finalBase = baseOptions.length ? baseOptions : supplierOptions;
     return finalBase.filter((option) => !existingSuppliers.has(option.value));
   }, [activeAddSupplierItem, supplierOptions]);
@@ -1095,13 +1450,12 @@ export default function PoBudgetPage() {
   );
 
   const openBulkPoBudget = () => {
-    const firstPrlId = prlOptions[0]?.value ?? "";
-    const firstPrl = approvedPrls.find(
-      (item) => String(item.prl_id ?? item.id ?? "") === String(firstPrlId),
-    );
-    setBulkItems(buildBulkItemsFromPrl(firstPrlId));
-    setBulkPeriod(getPrlPeriodValue(firstPrl) || periodOptions[0]?.value);
-    setBulkPrlId(firstPrlId);
+    setBulkPrlSearch("");
+    setBulkPrlPage(1);
+    setPrlCache([]);
+    setBulkItems([]);
+    setBulkPeriod(periodOptions[0]?.value);
+    setBulkPrlIds([]);
     setBulkBudgetType("adhoc");
     setBulkPo1Pct(60);
     setBulkPo2Pct(40);
@@ -1175,7 +1529,9 @@ export default function PoBudgetPage() {
 
     const target = bulkItems.find((it) => it.key === addSupplierItemKey);
     if (!target) return;
-    const duplicateSupplier = target.suppliers.some((item) => item.supplier === supplier);
+    const duplicateSupplier = target.suppliers.some(
+      (item) => item.supplier === supplier,
+    );
     if (duplicateSupplier) {
       message.warning("Supplier already added for this item");
       return;
@@ -1223,7 +1579,9 @@ export default function PoBudgetPage() {
   };
 
   const bulkUpdateItem = (itemKey: string, patch: Partial<BulkItemRow>) => {
-    setBulkItems((prev) => prev.map((item) => (item.key === itemKey ? { ...item, ...patch } : item)));
+    setBulkItems((prev) =>
+      prev.map((item) => (item.key === itemKey ? { ...item, ...patch } : item)),
+    );
   };
 
   const computedPo1Units = useMemo(() => {
@@ -1240,16 +1598,17 @@ export default function PoBudgetPage() {
 
   const derivedPrlAmount = useMemo(() => {
     return approvedPrls
-      .filter(
-        (item) => {
-          const resolvedCustomerId = resolvePrlCustomerId(item as Record<string, unknown>);
-          return (
-            (addForm.customerId != null && resolvedCustomerId === addForm.customerId) ||
-            String(item.customer_name ?? "").toLowerCase() ===
-              String(addForm.customer || "").toLowerCase()
-          );
-        },
-      )
+      .filter((item) => {
+        const resolvedCustomerId = resolvePrlCustomerId(
+          item as Record<string, unknown>,
+        );
+        return (
+          (addForm.customerId != null &&
+            resolvedCustomerId === addForm.customerId) ||
+          String(item.customer_name ?? "").toLowerCase() ===
+            String(addForm.customer || "").toLowerCase()
+        );
+      })
       .filter(
         (item) =>
           String(item.uniq_code ?? item.item_uniq_code ?? "") ===
@@ -1261,7 +1620,14 @@ export default function PoBudgetPage() {
           String(addForm.period || ""),
       )
       .reduce((sum, item) => sum + Number(item.quantity ?? 0), 0);
-  }, [addForm.customer, addForm.customerId, addForm.period, addForm.uniq, approvedPrls, customerIdByName]);
+  }, [
+    addForm.customer,
+    addForm.customerId,
+    addForm.period,
+    addForm.uniq,
+    approvedPrls,
+    customerIdByName,
+  ]);
 
   const saveAddBudget = async () => {
     const effectiveCustomerId =
@@ -1269,9 +1635,7 @@ export default function PoBudgetPage() {
       customerIdByName.get(normalizeCustomerName(addForm.customer)) ??
       null;
     const effectiveSupplierId =
-      addForm.supplierId ??
-      resolvedAddSupplierOption?.supplierId ??
-      null;
+      addForm.supplierId ?? resolvedAddSupplierOption?.supplierId ?? null;
 
     if (
       effectiveCustomerId == null ||
@@ -1281,7 +1645,9 @@ export default function PoBudgetPage() {
       !addForm.uom ||
       !addForm.period
     ) {
-      message.warning("Please complete customer, uniq, supplier, UOM, and period");
+      message.warning(
+        "Please complete customer, uniq, supplier, UOM, and period",
+      );
       return;
     }
 
@@ -1297,7 +1663,7 @@ export default function PoBudgetPage() {
       description: addForm.description,
       supplier_id: Number(effectiveSupplierId),
       supplier_name: addForm.supplier,
-      period: addForm.period,
+      period: normalizePeriodForApi(addForm.period),
       sales_plan: Number(addForm.salesPlan || 0),
       purchase_request: Number(addForm.purchaseRequest || 0),
       po1_pct: Number(addForm.po1Pct || 0),
@@ -1337,14 +1703,24 @@ export default function PoBudgetPage() {
   };
 
   const bulkSave = async () => {
-    if (!bulkPrlId || !bulkPeriod) {
-      message.warning("Please select PRL and period");
+    if (bulkPrlIds.length === 0 || !bulkPeriod) {
+      message.warning("Please select at least one PRL UNIQ and period");
       return;
     }
 
-    const selectedPrl = approvedPrls.find(
-      (item) => String(item.id ?? item.prl_id ?? "") === String(bulkPrlId),
+    const selectedPrl = selectedBulkPrl;
+
+    const missingSupplierItems = bulkItems.filter(
+      (item) => item.suppliers.length === 0,
     );
+    if (missingSupplierItems.length > 0) {
+      message.warning(
+        `Add at least one supplier for UNIQ: ${missingSupplierItems
+          .map((item) => item.uniq)
+          .join(", ")}`,
+      );
+      return;
+    }
 
     const unresolvedSupplier = bulkItems.find((item) =>
       item.suppliers.some((supplier) => {
@@ -1358,19 +1734,25 @@ export default function PoBudgetPage() {
     const unresolvedPrlItem = bulkItems.find((item) => item.prlItemId == null);
 
     if (unresolvedSupplier) {
-      message.warning(`Supplier row_id for UNIQ ${unresolvedSupplier.uniq} is not resolved yet`);
+      message.warning(
+        `Supplier row_id for UNIQ ${unresolvedSupplier.uniq} is not resolved yet`,
+      );
       return;
     }
 
     if (unresolvedPrlItem) {
-      message.warning(`PRL row_id for UNIQ ${unresolvedPrlItem.uniq} is not resolved yet`);
+      message.warning(
+        `PRL row_id for UNIQ ${unresolvedPrlItem.uniq} is not resolved yet`,
+      );
       return;
     }
 
     const body = {
-      prl_id: String(bulkPrlId),
+      prl_id: String(
+        bulkItems[0]?.prlId ?? selectedPrl?.prl_id ?? selectedPrl?.id ?? "",
+      ),
       budget_subtype: bulkBudgetType === "adhoc" ? "adhoc" : "regular",
-      period: bulkPeriod,
+      period: normalizePeriodForApi(bulkPeriod),
       po1_pct: Number(bulkPo1Pct || 0),
       po2_pct: Number(bulkPo2Pct || 0),
       items: bulkItems.map((item) => ({
@@ -1396,10 +1778,29 @@ export default function PoBudgetPage() {
 
     try {
       if (useApi) {
-        await addBulk({ type: getApiType(activeTab), body }).unwrap();
+        const token = getCookiesFromBrowser("Authorization");
+        if (!token) {
+          message.error(
+            "Session expired or missing token. Please login again.",
+          );
+          return;
+        }
+        const result = await addBulk({ type: getApiType(activeTab), body }).unwrap();
+        const created = Number(result.data?.created ?? 0);
+        const errors = Array.isArray(result.data?.errors) ? result.data.errors.filter(Boolean) : [];
+
+        if (errors.length > 0) {
+          message.error(errors.join("; "));
+          if (created <= 0) return;
+        }
+
+        if (created <= 0) {
+          message.warning("No PO Budget entries were created.");
+          return;
+        }
       }
       message.success(
-        `Bulk ${getBudgetTypeLabel(activeTab)} PO Budget${selectedPrl ? ` for ${selectedPrl.uniq_code ?? selectedPrl.item_uniq_code ?? bulkPrlId}` : ""} saved successfully`,
+        `Bulk ${getBudgetTypeLabel(activeTab)} PO Budget with ${bulkItems.length} UNIQ saved successfully`,
       );
       setBulkOpen(false);
     } catch (error) {
@@ -1409,7 +1810,9 @@ export default function PoBudgetPage() {
   };
 
   const addSubtitle = `Enter the PO budget details for ${getBudgetTypeLabel(activeTab).toLowerCase()}`;
-  const groupedDetail = detailQuery.data?.data as PoBudgetGroupedDetail | undefined;
+  const groupedDetail = detailQuery.data?.data as
+    | PoBudgetGroupedDetail
+    | undefined;
 
   const openDetail = (row: PoBudgetRow) => {
     if (!row.id && useApi) {
@@ -1428,8 +1831,12 @@ export default function PoBudgetPage() {
     setEditForm({
       purchaseRequest: Number(row.pr || 0),
       prl: Number(row.prl || 0),
-      po1Pct: Number(row.po1 && row.pr ? Math.round((row.po1 / row.pr) * 100) : 50),
-      po2Pct: Number(row.po2 && row.pr ? Math.round((row.po2 / row.pr) * 100) : 50),
+      po1Pct: Number(
+        row.po1 && row.pr ? Math.round((row.po1 / row.pr) * 100) : 50,
+      ),
+      po2Pct: Number(
+        row.po2 && row.pr ? Math.round((row.po2 / row.pr) * 100) : 50,
+      ),
       period: row.period || "",
     });
     setEditOpen(true);
@@ -1447,7 +1854,11 @@ export default function PoBudgetPage() {
     };
 
     try {
-      await updateEntry({ type: getApiType(activeTab), id: editRow.id, body }).unwrap();
+      await updateEntry({
+        type: getApiType(activeTab),
+        id: editRow.id,
+        body,
+      }).unwrap();
       message.success("PO Budget updated successfully");
       setEditOpen(false);
       setEditRow(null);
@@ -1507,9 +1918,8 @@ export default function PoBudgetPage() {
           v ? (
             <Tag
               color="purple"
-              className="!rounded-md !px-2 !py-0.5 !text-xs !font-semibold"
-            >
-              {v}
+              className="!rounded-md !px-2 !py-0.5 !text-xs !font-semibold">
+              {v === "adhoc" ? "Additional" : v}
             </Tag>
           ) : (
             <span className="text-xs text-gray-400">-</span>
@@ -1595,8 +2005,7 @@ export default function PoBudgetPage() {
         render: (v: PoBudgetRow["status"]) => (
           <Tag
             color={v === "approved" ? "green" : "gold"}
-            className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
-          >
+            className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
             {v}
           </Tag>
         ),
@@ -1640,16 +2049,14 @@ export default function PoBudgetPage() {
               size="small"
               icon={<EyeOutlined />}
               className="!rounded-lg"
-              onClick={() => openDetail(r)}
-            >
+              onClick={() => openDetail(r)}>
               Detail
             </Button>
             <Button
               size="small"
               className="!rounded-lg"
               disabled={!r.id || r.status === "approved"}
-              onClick={() => openEdit(r)}
-            >
+              onClick={() => openEdit(r)}>
               Edit
             </Button>
           </div>
@@ -1694,7 +2101,9 @@ export default function PoBudgetPage() {
           <InputNumber
             min={0}
             value={v}
-            onChange={(next) => bulkUpdateItem(r.key, { weightKg: Number(next || 0) })}
+            onChange={(next) =>
+              bulkUpdateItem(r.key, { weightKg: Number(next || 0) })
+            }
             className="w-[90px]"
             size="small"
           />
@@ -1708,7 +2117,9 @@ export default function PoBudgetPage() {
         render: (value: string, r) => (
           <Select
             value={value || undefined}
-            onChange={(next) => bulkUpdateItem(r.key, { uom: String(next ?? "") })}
+            onChange={(next) =>
+              bulkUpdateItem(r.key, { uom: String(next ?? "") })
+            }
             options={uomOptions}
             className="w-[100px]"
             size="small"
@@ -1775,8 +2186,7 @@ export default function PoBudgetPage() {
               <div
                 className={
                   "text-[11px] " + (over ? "text-red-600" : "text-gray-500")
-                }
-              >
+                }>
                 Total: {formatNumber(total)} / {formatNumber(r.quantity)}
               </div>
             </div>
@@ -1791,8 +2201,7 @@ export default function PoBudgetPage() {
           <Button
             size="small"
             className="!rounded-lg"
-            onClick={() => bulkAddSupplierLine(r.key)}
-          >
+            onClick={() => bulkAddSupplierLine(r.key)}>
             + Add Supplier
           </Button>
         ),
@@ -1819,16 +2228,14 @@ export default function PoBudgetPage() {
             <Button
               className="!rounded-lg"
               icon={<FileExcelOutlined />}
-              onClick={openBulkPoBudget}
-            >
+              onClick={openBulkPoBudget}>
               Bulk PO Budget
             </Button>
             <Button
               type="primary"
               className="!rounded-lg"
               icon={<PlusOutlined />}
-              onClick={() => setAddOpen(true)}
-            >
+              onClick={() => setAddOpen(true)}>
               Add Budget Entry
             </Button>
           </div>
@@ -1899,7 +2306,8 @@ export default function PoBudgetPage() {
                 : filteredRows.length,
               showSizeChanger: true,
               pageSizeOptions: ["10", "20", "50", "100"],
-              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} items`,
+              showTotal: (total, range) =>
+                `${range[0]}-${range[1]} of ${total} items`,
               onChange: (page, pageSize) => {
                 setPaginationByTab((prev) => ({
                   ...prev,
@@ -1945,13 +2353,11 @@ export default function PoBudgetPage() {
             <Button
               type="primary"
               className="!rounded-lg"
-              onClick={saveAddBudget}
-            >
+              onClick={saveAddBudget}>
               Save Budget Entry
             </Button>
           </div>
-        }
-      >
+        }>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <div className="text-xs text-gray-600 mb-1">PRL (Select)</div>
@@ -1965,22 +2371,36 @@ export default function PoBudgetPage() {
               onChange={(v) => {
                 const prlId = String(v ?? "");
                 const matched = approvedPrls.find(
-                  (p) => String(p.prl_id ?? p.id ?? "") === prlId || String(p.id ?? p.prl_id ?? "") === prlId,
+                  (p) =>
+                    String(p.prl_id ?? p.id ?? "") === prlId ||
+                    String(p.id ?? p.prl_id ?? "") === prlId,
                 );
                 if (!matched) {
                   setAddForm((p) => ({ ...p, prlId: undefined }));
                   return;
                 }
-                const uniqCode = String(matched.uniq_code ?? matched.item_uniq_code ?? "").trim();
-                let supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ?? [])[0];
+                const uniqCode = String(
+                  matched.uniq_code ?? matched.item_uniq_code ?? "",
+                ).trim();
+                let supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ??
+                  [])[0];
                 if (!supplierItemMatch) {
-                  supplierItemMatch = supplierItems.find((it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === uniqCode) as any;
+                  supplierItemMatch = supplierItems.find(
+                    (it) =>
+                      String(it.uniq_code ?? it.item_uniq_code ?? "").trim() ===
+                      uniqCode,
+                  ) as any;
                 }
                 setAddForm((prev) => ({
                   ...prev,
                   prlId,
-                  customer: matched.customer_name ?? matched.customer?.customer_name ?? prev.customer,
-                  customerId: resolvePrlCustomerId(matched as Record<string, unknown>) ?? prev.customerId,
+                  customer:
+                    matched.customer_name ??
+                    matched.customer?.customer_name ??
+                    prev.customer,
+                  customerId:
+                    resolvePrlCustomerId(matched as Record<string, unknown>) ??
+                    prev.customerId,
                   uniq: uniqCode || prev.uniq,
                   productModel: matched.product_model ?? prev.productModel,
                   partName: matched.part_name ?? prev.partName,
@@ -1988,8 +2408,13 @@ export default function PoBudgetPage() {
                   period: getPrlPeriodValue(matched) || prev.period,
                   salesPlan: Number(matched.quantity ?? prev.salesPlan ?? 0),
                   uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
-                  weightKg: supplierItemMatch?.weight == null ? prev.weightKg : String(supplierItemMatch.weight),
-                  supplier: String(supplierItemMatch?.supplier_name ?? prev.supplier ?? ""),
+                  weightKg:
+                    supplierItemMatch?.weight == null
+                      ? prev.weightKg
+                      : String(supplierItemMatch.weight),
+                  supplier: String(
+                    supplierItemMatch?.supplier_name ?? prev.supplier ?? "",
+                  ),
                   supplierId:
                     resolveSupplierRowId({
                       supplierUuid: supplierItemMatch?.supplier_uuid,
@@ -2024,39 +2449,56 @@ export default function PoBudgetPage() {
                   String(selected?.label ?? ""),
                   addForm.uniq,
                 );
-                  // determine uniq from matched PRL if available, otherwise use current addForm.uniq
-                  const resolvedUniq = String(matchedPrl ? (matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "") : (addForm.uniq ?? "")).trim();
-                  let supplierItemMatch = (supplierItemsByUniq.get(resolvedUniq) ?? [])[0];
-                  if (!supplierItemMatch) {
-                    supplierItemMatch = supplierItems.find((it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === resolvedUniq) as any;
-                  }
-                  setAddForm((prev) => ({
-                    ...prev,
-                    customerId: selectedCustomerId,
-                    customer: String(selected?.label ?? ""),
-                    supplier: "",
-                    supplierId: null,
-                    uniq: matchedPrl ? prev.uniq : "",
-                    productModel:
-                      matchedPrl?.product_model ??
-                      "",
-                    partName:
-                      matchedPrl?.part_name ??
-                      "",
-                    partNumber:
-                      matchedPrl?.part_number ??
-                      "",
-                    period: getPrlPeriodValue(matchedPrl) || prev.period,
-                    uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
-                    weightKg: supplierItemMatch?.weight == null ? prev.weightKg : String(supplierItemMatch.weight),
-                    salesPlan: Number(matchedPrl?.quantity ?? prev.salesPlan ?? 0),
-                  }));
+                // determine uniq from matched PRL if available, otherwise use current addForm.uniq
+                const resolvedUniq = String(
+                  matchedPrl
+                    ? (matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "")
+                    : (addForm.uniq ?? ""),
+                ).trim();
+                let supplierItemMatch = (supplierItemsByUniq.get(
+                  resolvedUniq,
+                ) ?? [])[0];
+                if (!supplierItemMatch) {
+                  supplierItemMatch = supplierItems.find(
+                    (it) =>
+                      String(it.uniq_code ?? it.item_uniq_code ?? "").trim() ===
+                      resolvedUniq,
+                  ) as any;
+                }
+                setAddForm((prev) => ({
+                  ...prev,
+                  customerId: selectedCustomerId,
+                  customer: String(selected?.label ?? ""),
+                  supplier: "",
+                  supplierId: null,
+                  uniq: matchedPrl ? prev.uniq : "",
+                  productModel: matchedPrl?.product_model ?? "",
+                  partName: matchedPrl?.part_name ?? "",
+                  partNumber: matchedPrl?.part_number ?? "",
+                  period: getPrlPeriodValue(matchedPrl) || prev.period,
+                  uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
+                  weightKg:
+                    supplierItemMatch?.weight == null
+                      ? prev.weightKg
+                      : String(supplierItemMatch.weight),
+                  salesPlan: Number(
+                    matchedPrl?.quantity ?? prev.salesPlan ?? 0,
+                  ),
+                }));
               }}
             />
           </div>
           <div>
-            <div className="text-xs text-gray-600 mb-1">Customer ID (row_id)</div>
-            <Input value={addForm.customerId == null ? "" : String(addForm.customerId)} disabled className="!rounded-lg" />
+            <div className="text-xs text-gray-600 mb-1">
+              Customer ID (row_id)
+            </div>
+            <Input
+              value={
+                addForm.customerId == null ? "" : String(addForm.customerId)
+              }
+              disabled
+              className="!rounded-lg"
+            />
           </div>
           <div>
             <div className="text-xs text-gray-600 mb-1">
@@ -2078,17 +2520,28 @@ export default function PoBudgetPage() {
                 // Find the PRL entry for this uniq_code (no filter by status/customer)
                 const matchedPrl = prls.find(
                   (item) =>
-                    String(item.uniq_code ?? item.item_uniq_code ?? "").trim() === uniqCode
+                    String(
+                      item.uniq_code ?? item.item_uniq_code ?? "",
+                    ).trim() === uniqCode,
                 );
-                let supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ?? [])[0];
+                let supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ??
+                  [])[0];
                 const supplierItemMatchFromMap = supplierItemMatch;
                 if (!supplierItemMatch) {
-                  supplierItemMatch = supplierItems.find((it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === uniqCode) as any;
+                  supplierItemMatch = supplierItems.find(
+                    (it) =>
+                      String(it.uniq_code ?? it.item_uniq_code ?? "").trim() ===
+                      uniqCode,
+                  ) as any;
                 }
                 // Debug logging to help trace missing mappings (remove after verification)
                 try {
                   // eslint-disable-next-line no-console
-                  console.debug("po-budget: uniq lookup", { uniqCode, fromMap: supplierItemMatchFromMap, fromFallback: supplierItemMatch });
+                  console.debug("po-budget: uniq lookup", {
+                    uniqCode,
+                    fromMap: supplierItemMatchFromMap,
+                    fromFallback: supplierItemMatch,
+                  });
                 } catch (e) {
                   /* ignore */
                 }
@@ -2104,8 +2557,12 @@ export default function PoBudgetPage() {
                   matchedPrl?.product_model ??
                   bomIndex.assemblyCodeByUniq[uniqCode] ??
                   "";
-                const customerName = matchedPrl?.customer_name ?? matchedPrl?.customer?.customer_name ?? "";
-                const customerId = matchedPrl?.customer_id ?? matchedPrl?.customer?.code ?? null;
+                const customerName =
+                  matchedPrl?.customer_name ??
+                  matchedPrl?.customer?.customer_name ??
+                  "";
+                const customerId =
+                  matchedPrl?.customer_id ?? matchedPrl?.customer?.code ?? null;
 
                 setAddForm((prev) => ({
                   ...prev,
@@ -2120,10 +2577,14 @@ export default function PoBudgetPage() {
                     supplierItemMatch?.weight == null
                       ? prev.weightKg
                       : String(supplierItemMatch.weight),
-                  salesPlan: Number(matchedPrl?.quantity ?? prev.salesPlan ?? 0),
-                  description: supplierItemMatch?.description ?? prev.description,
+                  salesPlan: Number(
+                    matchedPrl?.quantity ?? prev.salesPlan ?? 0,
+                  ),
+                  description:
+                    supplierItemMatch?.description ?? prev.description,
                   supplier:
-                    String(supplierItemMatch?.supplier_name ?? "") || prev.supplier,
+                    String(supplierItemMatch?.supplier_name ?? "") ||
+                    prev.supplier,
                   supplierId:
                     resolveSupplierRowId({
                       supplierUuid: supplierItemMatch?.supplier_uuid,
@@ -2198,11 +2659,16 @@ export default function PoBudgetPage() {
                   : (option as SupplierOption | undefined);
                 setAddForm((p) => ({
                   ...p,
-                  supplier: selected?.supplierName ?? selected?.label ?? String(v ?? ""),
+                  supplier:
+                    selected?.supplierName ??
+                    selected?.label ??
+                    String(v ?? ""),
                   supplierId: selected?.supplierId ?? null,
                   uom: selected?.uom ?? p.uom,
                   weightKg:
-                    selected?.weight == null ? p.weightKg : String(selected.weight),
+                    selected?.weight == null
+                      ? p.weightKg
+                      : String(selected.weight),
                   description: selected?.description ?? p.description,
                 }));
               }}
@@ -2322,10 +2788,15 @@ export default function PoBudgetPage() {
             <div className="text-xs text-gray-600 mb-1">Period</div>
             <DatePicker
               picker="month"
-              value={addForm.period ? dayjs(addForm.period, "MMMM-YYYY") : undefined}
-              onChange={(date) => setAddForm((p) => ({ ...p, period: date ? dayjs(date).format("MMMM-YYYY") : "" }))}
+              value={parsePeriodMonth(addForm.period)}
+              onChange={(date) =>
+                setAddForm((p) => ({
+                  ...p,
+                  period: formatPeriodMonth(date) ?? "",
+                }))
+              }
               className="w-full"
-              format={(value) => (value ? dayjs(value).format("MMMM-YYYY") : "")}
+              format={(value) => (value ? value.format("MMMM YYYY") : "")}
             />
           </div>
         </div>
@@ -2359,8 +2830,7 @@ export default function PoBudgetPage() {
               Save PO Budget
             </Button>
           </div>
-        }
-      >
+        }>
         <div className="space-y-4">
           <div className="rounded-xl border border-blue-200 bg-white p-4">
             <div className="flex items-start justify-between gap-3">
@@ -2379,12 +2849,24 @@ export default function PoBudgetPage() {
 
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <div className="text-xs text-gray-600 mb-1">Select PRL</div>
+                <div className="text-xs text-gray-600 mb-1">
+                  Select PRL UNIQ
+                </div>
                 <Select
-                  value={bulkPrlId}
-                  onChange={setBulkPrlId}
+                  mode="multiple"
+                  allowClear
+                  showSearch
+                  value={bulkPrlIds}
+                  onChange={(values) => setBulkPrlIds(values)}
+                  onSearch={handleBulkPrlSearch}
+                  onPopupScroll={handleBulkPrlPopupScroll}
                   options={prlOptions}
                   className="w-full"
+                  placeholder="Search and select one or more PRL UNIQ"
+                  optionFilterProp="label"
+                  filterOption={false}
+                  loading={prlsFetching}
+                  maxTagCount="responsive"
                 />
               </div>
               <div>
@@ -2416,8 +2898,7 @@ export default function PoBudgetPage() {
               </div>
               <Tag
                 color="green"
-                className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
-              >
+                className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
                 {bulkItems.length} Items
               </Tag>
             </div>
@@ -2451,8 +2932,7 @@ export default function PoBudgetPage() {
               </div>
               <Tag
                 color="purple"
-                className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
-              >
+                className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
                 Final Step
               </Tag>
             </div>
@@ -2460,14 +2940,14 @@ export default function PoBudgetPage() {
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <div className="text-xs text-gray-600 mb-1">Period</div>
-                  <DatePicker
-                    picker="month"
-                    value={bulkPeriod ? dayjs(bulkPeriod, "MMMM-YYYY") : undefined}
-                    onChange={(date) => setBulkPeriod(date ? dayjs(date).format("MMMM-YYYY") : undefined)}
-                    className="w-full"
-                    format={(value) => (value ? dayjs(value).format("MMMM-YYYY") : "")}
-                    placeholder="Select period..."
-                  />
+                <DatePicker
+                  picker="month"
+                  value={parsePeriodMonth(bulkPeriod)}
+                  onChange={(date) => setBulkPeriod(formatPeriodMonth(date))}
+                  className="w-full"
+                  format={(value) => (value ? value.format("MMMM YYYY") : "")}
+                  placeholder="Select period..."
+                />
               </div>
 
               <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4">
@@ -2542,137 +3022,300 @@ export default function PoBudgetPage() {
               Grouped detail for {detailState.row?.uniq ?? "selected budget"}
             </div>
           </div>
-        }
-      >
+        }>
         <div className="space-y-4 text-sm text-gray-700">
           <div className="rounded-2xl border border-gray-200 bg-white p-5">
-            <div className="text-sm font-semibold text-gray-900 mb-4">Basic Information</div>
+            <div className="text-sm font-semibold text-gray-900 mb-4">
+              Basic Information
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">Customer Name</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.customer_name ?? detailState.row?.customer ?? "-"}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  Customer Name
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {groupedDetail?.basic_information?.customer_name ??
+                    detailState.row?.customer ??
+                    "-"}
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">UNIQ</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.uniq ?? detailState.row?.uniq ?? "-"}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  UNIQ
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {groupedDetail?.basic_information?.uniq ??
+                    detailState.row?.uniq ??
+                    "-"}
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-amber-600 uppercase">Product Model</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.product_model ?? detailState.row?.productModel ?? "-"}</div>
+                <div className="text-[11px] font-medium text-amber-600 uppercase">
+                  Product Model
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {groupedDetail?.basic_information?.product_model ??
+                    detailState.row?.productModel ??
+                    "-"}
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">Part Name</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.part_name ?? detailState.row?.partName ?? "-"}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  Part Name
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {groupedDetail?.basic_information?.part_name ??
+                    detailState.row?.partName ??
+                    "-"}
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">Part Number</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.part_number ?? detailState.row?.partNumber ?? "-"}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  Part Number
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {groupedDetail?.basic_information?.part_number ??
+                    detailState.row?.partNumber ??
+                    "-"}
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">Supplier Name</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.supplier_name ?? detailState.row?.supplier ?? "-"}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  Supplier Name
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {groupedDetail?.basic_information?.supplier_name ??
+                    detailState.row?.supplier ??
+                    "-"}
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">Type</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.budget_type ?? detailState.row?.type ?? "-"}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  Type
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {groupedDetail?.basic_information?.budget_type ??
+                    detailState.row?.type ??
+                    "-"}
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">Type Label</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.type_label ?? detailState.row?.type ?? "-"}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  Type Label
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {groupedDetail?.basic_information?.type_label ??
+                    detailState.row?.type ??
+                    "-"}
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">Period</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.basic_information?.period ?? detailState.row?.period ?? "-"}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  Period
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {groupedDetail?.basic_information?.period ??
+                    detailState.row?.period ??
+                    "-"}
+                </div>
               </div>
             </div>
           </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5">
-            <div className="text-sm font-semibold text-gray-900 mb-4">Budget Calculations</div>
+            <div className="text-sm font-semibold text-gray-900 mb-4">
+              Budget Calculations
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">Sales Plan</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{formatNumber(Number(groupedDetail?.budget_calculations?.sales_plan ?? detailState.row?.salesPlan ?? 0))}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  Sales Plan
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {formatNumber(
+                    Number(
+                      groupedDetail?.budget_calculations?.sales_plan ??
+                        detailState.row?.salesPlan ??
+                        0,
+                    ),
+                  )}
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">Purchase Request (PR)</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{formatNumber(Number(groupedDetail?.budget_calculations?.purchase_request ?? detailState.row?.pr ?? 0))}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  Purchase Request (PR)
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {formatNumber(
+                    Number(
+                      groupedDetail?.budget_calculations?.purchase_request ??
+                        detailState.row?.pr ??
+                        0,
+                    ),
+                  )}
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">PRL Amount</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{formatNumber(Number(groupedDetail?.budget_calculations?.prl_amount ?? detailState.row?.prl ?? 0))}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  PRL Amount
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {formatNumber(
+                    Number(
+                      groupedDetail?.budget_calculations?.prl_amount ??
+                        detailState.row?.prl ??
+                        0,
+                    ),
+                  )}
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">PO1 Percentage</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{Number(groupedDetail?.budget_calculations?.po1_pct ?? 0)}%</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  PO1 Percentage
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {Number(groupedDetail?.budget_calculations?.po1_pct ?? 0)}%
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">PO2 Percentage</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{Number(groupedDetail?.budget_calculations?.po2_pct ?? 0)}%</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  PO2 Percentage
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {Number(groupedDetail?.budget_calculations?.po2_pct ?? 0)}%
+                </div>
               </div>
             </div>
           </div>
 
           <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-5">
-            <div className="text-sm font-semibold text-gray-900 mb-4">Calculation Results</div>
+            <div className="text-sm font-semibold text-gray-900 mb-4">
+              Calculation Results
+            </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="rounded-xl border border-gray-200 bg-white p-4">
                 <div className="text-xs text-gray-500">PO1 Amount</div>
-                <div className="mt-1 text-2xl font-semibold text-gray-900">{formatNumber(Number(groupedDetail?.calculation_results?.po1_amount ?? detailState.row?.po1 ?? 0))}</div>
+                <div className="mt-1 text-2xl font-semibold text-gray-900">
+                  {formatNumber(
+                    Number(
+                      groupedDetail?.calculation_results?.po1_amount ??
+                        detailState.row?.po1 ??
+                        0,
+                    ),
+                  )}
+                </div>
                 <div className="text-[11px] text-gray-400">PO1 of PR</div>
               </div>
               <div className="rounded-xl border border-gray-200 bg-white p-4">
                 <div className="text-xs text-gray-500">PO2 Amount</div>
-                <div className="mt-1 text-2xl font-semibold text-gray-900">{formatNumber(Number(groupedDetail?.calculation_results?.po2_amount ?? detailState.row?.po2 ?? 0))}</div>
+                <div className="mt-1 text-2xl font-semibold text-gray-900">
+                  {formatNumber(
+                    Number(
+                      groupedDetail?.calculation_results?.po2_amount ??
+                        detailState.row?.po2 ??
+                        0,
+                    ),
+                  )}
+                </div>
                 <div className="text-[11px] text-gray-400">PO2 of PR</div>
               </div>
               <div className="rounded-xl border border-green-200 bg-white p-4">
                 <div className="text-xs text-gray-500">Total PO</div>
-                <div className="mt-1 text-2xl font-semibold text-gray-900">{formatNumber(Number(groupedDetail?.calculation_results?.total_po ?? detailState.row?.totalPo ?? 0))}</div>
+                <div className="mt-1 text-2xl font-semibold text-gray-900">
+                  {formatNumber(
+                    Number(
+                      groupedDetail?.calculation_results?.total_po ??
+                        detailState.row?.totalPo ??
+                        0,
+                    ),
+                  )}
+                </div>
                 <div className="text-[11px] text-gray-400">PO1 + PO2</div>
               </div>
               <div className="rounded-xl border border-amber-200 bg-white p-4">
                 <div className="text-xs text-gray-500">APO - PRL</div>
-                <div className="mt-1 text-2xl font-semibold text-amber-600">{formatNumber(Number(groupedDetail?.calculation_results?.apo_prl_abs ?? detailState.row?.apoPrl ?? 0))}</div>
-                <div className="text-[11px] text-amber-500">{groupedDetail?.calculation_results?.apo_prl_state ?? "-"}</div>
+                <div className="mt-1 text-2xl font-semibold text-amber-600">
+                  {formatNumber(
+                    Number(
+                      groupedDetail?.calculation_results?.apo_prl_abs ??
+                        detailState.row?.apoPrl ??
+                        0,
+                    ),
+                  )}
+                </div>
+                <div className="text-[11px] text-amber-500">
+                  {groupedDetail?.calculation_results?.apo_prl_state ?? "-"}
+                </div>
               </div>
             </div>
           </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5">
-            <div className="text-sm font-semibold text-gray-900 mb-4">Additional Information</div>
+            <div className="text-sm font-semibold text-gray-900 mb-4">
+              Additional Information
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">Submitted By</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.additional_information?.submitted_by_name ?? groupedDetail?.additional_information?.submitted_by ?? "-"}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  Submitted By
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {groupedDetail?.additional_information?.submitted_by_name ??
+                    groupedDetail?.additional_information?.submitted_by ??
+                    "-"}
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">Submitted Date</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.additional_information?.submitted_at ?? "-"}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  Submitted Date
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {groupedDetail?.additional_information?.submitted_at ?? "-"}
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">Approved By</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.additional_information?.approved_by_name ?? groupedDetail?.additional_information?.approved_by ?? "-"}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  Approved By
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {groupedDetail?.additional_information?.approved_by_name ??
+                    groupedDetail?.additional_information?.approved_by ??
+                    "-"}
+                </div>
               </div>
               <div>
-                <div className="text-[11px] font-medium text-gray-500 uppercase">Approved Date</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">{groupedDetail?.additional_information?.approved_at ?? groupedDetail?.additional_information?.approval_date ?? "-"}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  Approved Date
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  {groupedDetail?.additional_information?.approved_at ??
+                    groupedDetail?.additional_information?.approval_date ??
+                    "-"}
+                </div>
               </div>
               <div className="md:col-span-2">
-                <div className="text-[11px] font-medium text-gray-500 uppercase">Notes</div>
-                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 min-h-[44px]">{groupedDetail?.additional_information?.notes ?? "-"}</div>
+                <div className="text-[11px] font-medium text-gray-500 uppercase">
+                  Notes
+                </div>
+                <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 min-h-[44px]">
+                  {groupedDetail?.additional_information?.notes ?? "-"}
+                </div>
               </div>
             </div>
           </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5">
-            <div className="text-sm font-semibold text-gray-900 mb-4">History Log</div>
+            <div className="text-sm font-semibold text-gray-900 mb-4">
+              History Log
+            </div>
             {groupedDetail?.history?.length ? (
               <div className="overflow-hidden rounded-xl border border-gray-100">
                 <Table
                   size="small"
                   pagination={false}
-                  rowKey={(item, index) => `${item.date_time ?? "history"}-${index}`}
+                  rowKey={(item, index) =>
+                    `${item.date_time ?? "history"}-${index}`
+                  }
                   dataSource={groupedDetail.history}
                   columns={[
                     {
@@ -2735,16 +3378,17 @@ export default function PoBudgetPage() {
               onClick={() => {
                 setEditOpen(false);
                 setEditRow(null);
-              }}
-            >
+              }}>
               Cancel
             </Button>
-            <Button type="primary" className="!rounded-lg" onClick={saveEditBudget}>
+            <Button
+              type="primary"
+              className="!rounded-lg"
+              onClick={saveEditBudget}>
               Save Changes
             </Button>
           </div>
-        }
-      >
+        }>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <div className="text-xs text-gray-600 mb-1">Purchase Request</div>
@@ -2752,7 +3396,10 @@ export default function PoBudgetPage() {
               min={0}
               value={editForm.purchaseRequest}
               onChange={(value) =>
-                setEditForm((prev) => ({ ...prev, purchaseRequest: Number(value || 0) }))
+                setEditForm((prev) => ({
+                  ...prev,
+                  purchaseRequest: Number(value || 0),
+                }))
               }
               className="w-full"
             />
@@ -2804,7 +3451,12 @@ export default function PoBudgetPage() {
             <div className="text-xs text-gray-600 mb-1">Period</div>
             <Select
               value={editForm.period || undefined}
-              onChange={(value) => setEditForm((prev) => ({ ...prev, period: String(value ?? "") }))}
+              onChange={(value) =>
+                setEditForm((prev) => ({
+                  ...prev,
+                  period: String(value ?? ""),
+                }))
+              }
               options={periodOptions}
               className="w-full"
             />
@@ -2832,20 +3484,17 @@ export default function PoBudgetPage() {
           <div className="flex items-center justify-end gap-2">
             <Button
               className="!rounded-lg"
-              onClick={() => setAddSupplierOpen(false)}
-            >
+              onClick={() => setAddSupplierOpen(false)}>
               Cancel
             </Button>
             <Button
               type="primary"
               className="!rounded-lg"
-              onClick={confirmAddSupplier}
-            >
+              onClick={confirmAddSupplier}>
               Add Supplier
             </Button>
           </div>
-        }
-      >
+        }>
         <div className="space-y-3">
           <div>
             <div className="text-xs text-gray-600 mb-1">Supplier Name</div>

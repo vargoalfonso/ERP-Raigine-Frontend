@@ -87,6 +87,11 @@ export type PrlRecord = {
 export type PrlListRequest = {
   page: number;
   limit: number;
+  search?: string;
+  status?: string;
+  forecast_period?: string;
+  customer_uuid?: string;
+  uniq_code?: string;
 };
 
 export type PrlListPagination = {
@@ -229,7 +234,15 @@ export const prlApiSlice = apiSlice
           return {
           url: "/prls",
           method: "GET",
-          params: { page, limit },
+          params: {
+            page,
+            limit,
+            ...(params?.search ? { search: params.search } : {}),
+            ...(params?.status ? { status: params.status } : {}),
+            ...(params?.forecast_period ? { forecast_period: params.forecast_period } : {}),
+            ...(params?.customer_uuid ? { customer_uuid: params.customer_uuid } : {}),
+            ...(params?.uniq_code ? { uniq_code: params.uniq_code } : {}),
+          },
           meta: { useAuthorization: true, contentType: "application/json" },
         };
         },

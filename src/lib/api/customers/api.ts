@@ -49,6 +49,8 @@ export type CustomerRecord = {
   bank_account?: string | null;
   bank_account_number?: string | null;
 
+  bom_codes?: string[] | null;
+
   status?: string;
 
   created_at?: string;
@@ -66,6 +68,7 @@ export type CreateCustomerRequest = {
   billing_address?: string | null;
   bank_account?: string | null;
   bank_account_number?: string | null;
+  bom_codes?: string[];
 };
 
 export type UpdateCustomerRequest = CreateCustomerRequest;

@@ -16,7 +16,9 @@ import { ArrowLeftOutlined, SaveOutlined } from "@ant-design/icons";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useCreateCustomerMutation } from "@/lib/api/customers/api";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { BANK_SELECT_OPTIONS } from "@/lib/constants/banks";
+import { buildBomCodeSelectOptions, normalizeBomCodes } from "@/lib/utils/bomSelectOptions";
 
 type CreateCustomerForm = {
   customerId?: string;
@@ -27,6 +29,7 @@ type CreateCustomerForm = {
   billingAddress?: string;
   bankAccount?: string;
   bankAccountNumber?: string;
+  bomCodes?: string[];
 };
 
 export default function CreateCustomerPage() {
@@ -38,6 +41,7 @@ export default function CreateCustomerPage() {
 
   const [billingSame, setBillingSame] = useState(true);
   const [createCustomer, createState] = useCreateCustomerMutation();
+  const bomQuery = useGetBomTreeQuery({ page: 1, limit: 1000 }, { skip: !apiEnabled });
 
   useEffect(() => {
     form.setFieldsValue({
@@ -58,6 +62,11 @@ export default function CreateCustomerPage() {
     [billingSame]
   );
 
+  const bomOptions = useMemo(
+    () => buildBomCodeSelectOptions(bomQuery.data?.data ?? []),
+    [bomQuery.data]
+  );
+
   const onSave = async () => {
     try {
       const v = await form.validateFields();
@@ -71,6 +80,7 @@ export default function CreateCustomerPage() {
         billing_address: v.billingSameAsShipping ? null : (v.billingAddress?.trim() || null),
         bank_account: v.bankAccount?.trim() ? v.bankAccount.trim() : null,
         bank_account_number: v.bankAccountNumber?.trim() ? v.bankAccountNumber.trim() : null,
+        bom_codes: normalizeBomCodes(v.bomCodes),
       }).unwrap();
 
       messageApi.success("Customer created");
@@ -191,6 +201,30 @@ export default function CreateCustomerPage() {
                   />
                 </Form.Item>
               </div>
+            </Card>
+
+            <Card
+              className="!rounded-xl"
+              title={
+                <div>
+                  <div className="font-semibold">BOM Information</div>
+                  <div className="text-xs text-gray-500">Select one or more BOM uniq codes for this customer</div>
+                </div>
+              }
+            >
+              <Form.Item label="BOM Codes" name="bomCodes">
+                <Select
+                  mode="multiple"
+                  allowClear
+                  showSearch
+                  className="!rounded-lg"
+                  placeholder="Select BOM uniq codes"
+                  loading={bomQuery.isFetching}
+                  options={bomOptions}
+                  optionFilterProp="label"
+                  maxTagCount="responsive"
+                />
+              </Form.Item>
             </Card>
 
             <Card

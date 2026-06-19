@@ -9,6 +9,23 @@ const getStringField = (value: unknown, key: string): string | undefined => {
   return typeof field === "string" && field.trim() ? field : undefined;
 };
 
+const getValidationErrors = (value: unknown): string | undefined => {
+  if (!isRecord(value) || !Array.isArray(value.errors)) return undefined;
+
+  const messages = value.errors
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      if (!isRecord(item)) return "";
+      const field = typeof item.field === "string" ? item.field.trim() : "";
+      const message = typeof item.message === "string" ? item.message.trim() : "";
+      if (field && message) return `${field}: ${message}`;
+      return message || field;
+    })
+    .filter(Boolean);
+
+  return messages.length > 0 ? messages.join("; ") : undefined;
+};
+
 /**
  * Best-effort extraction of a human-readable message from RTK Query / fetch errors.
  */
@@ -34,7 +51,12 @@ export const getApiErrorMessage = (error: unknown, fallback: string): string => 
     }
 
     const data = (error as UnknownRecord).data;
+    const dataValidationErrors = getValidationErrors(data);
     const dataMessage = getStringField(data, "message");
+    if (dataMessage && dataValidationErrors) {
+      const message = `${dataMessage}: ${dataValidationErrors}`;
+      return status ? `${message} (status ${String(status)})` : message;
+    }
     if (dataMessage) return status ? `${dataMessage} (status ${String(status)})` : dataMessage;
 
     const dataError = getStringField(data, "error");
