@@ -23,6 +23,14 @@ import {
 } from "@ant-design/icons";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetRolesQuery } from "@/lib/api/system-settings/api";
+import {
+  getLoginPermissions,
+  getLoginRoleNames,
+  getModuleAccess,
+  getPermissionsFromRoles,
+  hasAnyPermission,
+} from "@/lib/utils/permissions";
 import {
   useCreateMachineParameterMutation,
   useDeleteMachineParameterMutation,
@@ -93,6 +101,23 @@ export default function MachineSettingsPanel() {
   const [createOpen, setCreateOpen] = useState(false);
   const [patternViewOpen, setPatternViewOpen] = useState(false);
   const [form] = Form.useForm<MachineMasterFormValues>();
+
+  const jwtPermissions = useMemo(() => getLoginPermissions(), []);
+  const loginRoleNames = useMemo(() => getLoginRoleNames(), []);
+  const rolesQuery = useGetRolesQuery(undefined, {
+    skip: !apiEnabled || loginRoleNames.length === 0,
+    refetchOnMountOrArgChange: true,
+  });
+  const rolePermissions = useMemo(
+    () => getPermissionsFromRoles(rolesQuery.data, loginRoleNames),
+    [rolesQuery.data, loginRoleNames]
+  );
+  const permissions = useMemo(
+    () => (hasAnyPermission(rolePermissions) ? rolePermissions : jwtPermissions),
+    [jwtPermissions, rolePermissions]
+  );
+  const machineMasterAccess = useMemo(() => getModuleAccess(permissions, ["machine_parameter", "machine"]), [permissions]);
+  const machinePatternAccess = useMemo(() => getModuleAccess(permissions, ["machine_pattern", "machine"]), [permissions]);
 
   const machineParametersQuery = useGetMachineParametersQuery({ page: 1, limit: 20 }, { skip: !apiEnabled });
   const machinePatternsQuery = useGetMachinePatternsQuery({ page: 1, limit: 20 }, { skip: !apiEnabled });
@@ -174,30 +199,38 @@ export default function MachineSettingsPanel() {
         </Tag>
       ),
     },
-    {
-      title: "Actions",
-      key: "actions",
-      width: 120,
-      render: (_value, row) => (
-        <div className="flex items-center gap-1">
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            onClick={() => {
-              setEditingMachine(row);
-              form.setFieldsValue({
-                machineName: row.machineName,
-                machineCount: row.machineCount,
-                operatingHours: row.operatingHours,
-                status: row.status,
-              });
-              setEditOpen(true);
-            }}
-          />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => setDeletingMachine(row)} />
-        </div>
-      ),
-    },
+    ...(machineMasterAccess.canUpdate || machineMasterAccess.canDelete
+      ? [
+          {
+            title: "Actions",
+            key: "actions",
+            width: 120,
+            render: (_value, row) => (
+              <div className="flex items-center gap-1">
+                {machineMasterAccess.canUpdate ? (
+                  <Button
+                    type="text"
+                    icon={<EditOutlined />}
+                    onClick={() => {
+                      setEditingMachine(row);
+                      form.setFieldsValue({
+                        machineName: row.machineName,
+                        machineCount: row.machineCount,
+                        operatingHours: row.operatingHours,
+                        status: row.status,
+                      });
+                      setEditOpen(true);
+                    }}
+                  />
+                ) : null}
+                {machineMasterAccess.canDelete ? (
+                  <Button type="text" danger icon={<DeleteOutlined />} onClick={() => setDeletingMachine(row)} />
+                ) : null}
+              </div>
+            ),
+          } satisfies ColumnsType<MachineMasterRow>[number],
+        ]
+      : []),
   ];
 
   const machinePatternColumns: ColumnsType<MachinePatternRow> = [
@@ -224,7 +257,9 @@ export default function MachineSettingsPanel() {
       render: (_value, row) => (
         <div className="flex items-center gap-1">
           <Button type="text" icon={<EyeOutlined />} onClick={() => { setViewingPattern(row); setPatternViewOpen(true); }} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => setDeletingPattern(row)} />
+          {machinePatternAccess.canDelete ? (
+            <Button type="text" danger icon={<DeleteOutlined />} onClick={() => setDeletingPattern(row)} />
+          ) : null}
         </div>
       ),
     },
@@ -238,6 +273,15 @@ export default function MachineSettingsPanel() {
   };
 
   const submitMachineForm = async (mode: "create" | "edit") => {
+    if (mode === "create" && !machineMasterAccess.canCreate) {
+      messageApi.error("You do not have permission to create machine master");
+      return;
+    }
+    if (mode === "edit" && !machineMasterAccess.canUpdate) {
+      messageApi.error("You do not have permission to update machine master");
+      return;
+    }
+
     try {
       const values = await form.validateFields();
       if (mode === "edit" && !editingMachine?.id) {
@@ -314,16 +358,18 @@ export default function MachineSettingsPanel() {
               { label: "Inactive", value: "Inactive" },
             ]}
           />
-          <Button icon={<PlusOutlined />} type="primary" onClick={() => {
-            if (machineTab === "master") {
-              form.setFieldsValue({ status: "Active", machineCount: 1, operatingHours: 8 });
-              setCreateOpen(true);
-              return;
-            }
-            router.push("/system-settings/machine/pattern/create");
-          }}>
-            {machineTab === "master" ? "Add Machine" : "Add Pattern"}
-          </Button>
+          {(machineTab === "master" ? machineMasterAccess.canCreate : machinePatternAccess.canCreate) ? (
+            <Button icon={<PlusOutlined />} type="primary" onClick={() => {
+              if (machineTab === "master") {
+                form.setFieldsValue({ status: "Active", machineCount: 1, operatingHours: 8 });
+                setCreateOpen(true);
+                return;
+              }
+              router.push("/system-settings/machine/pattern/create");
+            }}>
+              {machineTab === "master" ? "Add Machine" : "Add Pattern"}
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -439,6 +485,11 @@ export default function MachineSettingsPanel() {
         destroyOnClose={true}
         closable={true}
         onOk={async () => {
+          if (!machineMasterAccess.canDelete) {
+            messageApi.error("You do not have permission to delete machine master");
+            return;
+          }
+
           try {
             if (!deletingMachine?.id) return;
             await deleteMachineParameter(deletingMachine.id).unwrap();
@@ -490,6 +541,11 @@ export default function MachineSettingsPanel() {
         destroyOnClose={true}
         closable={true}
         onOk={async () => {
+          if (!machinePatternAccess.canDelete) {
+            messageApi.error("You do not have permission to delete machine pattern");
+            return;
+          }
+
           try {
             if (!deletingPattern?.id) return;
             await deleteMachinePattern(deletingPattern.id).unwrap();
