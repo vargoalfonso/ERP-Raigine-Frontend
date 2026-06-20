@@ -935,19 +935,24 @@ export default function SystemSettingsPage() {
     return raw.includes("inact") ? "Inactive" : "Active";
   };
 
-  const { data: rolesApiData } = useGetRolesQuery(undefined, {
+  const rolesQuery = useGetRolesQuery(undefined, {
     skip: !apiEnabled || (!shouldLoadRoles && loginRoleNames.length === 0),
     refetchOnMountOrArgChange: true,
   });
+  const rolesApiData = rolesQuery.data;
 
   const rolePermissions = useMemo(
     () => getPermissionsFromRoles(rolesApiData, loginRoleNames),
     [rolesApiData, loginRoleNames],
   );
+  const hasRolePermissions = hasAnyPermission(rolePermissions);
+  const hasJwtPermissions = hasAnyPermission(jwtPermissions);
   const permissions = useMemo(
-    () => (hasAnyPermission(rolePermissions) ? rolePermissions : jwtPermissions),
-    [jwtPermissions, rolePermissions],
+    () => (hasRolePermissions ? rolePermissions : hasJwtPermissions ? jwtPermissions : {}),
+    [hasJwtPermissions, hasRolePermissions, jwtPermissions, rolePermissions],
   );
+  const permissionsLoading = apiEnabled && !hasRolePermissions && !hasJwtPermissions && (rolesQuery.isLoading || rolesQuery.isFetching);
+  const permissionsError = apiEnabled && !hasRolePermissions && !hasJwtPermissions && !permissionsLoading;
   const permissionsReady = !apiEnabled || hasAnyPermission(permissions);
   const moduleAccessById = useMemo(
     () =>
@@ -966,7 +971,7 @@ export default function SystemSettingsPage() {
     [apiEnabled, permissions],
   );
   const visibleModules = useMemo(
-    () => (permissionsReady ? modules.filter((module) => moduleAccessById[module.id]?.canView) : modules),
+    () => (permissionsReady ? modules.filter((module) => moduleAccessById[module.id]?.canView) : []),
     [moduleAccessById, permissionsReady],
   );
 
@@ -5069,12 +5074,40 @@ export default function SystemSettingsPage() {
     </div>
   );
 
-  if (permissionsReady && visibleModules.length === 0) {
+  if (permissionsLoading) {
     return (
       <div className="p-6">
         <Card className="rounded-2xl shadow-sm">
           <div className="py-10 text-center">
-            <div className="text-lg font-semibold text-gray-900">No System Settings Access</div>
+            <div className="text-lg font-semibold text-gray-900">Loading Permissions</div>
+            <div className="mt-2 text-sm text-gray-500">Checking your System Settings access...</div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (permissionsError) {
+    return (
+      <div className="p-6">
+        <Card className="rounded-2xl shadow-sm border-red-100">
+          <div className="py-10 text-center">
+            <div className="text-lg font-semibold text-red-700">No Permission</div>
+            <div className="mt-2 text-sm text-gray-500">
+              Permission data for your role could not be loaded. Please logout and login again, or contact administrator.
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (permissionsReady && visibleModules.length === 0) {
+    return (
+      <div className="p-6">
+        <Card className="rounded-2xl shadow-sm border-red-100">
+          <div className="py-10 text-center">
+            <div className="text-lg font-semibold text-red-700">No Permission</div>
             <div className="mt-2 text-sm text-gray-500">
               Your role does not have view permission for any System Settings module.
             </div>
