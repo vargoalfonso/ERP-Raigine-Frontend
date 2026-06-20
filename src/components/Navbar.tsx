@@ -1,11 +1,12 @@
 "use client";
 
-import { apiBaseUrl, getCookiesFromBrowser } from "@/lib/api/instance";
+import { apiBaseUrl, apiSlice, getCookiesFromBrowser } from "@/lib/api/instance";
 import { getCurrentUserProfile, getCurrentUserTokenPayload, getCurrentUserUid } from "@/lib/utils/currentUser";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePathname } from "next/navigation";
 import { MdCircle } from "react-icons/md";
+import { useDispatch } from "react-redux";
 
 // Mapping path ke title
 const getPageTitle = (pathname: string): string => {
@@ -93,6 +94,7 @@ export default function Navbar() {
   const pageTitle = getPageTitle(pathname);
   const currentDate = getCurrentDate();
   const router = useRouter();
+  const dispatch = useDispatch();
   const [currentUser, setCurrentUser] = useState(() => getCurrentUserProfile());
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
@@ -269,11 +271,14 @@ export default function Navbar() {
                     // Clear auth cookies/token and redirect to login
                     try {
                       document.cookie = "Authorization=; path=/; max-age=0";
+                      sessionStorage.clear();
+                      localStorage.removeItem("Authorization");
+                      dispatch(apiSlice.util.resetApiState());
                     } catch (e) {
                       // ignore
                     }
                     setShowProfileMenu(false);
-                    router.push("/login");
+                    window.location.replace("/login");
                   }}
                   className="w-full text-left block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                 >
