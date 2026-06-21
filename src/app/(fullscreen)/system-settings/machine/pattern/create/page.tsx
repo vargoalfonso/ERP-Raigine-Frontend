@@ -8,6 +8,14 @@ import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { useListPrlsQuery } from "@/lib/api/prl/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetRolesQuery } from "@/lib/api/system-settings/api";
+import {
+  getLoginPermissions,
+  getLoginRoleNames,
+  getPermissionsFromRoles,
+  hasAnyPermission,
+  hasPermission,
+} from "@/lib/utils/permissions";
 import { useGetMachineParametersQuery } from "@/lib/api/machine-parameters/api";
 import { useCreateMachinePatternMutation, useGetMachinePatternsQuery } from "@/lib/api/machine-patterns/api";
 
@@ -58,6 +66,25 @@ export default function MachinePatternCreatePage() {
   const { data: bomTreeData } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
   const { data: prlsResponse } = useListPrlsQuery(undefined, { skip: !apiEnabled });
   const [createMachinePattern, createState] = useCreateMachinePatternMutation();
+
+  const jwtPermissions = useMemo(() => getLoginPermissions(), []);
+  const loginRoleNames = useMemo(() => getLoginRoleNames(), []);
+  const rolesQuery = useGetRolesQuery(undefined, {
+    skip: !apiEnabled || loginRoleNames.length === 0,
+    refetchOnMountOrArgChange: true,
+  });
+  const rolePermissions = useMemo(
+    () => getPermissionsFromRoles(rolesQuery.data, loginRoleNames),
+    [rolesQuery.data, loginRoleNames]
+  );
+  const permissions = useMemo(
+    () => (hasAnyPermission(rolePermissions) ? rolePermissions : jwtPermissions),
+    [jwtPermissions, rolePermissions]
+  );
+  const canCreateMachinePattern = useMemo(
+    () => hasPermission(permissions, ["machine_pattern", "machine"], "create"),
+    [permissions]
+  );
 
   const machines = machineParameters?.items ?? [];
   const prls = prlsResponse?.items ?? [];
@@ -205,6 +232,11 @@ export default function MachinePatternCreatePage() {
   };
 
   const onSave = async () => {
+    if (!canCreateMachinePattern) {
+      message.error("You do not have permission to create machine pattern");
+      return;
+    }
+
     for (const entry of entries) {
       const error = validateEntry(entry);
       if (error) {
@@ -253,7 +285,7 @@ export default function MachinePatternCreatePage() {
 
             <div className="flex items-center gap-2">
               <Button onClick={() => router.push("/system-settings")}>Cancel</Button>
-              <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={createState.isLoading}>
+              <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={createState.isLoading} disabled={!canCreateMachinePattern}>
                 Save Parameter
               </Button>
             </div>
@@ -399,7 +431,7 @@ export default function MachinePatternCreatePage() {
           ))}
 
           <div className="flex items-center justify-center">
-            <Button icon={<PlusOutlined />} onClick={addAnother}>
+            <Button icon={<PlusOutlined />} onClick={addAnother} disabled={!canCreateMachinePattern}>
               Add Another Parameter
             </Button>
           </div>

@@ -108,6 +108,14 @@ import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 import { useGetInventoryListQuery } from "@/lib/api/inventory/api";
 import MachineSettingsPanel from "@/components/system-settings/MachineSettingsPanel";
+import {
+  getLoginPermissions,
+  getLoginRoleNames,
+  getModuleAccess,
+  getPermissionsFromRoles,
+  hasAnyPermission,
+  hasPermission,
+} from "@/lib/utils/permissions";
 
 type StatusType = "Active" | "Inactive";
 
@@ -259,6 +267,23 @@ type ModuleItem = {
   icon: React.ReactNode;
   iconBgClass: string;
   iconTextClass: string;
+};
+
+const MODULE_PERMISSION_KEYS: Record<string, string[]> = {
+  "access-control-matrix": ["users"],
+  roles: ["role"],
+  "safety-stock": ["safety-stock"],
+  stockdays: ["stockdays"],
+  "buy-not-buy-flag": ["procurement"],
+  "type-parameters": ["type-parameter"],
+  scrap: ["scrap_type", "scrap"],
+  "uom-global": ["unit_measurement"],
+  "purchase-order": ["po_split_setting"],
+  machine: ["machine", "machine_parameter", "machine_pattern"],
+  "approval-workflow": ["approval_workflow"],
+  kanban: ["kanban"],
+  global: ["global_parameter"],
+  process: ["process"],
 };
 
 const modules: ModuleItem[] = [
@@ -858,6 +883,9 @@ export default function SystemSettingsPage() {
     () => readSystemSettingsModule(),
   );
 
+  const jwtPermissions = useMemo(() => getLoginPermissions(), []);
+  const loginRoleNames = useMemo(() => getLoginRoleNames(), []);
+
   useEffect(() => {
     rememberSystemSettingsModule(selectedModuleId);
   }, [selectedModuleId]);
@@ -907,9 +935,60 @@ export default function SystemSettingsPage() {
     return raw.includes("inact") ? "Inactive" : "Active";
   };
 
-  const { data: rolesApiData } = useGetRolesQuery(undefined, {
-    skip: !shouldLoadRoles,
+  const rolesQuery = useGetRolesQuery(undefined, {
+    skip: !apiEnabled || (!shouldLoadRoles && loginRoleNames.length === 0),
+    refetchOnMountOrArgChange: true,
   });
+  const rolesApiData = rolesQuery.data;
+
+  const rolePermissions = useMemo(
+    () => getPermissionsFromRoles(rolesApiData, loginRoleNames),
+    [rolesApiData, loginRoleNames],
+  );
+  const hasRolePermissions = hasAnyPermission(rolePermissions);
+  const hasJwtPermissions = hasAnyPermission(jwtPermissions);
+  const permissions = useMemo(
+    () => (hasRolePermissions ? rolePermissions : hasJwtPermissions ? jwtPermissions : {}),
+    [hasJwtPermissions, hasRolePermissions, jwtPermissions, rolePermissions],
+  );
+  const permissionsLoading = apiEnabled && !hasRolePermissions && !hasJwtPermissions && (rolesQuery.isLoading || rolesQuery.isFetching);
+  const permissionsError = apiEnabled && !hasRolePermissions && !hasJwtPermissions && !permissionsLoading;
+  const permissionsReady = !apiEnabled || hasAnyPermission(permissions);
+  const moduleAccessById = useMemo(
+    () =>
+      Object.fromEntries(
+        modules.map((module) => {
+          const keys = MODULE_PERMISSION_KEYS[module.id] ?? [module.id];
+          return [
+            module.id,
+            {
+              canView: !apiEnabled || hasPermission(permissions, keys, "view"),
+              ...getModuleAccess(permissions, keys),
+            },
+          ];
+        }),
+      ) as Record<string, { canView: boolean; canCreate: boolean; canUpdate: boolean; canDelete: boolean }>,
+    [apiEnabled, permissions],
+  );
+  const visibleModules = useMemo(
+    () => (permissionsReady ? modules.filter((module) => moduleAccessById[module.id]?.canView) : []),
+    [moduleAccessById, permissionsReady],
+  );
+
+  useEffect(() => {
+    if (!permissionsReady || visibleModules.length === 0) return;
+    if (!visibleModules.some((module) => module.id === selectedModuleId)) {
+      setSelectedModuleId(visibleModules[0].id);
+    }
+  }, [permissionsReady, selectedModuleId, visibleModules]);
+
+  const selectedModuleAccess = moduleAccessById[selectedModuleId] ?? {
+    canView: !apiEnabled,
+    canCreate: !apiEnabled,
+    canUpdate: !apiEnabled,
+    canDelete: !apiEnabled,
+  };
+  const canCreateSelectedModule = selectedModuleAccess.canCreate;
   const { data: departmentsApiData } = useGetDepartmentsQuery(undefined, {
     skip: !shouldLoadDepartments,
   });
@@ -995,8 +1074,8 @@ export default function SystemSettingsPage() {
     skip: !shouldLoadBomTree,
   });
   const selectedModule = useMemo(
-    () => modules.find((m) => m.id === selectedModuleId) ?? modules[0],
-    [selectedModuleId],
+    () => visibleModules.find((m) => m.id === selectedModuleId) ?? visibleModules[0] ?? modules[0],
+    [selectedModuleId, visibleModules],
   );
 
   const [query, setQuery] = useState("");
@@ -3583,17 +3662,21 @@ export default function SystemSettingsPage() {
             icon={<EyeOutlined />}
             onClick={() => openDetail(r)}
           />
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            onClick={() => openEdit(r)}
-          />
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => openDelete(r)}
-          />
+          {moduleAccessById["access-control-matrix"]?.canUpdate ? (
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => openEdit(r)}
+            />
+          ) : null}
+          {moduleAccessById["access-control-matrix"]?.canDelete ? (
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => openDelete(r)}
+            />
+          ) : null}
         </div>
       ),
     },
@@ -3631,17 +3714,21 @@ export default function SystemSettingsPage() {
             icon={<EyeOutlined />}
             onClick={() => openRoleDetail(r)}
           />
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            onClick={() => openEditRole(r)}
-          />
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => openRoleDelete(r)}
-          />
+          {moduleAccessById.roles?.canUpdate ? (
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => openEditRole(r)}
+            />
+          ) : null}
+          {moduleAccessById.roles?.canDelete ? (
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => openRoleDelete(r)}
+            />
+          ) : null}
         </div>
       ),
     },
@@ -3703,17 +3790,21 @@ export default function SystemSettingsPage() {
             icon={<EyeOutlined />}
             onClick={() => openSafetyDetail(r)}
           />
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            onClick={() => openEditSafety(r)}
-          />
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => openSafetyDelete(r)}
-          />
+          {moduleAccessById["safety-stock"]?.canUpdate ? (
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => openEditSafety(r)}
+            />
+          ) : null}
+          {moduleAccessById["safety-stock"]?.canDelete ? (
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => openSafetyDelete(r)}
+            />
+          ) : null}
         </div>
       ),
     },
@@ -3788,17 +3879,21 @@ export default function SystemSettingsPage() {
             icon={<EyeOutlined />}
             onClick={() => openStockdaysDetail(r)}
           />
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            onClick={() => openEditStockdays(r)}
-          />
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => openStockdaysDelete(r)}
-          />
+          {moduleAccessById.stockdays?.canUpdate ? (
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => openEditStockdays(r)}
+            />
+          ) : null}
+          {moduleAccessById.stockdays?.canDelete ? (
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => openStockdaysDelete(r)}
+            />
+          ) : null}
         </div>
       ),
     },
@@ -3878,8 +3973,12 @@ export default function SystemSettingsPage() {
       render: (_: unknown, row: BuyNotBuyFlagRow) => (
         <div className="flex items-center gap-1">
           <Button type="text" icon={<EyeOutlined />} onClick={() => openBuyNotBuyFlagDetail(row)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditBuyNotBuyFlag(row)} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openBuyNotBuyFlagDelete(row)} />
+          {moduleAccessById["buy-not-buy-flag"]?.canUpdate ? (
+            <Button type="text" icon={<EditOutlined />} onClick={() => openEditBuyNotBuyFlag(row)} />
+          ) : null}
+          {moduleAccessById["buy-not-buy-flag"]?.canDelete ? (
+            <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openBuyNotBuyFlagDelete(row)} />
+          ) : null}
         </div>
       ),
     },
@@ -3936,17 +4035,21 @@ export default function SystemSettingsPage() {
             icon={<EyeOutlined />}
             onClick={() => openTypeParameterDetail(r)}
           />
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            onClick={() => openEditTypeParameter(r)}
-          />
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => openTypeParameterDelete(r)}
-          />
+          {moduleAccessById["type-parameters"]?.canUpdate ? (
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => openEditTypeParameter(r)}
+            />
+          ) : null}
+          {moduleAccessById["type-parameters"]?.canDelete ? (
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => openTypeParameterDelete(r)}
+            />
+          ) : null}
         </div>
       ),
     },
@@ -3995,8 +4098,12 @@ export default function SystemSettingsPage() {
       render: (_: unknown, r: ScrapTypeRow) => (
         <div className="flex items-center gap-1">
           <Button type="text" icon={<EyeOutlined />} onClick={() => openScrapDetail(r)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openScrapEdit(r)} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openScrapDelete(r)} />
+          {moduleAccessById.scrap?.canUpdate ? (
+            <Button type="text" icon={<EditOutlined />} onClick={() => openScrapEdit(r)} />
+          ) : null}
+          {moduleAccessById.scrap?.canDelete ? (
+            <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openScrapDelete(r)} />
+          ) : null}
         </div>
       ),
     },
@@ -4053,17 +4160,21 @@ export default function SystemSettingsPage() {
             icon={<EyeOutlined />}
             onClick={() => openUomDetail(r)}
           />
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            onClick={() => openEditUom(r)}
-          />
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => openUomDelete(r)}
-          />
+          {moduleAccessById["uom-global"]?.canUpdate ? (
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => openEditUom(r)}
+            />
+          ) : null}
+          {moduleAccessById["uom-global"]?.canDelete ? (
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => openUomDelete(r)}
+            />
+          ) : null}
         </div>
       ),
     },
@@ -4137,17 +4248,21 @@ export default function SystemSettingsPage() {
             icon={<EyeOutlined />}
             onClick={() => openPurchaseOrderDetail(r)}
           />
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            onClick={() => openEditPurchaseOrder(r)}
-          />
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => openPurchaseOrderDelete(r)}
-          />
+          {moduleAccessById["purchase-order"]?.canUpdate ? (
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => openEditPurchaseOrder(r)}
+            />
+          ) : null}
+          {moduleAccessById["purchase-order"]?.canDelete ? (
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => openPurchaseOrderDelete(r)}
+            />
+          ) : null}
         </div>
       ),
     },
@@ -4212,17 +4327,21 @@ export default function SystemSettingsPage() {
             icon={<EyeOutlined />}
             onClick={() => openApprovalWorkflowDetail(r)}
           />
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            onClick={() => openEditApprovalWorkflow(r)}
-          />
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => openApprovalWorkflowDelete(r)}
-          />
+          {moduleAccessById["approval-workflow"]?.canUpdate ? (
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => openEditApprovalWorkflow(r)}
+            />
+          ) : null}
+          {moduleAccessById["approval-workflow"]?.canDelete ? (
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => openApprovalWorkflowDelete(r)}
+            />
+          ) : null}
         </div>
       ),
     },
@@ -4286,17 +4405,21 @@ export default function SystemSettingsPage() {
             icon={<EyeOutlined />}
             onClick={() => openKanbanDetail(r)}
           />
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            onClick={() => openEditKanban(r)}
-          />
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => openKanbanDelete(r)}
-          />
+          {moduleAccessById.kanban?.canUpdate ? (
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => openEditKanban(r)}
+            />
+          ) : null}
+          {moduleAccessById.kanban?.canDelete ? (
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => openKanbanDelete(r)}
+            />
+          ) : null}
         </div>
       ),
     },
@@ -4350,17 +4473,21 @@ export default function SystemSettingsPage() {
             icon={<EyeOutlined />}
             onClick={() => openGlobalWorkingDaysDetail(r)}
           />
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            onClick={() => openEditGlobalWorkingDays(r)}
-          />
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => openGlobalWorkingDaysDelete(r)}
-          />
+          {moduleAccessById.global?.canUpdate ? (
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => openEditGlobalWorkingDays(r)}
+            />
+          ) : null}
+          {moduleAccessById.global?.canDelete ? (
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => openGlobalWorkingDaysDelete(r)}
+            />
+          ) : null}
         </div>
       ),
     },
@@ -4417,17 +4544,21 @@ export default function SystemSettingsPage() {
             icon={<EyeOutlined />}
             onClick={() => openProcessDetail(r)}
           />
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            onClick={() => openEditProcess(r)}
-          />
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => openProcessDelete(r)}
-          />
+          {moduleAccessById.process?.canUpdate ? (
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => openEditProcess(r)}
+            />
+          ) : null}
+          {moduleAccessById.process?.canDelete ? (
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => openProcessDelete(r)}
+            />
+          ) : null}
         </div>
       ),
     },
@@ -4484,7 +4615,9 @@ export default function SystemSettingsPage() {
       render: (_: unknown, r: MachinePatternRow) => (
         <div className="flex items-center gap-1">
           <Button type="text" icon={<EyeOutlined />} onClick={() => openMachinePatternDetail(r)} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openMachinePatternDelete(r)} />
+          {moduleAccessById.machine?.canDelete ? (
+            <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openMachinePatternDelete(r)} />
+          ) : null}
         </div>
       ),
     },
@@ -4940,6 +5073,49 @@ export default function SystemSettingsPage() {
       </Form>
     </div>
   );
+
+  if (permissionsLoading) {
+    return (
+      <div className="p-6">
+        <Card className="rounded-2xl shadow-sm">
+          <div className="py-10 text-center">
+            <div className="text-lg font-semibold text-gray-900">Loading Permissions</div>
+            <div className="mt-2 text-sm text-gray-500">Checking your System Settings access...</div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (permissionsError) {
+    return (
+      <div className="p-6">
+        <Card className="rounded-2xl shadow-sm border-red-100">
+          <div className="py-10 text-center">
+            <div className="text-lg font-semibold text-red-700">No Permission</div>
+            <div className="mt-2 text-sm text-gray-500">
+              Permission data for your role could not be loaded. Please logout and login again, or contact administrator.
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (permissionsReady && visibleModules.length === 0) {
+    return (
+      <div className="p-6">
+        <Card className="rounded-2xl shadow-sm border-red-100">
+          <div className="py-10 text-center">
+            <div className="text-lg font-semibold text-red-700">No Permission</div>
+            <div className="mt-2 text-sm text-gray-500">
+              Your role does not have view permission for any System Settings module.
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -6409,7 +6585,7 @@ export default function SystemSettingsPage() {
             </div>
           </div>
           <div className="p-2 max-h-[620px] overflow-y-auto">
-            {modules.map((m) => {
+            {visibleModules.map((m) => {
               const selected = m.id === selectedModuleId;
               return (
                 <button
@@ -6466,7 +6642,7 @@ export default function SystemSettingsPage() {
                   className="bg-blue-100 text-blue-700 border-blue-100"
                   icon={<InfoCircleOutlined />}
                 >
-                  {modules.length} Configuration Modules
+                  {visibleModules.length} Configuration Modules
                 </Button>
               </div>
             </div>
@@ -6556,83 +6732,89 @@ export default function SystemSettingsPage() {
                               : selectedModule.description}
                   </div>
                 </div>
-                <Button
-                  type={selectedModuleId === "purchase-order" && purchaseOrderEditOpen ? "default" : "primary"}
-                  icon={selectedModuleId === "purchase-order" && purchaseOrderEditOpen ? undefined : <PlusOutlined />}
-                  onClick={() => {
-                    if (selectedModuleId === "purchase-order" && purchaseOrderEditOpen) {
-                      closePurchaseOrderEdit();
-                      return;
-                    }
-                    if (selectedModuleId === "access-control-matrix") {
-                      router.push(
-                        "/system-settings/access-control-matrix/create",
-                      );
-                      return;
-                    }
-                    if (selectedModuleId === "roles") {
-                      openCreateRole();
-                      return;
-                    }
-                    if (selectedModuleId === "safety-stock") {
-                      router.push("/system-settings/safety-stock/create");
-                      return;
-                    }
-                    if (selectedModuleId === "stockdays") {
-                      router.push("/system-settings/stockdays/create");
-                      return;
-                    }
-                    if (selectedModuleId === "buy-not-buy-flag") {
-                      openCreateBuyNotBuyFlag();
-                      return;
-                    }
-                    if (selectedModuleId === "scrap") {
-                      router.push("/system-settings/scrap-type/create");
-                      return;
-                    }
-                    if (selectedModuleId === "type-parameters") {
-                      openCreateTypeParameter();
-                      return;
-                    }
-                    if (selectedModuleId === "uom-global") {
-                      openCreateUom();
-                      return;
-                    }
-                    if (selectedModuleId === "purchase-order") {
-                      openCreatePurchaseOrder();
-                      return;
-                    }
-                    if (selectedModuleId === "approval-workflow") {
-                      router.push("/system-settings/approval-workflow/create");
-                      return;
-                    }
-                    if (selectedModuleId === "kanban") {
-                      router.push(
-                        "/system-settings/kanban/parameter/create-fullscreen",
-                      );
-                      return;
-                    }
-                    if (selectedModuleId === "global") {
-                      router.push("/system-settings/global/create-fullscreen");
-                      return;
-                    }
-                    if (selectedModuleId === "process") {
-                      router.push("/system-settings/process/create-fullscreen");
-                      return;
-                    }
-                    if (selectedModuleId === "machine") {
-                      if (machineTab === "pattern") {
-                        router.push("/system-settings/machine/pattern/create");
+                {(selectedModuleId === "purchase-order" && purchaseOrderEditOpen) || canCreateSelectedModule ? (
+                  <Button
+                    type={selectedModuleId === "purchase-order" && purchaseOrderEditOpen ? "default" : "primary"}
+                    icon={selectedModuleId === "purchase-order" && purchaseOrderEditOpen ? undefined : <PlusOutlined />}
+                    onClick={() => {
+                      if (selectedModuleId === "purchase-order" && purchaseOrderEditOpen) {
+                        closePurchaseOrderEdit();
+                        return;
                       }
-                      return;
-                    }
-                    openCreate();
-                  }}
-                >
-                  {selectedModuleId === "purchase-order" && purchaseOrderEditOpen
-                    ? "Back to List"
-                    : "Add Parameter"}
-                </Button>
+                      if (!canCreateSelectedModule) {
+                        message.error("You do not have permission to create this parameter");
+                        return;
+                      }
+                      if (selectedModuleId === "access-control-matrix") {
+                        router.push(
+                          "/system-settings/access-control-matrix/create",
+                        );
+                        return;
+                      }
+                      if (selectedModuleId === "roles") {
+                        openCreateRole();
+                        return;
+                      }
+                      if (selectedModuleId === "safety-stock") {
+                        router.push("/system-settings/safety-stock/create");
+                        return;
+                      }
+                      if (selectedModuleId === "stockdays") {
+                        router.push("/system-settings/stockdays/create");
+                        return;
+                      }
+                      if (selectedModuleId === "buy-not-buy-flag") {
+                        openCreateBuyNotBuyFlag();
+                        return;
+                      }
+                      if (selectedModuleId === "scrap") {
+                        router.push("/system-settings/scrap-type/create");
+                        return;
+                      }
+                      if (selectedModuleId === "type-parameters") {
+                        openCreateTypeParameter();
+                        return;
+                      }
+                      if (selectedModuleId === "uom-global") {
+                        openCreateUom();
+                        return;
+                      }
+                      if (selectedModuleId === "purchase-order") {
+                        openCreatePurchaseOrder();
+                        return;
+                      }
+                      if (selectedModuleId === "approval-workflow") {
+                        router.push("/system-settings/approval-workflow/create");
+                        return;
+                      }
+                      if (selectedModuleId === "kanban") {
+                        router.push(
+                          "/system-settings/kanban/parameter/create-fullscreen",
+                        );
+                        return;
+                      }
+                      if (selectedModuleId === "global") {
+                        router.push("/system-settings/global/create-fullscreen");
+                        return;
+                      }
+                      if (selectedModuleId === "process") {
+                        router.push("/system-settings/process/create-fullscreen");
+                        return;
+                      }
+                      if (selectedModuleId === "machine") {
+                        if (machineTab === "pattern") {
+                          router.push("/system-settings/machine/pattern/create");
+                        }
+                        return;
+                      }
+                      openCreate();
+                    }}
+                  >
+                    {selectedModuleId === "purchase-order" && purchaseOrderEditOpen
+                      ? "Back to List"
+                      : "Add Parameter"}
+                  </Button>
+                ) : null}
               </div>
 
               {selectedModuleId === "purchase-order" && purchaseOrderEditOpen ? (
