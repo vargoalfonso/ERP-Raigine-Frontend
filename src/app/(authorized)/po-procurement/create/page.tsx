@@ -301,13 +301,13 @@ function CreatePoProcurementPageContent() {
 
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">PO Budget</div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">PR Budget</div>
               <Select
                 mode="multiple"
                 value={selectedBudgetIds}
                 onChange={(values) => setSelectedBudgetIds(values.map((value) => Number(value)).filter(Number.isFinite))}
                 options={poBudgetOptions}
-                placeholder="Select PO Budget entries"
+                placeholder="Select PR Budget entries"
                 className="w-full"
               />
             </div>

@@ -2370,12 +2370,25 @@ export default function PoBudgetPage() {
               placeholder="Select PRL to autofill"
               className="w-full"
               onChange={(v) => {
-                const prlId = String(v ?? "");
-                const matched = approvedPrls.find(
-                  (p) =>
-                    String(p.prl_id ?? p.id ?? "") === prlId ||
-                    String(p.id ?? p.prl_id ?? "") === prlId,
-                );
+                const raw = String(v ?? "");
+                const parsed = parsePrlSelection(raw);
+                let matched;
+                if (parsed) {
+                  matched = approvedPrls.find((p) => {
+                    const itemPrlId = String(p.prl_id ?? p.id ?? "");
+                    const itemRowId = String(
+                      getPrlRowId(p as Record<string, unknown>) ?? p.id ?? "",
+                    );
+                    return itemPrlId === parsed.prlId && itemRowId === parsed.prlItemId;
+                  });
+                } else {
+                  const prlId = raw;
+                  matched = approvedPrls.find(
+                    (p) =>
+                      String(p.prl_id ?? p.id ?? "") === prlId ||
+                      String(p.id ?? p.prl_id ?? "") === prlId,
+                  );
+                }
                 if (!matched) {
                   setAddForm((p) => ({ ...p, prl: "" }));
                   return;
@@ -2394,29 +2407,23 @@ export default function PoBudgetPage() {
                 }
                 setAddForm((prev) => ({
                   ...prev,
-                  prl: prlId,
-                  customer: matched.customer_name ?? matched.customer?.customer_name ?? prev.customer,
-                  customerId: resolvePrlCustomerId(matched as Record<string, unknown>) ?? prev.customerId,
-                  uniq: uniqCode || prev.uniq,
-                  productModel: matched.product_model ?? prev.productModel,
-                  partName: matched.part_name ?? prev.partName,
-                  partNumber: matched.part_number ?? prev.partNumber,
-                  period: getPrlPeriodValue(matched) || prev.period,
-                  salesPlan: Number(matched.quantity ?? prev.salesPlan ?? 0),
-                  uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
-                  weightKg:
-                    supplierItemMatch?.weight == null
-                      ? prev.weightKg
-                      : String(supplierItemMatch.weight),
-                  supplier: String(
-                    supplierItemMatch?.supplier_name ?? prev.supplier ?? "",
-                  ),
-                  supplierId:
-                    resolveSupplierRowId({
-                      supplierUuid: supplierItemMatch?.supplier_uuid,
-                      supplierCode: supplierItemMatch?.supplier_code,
-                      supplierName: supplierItemMatch?.supplier_name,
-                    }) ?? prev.supplierId,
+                  prl: raw,
+                  customer: matched.customer_name ?? matched.customer?.customer_name ?? "",
+                  customerId: resolvePrlCustomerId(matched as Record<string, unknown>) ?? null,
+                  uniq: uniqCode || "",
+                  productModel: matched.product_model ?? "",
+                  partName: matched.part_name ?? "",
+                  partNumber: matched.part_number ?? "",
+                  period: getPrlPeriodValue(matched) || "",
+                  salesPlan: Number(matched.quantity ?? 0),
+                  uom: String(supplierItemMatch?.uom ?? ""),
+                  weightKg: supplierItemMatch?.weight == null ? "" : String(supplierItemMatch.weight),
+                  supplier: String(supplierItemMatch?.supplier_name ?? ""),
+                  supplierId: resolveSupplierRowId({
+                    supplierUuid: supplierItemMatch?.supplier_uuid,
+                    supplierCode: supplierItemMatch?.supplier_code,
+                    supplierName: supplierItemMatch?.supplier_name,
+                  }) ?? null,
                 }));
               }}
             />
