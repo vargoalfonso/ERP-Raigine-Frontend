@@ -1755,7 +1755,7 @@ export default function PoBudgetPage() {
 
     const body = {
       prl_id: String(
-        bulkItems[0]?.prlId ?? selectedPrl?.prl_id ?? selectedPrl?.id ?? "",
+        bulkItems[0]?.prlId || selectedPrl?.prl_id || selectedPrl?.id || "",
       ),
       budget_subtype: bulkBudgetType === "adhoc" ? "adhoc" : "regular",
       period: normalizePeriodForApi(bulkPeriod),
@@ -2861,7 +2861,10 @@ export default function PoBudgetPage() {
                   allowClear
                   showSearch
                   value={bulkPrlIds}
-                  onChange={(values) => setBulkPrlIds(values)}
+                  onChange={(values) => {
+                    setBulkPrlIds(values);
+                    setBulkItems(buildBulkItemsFromPrl(values));
+                  }}
                   onSearch={handleBulkPrlSearch}
                   onPopupScroll={handleBulkPrlPopupScroll}
                   options={prlOptions}
