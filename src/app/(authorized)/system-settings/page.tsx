@@ -3898,8 +3898,9 @@ export default function SystemSettingsPage() {
       ),
     },
   ];
+  
 
-  const buyNotBuyFlagColumns: ColumnsType<BuyNotBuyFlagRow> = [
+  const buyNotBuyColumns: ColumnsType<BuyNotBuyFlagRow> = [
     {
       title: "Uniq",
       dataIndex: "uniq",
@@ -3973,12 +3974,8 @@ export default function SystemSettingsPage() {
       render: (_: unknown, row: BuyNotBuyFlagRow) => (
         <div className="flex items-center gap-1">
           <Button type="text" icon={<EyeOutlined />} onClick={() => openBuyNotBuyFlagDetail(row)} />
-          {moduleAccessById["buy-not-buy-flag"]?.canUpdate ? (
-            <Button type="text" icon={<EditOutlined />} onClick={() => openEditBuyNotBuyFlag(row)} />
-          ) : null}
-          {moduleAccessById["buy-not-buy-flag"]?.canDelete ? (
-            <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openBuyNotBuyFlagDelete(row)} />
-          ) : null}
+          <Button type="text" icon={<EditOutlined />} onClick={() => openEditBuyNotBuyFlag(row)} />
+          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openBuyNotBuyFlagDelete(row)} />
         </div>
       ),
     },
@@ -6847,7 +6844,7 @@ export default function SystemSettingsPage() {
                   />
                 ) : selectedModuleId === "buy-not-buy-flag" ? (
                   <Table<BuyNotBuyFlagRow>
-                    columns={buyNotBuyFlagColumns}
+                    columns={buyNotBuyColumns}
                     dataSource={filteredBuyNotBuyRows}
                     rowKey="id"
                     pagination={false}

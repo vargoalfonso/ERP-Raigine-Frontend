@@ -1633,26 +1633,30 @@ export default function PoBudgetPage() {
     const effectiveCustomerId =
       addForm.customerId ??
       customerIdByName.get(normalizeCustomerName(addForm.customer)) ??
+      toIntegerId(addForm.customer) ??
+      // fallback: if matchedAddPrl exists, try to resolve from it
+      (matchedAddPrl ? resolvePrlCustomerId(matchedAddPrl as Record<string, unknown>) : null) ??
       null;
-    const effectiveSupplierId =
-      addForm.supplierId ?? resolvedAddSupplierOption?.supplierId ?? null;
 
-    if (
-      effectiveCustomerId == null ||
-      !addForm.customer ||
-      !addForm.uniq ||
-      effectiveSupplierId == null ||
-      !addForm.uom ||
-      !addForm.period
-    ) {
-      message.warning(
-        "Please complete customer, uniq, supplier, UOM, and period",
-      );
-      return;
-    }
+    const effectiveSupplierId =
+      addForm.supplierId ??
+      resolvedAddSupplierOption?.supplierId ??
+      // try to resolve by supplier name text
+      resolveSupplierRowId({ supplierName: addForm.supplier }) ??
+      null;
+
+    // NOTE: Removed client-side blocking validation so backend responses
+    // (success or detailed validation errors) are visible to the user.
+    // The API will return validation messages which we surface in the catch.
 
     const payload: PoBudgetEntryRequest = {
-      customer_id: effectiveCustomerId,
+      // Ensure customer_id matches expected `string | number` type.
+      // Use resolved ID when available, otherwise fall back to the visible
+      // customer text so the backend can attempt resolution and return
+      // a helpful error if necessary.
+      customer_id: (effectiveCustomerId ?? addForm.customer ?? "") as
+        | string
+        | number,
       customer_name: addForm.customer,
       uniq_code: addForm.uniq,
       product_model: addForm.productModel,
@@ -1661,7 +1665,9 @@ export default function PoBudgetPage() {
       uom: addForm.uom,
       weight_kg: Number(addForm.weightKg || 0),
       description: addForm.description,
-      supplier_id: Number(effectiveSupplierId),
+      supplier_id: (effectiveSupplierId ?? addForm.supplier ?? "") as
+        | string
+        | number,
       supplier_name: addForm.supplier,
       period: normalizePeriodForApi(addForm.period),
       sales_plan: Number(addForm.salesPlan || 0),
@@ -2370,12 +2376,25 @@ export default function PoBudgetPage() {
               placeholder="Select PRL to autofill"
               className="w-full"
               onChange={(v) => {
-                const prlId = String(v ?? "");
-                const matched = approvedPrls.find(
-                  (p) =>
-                    String(p.prl_id ?? p.id ?? "") === prlId ||
-                    String(p.id ?? p.prl_id ?? "") === prlId,
-                );
+                const raw = String(v ?? "");
+                const parsed = parsePrlSelection(raw);
+                let matched;
+                if (parsed) {
+                  matched = approvedPrls.find((p) => {
+                    const itemPrlId = String(p.prl_id ?? p.id ?? "");
+                    const itemRowId = String(
+                      getPrlRowId(p as Record<string, unknown>) ?? p.id ?? "",
+                    );
+                    return itemPrlId === parsed.prlId && itemRowId === parsed.prlItemId;
+                  });
+                } else {
+                  const prlId = raw;
+                  matched = approvedPrls.find(
+                    (p) =>
+                      String(p.prl_id ?? p.id ?? "") === prlId ||
+                      String(p.id ?? p.prl_id ?? "") === prlId,
+                  );
+                }
                 if (!matched) {
                   setAddForm((p) => ({ ...p, prl: "" }));
                   return;
@@ -2394,29 +2413,23 @@ export default function PoBudgetPage() {
                 }
                 setAddForm((prev) => ({
                   ...prev,
-                  prl: prlId,
-                  customer: matched.customer_name ?? matched.customer?.customer_name ?? prev.customer,
-                  customerId: resolvePrlCustomerId(matched as Record<string, unknown>) ?? prev.customerId,
-                  uniq: uniqCode || prev.uniq,
-                  productModel: matched.product_model ?? prev.productModel,
-                  partName: matched.part_name ?? prev.partName,
-                  partNumber: matched.part_number ?? prev.partNumber,
-                  period: getPrlPeriodValue(matched) || prev.period,
-                  salesPlan: Number(matched.quantity ?? prev.salesPlan ?? 0),
-                  uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
-                  weightKg:
-                    supplierItemMatch?.weight == null
-                      ? prev.weightKg
-                      : String(supplierItemMatch.weight),
-                  supplier: String(
-                    supplierItemMatch?.supplier_name ?? prev.supplier ?? "",
-                  ),
-                  supplierId:
-                    resolveSupplierRowId({
-                      supplierUuid: supplierItemMatch?.supplier_uuid,
-                      supplierCode: supplierItemMatch?.supplier_code,
-                      supplierName: supplierItemMatch?.supplier_name,
-                    }) ?? prev.supplierId,
+                  prl: raw,
+                  customer: matched.customer_name ?? matched.customer?.customer_name ?? "",
+                  customerId: resolvePrlCustomerId(matched as Record<string, unknown>) ?? null,
+                  uniq: uniqCode || "",
+                  productModel: matched.product_model ?? "",
+                  partName: matched.part_name ?? "",
+                  partNumber: matched.part_number ?? "",
+                  period: getPrlPeriodValue(matched) || "",
+                  salesPlan: Number(matched.quantity ?? 0),
+                  uom: String(supplierItemMatch?.uom ?? ""),
+                  weightKg: supplierItemMatch?.weight == null ? "" : String(supplierItemMatch.weight),
+                  supplier: String(supplierItemMatch?.supplier_name ?? ""),
+                  supplierId: resolveSupplierRowId({
+                    supplierUuid: supplierItemMatch?.supplier_uuid,
+                    supplierCode: supplierItemMatch?.supplier_code,
+                    supplierName: supplierItemMatch?.supplier_name,
+                  }) ?? null,
                 }));
               }}
             />
@@ -2455,6 +2468,16 @@ export default function PoBudgetPage() {
                     ...prev,
                     customerId: selectedCustomerId,
                     customer: String(selected?.label ?? ""),
+                    // If we found a matched PRL, prefer its uniq and PRL-derived fields
+                    uniq: matchedPrl
+                      ? String(matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "")
+                      : prev.uniq,
+                    productModel: matchedPrl?.product_model ?? prev.productModel,
+                    partName: matchedPrl?.part_name ?? prev.partName,
+                    partNumber: matchedPrl?.part_number ?? prev.partNumber,
+                    period: getPrlPeriodValue(matchedPrl) || prev.period,
+                    salesPlan: Number(matchedPrl?.quantity ?? prev.salesPlan ?? 0),
+                    // Supplier info: prefer explicit supplierItemMatch when available, otherwise keep previous
                     supplier: supplierItemMatch?.supplier_name ?? prev.supplier ?? "",
                     supplierId:
                       resolveSupplierRowId({
@@ -2462,20 +2485,9 @@ export default function PoBudgetPage() {
                         supplierCode: supplierItemMatch?.supplier_code,
                         supplierName: supplierItemMatch?.supplier_name,
                       }) ?? prev.supplierId,
-                    uniq: matchedPrl ? prev.uniq : "",
-                    productModel:
-                      matchedPrl?.product_model ??
-                      "",
-                    partName:
-                      matchedPrl?.part_name ??
-                      "",
-                    partNumber:
-                      matchedPrl?.part_number ??
-                      "",
-                    period: getPrlPeriodValue(matchedPrl) || prev.period,
                     uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
                     weightKg: supplierItemMatch?.weight == null ? prev.weightKg : String(supplierItemMatch.weight),
-                    salesPlan: Number(matchedPrl?.quantity ?? prev.salesPlan ?? 0),
+                    description: supplierItemMatch?.description ?? prev.description,
                   }));
               }}
             />
