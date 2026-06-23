@@ -249,7 +249,24 @@ function getPrlPeriodValue(prl: unknown): string {
 
 function getPrlRowId(prl: unknown): number | null {
   if (!isRecord(prl)) return null;
-  return toIntegerId(prl.row_id);
+  // Try common fields that may contain the PRL row identifier. Some APIs
+  // return `row_id`, others `id`, `prl_item_id`, or similar. Accept the
+  // first integer-like value we can parse.
+  const candidates = [
+    (prl as any).row_id,
+    (prl as any).id,
+    (prl as any).prl_item_id,
+    (prl as any).item_id,
+    (prl as any).rowId,
+    (prl as any).prl_row_id,
+  ];
+
+  for (const c of candidates) {
+    const v = toIntegerId(c);
+    if (v != null) return v;
+  }
+
+  return null;
 }
 
 function parsePeriodMonth(value: string | undefined): Dayjs | undefined {
@@ -1278,6 +1295,20 @@ export default function PoBudgetPage() {
           const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ??
             [])[0];
           const prlRowId = getPrlRowId(item as Record<string, unknown>);
+              if (prlRowId == null) {
+                try {
+                  // eslint-disable-next-line no-console
+                  console.debug("po-budget: unresolved PRL row_id", {
+                    uniqCode,
+                    prlSnippet: {
+                      prl_id: (item as any).prl_id ?? (item as any).id,
+                      row_id: (item as any).row_id,
+                    },
+                  });
+                } catch (e) {
+                  /* ignore */
+                }
+              }
 
           return {
             key: String(
