@@ -316,14 +316,14 @@ function DnRawMaterialDetailPageContent() {
           <div className="flex items-center justify-between gap-4">
             <button
               className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
-              onClick={() => router.push(`/dn-procurement?tab=${encodeURIComponent(tab)}`)}
+              onClick={() => router.push(`/dn-management?tab=${encodeURIComponent(tab)}`)}
             >
               <LeftOutlined />
               <span>Back to Delivery Notes</span>
             </button>
 
             <div className="flex items-center gap-2">
-              <Button onClick={() => router.push(`/dn-procurement?tab=${encodeURIComponent(tab)}`)}>Close</Button>
+              <Button onClick={() => router.push(`/dn-management?tab=${encodeURIComponent(tab)}`)}>Close</Button>
             </div>
           </div>
 
@@ -639,7 +639,7 @@ function DnRawMaterialDetailPageContent() {
             </div>
 
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-white">
-              <Button onClick={() => router.push(`/dn-procurement?tab=${encodeURIComponent(tab)}`)}>Close</Button>
+              <Button onClick={() => router.push(`/dn-management?tab=${encodeURIComponent(tab)}`)}>Close</Button>
               <Button icon={<EditOutlined />} onClick={() => router.push(`/dn-management/create?tab=${encodeURIComponent(tab)}&id=${encodeURIComponent(String(dnNumber))}`)}>
                 Edit DN
               </Button>
