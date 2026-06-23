@@ -143,6 +143,9 @@ export default function DnManagementPage() {
         const id = String(dn.id ?? "").trim() || String(dn.dn_number ?? dn.po_number ?? index);
         const totalPo = Number(dn.total_po_qty ?? 0);
         const totalIncoming = Number(dn.total_po_incoming ?? 0);
+        const dnCreated = Number(dn.total_dn_created ?? 0);
+        // Open DN (pending units) is defined as Total PO minus total incoming
+        const pending = Math.max(totalPo - totalIncoming, 0);
         const progressPercent = totalPo > 0 ? Math.round((totalIncoming / totalPo) * 100) : 0;
         return {
           key: id,
@@ -152,8 +155,8 @@ export default function DnManagementPage() {
           totalPo,
           totalIncoming,
           progressPercent,
-          pendingUnits: Math.max(totalPo - totalIncoming, 0),
-          dnCreated: Number(dn.total_dn_created ?? 0),
+          pendingUnits: pending,
+          dnCreated,
           dnIncoming: Number(dn.total_dn_incoming ?? 0),
           supplier: String(dn.supplier_name ?? (dn.supplier_id ? `Supplier #${dn.supplier_id}` : "-")),
         };
@@ -598,10 +601,10 @@ export default function DnManagementPage() {
                         </td>
                         <td className="px-4 py-4">
                           <div className="text-xs text-gray-500">
-                            DN Created: <span className="text-gray-900">{r.dnCreated.toLocaleString()}</span>
+                            DN Created: <span className="text-gray-900">{r.totalPo.toLocaleString()}</span>
                           </div>
                           <div className="text-xs text-gray-500 mt-1">
-                            DN Incoming: <span className="text-blue-600 font-medium">{r.dnIncoming.toLocaleString()}</span>
+                            DN Incoming: <span className="text-blue-600 font-medium">{r.totalIncoming.toLocaleString()}</span>
                           </div>
                         </td>
                         <td className="px-4 py-4 whitespace-nowrap">

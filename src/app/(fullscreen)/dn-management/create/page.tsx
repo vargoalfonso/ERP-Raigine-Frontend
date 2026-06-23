@@ -19,6 +19,7 @@ import {
 } from "@/lib/api/procurement-dn/api";
 import { type ProcurementPoType, useGetProcurementPoByIdQuery, useListProcurementPosQuery } from "@/lib/api/procurement-po/api";
 import { useGetGlobalWorkingDaysQuery } from "@/lib/api/system-settings/api";
+import { useGetKanbanStandardsQuery } from "@/lib/api/system-settings/api";
 
 type DnManagementType = "rm" | "indirect" | "subcon";
 
@@ -227,6 +228,20 @@ function DnRawMaterialCreatePageContent() {
       }))
       .filter((opt) => Boolean(opt.value));
   }, [poListQuery.data]);
+
+  const { data: kanbanApi = { items: [] } } = useGetKanbanStandardsQuery(undefined, { skip: !apiEnabled });
+
+  const kanbanMap = useMemo(() => {
+    const map = new Map<string, { kanbanQty?: number; productCode?: string }>();
+    const items = Array.isArray(kanbanApi) ? kanbanApi : (kanbanApi?.items ?? []);
+    items.forEach((k: any) => {
+      const code = String(k.item_uniq_code ?? k.item_uniq ?? k.uniq_code ?? k.uniq ?? "").trim();
+      if (!code) return;
+      const qty = Number(k.kanban_qty ?? k.kanbanQty ?? k.kanban_quantity ?? 0) || 0;
+      map.set(code, { kanbanQty: qty, productCode: code });
+    });
+    return map;
+  }, [kanbanApi]);
 
   const periodOptions = useMemo(() => {
     const activePlanningPeriods = globalParameters
@@ -463,13 +478,17 @@ function DnRawMaterialCreatePageContent() {
       }
     }
 
+    // Try to autofill pcsPerKanban from system-settings kanban map if available
+    const kanbanEntry = kanbanMap.get(uniq) ?? kanbanMap.get(uniq.toLowerCase());
+    const kanbanPcs = kanbanEntry?.kanbanQty ?? undefined;
+
     setDraft((prev) => ({
       ...prev,
       uniq,
       orderQty: undefined,
       uom: found?.uom ?? prev.uom,
       packing: found?.packingNumber ?? prev.packing,
-      pcsPerKanban: resolvedPcs ?? prev.pcsPerKanban,
+      pcsPerKanban: kanbanPcs ?? resolvedPcs ?? prev.pcsPerKanban,
       dateIncoming: parseIncomingDate(found?.dateIncoming) ?? prev.dateIncoming,
       weightKg: prev.weightKg,
     }));

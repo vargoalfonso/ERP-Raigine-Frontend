@@ -514,7 +514,7 @@ function DnRawMaterialDetailPageContent() {
                           <th className="text-left font-medium px-4 py-3">Total Qty</th>
                           <th className="text-left font-medium px-4 py-3">Remaining Qty</th>
                           <th className="text-left font-medium px-4 py-3">UoM</th>
-                          <th className="text-left font-medium px-4 py-3">Order Qty</th>
+                          <th className="text-left font-medium px-4 py-3">PO Qty</th>
                           <th className="text-left font-medium px-4 py-3">Packing Number</th>
                           <th className="text-left font-medium px-4 py-3">Pcs/Kanban</th>
                           <th className="text-left font-medium px-4 py-3">Date Incoming</th>

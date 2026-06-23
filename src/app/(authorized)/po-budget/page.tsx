@@ -2915,8 +2915,8 @@ export default function PoBudgetPage() {
                   value={bulkBudgetType}
                   onChange={(v) => setBulkBudgetType(v as BulkBudgetType)}
                   options={[
-                    { label: "PO Additional", value: "adhoc" },
-                    { label: "PO Kanban", value: "kanban" },
+                    { label: "Additional", value: "adhoc" },
+                    { label: "Reguler", value: "kanban" },
                   ]}
                   className="w-full"
                 />
