@@ -89,6 +89,7 @@ type BulkSupplierLine = {
   id: string;
   supplier: string;
   qty: number;
+  percentage?: number;
 };
 
 type BulkItemRow = {
@@ -137,6 +138,7 @@ type SupplierOption = {
   uom?: string;
   weight?: number;
   description?: string;
+  percentage?: number;
 };
 
 type DetailState = {
@@ -828,6 +830,8 @@ export default function PoBudgetPage() {
           typeof item.description === "string"
             ? item.description.trim()
             : undefined,
+        percentage:
+          typeof item.percentage === "number" ? item.percentage : undefined,
       });
     });
 
@@ -934,6 +938,20 @@ export default function PoBudgetPage() {
 
     return grouped;
   }, [activeTab, supplierItems]);
+
+  const supplierOptionsByUniq = useMemo(() => {
+    const map = new Map<string, SupplierOption[]>();
+    supplierItemsByUniq.forEach((items, uniq) => {
+      const names = new Set(
+        items.map((i) => String(i.supplier_name ?? "").trim()).filter(Boolean),
+      );
+      const filtered = supplierOptions.filter((opt) =>
+        names.has(String(opt.label ?? "").trim()),
+      );
+      if (filtered.length > 0) map.set(uniq, filtered);
+    });
+    return map;
+  }, [supplierItemsByUniq, supplierOptions]);
 
   const findApprovedPrlMatch = (
     customerId: number | null | undefined,
@@ -1220,6 +1238,29 @@ export default function PoBudgetPage() {
     );
   }, [approvedPrls, bulkPrlIds]);
 
+  const buildAutoSuppliers = (
+    uniqCode: string,
+    totalQty: number,
+  ): BulkSupplierLine[] => {
+    const items = (supplierItemsByUniq.get(uniqCode) ?? [])
+      .slice()
+      .sort((a, b) => (a.row_id ?? 0) - (b.row_id ?? 0));
+    return items
+      .filter((si) => Boolean(si.supplier_name || si.supplier_uuid))
+      .map((si, idx) => {
+        const pct = Number(si.percentage ?? 0);
+        const supplierValue = String(
+          si.supplier_uuid ?? si.supplier_name ?? "",
+        ).trim();
+        return {
+          id: `auto-${idx + 1}`,
+          supplier: supplierValue,
+          qty: pct > 0 ? Math.round((totalQty * pct) / 100) : 0,
+          percentage: pct > 0 ? pct : undefined,
+        };
+      });
+  };
+
   const buildBulkItemsFromPrl = (
     selection?: string | string[],
   ): BulkItemRow[] => {
@@ -1267,7 +1308,7 @@ export default function PoBudgetPage() {
               existingRawMaterial: String(
                 supplierItemMatch?.description ?? "-",
               ),
-              suppliers: [],
+              suppliers: buildAutoSuppliers(uniqCode, Number(it.quantity ?? 0)),
             } as BulkItemRow;
           }),
         );
@@ -1332,7 +1373,7 @@ export default function PoBudgetPage() {
             uom: String(supplierItemMatch?.uom ?? defaultUom),
             quantity: Number(item.quantity ?? 0),
             existingRawMaterial: String(supplierItemMatch?.description ?? "-"),
-            suppliers: [],
+            suppliers: buildAutoSuppliers(uniqCode, Number(item.quantity ?? 0)),
           };
         }),
       );
@@ -1501,18 +1542,32 @@ export default function PoBudgetPage() {
     setBulkItems((prev) =>
       prev.map((it) => {
         if (it.key !== itemKey) return it;
-        const nextSuppliers = it.suppliers.map((s) =>
+        let nextSuppliers = it.suppliers.map((s) =>
           s.id === supplierId ? { ...s, ...patch } : s,
         );
 
-        // Ensure supplier qty total cannot exceed item quantity.
+        // Cap per-supplier qty by its percentage limit.
+        if (patch.qty != null) {
+          nextSuppliers = nextSuppliers.map((s) => {
+            if (s.id !== supplierId || !s.percentage) return s;
+            const maxQty = Math.round((it.quantity * s.percentage) / 100);
+            if (Number(s.qty) > maxQty) {
+              message.warning(
+                `Qty melebihi batas ${s.percentage}% (max: ${maxQty})`,
+              );
+              return { ...s, qty: maxQty };
+            }
+            return s;
+          });
+        }
+
+        // Ensure total does not exceed item quantity.
         const total = nextSuppliers.reduce(
           (sum, s) => sum + Number(s.qty || 0),
           0,
         );
         if (total > it.quantity) {
           const over = total - it.quantity;
-          // Reduce the last edited supplier by the overage.
           const adjusted = nextSuppliers.map((s) => ({ ...s }));
           const idx = adjusted.findIndex((s) => s.id === supplierId);
           if (idx >= 0) {
@@ -1529,6 +1584,16 @@ export default function PoBudgetPage() {
 
         return { ...it, suppliers: nextSuppliers };
       }),
+    );
+  };
+
+  const bulkRemoveSupplier = (itemKey: string, supplierId: string) => {
+    setBulkItems((prev) =>
+      prev.map((it) =>
+        it.key !== itemKey
+          ? it
+          : { ...it, suppliers: it.suppliers.filter((s) => s.id !== supplierId) },
+      ),
     );
   };
 
@@ -1580,9 +1645,13 @@ export default function PoBudgetPage() {
       prev.map((it) => {
         if (it.key !== addSupplierItemKey) return it;
         const nextId = `s${it.suppliers.length + 1}`;
+        const pct = (addSupplierForm as any).percentage as number | undefined;
         return {
           ...it,
-          suppliers: [...it.suppliers, { id: nextId, supplier, qty }],
+          suppliers: [
+            ...it.suppliers,
+            { id: nextId, supplier, qty, percentage: pct },
+          ],
         };
       }),
     );
@@ -2202,21 +2271,65 @@ export default function PoBudgetPage() {
                 <div key={s.id} className="flex items-center gap-2">
                   <Select
                     value={s.supplier}
-                    onChange={(v) =>
-                      bulkUpdateSupplier(r.key, s.id, { supplier: v })
-                    }
-                    options={supplierOptions}
-                    className="w-[170px]"
+                    onChange={(v) => {
+                      const opts = supplierOptionsByUniq.get(r.uniq) ?? supplierOptions;
+                      const opt = opts.find((o) => o.value === v);
+                      const pct = opt?.percentage;
+                      const autoQty =
+                        pct != null && pct > 0
+                          ? Math.round((r.quantity * pct) / 100)
+                          : s.qty;
+                      bulkUpdateSupplier(r.key, s.id, {
+                        supplier: v,
+                        qty: autoQty,
+                        percentage: pct,
+                      });
+                    }}
+                    options={(supplierOptionsByUniq.get(r.uniq) ?? supplierOptions)
+                      .filter(
+                        (opt) =>
+                          opt.value === s.supplier ||
+                          !r.suppliers.some(
+                            (other) =>
+                              other.id !== s.id && other.supplier === opt.value,
+                          ),
+                      )
+                      .map((opt) => ({
+                        value: opt.value,
+                        label:
+                          opt.percentage != null
+                            ? `${opt.label} (${opt.percentage}%)`
+                            : opt.label,
+                      }))}
+                    className="w-[200px]"
                     size="small"
                   />
                   <InputNumber
                     min={0}
+                    max={
+                      s.percentage != null && s.percentage > 0
+                        ? Math.round((r.quantity * s.percentage) / 100)
+                        : r.quantity
+                    }
                     value={s.qty}
                     onChange={(v) =>
                       bulkUpdateSupplier(r.key, s.id, { qty: Number(v || 0) })
                     }
                     className="w-[90px]"
                     size="small"
+                  />
+                  {s.percentage != null && (
+                    <span className="text-[10px] text-gray-400 whitespace-nowrap">
+                      {s.percentage}%
+                    </span>
+                  )}
+                  <Button
+                    size="small"
+                    type="text"
+                    danger
+                    icon={<CloseOutlined />}
+                    onClick={() => bulkRemoveSupplier(r.key, s.id)}
+                    className="!px-1"
                   />
                 </div>
               ))}
@@ -3538,10 +3651,27 @@ export default function PoBudgetPage() {
             <div className="text-xs text-gray-600 mb-1">Supplier Name</div>
             <Select
               value={addSupplierForm.supplier}
-              onChange={(v) =>
-                setAddSupplierForm((p) => ({ ...p, supplier: v }))
-              }
-              options={addSupplierModalOptions}
+              onChange={(v) => {
+                const opt = addSupplierModalOptions.find((o) => o.value === v);
+                const pct = opt?.percentage;
+                const autoQty =
+                  pct != null && pct > 0 && addSupplierBudget > 0
+                    ? Math.round((addSupplierBudget * pct) / 100)
+                    : addSupplierRemaining;
+                setAddSupplierForm((p) => ({
+                  ...p,
+                  supplier: v,
+                  qty: autoQty,
+                  percentage: pct,
+                }));
+              }}
+              options={addSupplierModalOptions.map((opt) => ({
+                value: opt.value,
+                label:
+                  opt.percentage != null
+                    ? `${opt.label} (${opt.percentage}%)`
+                    : opt.label,
+              }))}
               placeholder="Select supplier"
               className="w-full"
             />
@@ -3553,7 +3683,14 @@ export default function PoBudgetPage() {
           </div>
 
           <div>
-            <div className="text-xs text-gray-600 mb-1">Quantity</div>
+            <div className="text-xs text-gray-600 mb-1">
+              Quantity
+              {(addSupplierForm as any).percentage != null && (
+                <span className="ml-2 text-blue-600">
+                  (auto: {(addSupplierForm as any).percentage}% of {formatNumber(addSupplierBudget)})
+                </span>
+              )}
+            </div>
             <InputNumber
               min={0}
               max={addSupplierRemaining}
@@ -3566,7 +3703,8 @@ export default function PoBudgetPage() {
             />
             <div className="text-[11px] text-gray-500 mt-1">
               Budget: {formatNumber(addSupplierBudget)} | Allocated:{" "}
-              {formatNumber(addSupplierAllocated)}
+              {formatNumber(addSupplierAllocated)} | Remaining:{" "}
+              {formatNumber(addSupplierRemaining)}
             </div>
           </div>
         </div>

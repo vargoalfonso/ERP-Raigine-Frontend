@@ -66,6 +66,7 @@ export type SupplierItemRecord = {
   weight?: number;
   pcs_per_kanban?: number;
   customer_cycle?: string | number;
+  percentage?: number;
   status?: string;
   product_model?: string;
   part_name?: string;
@@ -162,6 +163,7 @@ const normalizeSupplierItem = (record: unknown): SupplierItemRecord => {
     part_number: toText(row.part_number) ?? toText(product?.part_number),
     grade: toText(row.grade) ?? toText(row.material_grade),
     size: toText(row.size),
+    percentage: toNumber(row.percentage),
     created_at: toText(row.created_at),
     updated_at: toText(row.updated_at),
   };
