@@ -70,9 +70,18 @@ export const getCurrentUserDisplayName = (): string | null => {
 
 export const getCurrentUserRole = (): string | null => {
   const decoded = getTokenPayload();
-  if (!decoded?.role || !decoded.role.trim()) return null;
 
-  return decoded.role.trim();
+  if (typeof decoded?.role === "string" && decoded.role.trim()) {
+    return decoded.role.trim();
+  }
+
+  // Backend JWT uses "roles" (array) — take the first entry
+  if (Array.isArray(decoded?.roles) && decoded.roles.length > 0) {
+    const first = decoded.roles[0];
+    return typeof first === "string" && first.trim() ? first.trim() : null;
+  }
+
+  return null;
 };
 
 export const getCurrentUserProfile = (): CurrentUserProfile => {
