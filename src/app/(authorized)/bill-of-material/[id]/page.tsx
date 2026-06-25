@@ -51,6 +51,7 @@ type ProcessRouteRow = {
 };
 
 type MaterialSpec = {
+  grade?: string | null;
   material_grade?: string | null;
   form?: string | null;
   width_mm?: number | null;
@@ -186,6 +187,7 @@ const parseMaterialSpec = (raw: unknown): MaterialSpec | null => {
   const s = raw as any;
   return {
     material_grade: asStr(s.material_grade) ?? null,
+    grade: asStr(s.grade) ?? asStr(s.material_grade) ?? null,
     form: asStr(s.form) ?? null,
     width_mm: asNum(s.width_mm),
     diameter_mm: asNum(s.diameter_mm),
@@ -253,9 +255,8 @@ const MaterialSpecDesc = ({ spec }: { spec: MaterialSpec | null | undefined }) =
 
   return (
     <Descriptions size="small" column={{ xs: 2, md: 4 }} bordered>
-      <Descriptions.Item label="Grade">{spec.material_grade ?? "—"}</Descriptions.Item>
+      <Descriptions.Item label="Grade">{spec.grade ?? spec.material_grade ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Form">{spec.form ?? "—"}</Descriptions.Item>
-      <Descriptions.Item label="Supplier">{spec.supplier_name ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Weight">{fmt(spec.weight_kg, "kg")}</Descriptions.Item>
       {/* <Descriptions.Item label="Customer Cycle">{spec.customer_cycle ?? "—"}</Descriptions.Item> */}
       <Descriptions.Item label="Width">{fmt(spec.width_mm, "mm")}</Descriptions.Item>

@@ -51,7 +51,7 @@ type ProcessRoute = {
 type MaterialSpec = {
   material_code?: string;
   form?: string;
-  supplier?: string;
+  grade?: string;
   weight_kg?: number;
   width_mm?: number;
   diameter_mm?: number;
@@ -485,8 +485,8 @@ export default function Page() {
         <Form.Item name={[...fieldPath, "material_spec", "form"]} label="Form" rules={disabled ? [] : [{ required: true, message: "Form is required" }]}> 
           <Select placeholder="Select form" disabled={disabled} options={[{ label: "Plate", value: "Plate" },{ label: "Coil", value: "Coil" },{ label: "Pipe", value: "Pipe" },{ label: "Rod", value: "Rod" },{ label: "Wire", value: "Wire" },{ label: "Other", value: "Other" }]} allowClear />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "supplier"]} label="Supplier" rules={disabled ? [] : [{ required: true, message: "Supplier is required" }]}> 
-          <Select placeholder="Select supplier" disabled={disabled} options={supplierOptions} loading={isSuppliersLoading} showSearch optionFilterProp="label" allowClear />
+        <Form.Item name={[...fieldPath, "material_spec", "grade"]} label="Grade" rules={disabled ? [] : [{ required: true, message: "Grade is required" }]}> 
+          <Input placeholder="e.g., STKM550" disabled={disabled} />
         </Form.Item>
         <Form.Item name={[...fieldPath, "material_spec", "width_mm"]} label="Width (mm)"> 
           <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
@@ -789,7 +789,7 @@ export default function Page() {
         await form.validateFields([
           ["material_spec", "material_code"],
           ["material_spec", "form"],
-          ["material_spec", "supplier"],
+          ["material_spec", "grade"],
         ]);
       }
 
@@ -898,12 +898,9 @@ export default function Page() {
 
       const mapMaterialSpec = (spec?: MaterialSpec) => {
         const s = spec ?? {};
-        const supplierRaw = cleanText(s.supplier);
-        const supplierName = supplierRaw
-          ? supplierNameByValue.get(supplierRaw) ?? supplierRaw
-          : undefined;
         const form = normalizeMaterialForm(s.form);
         const raw: Record<string, unknown> = {
+          grade: cleanText(s.material_code),
           material_grade: cleanText(s.material_code),
           form,
           width_mm: s.width_mm,
@@ -914,7 +911,6 @@ export default function Page() {
           cycle_time_sec: s.cycle_time_sec,
           setup_time_min: s.setup_time_min,
           customer_cycle: cleanText(s.customer_cycle),
-          ...(supplierName ? { supplier_name: supplierName } : {}),
         };
         const cleanedEntries = Object.entries(raw).filter(
           ([, v]) => v !== undefined && v !== null && v !== ""
@@ -1645,20 +1641,11 @@ export default function Page() {
                       <Input placeholder="e.g., Daily / Weekly / Monthly" size="large" disabled={isParentAssembly} />
                     </Form.Item> */}
                     <Form.Item
-                      name={["material_spec", "supplier"]}
-                      label="Supplier"
-                      rules={isParentAssembly ? [] : [{ required: true, message: "Supplier is required" }]}
+                      name={["material_spec", "grade"]}
+                      label="Grade"
+                      rules={isParentAssembly ? [] : [{ required: true, message: "Grade is required" }]}
                     >
-                      <Select
-                        placeholder="Select supplier"
-                        size="large"
-                        disabled={isParentAssembly}
-                        options={supplierOptions}
-                        loading={isSuppliersLoading}
-                        showSearch
-                        optionFilterProp="label"
-                        allowClear
-                      />
+                      <Input placeholder="e.g., STKM550" size="large" disabled={isParentAssembly} />
                     </Form.Item>
                   </div>
 

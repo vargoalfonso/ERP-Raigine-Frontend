@@ -54,7 +54,7 @@ type ProcessRouteForm = {
 type MaterialSpecForm = {
   material_code?: string;
   form?: string;
-  supplier?: string;
+  grade?: string;
   weight_kg?: number;
   width_mm?: number;
   diameter_mm?: number;
@@ -413,16 +413,12 @@ export default function BomEditPage() {
             ? spec.material_code
             : typeof spec.material_grade === "string"
               ? spec.material_grade
-              : undefined,
-        form: typeof spec.form === "string" ? spec.form : undefined,
-        supplier:
-          typeof spec.supplier_id === "string"
-            ? spec.supplier_id
-            : typeof spec.supplier_name === "string"
-              ? spec.supplier_name
-              : typeof spec.supplier === "string"
-                ? spec.supplier
+              : typeof spec.grade === "string"
+                ? spec.grade
                 : undefined,
+        form: typeof spec.form === "string" ? spec.form : undefined,
+        grade:
+          typeof spec.grade === "string" ? spec.grade : typeof spec.material_grade === "string" ? spec.material_grade : undefined,
         weight_kg: typeof spec.weight_kg === "number" ? spec.weight_kg : undefined,
         width_mm: typeof spec.width_mm === "number" ? spec.width_mm : undefined,
         diameter_mm: typeof spec.diameter_mm === "number" ? spec.diameter_mm : undefined,
@@ -626,16 +622,8 @@ export default function BomEditPage() {
             allowClear
           />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "supplier"]} label="Supplier" rules={disabled ? [] : [{ required: true, message: "Supplier is required" }]}> 
-          <Select
-            placeholder="Select supplier"
-            disabled={disabled}
-            options={supplierOptions}
-            loading={isSuppliersLoading}
-            showSearch
-            optionFilterProp="label"
-            allowClear
-          />
+        <Form.Item name={[...fieldPath, "material_spec", "grade"]} label="Grade" rules={disabled ? [] : [{ required: true, message: "Grade is required" }]}> 
+          <Input placeholder="e.g., STKM550" disabled={disabled} />
         </Form.Item>
         <Form.Item name={[...fieldPath, "material_spec", "weight_kg"]} label="Weight (kg)">
           <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
@@ -876,7 +864,7 @@ export default function BomEditPage() {
       const assemblyMode = Array.isArray(values.process_routes) && values.process_routes.some((route) => isAssemblyProcessValue(route?.process_id));
 
       if (!assemblyMode) {
-        await form.validateFields([["material_spec", "material_code"], ["material_spec", "form"], ["material_spec", "supplier"]]);
+        await form.validateFields([["material_spec", "material_code"], ["material_spec", "form"], ["material_spec", "grade"]]);
       }
 
       const rootUniq = cleanText(values.parent_uniq);
@@ -893,10 +881,10 @@ export default function BomEditPage() {
       };
 
       const mapMaterialSpec = (spec?: MaterialSpecForm) => {
-        const supplierRaw = cleanText(spec?.supplier);
         const normalizedForm = normalizeMaterialForm(spec?.form);
         const payload: Record<string, unknown> = {
-          material_grade: cleanText(spec?.material_code) ?? null,
+          grade: cleanText(spec?.grade) ?? cleanText(spec?.material_code) ?? null,
+          material_grade: cleanText(spec?.grade) ?? cleanText(spec?.material_code) ?? null,
           form: normalizedForm ?? null,
           width_mm: typeof spec?.width_mm === "number" && Number.isFinite(spec.width_mm) ? spec.width_mm : null,
           diameter_mm: typeof spec?.diameter_mm === "number" && Number.isFinite(spec.diameter_mm) ? spec.diameter_mm : null,
@@ -907,16 +895,6 @@ export default function BomEditPage() {
           setup_time_min: typeof spec?.setup_time_min === "number" && Number.isFinite(spec.setup_time_min) ? spec.setup_time_min : null,
           customer_cycle: cleanText(spec?.customer_cycle) ?? null,
         };
-        if (supplierRaw) {
-          const supplierId = toNumberId(supplierRaw);
-          if (supplierId !== undefined) {
-            payload.supplier_id = supplierId;
-          } else {
-            payload.supplier_name = supplierNameByValue.get(supplierRaw) ?? supplierRaw;
-          }
-        } else {
-          payload.supplier_id = null;
-        }
         const hasMeaningfulValue = Object.values(payload).some((value) => value !== null && value !== undefined && value !== "");
         return hasMeaningfulValue ? payload : null;
       };
