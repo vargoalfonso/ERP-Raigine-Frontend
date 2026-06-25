@@ -67,6 +67,7 @@ type ChildPart = {
   part_name?: string;
   part_number?: string;
   model?: string;
+  category?: string;
   qpu?: number;
   version?: string;
   status?: string;
@@ -562,7 +563,7 @@ export default function Page() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <Form.Item
                 name={[field.name, "uniq"]}
                 label="UNIQ"
@@ -590,6 +591,13 @@ export default function Page() {
                 rules={[{ required: true, message: "Product model is required" }]}
               >
                 <Input placeholder="Enter product model" size="large" />
+              </Form.Item>
+              <Form.Item name={[field.name, "category"]} label="Category">
+                <Select placeholder="Select category" allowClear>
+                  <Select.Option value="RM">Raw Material</Select.Option>
+                  <Select.Option value="Indirect">Indirect</Select.Option>
+                  <Select.Option value="Subcon">Subcon</Select.Option>
+                </Select>
               </Form.Item>
             </div>
 
@@ -955,6 +963,7 @@ export default function Page() {
               qty_per_uniq:
                 typeof c.qpu === "number" && Number.isFinite(c.qpu) ? c.qpu : 1,
             };
+            if (c.category) childBody.raw_material_type = c.category;
             if (childRoutes.length > 0) childBody.process_routes = childRoutes;
             if (childSpec !== undefined) childBody.material_spec = childSpec;
             if (nested.length > 0) childBody.children = nested;

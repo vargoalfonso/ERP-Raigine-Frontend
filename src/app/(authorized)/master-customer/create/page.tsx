@@ -62,10 +62,20 @@ export default function CreateCustomerPage() {
     [billingSame]
   );
 
-  const bomOptions = useMemo(
-    () => buildBomCodeSelectOptions(bomQuery.data?.data ?? []),
-    [bomQuery.data]
-  );
+  const bomOptions = useMemo(() => {
+    const nodes = Array.isArray(bomQuery.data?.data) ? bomQuery.data.data : [];
+    const opts: { label: string; value: string }[] = [];
+    for (const n of nodes) {
+      const uniq = typeof (n as any)?.uniq === "string" && (n as any).uniq.trim()
+        ? (n as any).uniq.trim()
+        : typeof (n as any)?.uniq_code === "string"
+          ? (n as any).uniq_code.trim()
+          : "";
+      if (uniq) opts.push({ label: uniq, value: uniq });
+    }
+    if (opts.length) return opts;
+    return buildBomCodeSelectOptions(bomQuery.data?.data ?? []);
+  }, [bomQuery.data]);
 
   const onSave = async () => {
     try {

@@ -84,18 +84,26 @@ export default function AddForecastPage() {
     () => buildBomUniqIndex(bomTreeRes?.data ?? []),
     [bomTreeRes?.data]
   );
+  const topLevelUniqOptions = useMemo(() => {
+    const nodes = Array.isArray(bomTreeRes?.data) ? bomTreeRes?.data : [];
+    const opts: { label: string; value: string }[] = [];
+    for (const n of nodes) {
+      const uniq = typeof (n as any)?.uniq === "string" && (n as any).uniq.trim()
+        ? (n as any).uniq.trim()
+        : typeof (n as any)?.uniq_code === "string"
+          ? (n as any).uniq_code.trim()
+          : "";
+      if (uniq) opts.push({ label: uniq, value: uniq });
+    }
+    if (opts.length) return opts;
+    return [
+      { label: "LV-001", value: "LV-001" },
+      { label: "LV-002", value: "LV-002" },
+      { label: "LV-003", value: "LV-003" },
+    ];
+  }, [bomTreeRes?.data]);
 
-  const uniqOptions = useMemo(
-    () =>
-      bomIndex.options.length
-        ? bomIndex.options
-        : [
-            { label: "LV-001", value: "LV-001" },
-            { label: "LV-002", value: "LV-002" },
-            { label: "LV-003", value: "LV-003" },
-          ],
-    [bomIndex.options]
-  );
+  const uniqOptions = topLevelUniqOptions;
 
   const customerOptions = useMemo(
     () =>

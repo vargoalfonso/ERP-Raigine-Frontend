@@ -71,6 +71,7 @@ type ChildPartForm = {
   uniq_code?: string;
   parent_uniq_code?: string;
   level?: number;
+  category?: string;
   qty_per_uniq?: number;
   scrap_factor?: number;
   is_phantom?: boolean;
@@ -680,7 +681,7 @@ export default function BomEditPage() {
 
         const childContent = (
           <div>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
               <Form.Item name={[field.name, "uniq_code"]} label="UNIQ" rules={[{ required: true, message: "UNIQ is required" }]}>
                 <Input placeholder="Child UNIQ" size="large" />
               </Form.Item>
@@ -692,6 +693,13 @@ export default function BomEditPage() {
               </Form.Item>
               <Form.Item name={[field.name, "model"]} label="Model">
                 <Input placeholder="Model" size="large" />
+              </Form.Item>
+              <Form.Item name={[field.name, "category"]} label="Category">
+                <Select placeholder="Select category" allowClear>
+                  <Select.Option value="RM">Raw Material</Select.Option>
+                  <Select.Option value="Indirect">Indirect</Select.Option>
+                  <Select.Option value="Subcon">Subcon</Select.Option>
+                </Select>
               </Form.Item>
             </div>
 
@@ -959,6 +967,7 @@ export default function BomEditPage() {
             material_spec: mapMaterialSpec(child.material_spec),
             process_routes: mapProcessRoutes(child.process_routes),
             children: mapChildParts(child.children, level + 1, uniqCode, currentPath),
+            raw_material_type: cleanText(child.category) ?? undefined,
           };
         });
       };
