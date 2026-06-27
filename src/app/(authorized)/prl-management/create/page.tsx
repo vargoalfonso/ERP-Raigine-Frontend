@@ -28,13 +28,21 @@ type ForecastEntry = {
   customerUuid?: string;
   customerName?: string;
   forecastPeriod?: string;
-  uniqCode: string;
-  productModel: string;
-  partName: string;
-  partNumber: string;
+  uniqCode: string[];
+  productModel: string[];
+  partName: string[];
+  partNumber: string[];
   quantity: string; // keep as string for input UX
   remarks?: string;
 };
+
+function normalizeUniqCodes(value?: string | string[]): string[] {
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+  return values
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean)
+    .filter((item, index, array) => array.indexOf(item) === index);
+}
 
 function newEntry(seed?: Partial<ForecastEntry>): ForecastEntry {
   return {
@@ -42,10 +50,10 @@ function newEntry(seed?: Partial<ForecastEntry>): ForecastEntry {
     customerUuid: seed?.customerUuid,
     customerName: seed?.customerName,
     forecastPeriod: seed?.forecastPeriod,
-    uniqCode: seed?.uniqCode ?? "",
-    productModel: seed?.productModel ?? "",
-    partName: seed?.partName ?? "",
-    partNumber: seed?.partNumber ?? "",
+    uniqCode: normalizeUniqCodes(seed?.uniqCode),
+    productModel: Array.isArray(seed?.productModel) ? seed.productModel : [],
+    partName: Array.isArray(seed?.partName) ? seed.partName : [],
+    partNumber: Array.isArray(seed?.partNumber) ? seed.partNumber : [],
     quantity: seed?.quantity ?? "",
     remarks: seed?.remarks ?? "",
   };
@@ -56,9 +64,9 @@ function isComplete(entry: ForecastEntry): boolean {
   return (
     !!entry.customerUuid &&
     !!entry.forecastPeriod &&
-    entry.uniqCode.trim().length > 0 &&
-    entry.partName.trim().length > 0 &&
-    entry.partNumber.trim().length > 0 &&
+    entry.uniqCode.length > 0 &&
+    entry.partName.length > 0 &&
+    entry.partNumber.length > 0 &&
     Number.isFinite(quantityValue) &&
     quantityValue > 0
   );
@@ -86,6 +94,7 @@ export default function AddForecastPage() {
   );
   const topLevelUniqOptions = useMemo(() => {
     const nodes = Array.isArray(bomTreeRes?.data) ? bomTreeRes?.data : [];
+    const seen = new Set<string>();
     const opts: { label: string; value: string }[] = [];
     for (const n of nodes) {
       const uniq = typeof (n as any)?.uniq === "string" && (n as any).uniq.trim()
@@ -93,7 +102,10 @@ export default function AddForecastPage() {
         : typeof (n as any)?.uniq_code === "string"
           ? (n as any).uniq_code.trim()
           : "";
-      if (uniq) opts.push({ label: uniq, value: uniq });
+      if (uniq && !seen.has(uniq)) {
+        seen.add(uniq);
+        opts.push({ label: uniq, value: uniq });
+      }
     }
     if (opts.length) return opts;
     return [
@@ -162,11 +174,15 @@ export default function AddForecastPage() {
     });
   };
 
-  const handleUniqChange = (id: string, uniqCode?: string) => {
-    const nextUniq = String(uniqCode ?? "").trim();
-    const partName = bomIndex.partNameByUniq[nextUniq] ?? "";
-    const partNumber = bomIndex.partNumberByUniq[nextUniq] ?? "";
-    const productModel = bomIndex.modelByUniq[nextUniq] ?? bomIndex.assemblyCodeByUniq[nextUniq] ?? "";
+  const handleUniqChange = (id: string, uniqCode?: string[]) => {
+    const nextUniq = normalizeUniqCodes(uniqCode);
+    const collectByUniq = (lookup: Record<string, string>) =>
+      nextUniq.map((code) => lookup[code] ?? "").filter(Boolean);
+    const partName = collectByUniq(bomIndex.partNameByUniq);
+    const partNumber = collectByUniq(bomIndex.partNumberByUniq);
+    const productModel = nextUniq
+      .map((code) => bomIndex.modelByUniq[code] ?? bomIndex.assemblyCodeByUniq[code] ?? "")
+      .filter(Boolean);
 
     updateEntry(id, {
       uniqCode: nextUniq,
@@ -201,10 +217,10 @@ export default function AddForecastPage() {
         entries.map((entry) => {
           const payload: any = {
             customer_uuid: String(entry.customerUuid ?? "").trim(),
-            uniq_code: entry.uniqCode.trim(),
-            product_model: entry.productModel.trim(),
-            part_name: entry.partName.trim(),
-            part_number: entry.partNumber.trim(),
+            uniq_code: entry.uniqCode,
+            product_model: entry.productModel,
+            part_name: entry.partName,
+            part_number: entry.partNumber,
             forecast_period: String(entry.forecastPeriod ?? ""),
             quantity: Number(entry.quantity),
           };
@@ -439,13 +455,15 @@ export default function AddForecastPage() {
                 <div>
                   <div className="text-xs font-semibold text-gray-700 mb-1">UNIQ Code</div>
                   <Select
+                    mode="multiple"
                     value={entry.uniqCode}
                     onChange={(value) => handleUniqChange(entry.id, value)}
                     options={uniqOptions}
-                    placeholder="Select UNIQ from BOM"
+                    placeholder="Select one or more UNIQ from BOM"
                     className="w-full"
                     showSearch
                     allowClear
+                    maxTagCount="responsive"
                     filterOption={(input, option) =>
                       String(option?.label ?? "")
                         .toLowerCase()
@@ -457,7 +475,7 @@ export default function AddForecastPage() {
                 <div>
                   <div className="text-xs font-semibold text-gray-700 mb-1">Product Model</div>
                   <Input
-                    value={entry.productModel}
+                    value={entry.productModel.join(", ")}
                     placeholder="Auto-filled from BOM model"
                     className="!rounded-lg"
                     readOnly
@@ -467,7 +485,7 @@ export default function AddForecastPage() {
                 <div>
                   <div className="text-xs font-semibold text-gray-700 mb-1">Part Name</div>
                   <Input
-                    value={entry.partName}
+                    value={entry.partName.join(", ")}
                     placeholder="Auto-filled from uniq"
                     className="!rounded-lg"
                     readOnly
@@ -477,7 +495,7 @@ export default function AddForecastPage() {
                 <div>
                   <div className="text-xs font-semibold text-gray-700 mb-1">Part Number</div>
                   <Input
-                    value={entry.partNumber}
+                    value={entry.partNumber.join(", ")}
                     placeholder="Auto-filled from uniq"
                     className="!rounded-lg"
                     readOnly

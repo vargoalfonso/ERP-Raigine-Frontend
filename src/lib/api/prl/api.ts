@@ -108,10 +108,10 @@ export type PrlListResponse = PrlRecord[] & {
 
 export type CreatePrlRequest = {
   customer_uuid: string;
-  uniq_code: string;
-  product_model: string;
-  part_name: string;
-  part_number: string;
+  uniq_code: string | string[];
+  product_model: string | string[];
+  part_name: string | string[];
+  part_number: string | string[];
   forecast_period: string;
   quantity: number;
 };
