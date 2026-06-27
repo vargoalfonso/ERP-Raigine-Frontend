@@ -111,6 +111,23 @@ export type EditSupplierPatchRequest = {
   [key: string]: unknown;
 };
 
+export type ListSuppliersParams = {
+  material_category?: string;
+  status?: string;
+  search?: string;
+  uniq_code?: string;
+  limit?: number;
+};
+
+const buildQueryString = (params: Record<string, string | undefined>): string => {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) qs.set(key, value);
+  }
+  const str = qs.toString();
+  return str ? `?${str}` : "";
+};
+
 const TAG = "Suppliers" as const;
 
 export const supplierApiSlice = apiSlice
@@ -126,9 +143,15 @@ export const supplierApiSlice = apiSlice
         transformResponse: (response: unknown) => parseNextCode(response),
       }),
 
-      listSuppliers: builder.query<SupplierRecord[], void>({
-        query: () => ({
-          url: "/suppliers",
+      listSuppliers: builder.query<SupplierRecord[], ListSuppliersParams | void>({
+        query: (params) => ({
+          url: `/suppliers${buildQueryString({
+            material_category: params?.material_category,
+            status: params?.status,
+            search: params?.search,
+            uniq_code: params?.uniq_code,
+            limit: params?.limit !== undefined ? String(params.limit) : undefined,
+          })}`,
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
