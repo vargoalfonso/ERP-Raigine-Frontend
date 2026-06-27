@@ -35,7 +35,7 @@ import * as XLSX from "xlsx";
 import {
   useDeleteBomChildMutation,
   useDeleteBomParentMutation,
-  useGetBomTreeQuery,
+  useGetBomListQuery,
   useImportBomMutation,
 } from "@/lib/api/bom/api";
 import type { BackendBomNode } from "@/lib/api/bom/api";
@@ -546,10 +546,10 @@ export default function BillOfMaterialPage() {
   const [uniqSearch, setUniqSearch] = useState("");
 
   const {
-    data: bomTreeRes,
+    data: bomListRes,
     isLoading: isBomLoading,
     refetch,
-  } = useGetBomTreeQuery();
+  } = useGetBomListQuery();
   const [deleteBomParent, { isLoading: isDeletingParent }] =
     useDeleteBomParentMutation();
   const [deleteBomChild, { isLoading: isDeletingChild }] =
@@ -557,9 +557,9 @@ export default function BillOfMaterialPage() {
   const [importBom] = useImportBomMutation();
 
   const bomRows = useMemo(() => {
-    const tree = bomTreeRes?.data ?? [];
+    const tree = bomListRes?.data ?? [];
     return tree.map((n) => mapNodeToRow(n, { level: 0 }));
-  }, [bomTreeRes?.data]);
+  }, [bomListRes?.data]);
 
   const filteredBomRows = useMemo(
     () => filterBomRowsByUniq(bomRows, uniqSearch),

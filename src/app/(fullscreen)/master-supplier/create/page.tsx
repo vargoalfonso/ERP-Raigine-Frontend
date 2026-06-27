@@ -292,11 +292,12 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
   return {
     value: uniqCode,
     label: uniqCode,
-    lookupId: pickText(node.bom_id, node.id, node.uuid, (node as Record<string, unknown>)._id),
+    lookupId: pickText(node.bom_id) || undefined,
     productModel: pickText((node as any).model, node.assembly_code),
     partName: pickText(node.part_name, node.description),
     partNumber: pickText(node.part_number),
     type: pickText(
+      materialSpec?.type_material,
       materialSpec?.material_type,
       materialSpec?.type,
       materialSpec?.item_type,
@@ -348,6 +349,7 @@ function MasterSupplierCreatePageContent() {
   const [selectedBomLookupId, setSelectedBomLookupId] = useState("");
   const [selectedUniqCode, setSelectedUniqCode] = useState("");
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | undefined>();
+  const [selectedBomOption, setSelectedBomOption] = useState<BomOption | null>(null);
 
   const apiEnabled = Boolean(apiBaseUrl);
   const section = normalizeSection(searchParams.get("section"));
@@ -562,6 +564,7 @@ function MasterSupplierCreatePageContent() {
   const handleSupplierChange = (value?: string) => {
     setSelectedSupplierId(value);
     setSelectedUniqCode("");
+    setSelectedBomOption(null);
     setSelectedBomLookupId("");
     form.setFieldsValue({
       uniq_code: undefined,
@@ -577,15 +580,31 @@ function MasterSupplierCreatePageContent() {
     });
   };
 
-  const handleUniqChange = (value: string) => {
-    const matched = bomOptions.find((option) => option.value === value);
+  const handleUniqChange = (value: string, optionFromSelect?: BomOption | BomOption[]) => {
+    const opt = Array.isArray(optionFromSelect) ? optionFromSelect[0] : optionFromSelect;
+    const matched = opt ?? bomOptions.find((option) => option.value === value);
     if (!matched) return;
 
     setSelectedUniqCode(value);
     setSelectedBomLookupId(matched.lookupId ?? "");
+    setSelectedBomOption({ ...matched, label: matched.value });
 
     const rawUom = matched.uom?.trim() ?? "";
     const resolvedUom = resolveUomValue(rawUom, uoms, uomOptions);
+
+    console.log("[handleUniqChange] selected:", {
+      value,
+      rawUom,
+      resolvedUom,
+      lookupId: matched.lookupId,
+      option_value: matched.value,
+      option_label: matched.label,
+      type: matched.type,
+      productModel: matched.productModel,
+      partName: matched.partName,
+      uom: matched.uom,
+      currentFormUniq: form.getFieldValue("uniq_code"),
+    });
 
     form.setFieldsValue({
       uniq_code: matched.value,
@@ -604,6 +623,7 @@ function MasterSupplierCreatePageContent() {
 
     // Defer UOM so it runs after React effects (bomDetailQuery effect may override if not deferred)
     setTimeout(() => {
+      console.log("[handleUniqChange] setFieldValue uom (deferred):", resolvedUom);
       if (resolvedUom) form.setFieldValue("uom", resolvedUom);
     }, 0);
   };
@@ -612,7 +632,8 @@ function MasterSupplierCreatePageContent() {
     const bomDetailRoot = bomDetailQuery.data?.data;
     if (!bomDetailRoot || !selectedUniqCode) return;
 
-    const bomDetail = findNodeByUniq(bomDetailRoot, selectedUniqCode) ?? bomDetailRoot;
+    const bomDetail = findNodeByUniq(bomDetailRoot, selectedUniqCode);
+    if (!bomDetail) return;
 
     const materialSpec = resolveMaterialSpec(bomDetail);
 
@@ -622,6 +643,7 @@ function MasterSupplierCreatePageContent() {
       part_name: pickText(bomDetail.part_name, bomDetail.description),
       part_number: pickText(bomDetail.part_number),
       type: pickText(
+        materialSpec?.type_material,
         materialSpec?.material_type,
         materialSpec?.type,
         materialSpec?.item_type,
@@ -894,18 +916,24 @@ function MasterSupplierCreatePageContent() {
                           showSearch
                           filterOption={false}
                           placeholder="Search or scroll to browse..."
-                          options={bomOptions.map((option) => ({
-                            ...option,
-                            label: [
-                              option.label,
-                              option.partName,
-                              option.productModel,
-                            ]
-                              .filter(Boolean)
-                              .join(" — "),
-                          }))}
+                          options={(() => {
+                            const toSelectOpt = (option: BomOption) => ({
+                              ...option,
+                              label: [option.label, option.partName, option.productModel]
+                                .filter(Boolean)
+                                .join(" — "),
+                            });
+                            const opts = bomOptions.map(toSelectOpt);
+                            if (
+                              selectedBomOption &&
+                              !opts.some((o) => o.value === selectedBomOption.value)
+                            ) {
+                              opts.unshift(toSelectOpt(selectedBomOption));
+                            }
+                            return opts;
+                          })()}
                           onSearch={setUniqSearch}
-                          onChange={handleUniqChange}
+                          onChange={(val, opt) => handleUniqChange(val as string, opt as BomOption | BomOption[])}
                           onPopupScroll={handleUniqPopupScroll}
                           loading={bomSearchFetching}
                           disabled={readOnly || !selectedSupplierId}
@@ -935,7 +963,11 @@ function MasterSupplierCreatePageContent() {
                           { required: true, message: "Please input material code" },
                         ]}
                       >
-                        <Input size="large" placeholder="Enter material code" />
+                        <Input
+                          size="large"
+                          placeholder="Enter material code"
+                          onChange={(e) => console.log("[sebango_code] onChange:", e.target.value)}
+                        />
                       </Form.Item>
 
                       <Form.Item label="Grade" name="grade">
