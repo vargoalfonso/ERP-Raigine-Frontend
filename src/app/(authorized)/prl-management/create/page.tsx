@@ -29,9 +29,9 @@ type ForecastEntry = {
   customerName?: string;
   forecastPeriod?: string;
   uniqCode: string[];
-  productModel: string[];
-  partName: string[];
-  partNumber: string[];
+  productModel: string;
+  partName: string;
+  partNumber: string;
   quantity: string; // keep as string for input UX
   remarks?: string;
 };
@@ -51,9 +51,9 @@ function newEntry(seed?: Partial<ForecastEntry>): ForecastEntry {
     customerName: seed?.customerName,
     forecastPeriod: seed?.forecastPeriod,
     uniqCode: normalizeUniqCodes(seed?.uniqCode),
-    productModel: Array.isArray(seed?.productModel) ? seed.productModel : [],
-    partName: Array.isArray(seed?.partName) ? seed.partName : [],
-    partNumber: Array.isArray(seed?.partNumber) ? seed.partNumber : [],
+    productModel: seed?.productModel ?? "",
+    partName: seed?.partName ?? "",
+    partNumber: seed?.partNumber ?? "",
     quantity: seed?.quantity ?? "",
     remarks: seed?.remarks ?? "",
   };
@@ -65,8 +65,8 @@ function isComplete(entry: ForecastEntry): boolean {
     !!entry.customerUuid &&
     !!entry.forecastPeriod &&
     entry.uniqCode.length > 0 &&
-    entry.partName.length > 0 &&
-    entry.partNumber.length > 0 &&
+    entry.partName.trim().length > 0 &&
+    entry.partNumber.trim().length > 0 &&
     Number.isFinite(quantityValue) &&
     quantityValue > 0
   );
@@ -88,12 +88,17 @@ export default function AddForecastPage() {
     skip: !apiEnabled,
   });
 
-  const bomIndex = useMemo(
-    () => buildBomUniqIndex(bomTreeRes?.data ?? []),
-    [bomTreeRes?.data]
-  );
+const bomNodes = useMemo(
+  () => bomTreeRes?.data?.items ?? [],
+  [bomTreeRes?.data?.items]
+);
+
+const bomIndex = useMemo(
+  () => buildBomUniqIndex(bomNodes),
+  [bomNodes]
+);
   const topLevelUniqOptions = useMemo(() => {
-    const nodes = Array.isArray(bomTreeRes?.data) ? bomTreeRes?.data : [];
+    const nodes = Array.isArray(bomTreeRes?.data.items) ? bomTreeRes?.data.items : [];
     const seen = new Set<string>();
     const opts: { label: string; value: string }[] = [];
     for (const n of nodes) {
@@ -109,11 +114,9 @@ export default function AddForecastPage() {
     }
     if (opts.length) return opts;
     return [
-      { label: "LV-001", value: "LV-001" },
-      { label: "LV-002", value: "LV-002" },
-      { label: "LV-003", value: "LV-003" },
+      { label: "Loading ...", value: "Loading ..." },
     ];
-  }, [bomTreeRes?.data]);
+  }, [bomTreeRes?.data.items]);
 
   const uniqOptions = topLevelUniqOptions;
 
@@ -176,13 +179,16 @@ export default function AddForecastPage() {
 
   const handleUniqChange = (id: string, uniqCode?: string[]) => {
     const nextUniq = normalizeUniqCodes(uniqCode);
-    const collectByUniq = (lookup: Record<string, string>) =>
-      nextUniq.map((code) => lookup[code] ?? "").filter(Boolean);
-    const partName = collectByUniq(bomIndex.partNameByUniq);
-    const partNumber = collectByUniq(bomIndex.partNumberByUniq);
-    const productModel = nextUniq
-      .map((code) => bomIndex.modelByUniq[code] ?? bomIndex.assemblyCodeByUniq[code] ?? "")
-      .filter(Boolean);
+    const collectUnique = (lookup: Record<string, string>) =>
+      nextUniq
+        .map((code) => lookup[code] ?? "")
+        .filter(Boolean)
+        .filter((item, index, array) => array.indexOf(item) === index)
+        .join(", ");
+    const partName = collectUnique(bomIndex.partNameByUniq);
+    const partNumber = collectUnique(bomIndex.partNumberByUniq);
+    const productModel =
+      collectUnique(bomIndex.modelByUniq) || collectUnique(bomIndex.assemblyCodeByUniq);
 
     updateEntry(id, {
       uniqCode: nextUniq,
@@ -218,9 +224,9 @@ export default function AddForecastPage() {
           const payload: any = {
             customer_uuid: String(entry.customerUuid ?? "").trim(),
             uniq_code: entry.uniqCode,
-            product_model: entry.productModel,
-            part_name: entry.partName,
-            part_number: entry.partNumber,
+            product_model: entry.productModel.trim(),
+            part_name: entry.partName.trim(),
+            part_number: entry.partNumber.trim(),
             forecast_period: String(entry.forecastPeriod ?? ""),
             quantity: Number(entry.quantity),
           };
@@ -475,7 +481,7 @@ export default function AddForecastPage() {
                 <div>
                   <div className="text-xs font-semibold text-gray-700 mb-1">Product Model</div>
                   <Input
-                    value={entry.productModel.join(", ")}
+                    value={entry.productModel}
                     placeholder="Auto-filled from BOM model"
                     className="!rounded-lg"
                     readOnly
@@ -485,7 +491,7 @@ export default function AddForecastPage() {
                 <div>
                   <div className="text-xs font-semibold text-gray-700 mb-1">Part Name</div>
                   <Input
-                    value={entry.partName.join(", ")}
+                    value={entry.partName}
                     placeholder="Auto-filled from uniq"
                     className="!rounded-lg"
                     readOnly
@@ -495,7 +501,7 @@ export default function AddForecastPage() {
                 <div>
                   <div className="text-xs font-semibold text-gray-700 mb-1">Part Number</div>
                   <Input
-                    value={entry.partNumber.join(", ")}
+                    value={entry.partNumber}
                     placeholder="Auto-filled from uniq"
                     className="!rounded-lg"
                     readOnly
