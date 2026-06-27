@@ -21,7 +21,6 @@ import { ArrowLeftOutlined, SaveOutlined } from "@ant-design/icons";
 import {
   type BackendBomNode,
   useGetBomTreeQuery,
-  useGetBomsBySupplierQuery,
   useGetBomByIdQuery,
 } from "@/lib/api/bom/api";
 import { getApiErrorMessage } from "@/lib/api/error";
@@ -60,6 +59,7 @@ type FormValues = {
   quantity?: number;
   weight?: number;
   pcs_per_kanban?: number;
+  percentage?: number;
   customer_cycle?: string;
   description?: string;
   status?: string;
@@ -89,11 +89,6 @@ type SupplierOption = {
   supplierCode: string;
   queryValue: string;
   matchValues: string[];
-};
-
-type BomTreeLookupResult = {
-  rootBomId?: string;
-  matchedNode?: BackendBomNode;
 };
 
 const SECTION_OPTIONS: Array<{ label: string; value: SupplierSection }> = [
@@ -142,6 +137,27 @@ const sectionPayloadTypeValue = (section: SupplierSection) => {
   if (section === "indirect-raw-material") return "indirect";
   if (section === "subcon") return "subcon";
   return "raw_material";
+};
+
+const sectionToMaterialCategory = (section: SupplierSection): string => {
+  if (section === "indirect-raw-material") return "Indirect Raw Material";
+  if (section === "subcon") return "Subcon";
+  return "Raw Material";
+};
+
+const sectionToTypeMaterial = (section: SupplierSection): string => {
+  if (section === "indirect-raw-material") return "indirect";
+  if (section === "subcon") return "subcon";
+  return "raw";
+};
+
+const sectionMatchesTypeMaterial = (section: SupplierSection, typeMaterial: string | undefined): boolean => {
+  if (!typeMaterial) return false;
+  const t = typeMaterial.toLowerCase();
+  if (section === "raw-material") return t === "raw" || t === "raw_material";
+  if (section === "indirect-raw-material") return t === "indirect" || t === "indirect_raw_material";
+  if (section === "subcon") return t === "subcon";
+  return false;
 };
 
 const normalizeSupplierCategory = (value: unknown): SupplierSection => {
@@ -231,27 +247,6 @@ const resolveMaterialSpec = (node: BackendBomNode): Record<string, unknown> | un
       : undefined;
 };
 
-const findBomTreeLookupByUniq = (
-  nodes: BackendBomNode[],
-  uniqCode: string,
-  currentRootBomId?: string
-): BomTreeLookupResult | null => {
-  for (const node of nodes) {
-    const nextRootBomId = pickText(node.bom_id) || currentRootBomId;
-    const nodeUniq = pickText(node.uniq_code, node.uniq);
-
-    if (nodeUniq === uniqCode) {
-      return { rootBomId: nextRootBomId, matchedNode: node };
-    }
-
-    if (Array.isArray(node.children) && node.children.length > 0) {
-      const found = findBomTreeLookupByUniq(node.children, uniqCode, nextRootBomId);
-      if (found) return found;
-    }
-  }
-
-  return null;
-};
 
 const findNodeByUniq = (node: BackendBomNode | undefined, uniqCode: string): BackendBomNode | null => {
   if (!node) return null;
@@ -281,43 +276,6 @@ const flattenBomTree = (nodes: BackendBomNode[]): BackendBomNode[] => {
   return flattened;
 };
 
-const collectBomSupplierReferences = (nodes: BackendBomNode[]): Set<string> => {
-  const refs = new Set<string>();
-
-  flattenBomTree(nodes).forEach((node) => {
-    const materialSpec = resolveMaterialSpec(node);
-    [
-      materialSpec?.supplier_id,
-      materialSpec?.supplier_uuid,
-      materialSpec?.supplierId,
-      materialSpec?.supplierUuid,
-      materialSpec?.supplier_name,
-      materialSpec?.supplierName,
-    ]
-      .map((value) => pickText(value))
-      .filter(Boolean)
-      .forEach((value) => {
-        refs.add(value.toLowerCase());
-      });
-  });
-
-  return refs;
-};
-
-const getNodeSupplierReferences = (node: BackendBomNode): string[] => {
-  const materialSpec = resolveMaterialSpec(node);
-  return [
-    materialSpec?.supplier_id,
-    materialSpec?.supplier_uuid,
-    materialSpec?.supplierId,
-    materialSpec?.supplierUuid,
-    materialSpec?.supplier_name,
-    materialSpec?.supplierName,
-  ]
-    .map((value) => pickText(value))
-    .filter(Boolean)
-    .map((value) => value.toLowerCase());
-};
 
 const toBomOption = (node: BackendBomNode): BomOption | null => {
   const uniqCode = pickText(node.uniq_code, node.uniq);
@@ -356,6 +314,32 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
   };
 };
 
+// Match BOM's uom string (e.g. "PCS") against UOM options by name first, then by code.
+const resolveUomValue = (
+  raw: string,
+  uoms: import("@/lib/api/system-settings/api").UomRecord[],
+  uomOptions: { value: string; label: string }[],
+): string | undefined => {
+  if (!raw) return undefined;
+  const lower = raw.toLowerCase();
+  // 1. Direct match on option value or label (e.g. "Pieces" === "Pieces")
+  const byName = uomOptions.find(
+    (o) => o.value.toLowerCase() === lower || o.label.toLowerCase() === lower,
+  );
+  if (byName) return byName.value;
+  // 2. Match by UOM code field (e.g. "PCS" → code "PCS" → name "Pieces")
+  const byCode = uoms.find(
+    (u) =>
+      u.code?.toLowerCase() === lower || u.unit_code?.toLowerCase() === lower,
+  );
+  if (byCode) {
+    const name = byCode.name ?? byCode.unit_name ?? byCode.code ?? byCode.unit_code ?? "";
+    const opt = uomOptions.find((o) => o.value === name);
+    if (opt) return opt.value;
+  }
+  return undefined;
+};
+
 function MasterSupplierCreatePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -363,6 +347,7 @@ function MasterSupplierCreatePageContent() {
   const [form] = Form.useForm<FormValues>();
   const [selectedBomLookupId, setSelectedBomLookupId] = useState("");
   const [selectedUniqCode, setSelectedUniqCode] = useState("");
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | undefined>();
 
   const apiEnabled = Boolean(apiBaseUrl);
   const section = normalizeSection(searchParams.get("section"));
@@ -373,10 +358,28 @@ function MasterSupplierCreatePageContent() {
   const itemId = String(searchParams.get("id") ?? "").trim();
   const isEditing = mode === "edit";
   const autofilled = Boolean(selectedUniqCode);
+
+  const [uniqSearch, setUniqSearch] = useState("");
+  const [debouncedUniqSearch, setDebouncedUniqSearch] = useState("");
+  const [uniqPage, setUniqPage] = useState(1);
+  const [accumulatedBomItems, setAccumulatedBomItems] = useState<BackendBomNode[]>([]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedUniqSearch(uniqSearch), 400);
+    return () => clearTimeout(timer);
+  }, [uniqSearch]);
+
+  // Reset pagination whenever search term or supplier changes
+  useEffect(() => {
+    setUniqPage(1);
+    setAccumulatedBomItems([]);
+  }, [debouncedUniqSearch, selectedSupplierId]);
+
   const { data: suppliers = [], isLoading: suppliersLoading } =
-    useListSuppliersQuery(undefined, {
-      skip: !apiEnabled,
-    });
+    useListSuppliersQuery(
+      { material_category: sectionToMaterialCategory(section), status: "Active", limit: 1000 },
+      { skip: !apiEnabled },
+    );
   const { data: warehouses = [], isLoading: warehousesLoading } =
     useListWarehousesQuery(undefined, {
       skip: !apiEnabled,
@@ -387,16 +390,34 @@ function MasterSupplierCreatePageContent() {
       skip: !apiEnabled,
     },
   );
-  const { data: globalBomTree } = useGetBomTreeQuery(undefined, {
-    skip: !apiEnabled,
-  });
 
-  const bomSupplierRefs = useMemo(
-    () => collectBomSupplierReferences(globalBomTree?.data ?? []),
-    [globalBomTree?.data],
+  const BOM_PAGE_SIZE = 10;
+
+  const { data: bomPageResult, isFetching: bomSearchFetching } = useGetBomTreeQuery(
+    {
+      search: debouncedUniqSearch || undefined,
+      type_material: sectionToTypeMaterial(section),
+      exclude_supplier_uuid: selectedSupplierId || undefined,
+      page: uniqPage,
+      limit: BOM_PAGE_SIZE,
+    },
+    { skip: !apiEnabled },
   );
 
-  const selectedSupplierId = Form.useWatch("supplier_uuid", form);
+  // Accumulate pages — replace on page 1, append on subsequent pages
+  useEffect(() => {
+    const newItems = flattenBomTree(bomPageResult?.data?.items ?? []).filter(
+      (node) => sectionMatchesTypeMaterial(section, node.type_material),
+    );
+    if (newItems.length === 0) return;
+    setAccumulatedBomItems((prev) => {
+      if (uniqPage === 1) return newItems;
+      const existingCodes = new Set(prev.map((n) => pickText(n.uniq_code, n.uniq)));
+      return [...prev, ...newItems.filter((n) => !existingCodes.has(pickText(n.uniq_code, n.uniq)))];
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bomPageResult?.data?.items]);
+
   const bomDetailQuery = useGetBomByIdQuery(selectedBomLookupId, {
     skip: !apiEnabled || !selectedBomLookupId,
   });
@@ -410,37 +431,8 @@ function MasterSupplierCreatePageContent() {
   const supplierOptions = useMemo<SupplierOption[]>(
     () =>
       suppliers
-        .filter((supplier) => {
-          const status = String(supplier.status ?? "active")
-            .trim()
-            .toLowerCase();
-          const category = resolveSupplierCategory(
-            supplier as Record<string, unknown>,
-          );
-          const supplierRefs = [
-            pickText(supplier.supplier_uuid, supplier.uuid, supplier.id),
-            pickText(supplier.supplier_name),
-            pickText(supplier.supplier_code),
-          ]
-            .filter(Boolean)
-            .map((value) => value.toLowerCase());
-
-          const existsInBom =
-            bomSupplierRefs.size === 0 ||
-            supplierRefs.some((value) => bomSupplierRefs.has(value));
-
-          return (
-            (!status || status === "active") &&
-            (bomSupplierRefs.size > 0 ? true : category === section) &&
-            existsInBom
-          );
-        })
         .map((supplier) => {
-          const value = pickText(
-            supplier.supplier_uuid,
-            supplier.uuid,
-            supplier.id,
-          );
+          const value = pickText(supplier.supplier_uuid, supplier.uuid, supplier.id);
           const supplierName = pickText(supplier.supplier_name);
           const supplierCode = pickText(supplier.supplier_code);
           const matchValues = [
@@ -455,27 +447,16 @@ function MasterSupplierCreatePageContent() {
               ? `${supplierCode} — ${supplierName}`
               : pickText(supplierName, supplierCode);
           if (!value || !label) return null;
-          return {
-            value,
-            label,
-            supplierCode,
-            queryValue: pickText(supplier.supplier_uuid, supplier.uuid, supplier.id),
-            matchValues,
-          };
+          return { value, label, supplierCode, queryValue: value, matchValues };
         })
         .filter((option): option is SupplierOption => Boolean(option))
         .sort((left, right) => left.label.localeCompare(right.label)),
-    [bomSupplierRefs, section, suppliers],
+    [suppliers],
   );
 
   const selectedSupplier = useMemo(
     () => supplierOptions.find((option) => option.value === selectedSupplierId),
     [selectedSupplierId, supplierOptions],
-  );
-
-  const { data: bomTree, isFetching: bomFetching } = useGetBomsBySupplierQuery(
-    { supplier_id: selectedSupplier?.queryValue ?? selectedSupplierId ?? "" },
-    { skip: !apiEnabled || !(selectedSupplier?.queryValue ?? selectedSupplierId) },
   );
 
   const uomOptions = useMemo(
@@ -519,32 +500,25 @@ function MasterSupplierCreatePageContent() {
     [warehouses],
   );
 
-  const supplierMatchedTreeItems = useMemo(() => {
-    if (!selectedSupplier) return [] as BackendBomNode[];
-
-    return flattenBomTree(globalBomTree?.data ?? []).filter((node) => {
-      const refs = getNodeSupplierReferences(node);
-      return refs.some((ref) => selectedSupplier.matchValues.includes(ref));
-    });
-  }, [globalBomTree?.data, selectedSupplier]);
-
   const bomOptions = useMemo(() => {
-    const items = supplierMatchedTreeItems.length > 0
-      ? supplierMatchedTreeItems
-      : flattenBomTree(bomTree?.data ?? []);
-    const mapped = items
+    const mapped = accumulatedBomItems
       .map(toBomOption)
       .filter((option): option is BomOption => Boolean(option));
     const deduped = new Map<string, BomOption>();
-
     mapped.forEach((option) => {
       if (!deduped.has(option.value)) deduped.set(option.value, option);
     });
+    return Array.from(deduped.values());
+  }, [accumulatedBomItems]);
 
-    return Array.from(deduped.values()).sort((left, right) =>
-      left.label.localeCompare(right.label),
-    );
-  }, [bomTree, supplierMatchedTreeItems]);
+  const handleUniqPopupScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLDivElement;
+    const nearBottom = target.scrollTop + target.offsetHeight >= target.scrollHeight - 40;
+    const canLoadMore = !bomSearchFetching && uniqPage < (bomPageResult?.data?.totalPages ?? 1);
+    if (nearBottom && canLoadMore) {
+      setUniqPage((prev) => prev + 1);
+    }
+  };
 
   const selectedWarehouseId = Form.useWatch("warehouse_uuid", form);
 
@@ -557,6 +531,7 @@ function MasterSupplierCreatePageContent() {
   useEffect(() => {
     if (!detailQuery.data) return;
 
+    setSelectedSupplierId(pickText(detailQuery.data.supplier_uuid) || undefined);
     form.setFieldsValue({
       supplier_uuid: pickText(detailQuery.data.supplier_uuid),
       warehouse_uuid: pickText(
@@ -575,13 +550,17 @@ function MasterSupplierCreatePageContent() {
       quantity: Number(detailQuery.data.quantity ?? 0),
       weight: Number(detailQuery.data.weight ?? 0),
       pcs_per_kanban: Number(detailQuery.data.pcs_per_kanban ?? 0),
+      percentage: detailQuery.data.percentage !== undefined && detailQuery.data.percentage !== null
+        ? Number(detailQuery.data.percentage)
+        : undefined,
       customer_cycle: pickText(detailQuery.data.customer_cycle),
       description: pickText(detailQuery.data.description),
       status: pickText(detailQuery.data.status) || "active",
     });
   }, [detailQuery.data, form]);
 
-  const handleSupplierChange = () => {
+  const handleSupplierChange = (value?: string) => {
+    setSelectedSupplierId(value);
     setSelectedUniqCode("");
     setSelectedBomLookupId("");
     form.setFieldsValue({
@@ -602,15 +581,11 @@ function MasterSupplierCreatePageContent() {
     const matched = bomOptions.find((option) => option.value === value);
     if (!matched) return;
 
-    const bomLookup = findBomTreeLookupByUniq(bomTree?.data ?? [], value);
     setSelectedUniqCode(value);
-    setSelectedBomLookupId(bomLookup?.rootBomId ?? matched.lookupId ?? "");
+    setSelectedBomLookupId(matched.lookupId ?? "");
 
-    const matchedUom = matched.uom
-      ? uomOptions.find(
-          (option) => option.value.toLowerCase() === matched.uom?.toLowerCase(),
-        )
-      : undefined;
+    const rawUom = matched.uom?.trim() ?? "";
+    const resolvedUom = resolveUomValue(rawUom, uoms, uomOptions);
 
     form.setFieldsValue({
       uniq_code: matched.value,
@@ -620,13 +595,17 @@ function MasterSupplierCreatePageContent() {
       type: matched.type,
       grade: matched.grade,
       size: matched.size,
-      uom: matchedUom?.value,
       quantity: matched.quantity,
       weight: matched.weight,
       customer_cycle: matched.customerCycle,
       description: matched.description || matched.partName,
       status: normalizeFormStatus(matched.status) ?? form.getFieldValue("status") ?? "active",
     });
+
+    // Defer UOM so it runs after React effects (bomDetailQuery effect may override if not deferred)
+    setTimeout(() => {
+      if (resolvedUom) form.setFieldValue("uom", resolvedUom);
+    }, 0);
   };
 
   useEffect(() => {
@@ -636,13 +615,6 @@ function MasterSupplierCreatePageContent() {
     const bomDetail = findNodeByUniq(bomDetailRoot, selectedUniqCode) ?? bomDetailRoot;
 
     const materialSpec = resolveMaterialSpec(bomDetail);
-    const matchedUom = pickText(bomDetail.unit_measurement, (bomDetail as Record<string, unknown>).uom)
-      ? uomOptions.find(
-          (option) =>
-            option.value.toLowerCase() ===
-            pickText(bomDetail.unit_measurement, (bomDetail as Record<string, unknown>).uom).toLowerCase()
-        )
-      : undefined;
 
     form.setFieldsValue({
       uniq_code: pickText(bomDetail.uniq_code, bomDetail.uniq),
@@ -660,14 +632,13 @@ function MasterSupplierCreatePageContent() {
       size:
         pickText(materialSpec?.size, materialSpec?.material_size, materialSpec?.thickness) ||
         formatSizeFromMaterialSpec(materialSpec),
-      uom: matchedUom?.value ?? pickText(bomDetail.unit_measurement, (bomDetail as Record<string, unknown>).uom),
       quantity: extractNumber(bomDetail.quantity, bomDetail.qpu, (bomDetail as Record<string, unknown>).qty_per_uniq),
       weight: extractWeightFromMaterialSpec(materialSpec),
       customer_cycle: pickText(materialSpec?.customer_cycle),
       description: pickText(bomDetail.description, bomDetail.part_name, bomDetail.uniq_code),
       status: normalizeFormStatus((bomDetail as Record<string, unknown>).status ?? (bomDetail as Record<string, unknown>).bom_status) ?? form.getFieldValue("status") ?? "active",
     });
-  }, [bomDetailQuery.data, form, selectedUniqCode, uomOptions]);
+  }, [bomDetailQuery.data, form, selectedUniqCode]);
 
   const handleSave = async () => {
     if (!apiEnabled) {
@@ -693,6 +664,7 @@ function MasterSupplierCreatePageContent() {
         uom: pickText(values.uom),
         weight: String(values.weight ?? 0),
         pcs_per_kanban: String(values.pcs_per_kanban ?? 0),
+        percentage: values.percentage !== undefined ? String(values.percentage) : "",
         customer_cycle: pickText(values.customer_cycle),
         status:
           pickText(values.status) ||
@@ -822,6 +794,7 @@ function MasterSupplierCreatePageContent() {
           </Card>
         ) : null}
 
+        <Form form={form} layout="vertical" disabled={readOnly}>
         {(!apiEnabled || !detailQuery.isLoading) &&
         (!apiEnabled || !detailQuery.error) ? (
           <>
@@ -842,7 +815,7 @@ function MasterSupplierCreatePageContent() {
                     </span>
                   </div>
 
-                  <Form form={form} layout="vertical" disabled={readOnly} className="mt-6">
+                  <div className="mt-6">
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                       <Form.Item
                         label="Supplier Name"
@@ -886,7 +859,7 @@ function MasterSupplierCreatePageContent() {
                         />
                       </Form.Item>
                     </div>
-                  </Form>
+                  </div>
                 </Card>
 
                 <Card className="overflow-hidden rounded-2xl border border-[#dfe8f5] shadow-sm">
@@ -904,7 +877,7 @@ function MasterSupplierCreatePageContent() {
                     </span>
                   </div>
 
-                  <Form form={form} layout="vertical" disabled={readOnly} className="mt-6">
+                  <div className="mt-6">
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                       <Form.Item
                         label="Uniq / Sebanggo"
@@ -919,11 +892,8 @@ function MasterSupplierCreatePageContent() {
                         <Select
                           size="large"
                           showSearch
-                          placeholder={
-                            selectedSupplierId
-                              ? "Select uniq from BOM"
-                              : "Select supplier first"
-                          }
+                          filterOption={false}
+                          placeholder="Search or scroll to browse..."
                           options={bomOptions.map((option) => ({
                             ...option,
                             label: [
@@ -934,10 +904,13 @@ function MasterSupplierCreatePageContent() {
                               .filter(Boolean)
                               .join(" — "),
                           }))}
-                          optionFilterProp="label"
+                          onSearch={setUniqSearch}
                           onChange={handleUniqChange}
-                          loading={bomFetching}
-                          disabled={!selectedSupplierId || readOnly}
+                          onPopupScroll={handleUniqPopupScroll}
+                          loading={bomSearchFetching}
+                          disabled={readOnly || !selectedSupplierId}
+                          placeholder={!selectedSupplierId ? "Select a supplier first" : "Search or scroll to browse..."}
+                          notFoundContent={bomSearchFetching ? "Loading..." : "No items found"}
                         />
                       </Form.Item>
 
@@ -1037,21 +1010,40 @@ function MasterSupplierCreatePageContent() {
                       <Form.Item
                         label="Weight"
                         name="weight"
-                        rules={[
-                          { required: true, message: "Please input weight" },
-                        ]}
                       >
                         <InputNumber
                           min={0}
                           size="large"
                           className="w-full"
-                          placeholder="Weight"
+                          placeholder="Weight (default 0)"
                           disabled={autofilled}
                         />
                       </Form.Item>
                     </div>
 
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                      <Form.Item
+                        label="Percentage (%)"
+                        name="percentage"
+                        rules={[
+                          { type: "number", min: 0, max: 100, message: "Percentage must be between 0 and 100" },
+                        ]}
+                      >
+                        <InputNumber
+                          min={0}
+                          max={100}
+                          precision={2}
+                          size="large"
+                          className="w-full"
+                          placeholder="e.g. 30.00"
+                          onChange={(val) => {
+                            if (typeof val === "number") {
+                              form.setFieldValue("percentage", Math.min(100, Math.max(0, val)));
+                            }
+                          }}
+                        />
+                      </Form.Item>
+
                       <Form.Item
                         label="Supplier Cycle"
                         name="customer_cycle"
@@ -1079,7 +1071,7 @@ function MasterSupplierCreatePageContent() {
                         />
                       </Form.Item>
                     </div>
-                  </Form>
+                  </div>
                 </Card>
               </div>
 
@@ -1127,6 +1119,7 @@ function MasterSupplierCreatePageContent() {
             </div>
           </>
         ) : null}
+        </Form>
       </div>
     </div>
   );

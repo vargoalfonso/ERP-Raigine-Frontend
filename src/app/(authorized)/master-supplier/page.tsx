@@ -148,6 +148,13 @@ const normalizeMaterialCategory = (value: unknown): (typeof SUPPLIER_CATEGORY_OP
 const sectionLabel = (section: SupplierSection) =>
   SECTION_OPTIONS.find((option) => option.value === section)?.label ?? "Raw Material";
 
+const sectionToItemType = (section: SupplierSection): string | undefined => {
+  if (section === "indirect-raw-material") return "indirect";
+  if (section === "subcon") return "subcon";
+  if (section === "raw-material") return "raw_material";
+  return undefined;
+};
+
 const toSupplierRow = (record: SupplierItemRecord, index: number): SupplierRow => {
   const section = normalizeSection(record.material_type ?? record.type);
   const grade = pickText(record.grade);
@@ -210,7 +217,11 @@ export default function MasterSupplierPage() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const supplierItemsQuery = useListSupplierItemsQuery(undefined, { skip: !apiEnabled });
+  const itemTypeFilter = sectionToItemType(activeSection);
+  const supplierItemsQuery = useListSupplierItemsQuery(
+    itemTypeFilter != null ? { type: itemTypeFilter } : undefined,
+    { skip: !apiEnabled || activeSection === "supplier-only" }
+  );
   const suppliersQuery = useListSuppliersQuery(undefined, { skip: !apiEnabled });
   const [deleteSupplierItem, deleteSupplierItemState] = useDeleteSupplierItemMutation();
   const [deleteSupplier, deleteSupplierState] = useDeleteSupplierMutation();

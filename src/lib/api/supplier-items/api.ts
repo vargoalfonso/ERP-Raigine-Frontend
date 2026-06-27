@@ -169,15 +169,30 @@ const normalizeSupplierItem = (record: unknown): SupplierItemRecord => {
   };
 };
 
+export type ListSupplierItemsParams = {
+  type?: string;
+  status?: string;
+  search?: string;
+};
+
+const buildQueryString = (params: Record<string, string | undefined>): string => {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) qs.set(key, value);
+  }
+  const str = qs.toString();
+  return str ? `?${str}` : "";
+};
+
 const TAG = "SupplierItems" as const;
 
 export const supplierItemsApiSlice = apiSlice
   .enhanceEndpoints({ addTagTypes: [TAG] })
   .injectEndpoints({
     endpoints: (builder) => ({
-      listSupplierItems: builder.query<SupplierItemRecord[], void>({
-        query: () => ({
-          url: "/supplier-items",
+      listSupplierItems: builder.query<SupplierItemRecord[], ListSupplierItemsParams | void>({
+        query: (params) => ({
+          url: `/supplier-items${buildQueryString({ type: params?.type, status: params?.status, search: params?.search })}`,
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),

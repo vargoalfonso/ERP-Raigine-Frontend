@@ -10,6 +10,7 @@ export type BackendBomNode = {
   bom_line_id?: string;
   bom_status?: any;
   uniq_code?: string;
+  type_material?: string;
   asset?: string;
   asset_type?: string;
   asset_label?: string;
@@ -184,6 +185,13 @@ const ok = <T,>(data: T, message = "OK"): ApiResponse<T> => ({
   data,
 });
 
+export type BomListResponse = {
+  items: BackendBomNode[];
+  totalPages: number;
+  total: number;
+  page: number;
+};
+
 const parseTreeResponse = (response: unknown): BackendBomNode[] => {
   if (Array.isArray(response)) return response as BackendBomNode[];
   if (response && typeof response === "object") {
@@ -195,6 +203,22 @@ const parseTreeResponse = (response: unknown): BackendBomNode[] => {
     }
   }
   return [];
+};
+
+const parseBomListResponse = (response: unknown): BomListResponse => {
+  const empty: BomListResponse = { items: [], totalPages: 1, total: 0, page: 1 };
+  if (!isRecord(response)) return empty;
+  const data = isRecord(response.data) ? response.data : response;
+
+  const itemsRaw = isRecord(data) ? (data.items ?? data.data) : undefined;
+  const items = Array.isArray(itemsRaw) ? (itemsRaw as BackendBomNode[]) : parseTreeResponse(response);
+
+  const pag = isRecord(data) && isRecord(data.pagination) ? data.pagination : null;
+  const totalPages = typeof pag?.total_pages === "number" ? pag.total_pages : 1;
+  const total = typeof pag?.total === "number" ? pag.total : items.length;
+  const page = typeof pag?.page === "number" ? pag.page : 1;
+
+  return { items, totalPages, total, page };
 };
 
 const parseArrayResponse = (response: unknown): unknown[] => {
@@ -294,7 +318,7 @@ const mapNewNodeToLegacy = (raw: unknown): BackendBomNode => {
     description: raw.description ?? null,
     quantity: raw.quantity ?? raw.qpu ?? raw.qty_per_uniq ?? null,
     material_code: raw.material_code ?? null,
-    unit_measurement: raw.unit_measurement ?? null,
+    unit_measurement: raw.unit_measurement ?? (raw as any).uom ?? null,
     process_routes: raw.process_routes ?? null,
     material_specifications: raw.material_spec ?? raw.material_specifications ?? null,
     created_at: raw.created_at ?? null,
@@ -371,6 +395,10 @@ const mapNewNodeToLegacy = (raw: unknown): BackendBomNode => {
     imageUrl: pickString(raw.imageUrl),
     image_path: pickString(raw.image_path),
     imagePath: pickString(raw.imagePath),
+    type_material:
+      pickString((raw as any).type_material) ||
+      pickString((raw as any).material_spec?.type_material) ||
+      undefined,
     children,
   };
 
@@ -501,7 +529,7 @@ const BOM_TAG = { type: "BOM" as const, id: "TREE" as const };
 
 export const bomSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
-    getBomTree: builder.query<ApiResponse<BackendBomNode[]>, { page?: number; limit?: number } | void>({
+    getBomTree: builder.query<ApiResponse<BomListResponse>, { page?: number; limit?: number; search?: string; type_material?: string; exclude_supplier_uuid?: string } | void>({
       query: (params) => {
         const page = params?.page ?? 1;
         const limit = params?.limit ?? 1000;
@@ -509,6 +537,9 @@ export const bomSlice = apiSlice.injectEndpoints({
           page: String(page),
           limit: String(limit),
         });
+        if (params?.search) searchParams.set("search", params.search);
+        if (params?.type_material) searchParams.set("type_material", params.type_material);
+        if (params?.exclude_supplier_uuid) searchParams.set("exclude_supplier_uuid", params.exclude_supplier_uuid);
 
         return {
           url: `/products/bom?${searchParams.toString()}`,
@@ -517,9 +548,14 @@ export const bomSlice = apiSlice.injectEndpoints({
         };
       },
       transformResponse: (response: unknown) => {
-        const arr = parseTreeResponse(response);
-        const mapped = arr.map(mapNewNodeToLegacy);
-        return ok(buildTreeIfFlat(mapped));
+        const parsed = parseBomListResponse(response);
+        const mapped = parsed.items.map(mapNewNodeToLegacy);
+        return ok({
+          items: buildTreeIfFlat(mapped),
+          totalPages: parsed.totalPages,
+          total: parsed.total,
+          page: parsed.page,
+        });
       },
       providesTags: [BOM_TAG],
     }),
