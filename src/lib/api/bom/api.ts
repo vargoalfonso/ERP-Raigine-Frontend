@@ -560,6 +560,27 @@ export const bomSlice = apiSlice.injectEndpoints({
       providesTags: [BOM_TAG],
     }),
 
+    getBomList: builder.query<ApiResponse<BackendBomNode[]>, { page?: number; limit?: number } | void>({
+      query: (params) => {
+        const page = params?.page ?? 1;
+        const limit = params?.limit ?? 1000;
+        const searchParams = new URLSearchParams({
+          page: String(page),
+          limit: String(limit),
+        });
+        return {
+          url: `/products/bom?${searchParams.toString()}`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        };
+      },
+      transformResponse: (response: unknown) => {
+        const arr = parseTreeResponse(response);
+        const mapped = arr.map(mapNewNodeToLegacy);
+        return ok(buildTreeIfFlat(mapped));
+      },
+    }),
+
     getBomsBySupplier: builder.query<ApiResponse<BackendBomNode[]>, { supplier_id: string; uniq_code?: string; page?: number }>({
       query: ({ supplier_id, uniq_code, page = 1 }) => {
         const params = new URLSearchParams({ page: String(page), supplier_id });
@@ -757,6 +778,7 @@ export const bomSlice = apiSlice.injectEndpoints({
 
 export const {
   useGetBomTreeQuery,
+  useGetBomListQuery,
   useGetBomsBySupplierQuery,
   useGetBomByIdQuery,
   useGetBomFullByIdQuery,
