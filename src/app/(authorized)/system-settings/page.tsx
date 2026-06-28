@@ -1634,49 +1634,19 @@ export default function SystemSettingsPage() {
 
   const roleRowsView = useMemo<RoleRow[]>(() => {
     if (!apiEnabled || !rolesApiData) return roleRows;
-    const peopleCountByRoleId = new Map<string, number>();
-    const peopleCountByRoleName = new Map<string, number>();
-
-    for (const row of rowsView) {
-      const normalizedRoleName = String(row.role ?? "")
-        .trim()
-        .toLowerCase();
-
-      if (row.roleId) {
-        peopleCountByRoleId.set(
-          row.roleId,
-          (peopleCountByRoleId.get(row.roleId) ?? 0) + 1,
-        );
-      }
-
-      if (normalizedRoleName) {
-        peopleCountByRoleName.set(
-          normalizedRoleName,
-          (peopleCountByRoleName.get(normalizedRoleName) ?? 0) + 1,
-        );
-      }
-    }
-
     return rolesApiData
       .filter((r) => Boolean(r?.id))
       .map((r) => {
         const d = r.updated_at || r.created_at;
         const lastUpdated = d ? new Date(d).toLocaleDateString("en-US") : "-";
-        const roleId = String(r.id);
-        const normalizedRoleName = String(r.name ?? "")
-          .trim()
-          .toLowerCase();
         return {
           id: r.id,
           roleName: r.name,
-          numberOfPeople:
-            peopleCountByRoleId.get(roleId) ??
-            peopleCountByRoleName.get(normalizedRoleName) ??
-            0,
+          numberOfPeople: r.user_count ?? 0,
           lastUpdated,
         };
       });
-  }, [apiEnabled, roleRows, rolesApiData, rowsView]);
+  }, [apiEnabled, roleRows, rolesApiData]);
 
   const kanbanRowsView = useMemo<KanbanRow[]>(() => {
     if (!apiEnabled || !kanbanApiData) return kanbanRows;

@@ -193,7 +193,7 @@ export default function AddForecastPage() {
   const handleUniqChange = (id: string, uniqCode?: string[]) => {
     const nextUniq = normalizeUniqCodes(uniqCode);
     const collectByUniq = (lookup: Record<string, string>) =>
-      nextUniq.map((code) => lookup[code] ?? "").filter(Boolean);
+      nextUniq.map((code) => lookup[code] ?? "").filter(Boolean).join(", ");
     const partName = collectByUniq(bomIndex.partNameByUniq);
     const partNumber = collectByUniq(bomIndex.partNumberByUniq);
     const productModel = nextUniq
@@ -201,7 +201,8 @@ export default function AddForecastPage() {
         (code) =>
           bomIndex.modelByUniq[code] ?? bomIndex.assemblyCodeByUniq[code] ?? "",
       )
-      .filter(Boolean);
+      .filter(Boolean)
+      .join(", ");
 
     updateEntry(id, {
       uniqCode: nextUniq,
