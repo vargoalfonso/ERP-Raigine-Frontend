@@ -26,9 +26,9 @@ type ForecastEntry = {
   customerName?: string;
   forecastPeriod?: string;
   uniqCode: string[];
-  productModel: string[];
-  partName: string[];
-  partNumber: string[];
+  productModel: string;
+  partName: string;
+  partNumber: string;
   quantity: string; // keep as string for input UX
   remarks?: string;
 };
@@ -48,9 +48,9 @@ function newEntry(seed?: Partial<ForecastEntry>): ForecastEntry {
     customerName: seed?.customerName,
     forecastPeriod: seed?.forecastPeriod,
     uniqCode: normalizeUniqCodes(seed?.uniqCode),
-    productModel: Array.isArray(seed?.productModel) ? seed.productModel : [],
-    partName: Array.isArray(seed?.partName) ? seed.partName : [],
-    partNumber: Array.isArray(seed?.partNumber) ? seed.partNumber : [],
+    productModel: seed?.productModel ?? "",
+    partName: seed?.partName ?? "",
+    partNumber: seed?.partNumber ?? "",
     quantity: seed?.quantity ?? "",
     remarks: seed?.remarks ?? "",
   };
@@ -62,8 +62,8 @@ function isComplete(entry: ForecastEntry): boolean {
     !!entry.customerUuid &&
     !!entry.forecastPeriod &&
     entry.uniqCode.length > 0 &&
-    entry.partName.length > 0 &&
-    entry.partNumber.length > 0 &&
+    entry.partName.trim().length > 0 &&
+    entry.partNumber.trim().length > 0 &&
     Number.isFinite(quantityValue) &&
     quantityValue > 0
   );
@@ -241,9 +241,9 @@ export default function AddForecastPage() {
           const payload: any = {
             customer_uuid: String(entry.customerUuid ?? "").trim(),
             uniq_code: entry.uniqCode,
-            product_model: entry.productModel,
-            part_name: entry.partName,
-            part_number: entry.partNumber,
+            product_model: entry.productModel.trim(),
+            part_name: entry.partName.trim(),
+            part_number: entry.partNumber.trim(),
             forecast_period: String(entry.forecastPeriod ?? ""),
             quantity: Number(entry.quantity),
           };

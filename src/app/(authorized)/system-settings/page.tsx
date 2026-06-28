@@ -3,6 +3,7 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Upload,
   Button,
   Card,
   Checkbox,
@@ -116,6 +117,7 @@ import {
   hasAnyPermission,
   hasPermission,
 } from "@/lib/utils/permissions";
+import { UploadOutlined } from "@ant-design/icons";
 
 type StatusType = "Active" | "Inactive";
 
@@ -879,8 +881,8 @@ export default function SystemSettingsPage() {
   const router = useRouter();
 
   const apiEnabled = Boolean(apiBaseUrl);
-  const [selectedModuleId, setSelectedModuleId] = useState<string>(
-    () => readSystemSettingsModule(),
+  const [selectedModuleId, setSelectedModuleId] = useState<string>(() =>
+    readSystemSettingsModule(),
   );
 
   const jwtPermissions = useMemo(() => getLoginPermissions(), []);
@@ -909,9 +911,11 @@ export default function SystemSettingsPage() {
   const shouldLoadSafetyStock =
     apiEnabled && selectedModuleId === "safety-stock";
   const shouldLoadStockdays = apiEnabled && selectedModuleId === "stockdays";
-  const shouldLoadTypeParameters = apiEnabled && selectedModuleId === "type-parameters";
+  const shouldLoadTypeParameters =
+    apiEnabled && selectedModuleId === "type-parameters";
   const shouldLoadScrapTypes = apiEnabled && selectedModuleId === "scrap";
-  const shouldLoadMachinePatterns = apiEnabled && selectedModuleId === "machine";
+  const shouldLoadMachinePatterns =
+    apiEnabled && selectedModuleId === "machine";
   const shouldLoadMachineMaster = apiEnabled && selectedModuleId === "machine";
   const shouldLoadProcesses = apiEnabled && selectedModuleId === "process";
   const shouldLoadGlobalParameters =
@@ -948,11 +952,24 @@ export default function SystemSettingsPage() {
   const hasRolePermissions = hasAnyPermission(rolePermissions);
   const hasJwtPermissions = hasAnyPermission(jwtPermissions);
   const permissions = useMemo(
-    () => (hasRolePermissions ? rolePermissions : hasJwtPermissions ? jwtPermissions : {}),
+    () =>
+      hasRolePermissions
+        ? rolePermissions
+        : hasJwtPermissions
+          ? jwtPermissions
+          : {},
     [hasJwtPermissions, hasRolePermissions, jwtPermissions, rolePermissions],
   );
-  const permissionsLoading = apiEnabled && !hasRolePermissions && !hasJwtPermissions && (rolesQuery.isLoading || rolesQuery.isFetching);
-  const permissionsError = apiEnabled && !hasRolePermissions && !hasJwtPermissions && !permissionsLoading;
+  const permissionsLoading =
+    apiEnabled &&
+    !hasRolePermissions &&
+    !hasJwtPermissions &&
+    (rolesQuery.isLoading || rolesQuery.isFetching);
+  const permissionsError =
+    apiEnabled &&
+    !hasRolePermissions &&
+    !hasJwtPermissions &&
+    !permissionsLoading;
   const permissionsReady = !apiEnabled || hasAnyPermission(permissions);
   const moduleAccessById = useMemo(
     () =>
@@ -967,11 +984,22 @@ export default function SystemSettingsPage() {
             },
           ];
         }),
-      ) as Record<string, { canView: boolean; canCreate: boolean; canUpdate: boolean; canDelete: boolean }>,
+      ) as Record<
+        string,
+        {
+          canView: boolean;
+          canCreate: boolean;
+          canUpdate: boolean;
+          canDelete: boolean;
+        }
+      >,
     [apiEnabled, permissions],
   );
   const visibleModules = useMemo(
-    () => (permissionsReady ? modules.filter((module) => moduleAccessById[module.id]?.canView) : []),
+    () =>
+      permissionsReady
+        ? modules.filter((module) => moduleAccessById[module.id]?.canView)
+        : [],
     [moduleAccessById, permissionsReady],
   );
 
@@ -1019,11 +1047,19 @@ export default function SystemSettingsPage() {
   const [createTypeParameter] = useCreateTypeParameterMutation();
   const [updateTypeParameter] = useUpdateTypeParameterMutation();
   const [deleteTypeParameter] = useDeleteTypeParameterMutation();
-  const { data: scrapTypesApiData } = useGetScrapTypesQuery({ page: 1, limit: 20 }, { skip: !shouldLoadScrapTypes });
+  const { data: scrapTypesApiData } = useGetScrapTypesQuery(
+    { page: 1, limit: 20 },
+    { skip: !shouldLoadScrapTypes },
+  );
   const [deleteScrapType] = useDeleteScrapTypeMutation();
-  const { data: machinePatternsApiData } = useGetMachinePatternsQuery({ page: 1, limit: 20 }, { skip: !shouldLoadMachinePatterns });
+  const { data: machinePatternsApiData } = useGetMachinePatternsQuery(
+    { page: 1, limit: 20 },
+    { skip: !shouldLoadMachinePatterns },
+  );
   const [deleteMachinePattern] = useDeleteMachinePatternMutation();
-  const { data: machinesApiData = [] } = useGetMachinesQuery(undefined, { skip: !shouldLoadMachineMaster });
+  const { data: machinesApiData = [] } = useGetMachinesQuery(undefined, {
+    skip: !shouldLoadMachineMaster,
+  });
 
   const { data: processesApiData } = useGetProcessesQuery(undefined, {
     skip: !shouldLoadProcesses,
@@ -1074,7 +1110,10 @@ export default function SystemSettingsPage() {
     skip: !shouldLoadBomTree,
   });
   const selectedModule = useMemo(
-    () => visibleModules.find((m) => m.id === selectedModuleId) ?? visibleModules[0] ?? modules[0],
+    () =>
+      visibleModules.find((m) => m.id === selectedModuleId) ??
+      visibleModules[0] ??
+      modules[0],
     [selectedModuleId, visibleModules],
   );
 
@@ -1085,14 +1124,17 @@ export default function SystemSettingsPage() {
 
   const [rows, setRows] = useState<ParameterRow[]>(initialRows);
   const [roleRows, setRoleRows] = useState<RoleRow[]>(initialRoleRows);
-  const [safetyRows, setSafetyRows] = useState<SafetyStockRow[]>(initialSafetyStockRows);
-  const [stockdaysRows, setStockdaysRows] = useState<StockdaysRow[]>(initialStockdaysRows);
+  const [safetyRows, setSafetyRows] = useState<SafetyStockRow[]>(
+    initialSafetyStockRows,
+  );
+  const [stockdaysRows, setStockdaysRows] =
+    useState<StockdaysRow[]>(initialStockdaysRows);
   const [buyNotBuyRows, setBuyNotBuyRows] = useState<BuyNotBuyFlagRow[]>(
     initialBuyNotBuyFlagRows,
   );
-  const [typeParameterRows, setTypeParameterRows] = useState<TypeParameterRow[]>(
-    initialTypeParameterRows
-  );
+  const [typeParameterRows, setTypeParameterRows] = useState<
+    TypeParameterRow[]
+  >(initialTypeParameterRows);
   const [scrapRows, setScrapRows] = useState<ScrapTypeRow[]>([]);
   const [uomRows, setUomRows] = useState<UomRow[]>(initialUomRows);
   const [purchaseOrderRows, setPurchaseOrderRows] = useState<
@@ -1206,8 +1248,14 @@ export default function SystemSettingsPage() {
   const [safetyForm] = Form.useForm<SafetyStockFormValues>();
 
   // reactively watch selected inventory type from the safety form to fetch inventory uniq codes
-  const safetyInventoryTypeWatch = (Form.useWatch("inventoryType", safetyForm) as string | undefined) ?? safetyEditingRow?.inventoryType ?? "";
-  const normalizedInventoryType = String(safetyInventoryTypeWatch ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  const safetyInventoryTypeWatch =
+    (Form.useWatch("inventoryType", safetyForm) as string | undefined) ??
+    safetyEditingRow?.inventoryType ??
+    "";
+  const normalizedInventoryType = String(safetyInventoryTypeWatch ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
   const inventoryApiType = (() => {
     switch (normalizedInventoryType) {
       case "raw_material":
@@ -1224,11 +1272,15 @@ export default function SystemSettingsPage() {
   })();
 
   const { data: inventoryListResp } = useGetInventoryListQuery(
-    inventoryApiType ? { type: inventoryApiType as any, page: 1, limit: 1000 } : ({} as any),
+    inventoryApiType
+      ? { type: inventoryApiType as any, page: 1, limit: 1000 }
+      : ({} as any),
     { skip: !inventoryApiType || !shouldLoadSafetyStock },
   );
 
-  const { data: safetyStockList } = useGetSafetyStockQuery(undefined, { skip: !apiEnabled });
+  const { data: safetyStockList } = useGetSafetyStockQuery(undefined, {
+    skip: !apiEnabled,
+  });
 
   const uniqOptions = React.useMemo(() => {
     const items = (inventoryListResp as any)?.data ?? inventoryListResp ?? [];
@@ -1241,7 +1293,15 @@ export default function SystemSettingsPage() {
       .filter(Boolean) as { label: string; value: string }[];
 
     // include current editing uniq so it stays selectable when editing
-    const existing = [String(safetyForm.getFieldValue("uniqCode") ?? safetyEditingRow?.itemUniqCode ?? "")].filter(Boolean).map(String);
+    const existing = [
+      String(
+        safetyForm.getFieldValue("uniqCode") ??
+          safetyEditingRow?.itemUniqCode ??
+          "",
+      ),
+    ]
+      .filter(Boolean)
+      .map(String);
     for (const u of existing) {
       if (u && !fromApi.some((o) => o.value === u)) {
         fromApi.push({ label: u, value: u });
@@ -1407,11 +1467,12 @@ export default function SystemSettingsPage() {
     useState<BuyNotBuyFlagRow | null>(null);
 
   const [typeParameterDeleteOpen, setTypeParameterDeleteOpen] = useState(false);
-  const [typeParameterDeletingRow, setTypeParameterDeletingRow] = useState<TypeParameterRow | null>(
-    null
-  );
+  const [typeParameterDeletingRow, setTypeParameterDeletingRow] =
+    useState<TypeParameterRow | null>(null);
   const [scrapDeleteOpen, setScrapDeleteOpen] = useState(false);
-  const [scrapDeletingRow, setScrapDeletingRow] = useState<ScrapTypeRow | null>(null);
+  const [scrapDeletingRow, setScrapDeletingRow] = useState<ScrapTypeRow | null>(
+    null,
+  );
 
   const [uomDeleteOpen, setUomDeleteOpen] = useState(false);
   const [uomDeletingRow, setUomDeletingRow] = useState<UomRow | null>(null);
@@ -1794,8 +1855,12 @@ export default function SystemSettingsPage() {
     const machineNameById = new Map<number, string>(
       machinesApiData.map((machine) => [
         Number(machine.id ?? 0),
-        String(machine.machine_name ?? machine.machine_number ?? `Machine #${String(machine.id ?? "")}`),
-      ])
+        String(
+          machine.machine_name ??
+            machine.machine_number ??
+            `Machine #${String(machine.id ?? "")}`,
+        ),
+      ]),
     );
 
     return (machinePatternsApiData.items ?? [])
@@ -1810,7 +1875,8 @@ export default function SystemSettingsPage() {
           id: String(record.id),
           uniqCode,
           machineId,
-          machineName: machineNameById.get(machineId) ?? `Machine #${machineId}`,
+          machineName:
+            machineNameById.get(machineId) ?? `Machine #${machineId}`,
           cycleTime,
           patternValue,
           workingDays: Number(record.working_days ?? 0),
@@ -1907,10 +1973,15 @@ export default function SystemSettingsPage() {
   const filteredScrap = useMemo(() => {
     const q = query.trim().toLowerCase();
     return scrapRowsView
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) =>
+        typeFilter === "All Types" ? true : r.status === typeFilter,
+      )
       .filter((r) => {
         if (!q) return true;
-        return [r.typeCode, r.typeName, r.description].join(" ").toLowerCase().includes(q);
+        return [r.typeCode, r.typeName, r.description]
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
       });
   }, [query, scrapRowsView, typeFilter]);
 
@@ -2070,7 +2141,9 @@ export default function SystemSettingsPage() {
   const filteredMachinePattern = useMemo(() => {
     const q = query.trim().toLowerCase();
     return machinePatternRowsView
-      .filter((r) => (typeFilter === "All Types" ? true : r.status === typeFilter))
+      .filter((r) =>
+        typeFilter === "All Types" ? true : r.status === typeFilter,
+      )
       .filter((r) => {
         if (!q) return true;
         return [
@@ -2350,6 +2423,50 @@ export default function SystemSettingsPage() {
     setPurchaseOrderEditingRow(null);
     purchaseOrderForm.resetFields();
   };
+
+ const handleDownloadTemplateKanban = () => {
+  window.open(
+    `${apiBaseUrl}/template/kanban`,
+    "_blank",
+  );
+};
+
+const handleImportKanban = async (file: File) => {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try {
+    const res = await fetch(
+      `${apiBaseUrl}/import/kanban`,
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      throw new Error(json.message);
+    }
+
+    message.success(
+      `Import selesai. Success ${json.data.success}, Failed ${json.data.failed}`,
+    );
+
+    if (json.data.failed_file) {
+      window.open(
+        `${apiBaseUrl}/import/kanban/failed/${json.data.failed_file}`,
+        "_blank",
+      );
+    }
+
+    return false;
+  } catch (err: any) {
+    message.error(err.message);
+    return false;
+  }
+};
 
   const resetPurchaseOrderEdit = () => {
     if (purchaseOrderEditMode === "edit" && purchaseOrderEditingRow) {
@@ -3044,7 +3161,7 @@ export default function SystemSettingsPage() {
         machinePatternEditMode === "create"
           ? `MP-${String(machinePatternRows.length + 1).padStart(3, "0")}`
           : (machinePatternEditingRow?.id ??
-              `MP-${String(machinePatternRows.length + 1).padStart(3, "0")}`),
+            `MP-${String(machinePatternRows.length + 1).padStart(3, "0")}`),
       uniqCode: values.patternName,
       machineId: machinePatternEditingRow?.machineId ?? 0,
       machineName: machinePatternEditingRow?.machineName ?? "",
@@ -3233,11 +3350,15 @@ export default function SystemSettingsPage() {
   };
 
   const openScrapDetail = (row: ScrapTypeRow) => {
-    router.push(`/system-settings/scrap-type/create?mode=detail&id=${encodeURIComponent(row.id)}`);
+    router.push(
+      `/system-settings/scrap-type/create?mode=detail&id=${encodeURIComponent(row.id)}`,
+    );
   };
 
   const openScrapEdit = (row: ScrapTypeRow) => {
-    router.push(`/system-settings/scrap-type/create?mode=edit&id=${encodeURIComponent(row.id)}`);
+    router.push(
+      `/system-settings/scrap-type/create?mode=edit&id=${encodeURIComponent(row.id)}`,
+    );
   };
 
   const openScrapDelete = (row: ScrapTypeRow) => {
@@ -3425,7 +3546,9 @@ export default function SystemSettingsPage() {
   const confirmBuyNotBuyDelete = () => {
     if (!buyNotBuyDeletingRow) return;
 
-    const next = buyNotBuyRows.filter((row) => row.id !== buyNotBuyDeletingRow.id);
+    const next = buyNotBuyRows.filter(
+      (row) => row.id !== buyNotBuyDeletingRow.id,
+    );
     setBuyNotBuyRows(next);
     saveBuyNotBuyFlagRecords(next);
     message.success("Buy/Not Buy flag deleted");
@@ -3456,7 +3579,9 @@ export default function SystemSettingsPage() {
         await deleteScrapType(scrapDeletingRow.id).unwrap();
         message.success("Scrap type deleted");
       } else {
-        setScrapRows((prev) => prev.filter((r) => r.id !== scrapDeletingRow.id));
+        setScrapRows((prev) =>
+          prev.filter((r) => r.id !== scrapDeletingRow.id),
+        );
       }
       closeScrapDelete();
     } catch (err) {
@@ -3579,11 +3704,15 @@ export default function SystemSettingsPage() {
         await deleteMachinePattern(machinePatternDeletingRow.id).unwrap();
         message.success("Machine pattern deleted");
       } else {
-        setMachinePatternRows((prev) => prev.filter((r) => r.id !== machinePatternDeletingRow.id));
+        setMachinePatternRows((prev) =>
+          prev.filter((r) => r.id !== machinePatternDeletingRow.id),
+        );
       }
       closeMachinePatternDelete();
     } catch (err) {
-      message.error(getApiErrorMessage(err, "Failed to delete machine pattern"));
+      message.error(
+        getApiErrorMessage(err, "Failed to delete machine pattern"),
+      );
     }
   };
 
@@ -3744,7 +3873,7 @@ export default function SystemSettingsPage() {
         <div className="font-medium text-gray-900">{v}</div>
       ),
     },
-    
+
     {
       title: "Parameter",
       dataIndex: "parameter",
@@ -3898,7 +4027,6 @@ export default function SystemSettingsPage() {
       ),
     },
   ];
-  
 
   const buyNotBuyColumns: ColumnsType<BuyNotBuyFlagRow> = [
     {
@@ -3973,9 +4101,22 @@ export default function SystemSettingsPage() {
       fixed: "right",
       render: (_: unknown, row: BuyNotBuyFlagRow) => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openBuyNotBuyFlagDetail(row)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => openEditBuyNotBuyFlag(row)} />
-          <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openBuyNotBuyFlagDelete(row)} />
+          <Button
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => openBuyNotBuyFlagDetail(row)}
+          />
+          <Button
+            type="text"
+            icon={<EditOutlined />}
+            onClick={() => openEditBuyNotBuyFlag(row)}
+          />
+          <Button
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => openBuyNotBuyFlagDelete(row)}
+          />
         </div>
       ),
     },
@@ -4058,7 +4199,9 @@ export default function SystemSettingsPage() {
       dataIndex: "typeCode",
       key: "typeCode",
       width: 120,
-      render: (v: string) => <div className="font-medium text-gray-900">{v}</div>,
+      render: (v: string) => (
+        <div className="font-medium text-gray-900">{v}</div>
+      ),
     },
     {
       title: "Type Name",
@@ -4084,7 +4227,9 @@ export default function SystemSettingsPage() {
           s === "Active"
             ? "bg-blue-50 text-blue-700 border-blue-100"
             : "bg-red-50 text-red-700 border-red-100";
-        return <Tag className={`rounded-full px-3 py-0.5 border ${cls}`}>{s}</Tag>;
+        return (
+          <Tag className={`rounded-full px-3 py-0.5 border ${cls}`}>{s}</Tag>
+        );
       },
     },
     {
@@ -4094,12 +4239,25 @@ export default function SystemSettingsPage() {
       fixed: "right",
       render: (_: unknown, r: ScrapTypeRow) => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openScrapDetail(r)} />
+          <Button
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => openScrapDetail(r)}
+          />
           {moduleAccessById.scrap?.canUpdate ? (
-            <Button type="text" icon={<EditOutlined />} onClick={() => openScrapEdit(r)} />
+            <Button
+              type="text"
+              icon={<EditOutlined />}
+              onClick={() => openScrapEdit(r)}
+            />
           ) : null}
           {moduleAccessById.scrap?.canDelete ? (
-            <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openScrapDelete(r)} />
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => openScrapDelete(r)}
+            />
           ) : null}
         </div>
       ),
@@ -4567,7 +4725,9 @@ export default function SystemSettingsPage() {
       dataIndex: "uniqCode",
       key: "uniqCode",
       width: 140,
-      render: (value: string) => <span className="font-medium text-gray-900">{value}</span>,
+      render: (value: string) => (
+        <span className="font-medium text-gray-900">{value}</span>
+      ),
     },
     {
       title: "Machine Name",
@@ -4601,7 +4761,15 @@ export default function SystemSettingsPage() {
       key: "status",
       width: 120,
       render: (s: StatusType) => (
-        <Tag className={s === "Active" ? "bg-blue-50 text-blue-700 border-blue-100" : "bg-red-50 text-red-700 border-red-100"}>{s}</Tag>
+        <Tag
+          className={
+            s === "Active"
+              ? "bg-blue-50 text-blue-700 border-blue-100"
+              : "bg-red-50 text-red-700 border-red-100"
+          }
+        >
+          {s}
+        </Tag>
       ),
     },
     {
@@ -4611,9 +4779,18 @@ export default function SystemSettingsPage() {
       fixed: "right",
       render: (_: unknown, r: MachinePatternRow) => (
         <div className="flex items-center gap-1">
-          <Button type="text" icon={<EyeOutlined />} onClick={() => openMachinePatternDetail(r)} />
+          <Button
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => openMachinePatternDetail(r)}
+          />
           {moduleAccessById.machine?.canDelete ? (
-            <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openMachinePatternDelete(r)} />
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => openMachinePatternDelete(r)}
+            />
           ) : null}
         </div>
       ),
@@ -4672,8 +4849,8 @@ export default function SystemSettingsPage() {
             Purchase Order Split Method
           </div>
           <div className="mt-1 text-sm text-gray-500">
-            Choose how to split purchase orders between PO1 and PO2. Total
-            must equal 100% of Purchase Request.
+            Choose how to split purchase orders between PO1 and PO2. Total must
+            equal 100% of Purchase Request.
           </div>
 
           <div className="mt-5 space-y-4">
@@ -4697,8 +4874,8 @@ export default function SystemSettingsPage() {
                     Option 1: PO based on Percentage
                   </div>
                   <div className="mt-1 text-sm text-gray-500">
-                    Applied for all UNIQ. Set fixed percentage split between
-                    PO1 and PO2.
+                    Applied for all UNIQ. Set fixed percentage split between PO1
+                    and PO2.
                   </div>
 
                   {!purchaseOrderIsHistory ? (
@@ -4715,7 +4892,8 @@ export default function SystemSettingsPage() {
                         <Form.Item
                           label={
                             <span className="text-sm font-medium text-gray-700">
-                              PO 1 Percentage <span className="text-red-500">*</span>
+                              PO 1 Percentage{" "}
+                              <span className="text-red-500">*</span>
                             </span>
                           }
                           name="po1Pct"
@@ -4738,7 +4916,8 @@ export default function SystemSettingsPage() {
                         <Form.Item
                           label={
                             <span className="text-sm font-medium text-gray-700">
-                              PO 2 Percentage <span className="text-red-500">*</span>
+                              PO 2 Percentage{" "}
+                              <span className="text-red-500">*</span>
                             </span>
                           }
                           name="po2Pct"
@@ -4792,7 +4971,9 @@ export default function SystemSettingsPage() {
             <button
               type="button"
               className={`w-full rounded-2xl border p-4 text-left transition ${purchaseOrderIsHistory ? "border-fuchsia-400 bg-fuchsia-50/40 shadow-[0_0_0_1px_rgba(217,70,239,0.14)]" : "border-gray-200 bg-white"}`}
-              onClick={() => purchaseOrderForm.setFieldsValue({ splitRule: "history" })}
+              onClick={() =>
+                purchaseOrderForm.setFieldsValue({ splitRule: "history" })
+              }
             >
               <div className="flex items-start gap-3">
                 <div
@@ -4835,25 +5016,53 @@ export default function SystemSettingsPage() {
                               <Form.Item
                                 label={
                                   <span className="text-sm font-medium text-gray-700">
-                                    From Date <span className="text-red-500">*</span>
+                                    From Date{" "}
+                                    <span className="text-red-500">*</span>
                                   </span>
                                 }
                                 name="po1FromDate"
-                                rules={purchaseOrderIsHistory ? [{ required: true, message: "PO 1 From Date is required" }] : []}
+                                rules={
+                                  purchaseOrderIsHistory
+                                    ? [
+                                        {
+                                          required: true,
+                                          message: "PO 1 From Date is required",
+                                        },
+                                      ]
+                                    : []
+                                }
                               >
-                                <Input size="large" type="date" className="w-full" />
+                                <Input
+                                  size="large"
+                                  type="date"
+                                  className="w-full"
+                                />
                               </Form.Item>
 
                               <Form.Item
                                 label={
                                   <span className="text-sm font-medium text-gray-700">
-                                    To Date <span className="text-red-500">*</span>
+                                    To Date{" "}
+                                    <span className="text-red-500">*</span>
                                   </span>
                                 }
                                 name="po1ToDate"
-                                rules={purchaseOrderIsHistory ? [{ required: true, message: "PO 1 To Date is required" }] : []}
+                                rules={
+                                  purchaseOrderIsHistory
+                                    ? [
+                                        {
+                                          required: true,
+                                          message: "PO 1 To Date is required",
+                                        },
+                                      ]
+                                    : []
+                                }
                               >
-                                <Input size="large" type="date" className="w-full" />
+                                <Input
+                                  size="large"
+                                  type="date"
+                                  className="w-full"
+                                />
                               </Form.Item>
                             </div>
                           </div>
@@ -4869,25 +5078,53 @@ export default function SystemSettingsPage() {
                               <Form.Item
                                 label={
                                   <span className="text-sm font-medium text-gray-700">
-                                    From Date <span className="text-red-500">*</span>
+                                    From Date{" "}
+                                    <span className="text-red-500">*</span>
                                   </span>
                                 }
                                 name="po2FromDate"
-                                rules={purchaseOrderIsHistory ? [{ required: true, message: "PO 2 From Date is required" }] : []}
+                                rules={
+                                  purchaseOrderIsHistory
+                                    ? [
+                                        {
+                                          required: true,
+                                          message: "PO 2 From Date is required",
+                                        },
+                                      ]
+                                    : []
+                                }
                               >
-                                <Input size="large" type="date" className="w-full" />
+                                <Input
+                                  size="large"
+                                  type="date"
+                                  className="w-full"
+                                />
                               </Form.Item>
 
                               <Form.Item
                                 label={
                                   <span className="text-sm font-medium text-gray-700">
-                                    To Date <span className="text-red-500">*</span>
+                                    To Date{" "}
+                                    <span className="text-red-500">*</span>
                                   </span>
                                 }
                                 name="po2ToDate"
-                                rules={purchaseOrderIsHistory ? [{ required: true, message: "PO 2 To Date is required" }] : []}
+                                rules={
+                                  purchaseOrderIsHistory
+                                    ? [
+                                        {
+                                          required: true,
+                                          message: "PO 2 To Date is required",
+                                        },
+                                      ]
+                                    : []
+                                }
                               >
-                                <Input size="large" type="date" className="w-full" />
+                                <Input
+                                  size="large"
+                                  type="date"
+                                  className="w-full"
+                                />
                               </Form.Item>
                             </div>
                           </div>
@@ -5000,7 +5237,11 @@ export default function SystemSettingsPage() {
             <Button className="rounded-lg" onClick={resetPurchaseOrderEdit}>
               Reset to Default
             </Button>
-            <Button type="primary" className="rounded-lg" onClick={savePurchaseOrderEdit}>
+            <Button
+              type="primary"
+              className="rounded-lg"
+              onClick={savePurchaseOrderEdit}
+            >
               Save Configuration
             </Button>
           </div>
@@ -5014,7 +5255,9 @@ export default function SystemSettingsPage() {
             <div className="flex items-center justify-between gap-4">
               <span className="text-gray-500">Selected Method:</span>
               <span className="inline-flex rounded-md bg-blue-600 px-3 py-1 text-xs font-semibold text-white">
-                {purchaseOrderIsHistory ? "History Forecasting" : "Percentage Based"}
+                {purchaseOrderIsHistory
+                  ? "History Forecasting"
+                  : "Percentage Based"}
               </span>
             </div>
             <div className="flex items-center justify-between gap-4">
@@ -5061,7 +5304,9 @@ export default function SystemSettingsPage() {
             </div> */}
             <div className="flex items-center justify-between gap-4">
               <span className="text-gray-500">Total:</span>
-              <span className={`font-semibold ${purchaseOrderPctTotal === 100 ? "text-emerald-600" : "text-amber-600"}`}>
+              <span
+                className={`font-semibold ${purchaseOrderPctTotal === 100 ? "text-emerald-600" : "text-amber-600"}`}
+              >
                 {purchaseOrderPctTotal}%
               </span>
             </div>
@@ -5076,8 +5321,12 @@ export default function SystemSettingsPage() {
       <div className="p-6">
         <Card className="rounded-2xl shadow-sm">
           <div className="py-10 text-center">
-            <div className="text-lg font-semibold text-gray-900">Loading Permissions</div>
-            <div className="mt-2 text-sm text-gray-500">Checking your System Settings access...</div>
+            <div className="text-lg font-semibold text-gray-900">
+              Loading Permissions
+            </div>
+            <div className="mt-2 text-sm text-gray-500">
+              Checking your System Settings access...
+            </div>
           </div>
         </Card>
       </div>
@@ -5089,9 +5338,12 @@ export default function SystemSettingsPage() {
       <div className="p-6">
         <Card className="rounded-2xl shadow-sm border-red-100">
           <div className="py-10 text-center">
-            <div className="text-lg font-semibold text-red-700">No Permission</div>
+            <div className="text-lg font-semibold text-red-700">
+              No Permission
+            </div>
             <div className="mt-2 text-sm text-gray-500">
-              Permission data for your role could not be loaded. Please logout and login again, or contact administrator.
+              Permission data for your role could not be loaded. Please logout
+              and login again, or contact administrator.
             </div>
           </div>
         </Card>
@@ -5104,9 +5356,12 @@ export default function SystemSettingsPage() {
       <div className="p-6">
         <Card className="rounded-2xl shadow-sm border-red-100">
           <div className="py-10 text-center">
-            <div className="text-lg font-semibold text-red-700">No Permission</div>
+            <div className="text-lg font-semibold text-red-700">
+              No Permission
+            </div>
             <div className="mt-2 text-sm text-gray-500">
-              Your role does not have view permission for any System Settings module.
+              Your role does not have view permission for any System Settings
+              module.
             </div>
           </div>
         </Card>
@@ -5192,7 +5447,11 @@ export default function SystemSettingsPage() {
         onCancel={closeBuyNotBuyDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{buyNotBuyDeletingRow?.materialCode}</span>.
+          This will remove{" "}
+          <span className="font-semibold">
+            {buyNotBuyDeletingRow?.materialCode}
+          </span>
+          .
         </div>
       </Modal>
 
@@ -5206,7 +5465,11 @@ export default function SystemSettingsPage() {
         onCancel={closeTypeParameterDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{typeParameterDeletingRow?.typeCode}</span>.
+          This will remove{" "}
+          <span className="font-semibold">
+            {typeParameterDeletingRow?.typeCode}
+          </span>
+          .
         </div>
       </Modal>
 
@@ -5220,7 +5483,8 @@ export default function SystemSettingsPage() {
         onCancel={closeScrapDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{scrapDeletingRow?.typeCode}</span>.
+          This will remove{" "}
+          <span className="font-semibold">{scrapDeletingRow?.typeCode}</span>.
         </div>
       </Modal>
 
@@ -5339,7 +5603,11 @@ export default function SystemSettingsPage() {
         onCancel={closeMachinePatternDelete}
       >
         <div className="text-gray-700">
-          This will remove <span className="font-semibold">{machinePatternDeletingRow?.uniqCode}</span>.
+          This will remove{" "}
+          <span className="font-semibold">
+            {machinePatternDeletingRow?.uniqCode}
+          </span>
+          .
         </div>
       </Modal>
 
@@ -5532,50 +5800,69 @@ export default function SystemSettingsPage() {
             <div>
               <div className="text-xs text-gray-500">Material Type</div>
               <div className="font-medium text-gray-900">
-                {poSplitDetailApiData?.budget_type || purchaseOrderDetailRow.materialType}
+                {poSplitDetailApiData?.budget_type ||
+                  purchaseOrderDetailRow.materialType}
               </div>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <div className="text-xs text-gray-500">PO 1 Percentage</div>
                 <div className="font-medium text-gray-900">
-                  {Number(poSplitDetailApiData?.po1_pct ?? purchaseOrderDetailRow.po1Pct)}%
+                  {Number(
+                    poSplitDetailApiData?.po1_pct ??
+                      purchaseOrderDetailRow.po1Pct,
+                  )}
+                  %
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">PO 2 Percentage</div>
                 <div className="font-medium text-gray-900">
-                  {Number(poSplitDetailApiData?.po2_pct ?? purchaseOrderDetailRow.po2Pct)}%
+                  {Number(
+                    poSplitDetailApiData?.po2_pct ??
+                      purchaseOrderDetailRow.po2Pct,
+                  )}
+                  %
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Min Order Qty</div>
                 <div className="font-medium text-gray-900">
                   {Number(
-                    poSplitDetailApiData?.min_order_qty ?? purchaseOrderDetailRow.minOrderQty,
+                    poSplitDetailApiData?.min_order_qty ??
+                      purchaseOrderDetailRow.minOrderQty,
                   ).toLocaleString("en-US")}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Max Split Lines</div>
                 <div className="font-medium text-gray-900">
-                  {Number(poSplitDetailApiData?.max_split_lines ?? purchaseOrderDetailRow.maxSplitLines)}
+                  {Number(
+                    poSplitDetailApiData?.max_split_lines ??
+                      purchaseOrderDetailRow.maxSplitLines,
+                  )}
                 </div>
               </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Split Rule</div>
               <div className="font-medium text-gray-900">
-                {poSplitDetailApiData?.split_rule || purchaseOrderDetailRow.splitRule}
+                {poSplitDetailApiData?.split_rule ||
+                  purchaseOrderDetailRow.splitRule}
               </div>
             </div>
-            {String(poSplitDetailApiData?.split_rule ?? purchaseOrderDetailRow.splitRule).toLowerCase() === "history" ? (
+            {String(
+              poSplitDetailApiData?.split_rule ??
+                purchaseOrderDetailRow.splitRule,
+            ).toLowerCase() === "history" ? (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <div className="text-xs text-gray-500">PO 1 Range</div>
                   <div className="font-medium text-gray-900">
-                    {(poSplitDetailApiData?.po1_from_date ?? purchaseOrderDetailRow.po1FromDate) &&
-                    (poSplitDetailApiData?.po1_to_date ?? purchaseOrderDetailRow.po1ToDate)
+                    {(poSplitDetailApiData?.po1_from_date ??
+                      purchaseOrderDetailRow.po1FromDate) &&
+                    (poSplitDetailApiData?.po1_to_date ??
+                      purchaseOrderDetailRow.po1ToDate)
                       ? `${poSplitDetailApiData?.po1_from_date ?? purchaseOrderDetailRow.po1FromDate} → ${poSplitDetailApiData?.po1_to_date ?? purchaseOrderDetailRow.po1ToDate}`
                       : "-"}
                   </div>
@@ -5583,8 +5870,10 @@ export default function SystemSettingsPage() {
                 <div>
                   <div className="text-xs text-gray-500">PO 2 Range</div>
                   <div className="font-medium text-gray-900">
-                    {(poSplitDetailApiData?.po2_from_date ?? purchaseOrderDetailRow.po2FromDate) &&
-                    (poSplitDetailApiData?.po2_to_date ?? purchaseOrderDetailRow.po2ToDate)
+                    {(poSplitDetailApiData?.po2_from_date ??
+                      purchaseOrderDetailRow.po2FromDate) &&
+                    (poSplitDetailApiData?.po2_to_date ??
+                      purchaseOrderDetailRow.po2ToDate)
                       ? `${poSplitDetailApiData?.po2_from_date ?? purchaseOrderDetailRow.po2FromDate} → ${poSplitDetailApiData?.po2_to_date ?? purchaseOrderDetailRow.po2ToDate}`
                       : "-"}
                   </div>
@@ -5594,7 +5883,9 @@ export default function SystemSettingsPage() {
             <div>
               <div className="text-xs text-gray-500">Description</div>
               <div className="font-medium text-gray-900">
-                {poSplitDetailApiData?.description || purchaseOrderDetailRow.description || "-"}
+                {poSplitDetailApiData?.description ||
+                  purchaseOrderDetailRow.description ||
+                  "-"}
               </div>
             </div>
             <div>
@@ -5622,32 +5913,41 @@ export default function SystemSettingsPage() {
             <div>
               <div className="text-xs text-gray-500">Menu/Action</div>
               <div className="font-medium text-gray-900">
-                {approvalWorkflowDetailApiData?.action_name || approvalWorkflowDetailRow.menuAction}
+                {approvalWorkflowDetailApiData?.action_name ||
+                  approvalWorkflowDetailRow.menuAction}
               </div>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <div className="text-xs text-gray-500">Level 1 Role</div>
                 <div className="font-medium text-gray-900">
-                  {approvalWorkflowDetailApiData?.level_1_role || approvalWorkflowDetailRow.level1Role || "-"}
+                  {approvalWorkflowDetailApiData?.level_1_role ||
+                    approvalWorkflowDetailRow.level1Role ||
+                    "-"}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Level 2 Role</div>
                 <div className="font-medium text-gray-900">
-                  {approvalWorkflowDetailApiData?.level_2_role || approvalWorkflowDetailRow.level2Role || "-"}
+                  {approvalWorkflowDetailApiData?.level_2_role ||
+                    approvalWorkflowDetailRow.level2Role ||
+                    "-"}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Level 3 Role</div>
                 <div className="font-medium text-gray-900">
-                  {approvalWorkflowDetailApiData?.level_3_role || approvalWorkflowDetailRow.level3Role || "-"}
+                  {approvalWorkflowDetailApiData?.level_3_role ||
+                    approvalWorkflowDetailRow.level3Role ||
+                    "-"}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Level 4 Role</div>
                 <div className="font-medium text-gray-900">
-                  {approvalWorkflowDetailApiData?.level_4_role || approvalWorkflowDetailRow.level4Role || "-"}
+                  {approvalWorkflowDetailApiData?.level_4_role ||
+                    approvalWorkflowDetailRow.level4Role ||
+                    "-"}
                 </div>
               </div>
             </div>
@@ -5675,28 +5975,40 @@ export default function SystemSettingsPage() {
           <div className="space-y-3">
             <div>
               <div className="text-xs text-gray-500">Product Name</div>
-              <div className="font-medium text-gray-900">{kanbanDetailRow.productName}</div>
+              <div className="font-medium text-gray-900">
+                {kanbanDetailRow.productName}
+              </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Product Code</div>
-              <div className="font-medium text-gray-900">{kanbanDetailRow.productCode}</div>
+              <div className="font-medium text-gray-900">
+                {kanbanDetailRow.productCode}
+              </div>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <div className="text-xs text-gray-500">Kanban Qty</div>
-                <div className="font-medium text-gray-900">{kanbanDetailRow.kanbanQty} units</div>
+                <div className="font-medium text-gray-900">
+                  {kanbanDetailRow.kanbanQty} units
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Min Stock</div>
-                <div className="font-medium text-gray-900">{kanbanDetailRow.minStock} units</div>
+                <div className="font-medium text-gray-900">
+                  {kanbanDetailRow.minStock} units
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Max Stock</div>
-                <div className="font-medium text-gray-900">{kanbanDetailRow.maxStock} units</div>
+                <div className="font-medium text-gray-900">
+                  {kanbanDetailRow.maxStock} units
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Status</div>
-                <div className="font-medium text-gray-900">{kanbanDetailRow.status}</div>
+                <div className="font-medium text-gray-900">
+                  {kanbanDetailRow.status}
+                </div>
               </div>
             </div>
           </div>
@@ -5829,36 +6141,52 @@ export default function SystemSettingsPage() {
           <div className="space-y-3">
             <div>
               <div className="text-xs text-gray-500">Uniq Code</div>
-              <div className="font-medium text-gray-900">{machinePatternDetailRow.uniqCode}</div>
+              <div className="font-medium text-gray-900">
+                {machinePatternDetailRow.uniqCode}
+              </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <div className="text-xs text-gray-500">Machine Name</div>
-                <div className="font-medium text-gray-900">{machinePatternDetailRow.machineName}</div>
+                <div className="font-medium text-gray-900">
+                  {machinePatternDetailRow.machineName}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Cycle Time</div>
-                <div className="font-medium text-gray-900">{machinePatternDetailRow.cycleTime}</div>
+                <div className="font-medium text-gray-900">
+                  {machinePatternDetailRow.cycleTime}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Pattern Value</div>
-                <div className="font-medium text-gray-900">{machinePatternDetailRow.patternValue}</div>
+                <div className="font-medium text-gray-900">
+                  {machinePatternDetailRow.patternValue}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Working Days</div>
-                <div className="font-medium text-gray-900">{machinePatternDetailRow.workingDays}</div>
+                <div className="font-medium text-gray-900">
+                  {machinePatternDetailRow.workingDays}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Moving Type</div>
-                <div className="font-medium text-gray-900">{machinePatternDetailRow.movingType}</div>
+                <div className="font-medium text-gray-900">
+                  {machinePatternDetailRow.movingType}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Min Output</div>
-                <div className="font-medium text-gray-900">{machinePatternDetailRow.minOutput}</div>
+                <div className="font-medium text-gray-900">
+                  {machinePatternDetailRow.minOutput}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">PRL Reference</div>
-                <div className="font-medium text-gray-900">{machinePatternDetailRow.prlReference}</div>
+                <div className="font-medium text-gray-900">
+                  {machinePatternDetailRow.prlReference}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Status</div>
@@ -6486,7 +6814,11 @@ export default function SystemSettingsPage() {
           </Form.Item>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-            <Form.Item name="isAssembly" valuePropName="checked" className="!mb-0">
+            <Form.Item
+              name="isAssembly"
+              valuePropName="checked"
+              className="!mb-0"
+            >
               <Checkbox>is_assembly</Checkbox>
             </Form.Item>
             <Form.Item name="subCon" valuePropName="checked" className="!mb-0">
@@ -6624,319 +6956,366 @@ export default function SystemSettingsPage() {
           {selectedModuleId === "machine" ? (
             <MachineSettingsPanel />
           ) : (
-          <Card className="rounded-2xl shadow-sm" styles={{ body: { padding: 0 } }}>
-            <div className="bg-blue-50 rounded-t-2xl px-5 py-4 border-b">
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div>
-                  <div className="text-lg font-semibold text-gray-900">
-                    System Parameters
+            <Card
+              className="rounded-2xl shadow-sm"
+              styles={{ body: { padding: 0 } }}
+            >
+              <div className="bg-blue-50 rounded-t-2xl px-5 py-4 border-b">
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div>
+                    <div className="text-lg font-semibold text-gray-900">
+                      System Parameters
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      Comprehensive ERP parameter management and configuration
+                    </div>
                   </div>
-                  <div className="text-sm text-gray-500">
-                    Comprehensive ERP parameter management and configuration
-                  </div>
-                </div>
-                <Button
-                  className="bg-blue-100 text-blue-700 border-blue-100"
-                  icon={<InfoCircleOutlined />}
-                >
-                  {visibleModules.length} Configuration Modules
-                </Button>
-              </div>
-            </div>
-
-            <div className="px-5 py-4 border-b">
-              {selectedModuleId === "machine" && (
-                <div className="mb-3">
-                  <div className="inline-flex items-center rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
-                    <button
-                      type="button"
-                      onClick={() => setMachineTab("pattern")}
-                      className={
-                        "px-4 py-2 text-sm rounded-md transition-colors " +
-                        (machineTab === "pattern"
-                          ? "bg-gray-100 text-gray-900 font-medium"
-                          : "text-gray-500 hover:text-gray-900")
-                      }
-                    >
-                      Pattern
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMachineTab("fast-slow")}
-                      className={
-                        "px-4 py-2 text-sm rounded-md transition-colors " +
-                        (machineTab === "fast-slow"
-                          ? "bg-gray-100 text-gray-900 font-medium"
-                          : "text-gray-500 hover:text-gray-900")
-                      }
-                    >
-                      Fast/Slow
-                    </button>
-                  </div>
-                </div>
-              )}
-              <div className="flex items-center gap-3 flex-wrap">
-                <Input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search by Uniq or Machine Name..."
-                  prefix={<SearchOutlined className="text-gray-400" />}
-                  className="flex-1 min-w-[260px]"
-                />
-                <Select
-                  value={typeFilter}
-                  onChange={(v) => setTypeFilter(v as "All Types" | StatusType)}
-                  style={{ width: 140 }}
-                  options={[
-                    { label: "All Types", value: "All Types" },
-                    { label: "Active", value: "Active" },
-                    { label: "Inactive", value: "Inactive" },
-                  ]}
-                />
-                <Button icon={<DownloadOutlined />}>Export</Button>
-              </div>
-            </div>
-
-            <div className="px-5 py-5">
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div>
-                  <div className="text-base font-semibold text-gray-900">
-                    {selectedModuleId === "purchase-order"
-                      ? "PO - Split Settings"
-                      : selectedModuleId === "kanban"
-                        ? "Kanban - FG Standards"
-                        : selectedModuleId === "global"
-                          ? "Global - Working Days"
-                          : selectedModuleId === "process"
-                            ? "Process"
-                            : selectedModuleId === "machine"
-                              ? machineTab === "fast-slow"
-                                ? "Machine - Fast/Slow"
-                                : "Machine - Pattern"
-                              : selectedModule.name}
-                  </div>
-                  <div className="text-sm text-gray-500">
-                    {selectedModuleId === "purchase-order"
-                      ? "Configure purchase order split settings"
-                      : selectedModuleId === "kanban"
-                        ? "Set kanban standards for finished goods"
-                        : selectedModuleId === "global"
-                          ? "Configure working days per month"
-                          : selectedModuleId === "process"
-                            ? "Configure Process for Work In Proccess"
-                            : selectedModuleId === "machine"
-                              ? "Define machine pattern configurations"
-                              : selectedModule.description}
-                  </div>
-                </div>
-                {(selectedModuleId === "purchase-order" && purchaseOrderEditOpen) || canCreateSelectedModule ? (
                   <Button
-                    type={selectedModuleId === "purchase-order" && purchaseOrderEditOpen ? "default" : "primary"}
-                    icon={selectedModuleId === "purchase-order" && purchaseOrderEditOpen ? undefined : <PlusOutlined />}
-                    onClick={() => {
-                      if (selectedModuleId === "purchase-order" && purchaseOrderEditOpen) {
-                        closePurchaseOrderEdit();
-                        return;
-                      }
-                      if (!canCreateSelectedModule) {
-                        message.error("You do not have permission to create this parameter");
-                        return;
-                      }
-                      if (selectedModuleId === "access-control-matrix") {
-                        router.push(
-                          "/system-settings/access-control-matrix/create",
-                        );
-                        return;
-                      }
-                      if (selectedModuleId === "roles") {
-                        openCreateRole();
-                        return;
-                      }
-                      if (selectedModuleId === "safety-stock") {
-                        router.push("/system-settings/safety-stock/create");
-                        return;
-                      }
-                      if (selectedModuleId === "stockdays") {
-                        router.push("/system-settings/stockdays/create");
-                        return;
-                      }
-                      if (selectedModuleId === "buy-not-buy-flag") {
-                        openCreateBuyNotBuyFlag();
-                        return;
-                      }
-                      if (selectedModuleId === "scrap") {
-                        router.push("/system-settings/scrap-type/create");
-                        return;
-                      }
-                      if (selectedModuleId === "type-parameters") {
-                        openCreateTypeParameter();
-                        return;
-                      }
-                      if (selectedModuleId === "uom-global") {
-                        openCreateUom();
-                        return;
-                      }
-                      if (selectedModuleId === "purchase-order") {
-                        openCreatePurchaseOrder();
-                        return;
-                      }
-                      if (selectedModuleId === "approval-workflow") {
-                        router.push("/system-settings/approval-workflow/create");
-                        return;
-                      }
-                      if (selectedModuleId === "kanban") {
-                        router.push(
-                          "/system-settings/kanban/parameter/create-fullscreen",
-                        );
-                        return;
-                      }
-                      if (selectedModuleId === "global") {
-                        router.push("/system-settings/global/create-fullscreen");
-                        return;
-                      }
-                      if (selectedModuleId === "process") {
-                        router.push("/system-settings/process/create-fullscreen");
-                        return;
-                      }
-                      if (selectedModuleId === "machine") {
-                        if (machineTab === "pattern") {
-                          router.push("/system-settings/machine/pattern/create");
-                        }
-                        return;
-                      }
-                      openCreate();
-                    }}
+                    className="bg-blue-100 text-blue-700 border-blue-100"
+                    icon={<InfoCircleOutlined />}
                   >
-                    {selectedModuleId === "purchase-order" && purchaseOrderEditOpen
-                      ? "Back to List"
-                      : "Add Parameter"}
+                    {visibleModules.length} Configuration Modules
                   </Button>
-                ) : null}
+                </div>
               </div>
 
-              {selectedModuleId === "purchase-order" && purchaseOrderEditOpen ? (
-                <div className="mt-4">{renderPurchaseOrderEditor()}</div>
-              ) : (
-              <div className="mt-4 border rounded-xl overflow-hidden">
-                {selectedModuleId === "roles" ? (
-                  <Table<RoleRow>
-                    columns={roleColumns}
-                    dataSource={filteredRoles}
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
+              <div className="px-5 py-4 border-b">
+                {selectedModuleId === "machine" && (
+                  <div className="mb-3">
+                    <div className="inline-flex items-center rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
+                      <button
+                        type="button"
+                        onClick={() => setMachineTab("pattern")}
+                        className={
+                          "px-4 py-2 text-sm rounded-md transition-colors " +
+                          (machineTab === "pattern"
+                            ? "bg-gray-100 text-gray-900 font-medium"
+                            : "text-gray-500 hover:text-gray-900")
+                        }
+                      >
+                        Pattern
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMachineTab("fast-slow")}
+                        className={
+                          "px-4 py-2 text-sm rounded-md transition-colors " +
+                          (machineTab === "fast-slow"
+                            ? "bg-gray-100 text-gray-900 font-medium"
+                            : "text-gray-500 hover:text-gray-900")
+                        }
+                      >
+                        Fast/Slow
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Input
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="Search by Uniq or Machine Name..."
+                    prefix={<SearchOutlined className="text-gray-400" />}
+                    className="flex-1 min-w-[260px]"
                   />
-                ) : selectedModuleId === "safety-stock" ? (
-                  <Table<SafetyStockRow>
-                    columns={safetyColumns}
-                    dataSource={filteredSafety}
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
-                  />
-                ) : selectedModuleId === "stockdays" ? (
-                  <Table<StockdaysRow>
-                    columns={stockdaysColumns}
-                    dataSource={filteredStockdays}
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
-                  />
-                ) : selectedModuleId === "buy-not-buy-flag" ? (
-                  <Table<BuyNotBuyFlagRow>
-                    columns={buyNotBuyColumns}
-                    dataSource={filteredBuyNotBuyRows}
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
-                  />
-                ) : selectedModuleId === "scrap" ? (
-                  <Table<ScrapTypeRow>
-                    columns={scrapColumns}
-                    dataSource={filteredScrap}
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
-                  />
-                ) : selectedModuleId === "type-parameters" ? (
-                  <Table<TypeParameterRow>
-                    columns={typeParameterColumns}
-                    dataSource={filteredTypeParameters}
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
-                  />
-                ) : selectedModuleId === "uom-global" ? (
-                  <Table<UomRow>
-                    columns={uomColumns}
-                    dataSource={filteredUom}
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
-                  />
-                ) : selectedModuleId === "purchase-order" ? (
-                  <Table<PurchaseOrderRow>
-                    columns={purchaseOrderColumns}
-                    dataSource={filteredPurchaseOrder}
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
-                  />
-                ) : selectedModuleId === "approval-workflow" ? (
-                  <Table<ApprovalWorkflowRow>
-                    columns={approvalWorkflowColumns}
-                    dataSource={filteredApprovalWorkflow}
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
-                  />
-                ) : selectedModuleId === "kanban" ? (
-                  <Table<KanbanRow>
-                    columns={kanbanColumns}
-                    dataSource={filteredKanban}
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
-                  />
-                ) : selectedModuleId === "global" ? (
-                  <Table<GlobalWorkingDaysRow>
-                    columns={globalWorkingDaysColumns}
-                    dataSource={filteredGlobalWorkingDays}
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
-                  />
-                ) : selectedModuleId === "process" ? (
-                  <Table<ProcessRow>
-                    columns={processColumns}
-                    dataSource={filteredProcess}
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
-                  />
-                ) : selectedModuleId === "machine" ? (
-                  <Table<MachinePatternRow>
-                    columns={machinePatternColumns}
-                    dataSource={
-                      machineTab === "pattern" ? filteredMachinePattern : []
+                  <Select
+                    value={typeFilter}
+                    onChange={(v) =>
+                      setTypeFilter(v as "All Types" | StatusType)
                     }
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
+                    style={{ width: 140 }}
+                    options={[
+                      { label: "All Types", value: "All Types" },
+                      { label: "Active", value: "Active" },
+                      { label: "Inactive", value: "Inactive" },
+                    ]}
                   />
+                  <Button icon={<DownloadOutlined />}>Export</Button>
+
+                  <Button
+                    icon={<DownloadOutlined />}
+                    onClick={handleDownloadTemplateKanban}
+                  >
+                    Download Template
+                  </Button>
+
+                  <Upload
+                    accept=".xlsx"
+                    showUploadList={false}
+                    beforeUpload={handleImportKanban}
+                  >
+                    <Button icon={<UploadOutlined />}>Import</Button>
+                  </Upload>
+                </div>
+              </div>
+
+              <div className="px-5 py-5">
+                <div className="flex items-start justify-between gap-4 flex-wrap">
+                  <div>
+                    <div className="text-base font-semibold text-gray-900">
+                      {selectedModuleId === "purchase-order"
+                        ? "PO - Split Settings"
+                        : selectedModuleId === "kanban"
+                          ? "Kanban - FG Standards"
+                          : selectedModuleId === "global"
+                            ? "Global - Working Days"
+                            : selectedModuleId === "process"
+                              ? "Process"
+                              : selectedModuleId === "machine"
+                                ? machineTab === "fast-slow"
+                                  ? "Machine - Fast/Slow"
+                                  : "Machine - Pattern"
+                                : selectedModule.name}
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      {selectedModuleId === "purchase-order"
+                        ? "Configure purchase order split settings"
+                        : selectedModuleId === "kanban"
+                          ? "Set kanban standards for finished goods"
+                          : selectedModuleId === "global"
+                            ? "Configure working days per month"
+                            : selectedModuleId === "process"
+                              ? "Configure Process for Work In Proccess"
+                              : selectedModuleId === "machine"
+                                ? "Define machine pattern configurations"
+                                : selectedModule.description}
+                    </div>
+                  </div>
+                  {(selectedModuleId === "purchase-order" &&
+                    purchaseOrderEditOpen) ||
+                  canCreateSelectedModule ? (
+                    <Button
+                      type={
+                        selectedModuleId === "purchase-order" &&
+                        purchaseOrderEditOpen
+                          ? "default"
+                          : "primary"
+                      }
+                      icon={
+                        selectedModuleId === "purchase-order" &&
+                        purchaseOrderEditOpen ? undefined : (
+                          <PlusOutlined />
+                        )
+                      }
+                      onClick={() => {
+                        if (
+                          selectedModuleId === "purchase-order" &&
+                          purchaseOrderEditOpen
+                        ) {
+                          closePurchaseOrderEdit();
+                          return;
+                        }
+                        if (!canCreateSelectedModule) {
+                          message.error(
+                            "You do not have permission to create this parameter",
+                          );
+                          return;
+                        }
+                        if (selectedModuleId === "access-control-matrix") {
+                          router.push(
+                            "/system-settings/access-control-matrix/create",
+                          );
+                          return;
+                        }
+                        if (selectedModuleId === "roles") {
+                          openCreateRole();
+                          return;
+                        }
+                        if (selectedModuleId === "safety-stock") {
+                          router.push("/system-settings/safety-stock/create");
+                          return;
+                        }
+                        if (selectedModuleId === "stockdays") {
+                          router.push("/system-settings/stockdays/create");
+                          return;
+                        }
+                        if (selectedModuleId === "buy-not-buy-flag") {
+                          openCreateBuyNotBuyFlag();
+                          return;
+                        }
+                        if (selectedModuleId === "scrap") {
+                          router.push("/system-settings/scrap-type/create");
+                          return;
+                        }
+                        if (selectedModuleId === "type-parameters") {
+                          openCreateTypeParameter();
+                          return;
+                        }
+                        if (selectedModuleId === "uom-global") {
+                          openCreateUom();
+                          return;
+                        }
+                        if (selectedModuleId === "purchase-order") {
+                          openCreatePurchaseOrder();
+                          return;
+                        }
+                        if (selectedModuleId === "approval-workflow") {
+                          router.push(
+                            "/system-settings/approval-workflow/create",
+                          );
+                          return;
+                        }
+                        if (selectedModuleId === "kanban") {
+                          router.push(
+                            "/system-settings/kanban/parameter/create-fullscreen",
+                          );
+                          return;
+                        }
+                        if (selectedModuleId === "global") {
+                          router.push(
+                            "/system-settings/global/create-fullscreen",
+                          );
+                          return;
+                        }
+                        if (selectedModuleId === "process") {
+                          router.push(
+                            "/system-settings/process/create-fullscreen",
+                          );
+                          return;
+                        }
+                        if (selectedModuleId === "machine") {
+                          if (machineTab === "pattern") {
+                            router.push(
+                              "/system-settings/machine/pattern/create",
+                            );
+                          }
+                          return;
+                        }
+                        openCreate();
+                      }}
+                    >
+                      {selectedModuleId === "purchase-order" &&
+                      purchaseOrderEditOpen
+                        ? "Back to List"
+                        : "Add Parameter"}
+                    </Button>
+                  ) : null}
+                </div>
+
+                {selectedModuleId === "purchase-order" &&
+                purchaseOrderEditOpen ? (
+                  <div className="mt-4">{renderPurchaseOrderEditor()}</div>
                 ) : (
-                  <Table<ParameterRow>
-                    columns={columns}
-                    dataSource={filtered}
-                    rowKey="id"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
-                  />
+                  <div className="mt-4 border rounded-xl overflow-hidden">
+                    {selectedModuleId === "roles" ? (
+                      <Table<RoleRow>
+                        columns={roleColumns}
+                        dataSource={filteredRoles}
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: "max-content" }}
+                      />
+                    ) : selectedModuleId === "safety-stock" ? (
+                      <Table<SafetyStockRow>
+                        columns={safetyColumns}
+                        dataSource={filteredSafety}
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: "max-content" }}
+                      />
+                    ) : selectedModuleId === "stockdays" ? (
+                      <Table<StockdaysRow>
+                        columns={stockdaysColumns}
+                        dataSource={filteredStockdays}
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: "max-content" }}
+                      />
+                    ) : selectedModuleId === "buy-not-buy-flag" ? (
+                      <Table<BuyNotBuyFlagRow>
+                        columns={buyNotBuyColumns}
+                        dataSource={filteredBuyNotBuyRows}
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: "max-content" }}
+                      />
+                    ) : selectedModuleId === "scrap" ? (
+                      <Table<ScrapTypeRow>
+                        columns={scrapColumns}
+                        dataSource={filteredScrap}
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: "max-content" }}
+                      />
+                    ) : selectedModuleId === "type-parameters" ? (
+                      <Table<TypeParameterRow>
+                        columns={typeParameterColumns}
+                        dataSource={filteredTypeParameters}
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: "max-content" }}
+                      />
+                    ) : selectedModuleId === "uom-global" ? (
+                      <Table<UomRow>
+                        columns={uomColumns}
+                        dataSource={filteredUom}
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: "max-content" }}
+                      />
+                    ) : selectedModuleId === "purchase-order" ? (
+                      <Table<PurchaseOrderRow>
+                        columns={purchaseOrderColumns}
+                        dataSource={filteredPurchaseOrder}
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: "max-content" }}
+                      />
+                    ) : selectedModuleId === "approval-workflow" ? (
+                      <Table<ApprovalWorkflowRow>
+                        columns={approvalWorkflowColumns}
+                        dataSource={filteredApprovalWorkflow}
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: "max-content" }}
+                      />
+                    ) : selectedModuleId === "kanban" ? (
+                      <Table<KanbanRow>
+                        columns={kanbanColumns}
+                        dataSource={filteredKanban}
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: "max-content" }}
+                      />
+                    ) : selectedModuleId === "global" ? (
+                      <Table<GlobalWorkingDaysRow>
+                        columns={globalWorkingDaysColumns}
+                        dataSource={filteredGlobalWorkingDays}
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: "max-content" }}
+                      />
+                    ) : selectedModuleId === "process" ? (
+                      <Table<ProcessRow>
+                        columns={processColumns}
+                        dataSource={filteredProcess}
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: "max-content" }}
+                      />
+                    ) : selectedModuleId === "machine" ? (
+                      <Table<MachinePatternRow>
+                        columns={machinePatternColumns}
+                        dataSource={
+                          machineTab === "pattern" ? filteredMachinePattern : []
+                        }
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: "max-content" }}
+                      />
+                    ) : (
+                      <Table<ParameterRow>
+                        columns={columns}
+                        dataSource={filtered}
+                        rowKey="id"
+                        pagination={false}
+                        scroll={{ x: "max-content" }}
+                      />
+                    )}
+                  </div>
                 )}
               </div>
-              )}
-            </div>
-          </Card>
+            </Card>
           )}
         </div>
       </div>
