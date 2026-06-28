@@ -124,6 +124,17 @@ export type RoleRecord = {
   status?: StatusType;
   created_at?: string;
   updated_at?: string;
+  user_count?: number;
+};
+
+export type RoleUserRecord = {
+  id: string;
+  full_name: string;
+  email: string;
+  job_title?: string | null;
+  status?: string;
+  department_id?: string | number | null;
+  join_date?: string | null;
 };
 
 export type EmployeeRecord = {
@@ -497,6 +508,7 @@ export type PoSplitRecord = {
 };
 
 export const systemSettingsSlice = apiSlice.injectEndpoints({
+  overrideExisting: true,
   endpoints: (builder) => ({
     // Role
     createRole: builder.mutation<
@@ -578,6 +590,19 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         };
       },
       providesTags: (_res, _err, id) => [{ type: "SystemSettingsRoles", id }],
+    }),
+
+    getRoleUsers: builder.query<RoleUserRecord[], string>({
+      query: (id) => ({
+        url: `${ROUTES.role}/${encodeURIComponent(id)}/users`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) =>
+        normalizeArrayResponse<RoleUserRecord>(response),
+      providesTags: (_res, _err, id) => [
+        { type: "SystemSettingsRoles", id: `${id}/users` },
+      ],
     }),
 
     getDepartments: builder.query<DepartmentRecord[], void>({
@@ -1733,6 +1758,7 @@ export const {
   useGetPoSplitSettingsQuery,
   useGetPoSplitSettingByIdQuery,
   useGetRoleByIdQuery,
+  useGetRoleUsersQuery,
   useGetDepartmentByIdQuery,
   useGetKanbanStandardByIdQuery,
 } = systemSettingsSlice;
