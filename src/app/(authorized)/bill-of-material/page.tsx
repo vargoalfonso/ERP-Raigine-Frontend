@@ -1594,7 +1594,7 @@ export default function BillOfMaterialPage() {
                 setTablePageSize(size);
               },
               showTotal: (total, range) =>
-                `(${range[1] - range[0] + 1} of ${total}) Parent BOMs`,
+                `(${range[1]} of ${total}) Parent BOMs`,
             }}
             expandable={{
               expandedRowKeys: effectiveExpandedRowKeys,

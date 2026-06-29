@@ -2,12 +2,16 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Button, Card, Form, Input, Typography, message, Switch, Table, Checkbox, Divider } from "antd";
+import { Button, Card, Form, Input, Typography, message, Switch, Table, Checkbox, Divider, Tag } from "antd";
+import type { ColumnsType } from "antd/es/table";
 
 import {
   type RolePermissions,
+  type RoleUserRecord,
   useCreateRoleMutation,
   useGetRoleByIdQuery,
+  useGetRoleUsersQuery,
+  useGetDepartmentsQuery,
   useUpdateRoleMutation,
 } from "@/lib/api/system-settings/api";
 import { getApiErrorMessage } from "@/lib/api/error";
@@ -605,8 +609,73 @@ function RoleCreatePageContent() {
     skip: !id,
   });
 
+  const { data: roleUsers = [], isFetching: isFetchingUsers } =
+    useGetRoleUsersQuery(id, {
+      skip: !id || mode !== "detail",
+    });
+
+  const { data: departments = [] } = useGetDepartmentsQuery(undefined, {
+    skip: mode !== "detail",
+  });
+
+  const departmentNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const dept of departments) {
+      if (dept?.id != null) map.set(String(dept.id), dept.department_name ?? "");
+    }
+    return map;
+  }, [departments]);
+
   const [createRole, createState] = useCreateRoleMutation();
   const [updateRole, updateState] = useUpdateRoleMutation();
+
+  const roleUserColumns: ColumnsType<RoleUserRecord> = useMemo(
+    () => [
+      {
+        title: "Full Name",
+        dataIndex: "full_name",
+        key: "full_name",
+        render: (v: string) => v || "-",
+      },
+      {
+        title: "Email",
+        dataIndex: "email",
+        key: "email",
+        render: (v: string) => v || "-",
+      },
+      {
+        title: "Job Title",
+        dataIndex: "job_title",
+        key: "job_title",
+        render: (v?: string | null) => v || "-",
+      },
+      {
+        title: "Department",
+        dataIndex: "department_id",
+        key: "department_id",
+        render: (v?: string | number | null) =>
+          v == null ? "-" : departmentNameById.get(String(v)) || String(v),
+      },
+      {
+        title: "Join Date",
+        dataIndex: "join_date",
+        key: "join_date",
+        render: (v?: string | null) =>
+          v ? new Date(v).toLocaleDateString("en-GB") : "-",
+      },
+      {
+        title: "Status",
+        dataIndex: "status",
+        key: "status",
+        render: (v?: string) => {
+          if (!v) return "-";
+          const isActive = v.toLowerCase() === "active";
+          return <Tag color={isActive ? "green" : "default"}>{v}</Tag>;
+        },
+      },
+    ],
+    [departmentNameById],
+  );
 
   const title = useMemo(() => {
     if (mode === "detail") return "Role Detail";
@@ -850,6 +919,34 @@ function RoleCreatePageContent() {
             </div>
           </Form>
         </Card>
+
+        {mode === "detail" ? (
+          <Card
+            className="rounded-2xl shadow-sm"
+            styles={{ body: { padding: 20 } }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <div className="text-lg font-semibold text-gray-900">
+                  Users in this Role
+                </div>
+                <div className="text-sm text-gray-500">
+                  People currently assigned to this role
+                </div>
+              </div>
+              <Tag color="blue">{roleUsers.length} user(s)</Tag>
+            </div>
+            <Table<RoleUserRecord>
+              rowKey="id"
+              size="middle"
+              columns={roleUserColumns}
+              dataSource={roleUsers}
+              loading={isFetchingUsers}
+              pagination={{ pageSize: 10, hideOnSinglePage: true }}
+              locale={{ emptyText: "No users assigned to this role" }}
+            />
+          </Card>
+        ) : null}
       </div>
     </div>
   );

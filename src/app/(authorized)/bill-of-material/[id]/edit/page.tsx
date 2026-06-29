@@ -628,9 +628,8 @@ export default function BomEditPage() {
         <Form.Item name={[...fieldPath, "material_spec", "grade"]} label="Grade" rules={disabled ? [] : [{ required: true, message: "Grade is required" }]}> 
           <Input placeholder="e.g., STKM550" disabled={disabled} />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "type_material"]} label="Type Material">
+        <Form.Item name={[...fieldPath, "material_spec", "type_material"]} label="Category">
           <Select placeholder="Select type" disabled={disabled} allowClear>
-            <Select.Option value="subcon">Subcon</Select.Option>
             <Select.Option value="raw">Raw</Select.Option>
             <Select.Option value="indirect">Indirect</Select.Option>
           </Select>
@@ -705,9 +704,8 @@ export default function BomEditPage() {
               </Form.Item>
               <Form.Item name={[field.name, "category"]} label="Category">
                 <Select placeholder="Select category" allowClear>
-                  <Select.Option value="RM">Raw Material</Select.Option>
-                  <Select.Option value="Indirect">Indirect</Select.Option>
-                  <Select.Option value="Subcon">Subcon</Select.Option>
+                  <Select.Option value="raw">Raw Material</Select.Option>
+                  <Select.Option value="indirect">Indirect</Select.Option>
                 </Select>
               </Form.Item>
             </div>
