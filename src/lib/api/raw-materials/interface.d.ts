@@ -39,7 +39,7 @@ export interface RawMaterialRecord {
   updated_at: string;
   master_list_supplier?: MasterListSupplierRecord;
   warehouse?: WarehouseRecord;
-  qr?: string;
+  qr: string;
 }
 
 export type StatusStock =

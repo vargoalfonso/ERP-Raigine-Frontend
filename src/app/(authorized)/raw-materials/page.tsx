@@ -49,6 +49,10 @@ import {
   getStatusStockColor,
 } from "@/lib/api/raw-materials/utils";
 
+import {
+  useLazyGenerateQRRawmaterialQuery,
+} from "@/lib/api/raw-materials/api";
+
 // Mock data untuk demo
 const MOCK_RAW_MATERIALS: RawMaterialRecord[] = [
   {
@@ -77,6 +81,7 @@ const MOCK_RAW_MATERIALS: RawMaterialRecord[] = [
     updated_at: "",
     current_stock: undefined,
     master_list: undefined,
+    qr:"",
   },
   {
     id: "2",
@@ -104,6 +109,7 @@ const MOCK_RAW_MATERIALS: RawMaterialRecord[] = [
     updated_at: "",
     current_stock: undefined,
     master_list: undefined,
+    qr:"",
   },
 ];
 
@@ -115,9 +121,11 @@ interface DetailModalState {
 
 type UnknownRecord = Record<string, unknown>;
 
-const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
 
-const isMissingRouteError = (error: unknown): boolean => isRecord(error) && error.status === 404;
+const isMissingRouteError = (error: unknown): boolean =>
+  isRecord(error) && error.status === 404;
 
 const deriveStatus = (stockQty: number): RawMaterialRecord["status"] => {
   if (stockQty <= 0) return "OutOfStock";
@@ -128,16 +136,25 @@ const deriveStatus = (stockQty: number): RawMaterialRecord["status"] => {
 const mapKanbanStatusToUi = (
   value: unknown,
 ): RawMaterialRecord["status"] | null => {
-  const raw = String(value ?? "").trim().toLowerCase();
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (!raw) return null;
   if (raw.includes("out")) return "OutOfStock";
   if (raw.includes("low")) return "LowStock";
-  if (raw.includes("avail") || raw.includes("in_stock") || raw.includes("in stock")) return "Available";
+  if (
+    raw.includes("avail") ||
+    raw.includes("in_stock") ||
+    raw.includes("in stock")
+  )
+    return "Available";
   return null;
 };
 
 const isBuyValue = (value: unknown): boolean | null => {
-  const raw = String(value ?? "").trim().toLowerCase();
+  const raw = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (!raw) return null;
   if (raw === "buy") return true;
   if (raw === "not_buy" || raw === "not buy" || raw === "no") return false;
@@ -146,7 +163,9 @@ const isBuyValue = (value: unknown): boolean | null => {
   return null;
 };
 
-const mapInventoryToRawMaterial = (record: InventoryRecord): RawMaterialRecord => {
+const mapInventoryToRawMaterial = (
+  record: InventoryRecord,
+): RawMaterialRecord => {
   const stockQty = Number(record.stock_qty ?? 0);
   const status = deriveStatus(stockQty);
 
@@ -165,7 +184,10 @@ const mapInventoryToRawMaterial = (record: InventoryRecord): RawMaterialRecord =
     stock_days: 0,
     status,
     is_buyed: status !== "Available",
-    warehouse: { id: record.warehouse_location ?? "", name: record.warehouse_location ?? "-" },
+    warehouse: {
+      id: record.warehouse_location ?? "",
+      name: record.warehouse_location ?? "-",
+    },
     master_list_supplier_id: record.rm_source,
     price: record.stock_weight_kg,
     po_reference: "",
@@ -187,7 +209,7 @@ const mapInventoryToRawMaterial = (record: InventoryRecord): RawMaterialRecord =
     expiry_date: undefined,
     updated_by: undefined,
     master_list_supplier: undefined,
-    qr: record.qr,
+    qr: record.qr ?? "",
   };
 };
 
@@ -427,29 +449,40 @@ export default function RawMaterialsPage() {
     record: null,
     isEditing: false,
   });
-  const [rawMaterials, setRawMaterials] = useState<RawMaterialRecord[]>(MOCK_RAW_MATERIALS);
+  const [rawMaterials, setRawMaterials] =
+    useState<RawMaterialRecord[]>(MOCK_RAW_MATERIALS);
   const apiEnabled = Boolean(apiBaseUrl);
   const listQuery = useGetInventoryListQuery(
     { type: "raw-materials", page: currentPage, limit: pageSize },
-    { skip: !apiEnabled }
+    { skip: !apiEnabled },
   );
 
   const [triggerKanbanSummary] = useLazyGetInventoryKanbanSummaryQuery();
-  const [kanbanSummaryByUniq, setKanbanSummaryByUniq] = useState<Record<string, InventoryKanbanSummary>>({});
+  const [kanbanSummaryByUniq, setKanbanSummaryByUniq] = useState<
+    Record<string, InventoryKanbanSummary>
+  >({});
   const requestedUniqsRef = useRef<Set<string>>(new Set());
   const [kanbanApiMissing, setKanbanApiMissing] = useState(false);
 
   useEffect(() => {
     if (!apiEnabled || !listQuery.error) return;
     if (isMissingRouteError(listQuery.error)) {
-      message.warning("Inventory raw-materials API route is not available yet; showing mock data.");
+      message.warning(
+        "Inventory raw-materials API route is not available yet; showing mock data.",
+      );
       return;
     }
-    message.error(getApiErrorMessage(listQuery.error, "Failed to load raw materials inventory"));
+    message.error(
+      getApiErrorMessage(
+        listQuery.error,
+        "Failed to load raw materials inventory",
+      ),
+    );
   }, [apiEnabled, listQuery.error]);
 
   const inventoryRows = useMemo<RawMaterialRecord[]>(() => {
-    if (!apiEnabled || isMissingRouteError(listQuery.error)) return rawMaterials;
+    if (!apiEnabled || isMissingRouteError(listQuery.error))
+      return rawMaterials;
     const items = listQuery.data?.data ?? [];
     if (!items.length) return [];
     return items.map(mapInventoryToRawMaterial);
@@ -459,7 +492,13 @@ export default function RawMaterialsPage() {
     const q = searchValue.trim().toLowerCase();
     if (!q) return inventoryRows;
     return inventoryRows.filter((item) => {
-      return [item.uniq, item.name, item.code, item.category, item.warehouse?.name]
+      return [
+        item.uniq,
+        item.name,
+        item.code,
+        item.category,
+        item.warehouse?.name,
+      ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q));
     });
@@ -495,11 +534,17 @@ export default function RawMaterialsPage() {
           }
         });
     });
-  }, [apiEnabled, filteredRows, kanbanApiMissing, listQuery.error, triggerKanbanSummary]);
+  }, [
+    apiEnabled,
+    filteredRows,
+    kanbanApiMissing,
+    listQuery.error,
+    triggerKanbanSummary,
+  ]);
 
   const paginationTotal = searchValue.trim()
     ? filteredRows.length
-    : listQuery.data?.pagination?.total ?? inventoryRows.length;
+    : (listQuery.data?.pagination?.total ?? inventoryRows.length);
 
   const stats = {
     totalItems: paginationTotal || 0,
@@ -507,8 +552,9 @@ export default function RawMaterialsPage() {
       .length,
     lowStockItems: inventoryRows.filter((item) => item.status === "LowStock")
       .length,
-    outOfStockItems: inventoryRows.filter((item) => item.status === "OutOfStock")
-      .length,
+    outOfStockItems: inventoryRows.filter(
+      (item) => item.status === "OutOfStock",
+    ).length,
   };
 
   const handleEdit = (record: RawMaterialRecord) => {
@@ -538,7 +584,9 @@ export default function RawMaterialsPage() {
         return;
       }
 
-      setRawMaterials((prev) => prev.filter((item) => item.id !== deletingRecord.id));
+      setRawMaterials((prev) =>
+        prev.filter((item) => item.id !== deletingRecord.id),
+      );
 
       message.success("Raw material deleted successfully!");
       closeDeleteModal();
@@ -580,6 +628,28 @@ export default function RawMaterialsPage() {
       return { ...prev, isEditing: true };
     });
   };
+
+  const [generateQR] = useLazyGenerateQRRawmaterialQuery();
+
+  const handleGenerateQR = async (record: RawMaterialRecord) => {
+  if (!record.uniq) {
+    message.error("Uniq code tidak ditemukan");
+    return;
+  }
+
+  try {
+    const result = await generateQR(record.uniq).unwrap();
+    
+   setQrModal({
+  open: true,
+  qr: result.data.qr,
+  uniq: record.uniq!,
+});
+  } catch (err) {
+    console.error(err);
+    message.error("Failed generate QR Uniq Not Found Packing");
+  }
+};
 
   const columns: ColumnType<RawMaterialRecord>[] = [
     {
@@ -642,14 +712,15 @@ export default function RawMaterialsPage() {
       title: "Kanban Info",
       key: "kanban_quantity",
       width: 160,
-      render: (record: RawMaterialRecord) => (
+      render: (record: RawMaterialRecord) =>
         (() => {
           const summary = kanbanSummaryByUniq[String(record.uniq ?? "").trim()];
-          const totalneeded = Number(summary?.kanbans_needed ?? record.kanban_quantity ?? 0);
+          const totalneeded = Number(
+            summary?.kanbans_needed ?? record.kanban_quantity ?? 0,
+          );
           const needed = Number(
-
             summary?.stock_to_complete ??
-            (record.safety_stock || 0) - (record.kanban_quantity || 0),
+              (record.safety_stock || 0) - (record.kanban_quantity || 0),
           );
 
           return (
@@ -657,11 +728,12 @@ export default function RawMaterialsPage() {
               <div className="text-sm font-semibold">
                 {formatNumber(totalneeded)} Kanban
               </div>
-              <div className="text-xs text-gray-500">Stock to Complete: {formatNumber(needed)}</div>
+              <div className="text-xs text-gray-500">
+                Stock to Complete: {formatNumber(needed)}
+              </div>
             </div>
           );
-        })()
-      ),
+        })(),
     },
     {
       title: "Status",
@@ -685,10 +757,9 @@ export default function RawMaterialsPage() {
         const isBuyed = mapped ?? record.is_buyed;
         return (
           <Tag
-            className={`${isBuyed
-              ? "text-green-600 bg-green-50"
-              : "text-red-600 bg-red-50"
-              }`}
+            className={`${
+              isBuyed ? "text-green-600 bg-green-50" : "text-red-600 bg-red-50"
+            }`}
           >
             {isBuyed ? "Buy" : "Not Buy"}
           </Tag>
@@ -699,24 +770,25 @@ export default function RawMaterialsPage() {
       title: "Stock Days",
       key: "stock_days",
       width: 110,
-      render: (record: RawMaterialRecord) => (
+      render: (record: RawMaterialRecord) =>
         (() => {
           const summary = kanbanSummaryByUniq[String(record.uniq ?? "").trim()];
-          const stockDays = Number(summary?.stock_days ?? record.stock_days ?? 0);
+          const stockDays = Number(
+            summary?.stock_days ?? record.stock_days ?? 0,
+          );
           return (
             <div className="text-sm font-medium">
               {formatNumber(stockDays)}
               <p className="text-xs text-gray-500 font-normal">days</p>
             </div>
           );
-        })()
-      ),
+        })(),
     },
     {
       title: "Safety Stocks",
       key: "safety_stock",
       width: 120,
-      render: (record: RawMaterialRecord) => (
+      render: (record: RawMaterialRecord) =>
         (() => {
           const summary = kanbanSummaryByUniq[String(record.uniq ?? "").trim()];
           const stockQty = Number(summary?.stock_qty ?? record.stock ?? 0);
@@ -732,8 +804,7 @@ export default function RawMaterialsPage() {
               <p className="text-xs text-gray-500 font-normal">threshold</p>
             </div>
           );
-        })()
-      ),
+        })(),
     },
     {
       title: "Actions",
@@ -749,7 +820,7 @@ export default function RawMaterialsPage() {
             className="text-blue-600 hover:text-blue-800"
             onClick={() =>
               router.push(
-                `/raw-materials/detail?id=${encodeURIComponent(record.id)}&uniq=${encodeURIComponent(record.uniq)}`
+                `/raw-materials/detail?id=${encodeURIComponent(record.id)}&uniq=${encodeURIComponent(record.uniq)}`,
               )
             }
           />
@@ -796,13 +867,9 @@ export default function RawMaterialsPage() {
                 />
               </svg>
             }
-            onClick={() =>
-              setQrModal({
-                open: true,
-                qr: record.qr ?? "",
-                uniq: record.uniq,
-              })
-            }
+            size="small"
+            className="text-gray-600 hover:text-blue-600"
+            onClick={() => handleGenerateQR(record)}
           />
         </div>
       ),
@@ -823,9 +890,13 @@ export default function RawMaterialsPage() {
         <div className="flex items-start gap-3">
           <ExclamationCircleOutlined className="text-red-500 mt-1" />
           <div>
-            <div className="font-medium">Are you sure you want to delete this raw material?</div>
+            <div className="font-medium">
+              Are you sure you want to delete this raw material?
+            </div>
             <div className="text-gray-500">
-              {deletingRecord ? `\"${deletingRecord.name}\" (${deletingRecord.uniq})` : ""}
+              {deletingRecord
+                ? `\"${deletingRecord.name}\" (${deletingRecord.uniq})`
+                : ""}
             </div>
           </div>
         </div>

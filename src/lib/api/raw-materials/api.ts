@@ -79,6 +79,21 @@ export const rawMaterialSlice = apiSlice.injectEndpoints({
         },
       }),
     }),
+
+    generateQRRawmaterial: builder.query<
+      ApiResponse<DataObject<RawMaterialRecord>>,
+      string
+    >({
+      query: (code) => ({
+        url: `/inventory/raw-materials/${code}/create-qr`,
+        method: "GET",
+        meta: {
+          useAuthorization: true,
+          contentType: "application/json",
+        },
+      }),
+    }),
+
   }),
 });
 
@@ -88,4 +103,5 @@ export const {
   useCreateRawMaterialMutation,
   useUpdateRawMaterialMutation,
   useDeleteRawMaterialMutation,
+  useLazyGenerateQRRawmaterialQuery,
 } = rawMaterialSlice;
