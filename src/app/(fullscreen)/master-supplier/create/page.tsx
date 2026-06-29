@@ -686,7 +686,6 @@ function MasterSupplierCreatePageContent() {
         uom: pickText(values.uom),
         weight: String(values.weight ?? 0),
         pcs_per_kanban: String(values.pcs_per_kanban ?? 0),
-        percentage: values.percentage !== undefined ? String(values.percentage) : "",
         customer_cycle: pickText(values.customer_cycle),
         status:
           pickText(values.status) ||
@@ -694,15 +693,19 @@ function MasterSupplierCreatePageContent() {
           "active",
       };
 
+      // preserve optional `percentage` form field in outgoing payload when present
+      const percentageValue = values.percentage !== undefined ? String(values.percentage) : undefined;
+      const payloadAny = percentageValue !== undefined ? ({ ...payload, percentage: percentageValue } as any) : payload;
+
       if (isEditing) {
-        await updateSupplierItem({ id: itemId, body: payload }).unwrap();
+        await updateSupplierItem({ id: itemId, body: payloadAny as SupplierItemMutationRequest }).unwrap();
         setFlashMessage({
           type: "success",
           content: "Supplier item updated",
           targetPath: "/master-supplier",
         });
       } else {
-        await createSupplierItem(payload).unwrap();
+        await createSupplierItem(payloadAny as SupplierItemMutationRequest).unwrap();
         setFlashMessage({
           type: "success",
           content: "Supplier item created",
@@ -937,7 +940,7 @@ function MasterSupplierCreatePageContent() {
                           onPopupScroll={handleUniqPopupScroll}
                           loading={bomSearchFetching}
                           disabled={readOnly || !selectedSupplierId}
-                          placeholder={!selectedSupplierId ? "Select a supplier first" : "Search or scroll to browse..."}
+                          
                           notFoundContent={bomSearchFetching ? "Loading..." : "No items found"}
                         />
                       </Form.Item>

@@ -74,7 +74,13 @@ export default function CreateCustomerPage() {
       if (uniq) opts.push({ label: uniq, value: uniq });
     }
     if (opts.length) return opts;
-    return buildBomCodeSelectOptions(bomQuery.data?.data ?? []);
+    const data = bomQuery.data?.data;
+    const arr = Array.isArray(data)
+      ? data
+      : Array.isArray((data as any)?.items)
+      ? (data as any).items
+      : [];
+    return buildBomCodeSelectOptions(arr);
   }, [bomQuery.data]);
 
   const onSave = async () => {
