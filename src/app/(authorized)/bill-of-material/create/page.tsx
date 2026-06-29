@@ -96,6 +96,28 @@ type FormPath = Array<string | number>;
 const MAX_CHILDREN_PER_PARENT = 6;
 const MAX_BOM_LEVEL = 6;
 
+type ChildUniqSelectProps = {
+  itemPath: Array<string | number>;
+  level: number;
+  form: any;
+  getOptions: (category?: string) => Array<{ label: string; value: string }>;
+};
+
+const ChildUniqSelect = ({ itemPath, level, form, getOptions }: ChildUniqSelectProps) => {
+  const watchedCat = Form.useWatch([...itemPath, "category"], form) as string | undefined;
+  const opts = getOptions(watchedCat);
+  return (
+    <Select
+      showSearch
+      placeholder={`Select or type UNIQ (e.g., LV7-001-${String.fromCharCode(64 + Math.min(level, 26))})`}
+      size="large"
+      options={opts}
+      allowClear
+      showArrow
+    />
+  );
+};
+
 const getLevelBadgeClass = (level: number) => {
   if (level <= 1) return "bg-blue-50 text-blue-700";
   if (level === 2) return "bg-emerald-50 text-emerald-700";
@@ -473,17 +495,11 @@ export default function Page() {
                       </Form.Item>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                      <Form.Item name={[routeField.name, "cycle_time_sec_per_pc"]} label="Cycle Time (sec/pcs)"> 
-                        <InputNumber size="large" min={0} style={{ width: "100%" }} placeholder="e.g., 30" />
-                      </Form.Item>
-                      <Form.Item name={[routeField.name, "setup_time_min"]} label="Setup Time (min)"> 
-                        <InputNumber size="large" min={0} style={{ width: "100%" }} placeholder="e.g., 15" />
-                      </Form.Item>
-                      <Form.Item name={[routeField.name, "tooling"]} label="Add Tooling"> 
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <Form.Item name={[routeField.name, "tooling"]} label="Add Tooling">
                         <Select size="large" placeholder="Select tooling" options={[{ label: "Dies", value: "Dies" },{ label: "JIG", value: "JIG" },{ label: "CF", value: "CF" }]} allowClear style={{ width: "100%" }} />
                       </Form.Item>
-                      <Form.Item name={[routeField.name, "machine_stroke"]} label="Machine Stroke"> 
+                      <Form.Item name={[routeField.name, "machine_stroke"]} label="Machine Stroke">
                         <Input size="large" placeholder="machine stroke" style={{ width: "100%" }} />
                       </Form.Item>
                     </div>
@@ -510,43 +526,39 @@ export default function Page() {
   const renderMaterialSpecEditor = (fieldPath: Array<string | number>, disabled = false) => (
     <div className="space-y-3">
       <Text strong>Material Specifications</Text>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Form.Item name={[...fieldPath, "material_spec", "material_code"]} label="Material Code" rules={disabled ? [] : [{ required: true, message: "Material Code is required" }]}>
+          <Input placeholder="e.g., STKM550" size="large" disabled={disabled} />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "form"]} label="Form" rules={disabled ? [] : [{ required: true, message: "Form is required" }]}>
+          <Select placeholder="Select form" size="large" disabled={disabled} options={[{ label: "Plate", value: "Plate" },{ label: "Coil", value: "Coil" },{ label: "Pipe", value: "Pipe" },{ label: "Rod", value: "Rod" },{ label: "Wire", value: "Wire" },{ label: "Other", value: "Other" }]} allowClear />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "weight_kg"]} label="Weight (kg)">
+          <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={disabled} />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "grade"]} label="Grade" rules={disabled ? [] : [{ required: true, message: "Grade is required" }]}>
+          <Input placeholder="e.g., Grade A" size="large" disabled={disabled} />
+        </Form.Item>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <Form.Item name={[...fieldPath, "material_spec", "material_code"]} label="Material Code" rules={disabled ? [] : [{ required: true, message: "Material Code is required" }]}> 
-          <Input placeholder="e.g., STKM550" disabled={disabled} />
+        <Form.Item name={[...fieldPath, "material_spec", "width_mm"]} label="Width (mm)">
+          <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={disabled} />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "form"]} label="Form" rules={disabled ? [] : [{ required: true, message: "Form is required" }]}> 
-          <Select placeholder="Select form" disabled={disabled} options={[{ label: "Plate", value: "Plate" },{ label: "Coil", value: "Coil" },{ label: "Pipe", value: "Pipe" },{ label: "Rod", value: "Rod" },{ label: "Wire", value: "Wire" },{ label: "Other", value: "Other" }]} allowClear />
+        <Form.Item name={[...fieldPath, "material_spec", "diameter_mm"]} label="Diameter (mm)">
+          <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={disabled} />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "grade"]} label="Grade" rules={disabled ? [] : [{ required: true, message: "Grade is required" }]}> 
-          <Input placeholder="e.g., STKM550" disabled={disabled} />
+        <Form.Item name={[...fieldPath, "material_spec", "thickness_mm"]} label="Thickness (mm)">
+          <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={disabled} />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "type_material"]} label="Type Material">
-          <Select placeholder="Select type" disabled={disabled} allowClear>
-            <Select.Option value="subcon">Subcon</Select.Option>
+        <Form.Item name={[...fieldPath, "material_spec", "length_mm"]} label="Length (mm)">
+          <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={disabled} />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "type_material"]} label="Category">
+          <Select placeholder="Category" size="large" disabled={disabled} allowClear>
             <Select.Option value="raw">Raw</Select.Option>
             <Select.Option value="indirect">Indirect</Select.Option>
           </Select>
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "width_mm"]} label="Width (mm)"> 
-          <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
-        </Form.Item>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Form.Item name={[...fieldPath, "material_spec", "diameter_mm"]} label="Diameter (mm)"> <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} /></Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "thickness_mm"]} label="Thickness (mm)"> <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} /></Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "length_mm"]} label="Length (mm)"> <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} /></Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "weight_kg"]} label="Weight (kg)"> <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} /></Form.Item>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Form.Item name={[...fieldPath, "material_spec", "cycle_time_sec"]} label="Cycle Time (sec)">
-          <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
-        </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "setup_time_min"]} label="Setup Time (min)">
-          <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
-        </Form.Item>
-        {/* <Form.Item name={[...fieldPath, "material_spec", "customer_cycle"]} label="Customer Cycle">
-          <Input placeholder="e.g., Daily / Weekly / Monthly" disabled={disabled} />
-        </Form.Item> */}
       </div>
     </div>
   );
@@ -601,21 +613,13 @@ export default function Page() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <Form.Item
                 name={[field.name, "uniq"]}
                 label="UNIQ"
                 rules={[{ required: true, message: "UNIQ is required" }]}
               >
-                {(() => {
-                  const watchedCat = Form.useWatch([...itemPath, "category"], form as any) as string | undefined;
-                  const opts = getUniqOptionsForCategory(watchedCat);
-                  return (
-                    <Select showSearch placeholder={`Select or type UNIQ (e.g., LV7-001-${String.fromCharCode(64 + Math.min(level, 26))})`} size="large" options={opts} allowClear showArrow>
-                      <Select.Option value="">None</Select.Option>
-                    </Select>
-                  );
-                })()}
+                <Input placeholder={`e.g., LV7-001-${String.fromCharCode(64 + Math.min(level, 26))}`} size="large" />
               </Form.Item>
               <Form.Item
                 name={[field.name, "part_name"]}
@@ -637,13 +641,6 @@ export default function Page() {
                 rules={[{ required: true, message: "Product model is required" }]}
               >
                 <Input placeholder="Enter product model" size="large" />
-              </Form.Item>
-              <Form.Item name={[field.name, "category"]} label="Category">
-                <Select placeholder="Select category" allowClear>
-                  <Select.Option value="RM">Raw Material</Select.Option>
-                  <Select.Option value="Indirect">Indirect</Select.Option>
-                  <Select.Option value="Subcon">Subcon</Select.Option>
-                </Select>
               </Form.Item>
             </div>
 
@@ -927,16 +924,8 @@ export default function Page() {
               op_seq,
               process_id,
               machine_id,
-              cycle_time_sec:
-                typeof r.cycle_time_sec_per_pc === "number" &&
-                Number.isFinite(r.cycle_time_sec_per_pc)
-                  ? r.cycle_time_sec_per_pc
-                  : undefined,
-              setup_time_min:
-                typeof r.setup_time_min === "number" &&
-                Number.isFinite(r.setup_time_min)
-                  ? r.setup_time_min
-                  : undefined,
+              cycle_time_sec: 0,
+              setup_time_min: 0,
               tooling_ref:
                 typeof r.tooling === "string" && r.tooling.trim()
                   ? r.tooling.trim()
@@ -954,7 +943,7 @@ export default function Page() {
         const s = spec ?? {};
         const form = normalizeMaterialForm(s.form);
         const raw: Record<string, unknown> = {
-          grade: cleanText(s.material_code),
+          grade: cleanText(s.grade),
           material_grade: cleanText(s.material_code),
           type_material: cleanText(s.type_material),
           form,
@@ -1010,7 +999,8 @@ export default function Page() {
               qty_per_uniq:
                 typeof c.qpu === "number" && Number.isFinite(c.qpu) ? c.qpu : 1,
             };
-            if (c.category) childBody.raw_material_type = c.category;
+            const rawMatType = c.material_spec?.type_material ?? c.category;
+            if (rawMatType) childBody.raw_material_type = rawMatType;
             if (childRoutes.length > 0) childBody.process_routes = childRoutes;
             if (childSpec !== undefined) childBody.material_spec = childSpec;
             if (nested.length > 0) childBody.children = nested;
@@ -1555,33 +1545,7 @@ export default function Page() {
                                       </Form.Item>
                                     </div>
 
-                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                                      <Form.Item
-                                        {...routeField}
-                                        name={[field.name, "cycle_time_sec_per_pc"]}
-                                        label="Cycle Time (sec/pcs)"
-                                      >
-                                        <InputNumber
-                                          size="large"
-                                          min={0}
-                                          style={{ width: "100%" }}
-                                          placeholder="e.g., 30"
-                                        />
-                                      </Form.Item>
-
-                                      <Form.Item
-                                        {...routeField}
-                                        name={[field.name, "setup_time_min"]}
-                                        label="Setup Time/Dandori (min)"
-                                      >
-                                        <InputNumber
-                                          size="large"
-                                          min={0}
-                                          style={{ width: "100%" }}
-                                          placeholder="e.g., 15"
-                                        />
-                                      </Form.Item>
-
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                       <Form.Item
                                         {...routeField}
                                         name={[field.name, "tooling"]}
@@ -1705,7 +1669,7 @@ export default function Page() {
                     </Form.Item>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                     <Form.Item
                       name={["material_spec", "width_mm"]}
                       label="Width (mm)"
@@ -1766,6 +1730,20 @@ export default function Page() {
                       ]}
                     >
                       <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
+                    </Form.Item>
+                    <Form.Item
+                      name={["material_spec", "type_material"]}
+                      label="Category"
+                    >
+                      <Select
+                        size="large"
+                        placeholder="Category"
+                        disabled={isParentAssembly}
+                        allowClear
+                      >
+                        <Select.Option value="raw">Raw</Select.Option>
+                        <Select.Option value="indirect">Indirect</Select.Option>
+                      </Select>
                     </Form.Item>
                   </div>
 
