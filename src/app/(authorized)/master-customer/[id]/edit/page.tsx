@@ -86,10 +86,15 @@ export default function EditCustomerPage() {
     [billingSame]
   );
 
-  const bomOptions = useMemo(
-    () => buildBomCodeSelectOptions(bomQuery.data?.data ?? []),
-    [bomQuery.data]
-  );
+  const bomOptions = useMemo(() => {
+    const data = bomQuery.data?.data;
+    const arr = Array.isArray(data)
+      ? data
+      : Array.isArray((data as any)?.items)
+      ? (data as any).items
+      : [];
+    return buildBomCodeSelectOptions(arr);
+  }, [bomQuery.data]);
 
   const onSave = async () => {
     try {

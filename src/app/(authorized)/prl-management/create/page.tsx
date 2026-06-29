@@ -548,7 +548,7 @@ export default function AddForecastPage() {
                         Product Model
                       </div>
                       <Input
-                        value={entry.productModel.join(", ")}
+                        value={entry.productModel}
                         placeholder="Auto-filled from BOM model"
                         className="!rounded-lg"
                         readOnly
@@ -560,7 +560,7 @@ export default function AddForecastPage() {
                         Part Name
                       </div>
                       <Input
-                        value={entry.partName.join(", ")}
+                        value={entry.partName}
                         placeholder="Auto-filled from uniq"
                         className="!rounded-lg"
                         readOnly
@@ -572,7 +572,7 @@ export default function AddForecastPage() {
                         Part Number
                       </div>
                       <Input
-                        value={entry.partNumber.join(", ")}
+                        value={entry.partNumber}
                         placeholder="Auto-filled from uniq"
                         className="!rounded-lg"
                         readOnly
