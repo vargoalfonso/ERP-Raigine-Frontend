@@ -28,6 +28,7 @@ import {
 import StatsCard from "@/components/StatsCard";
 import TableTemplate from "@/components/TableTemplate";
 import type { ColumnType } from "antd/es/table";
+import Image from "next/image";
 import type { FormInstance } from "antd";
 import { BsBoxSeam } from "react-icons/bs";
 import { FiAlertTriangle } from "react-icons/fi";
@@ -148,6 +149,7 @@ const isBuyValue = (value: unknown): boolean | null => {
 const mapInventoryToRawMaterial = (record: InventoryRecord): RawMaterialRecord => {
   const stockQty = Number(record.stock_qty ?? 0);
   const status = deriveStatus(stockQty);
+
   return {
     current_stock: undefined,
     master_list: undefined,
@@ -185,6 +187,7 @@ const mapInventoryToRawMaterial = (record: InventoryRecord): RawMaterialRecord =
     expiry_date: undefined,
     updated_by: undefined,
     master_list_supplier: undefined,
+    qr: record.qr,
   };
 };
 
@@ -414,6 +417,11 @@ export default function RawMaterialsPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletingRecord, setDeletingRecord] =
     useState<RawMaterialRecord | null>(null);
+  const [qrModal, setQrModal] = useState({
+    open: false,
+    qr: "",
+    uniq: "",
+  });
   const [detailModal, setDetailModal] = useState<DetailModalState>({
     visible: false,
     record: null,
@@ -639,9 +647,9 @@ export default function RawMaterialsPage() {
           const summary = kanbanSummaryByUniq[String(record.uniq ?? "").trim()];
           const totalneeded = Number(summary?.kanbans_needed ?? record.kanban_quantity ?? 0);
           const needed = Number(
-            
+
             summary?.stock_to_complete ??
-              (record.safety_stock || 0) - (record.kanban_quantity || 0),
+            (record.safety_stock || 0) - (record.kanban_quantity || 0),
           );
 
           return (
@@ -677,11 +685,10 @@ export default function RawMaterialsPage() {
         const isBuyed = mapped ?? record.is_buyed;
         return (
           <Tag
-            className={`${
-              isBuyed
-                ? "text-green-600 bg-green-50"
-                : "text-red-600 bg-red-50"
-            }`}
+            className={`${isBuyed
+              ? "text-green-600 bg-green-50"
+              : "text-red-600 bg-red-50"
+              }`}
           >
             {isBuyed ? "Buy" : "Not Buy"}
           </Tag>
@@ -760,6 +767,43 @@ export default function RawMaterialsPage() {
             className="text-red-600 hover:text-red-800"
             onClick={() => openDeleteModal(record)}
           />
+          <Button
+            type="text"
+            icon={
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M7 7h3v3H7V7zM14 7h3v3h-3V7zM7 14h3v3H7v-3z"
+                />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M14 14h1m2 0h0m-3 3h3"
+                />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6z"
+                />
+              </svg>
+            }
+            onClick={() =>
+              setQrModal({
+                open: true,
+                qr: record.qr ?? "",
+                uniq: record.uniq,
+              })
+            }
+          />
         </div>
       ),
     },
@@ -786,7 +830,35 @@ export default function RawMaterialsPage() {
           </div>
         </div>
       </Modal>
-
+      <Modal
+        open={qrModal.open}
+        title={`QR Code - ${qrModal.uniq}`}
+        footer={null}
+        centered
+        onCancel={() =>
+          setQrModal({
+            open: false,
+            qr: "",
+            uniq: "",
+          })
+        }
+      >
+        <div className="flex justify-center">
+          {qrModal.qr ? (
+            <img
+              src={
+                qrModal.qr.startsWith("data:image")
+                  ? qrModal.qr
+                  : `data:image/png;base64,${qrModal.qr}`
+              }
+              alt="QR"
+              className="w-64 h-64"
+            />
+          ) : (
+            <div>Tidak ada QR</div>
+          )}
+        </div>
+      </Modal>
       <RawMaterialDetailModal
         state={detailModal}
         onClose={handleDetailClose}
