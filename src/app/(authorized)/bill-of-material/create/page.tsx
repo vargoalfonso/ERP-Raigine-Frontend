@@ -52,6 +52,7 @@ type MaterialSpec = {
   material_code?: string;
   form?: string;
   grade?: string;
+  type_material?: string;
   weight_kg?: number;
   width_mm?: number;
   diameter_mm?: number;
@@ -156,6 +157,36 @@ export default function Page() {
     if (Array.isArray(nodes)) walk(nodes);
     return uniqs;
   }, [existingBomTree]);
+
+  const getUniqOptionsForCategory = (category?: string) => {
+    const desired = typeof category === "string" ? category.trim().toLowerCase() : "";
+    const mapCategory = (c: string) => {
+      const s = c.trim().toLowerCase();
+      if (s === "rm") return "raw";
+      return s;
+    };
+    const desiredNormalized = desired ? mapCategory(desired) : "";
+
+    const nodes = (existingBomTree as any)?.data;
+    const out: Array<{ label: string; value: string }> = [];
+    const walk = (arr: any[]) => {
+      for (const n of arr) {
+        const uniq = typeof n?.uniq_code === "string" ? n.uniq_code.trim() : "";
+        const spec = n?.material_spec || n?.material_specifications || {};
+        const type = typeof spec?.type_material === "string" ? spec.type_material.trim().toLowerCase() : typeof n?.raw_material_type === "string" ? n.raw_material_type.trim().toLowerCase() : "";
+        if (uniq && (!desiredNormalized || type === desiredNormalized)) {
+          out.push({ label: uniq, value: uniq });
+        }
+        if (Array.isArray(n?.children) && n.children.length) walk(n.children);
+      }
+    };
+    if (Array.isArray(nodes)) walk(nodes);
+    // fallback to unique set of existingUniqs if none matched
+    if (out.length === 0) {
+      for (const u of Array.from(existingUniqs)) out.push({ label: u, value: u });
+    }
+    return out;
+  };
 
   const { data: suppliers = [], isLoading: isSuppliersLoading } =
     useListSuppliersQuery();
@@ -479,7 +510,7 @@ export default function Page() {
   const renderMaterialSpecEditor = (fieldPath: Array<string | number>, disabled = false) => (
     <div className="space-y-3">
       <Text strong>Material Specifications</Text>
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <Form.Item name={[...fieldPath, "material_spec", "material_code"]} label="Material Code" rules={disabled ? [] : [{ required: true, message: "Material Code is required" }]}> 
           <Input placeholder="e.g., STKM550" disabled={disabled} />
         </Form.Item>
@@ -488,6 +519,13 @@ export default function Page() {
         </Form.Item>
         <Form.Item name={[...fieldPath, "material_spec", "grade"]} label="Grade" rules={disabled ? [] : [{ required: true, message: "Grade is required" }]}> 
           <Input placeholder="e.g., STKM550" disabled={disabled} />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "type_material"]} label="Type Material">
+          <Select placeholder="Select type" disabled={disabled} allowClear>
+            <Select.Option value="subcon">Subcon</Select.Option>
+            <Select.Option value="raw">Raw</Select.Option>
+            <Select.Option value="indirect">Indirect</Select.Option>
+          </Select>
         </Form.Item>
         <Form.Item name={[...fieldPath, "material_spec", "width_mm"]} label="Width (mm)"> 
           <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
@@ -569,7 +607,15 @@ export default function Page() {
                 label="UNIQ"
                 rules={[{ required: true, message: "UNIQ is required" }]}
               >
-                <Input placeholder={`e.g., LV7-001-${String.fromCharCode(64 + Math.min(level, 26))}`} size="large" />
+                {(() => {
+                  const watchedCat = Form.useWatch([...itemPath, "category"], form as any) as string | undefined;
+                  const opts = getUniqOptionsForCategory(watchedCat);
+                  return (
+                    <Select showSearch placeholder={`Select or type UNIQ (e.g., LV7-001-${String.fromCharCode(64 + Math.min(level, 26))})`} size="large" options={opts} allowClear showArrow>
+                      <Select.Option value="">None</Select.Option>
+                    </Select>
+                  );
+                })()}
               </Form.Item>
               <Form.Item
                 name={[field.name, "part_name"]}
@@ -910,6 +956,7 @@ export default function Page() {
         const raw: Record<string, unknown> = {
           grade: cleanText(s.material_code),
           material_grade: cleanText(s.material_code),
+          type_material: cleanText(s.type_material),
           form,
           width_mm: s.width_mm,
           diameter_mm: s.diameter_mm,

@@ -55,6 +55,7 @@ type MaterialSpecForm = {
   material_code?: string;
   form?: string;
   grade?: string;
+  type_material?: string;
   weight_kg?: number;
   width_mm?: number;
   diameter_mm?: number;
@@ -418,6 +419,7 @@ export default function BomEditPage() {
                 ? spec.grade
                 : undefined,
         form: typeof spec.form === "string" ? spec.form : undefined,
+        type_material: typeof spec.type_material === "string" ? spec.type_material : typeof spec.raw_material_type === "string" ? spec.raw_material_type : undefined,
         grade:
           typeof spec.grade === "string" ? spec.grade : typeof spec.material_grade === "string" ? spec.material_grade : undefined,
         weight_kg: typeof spec.weight_kg === "number" ? spec.weight_kg : undefined,
@@ -604,7 +606,7 @@ export default function BomEditPage() {
   const renderMaterialSpecEditor = (fieldPath: FormPath, disabled = false) => (
     <div className="space-y-3">
       <Text strong>Material Specifications</Text>
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <Form.Item name={[...fieldPath, "material_spec", "material_code"]} label="Material Code" rules={disabled ? [] : [{ required: true, message: "Material Code is required" }]}> 
           <Input placeholder="e.g., STKM550" disabled={disabled} />
         </Form.Item>
@@ -625,6 +627,13 @@ export default function BomEditPage() {
         </Form.Item>
         <Form.Item name={[...fieldPath, "material_spec", "grade"]} label="Grade" rules={disabled ? [] : [{ required: true, message: "Grade is required" }]}> 
           <Input placeholder="e.g., STKM550" disabled={disabled} />
+        </Form.Item>
+        <Form.Item name={[...fieldPath, "material_spec", "type_material"]} label="Type Material">
+          <Select placeholder="Select type" disabled={disabled} allowClear>
+            <Select.Option value="subcon">Subcon</Select.Option>
+            <Select.Option value="raw">Raw</Select.Option>
+            <Select.Option value="indirect">Indirect</Select.Option>
+          </Select>
         </Form.Item>
         <Form.Item name={[...fieldPath, "material_spec", "weight_kg"]} label="Weight (kg)">
           <InputNumber min={0} style={{ width: "100%" }} disabled={disabled} />
@@ -893,6 +902,7 @@ export default function BomEditPage() {
         const payload: Record<string, unknown> = {
           grade: cleanText(spec?.grade) ?? cleanText(spec?.material_code) ?? null,
           material_grade: cleanText(spec?.grade) ?? cleanText(spec?.material_code) ?? null,
+          type_material: cleanText(spec?.type_material) ?? null,
           form: normalizedForm ?? null,
           width_mm: typeof spec?.width_mm === "number" && Number.isFinite(spec.width_mm) ? spec.width_mm : null,
           diameter_mm: typeof spec?.diameter_mm === "number" && Number.isFinite(spec.diameter_mm) ? spec.diameter_mm : null,

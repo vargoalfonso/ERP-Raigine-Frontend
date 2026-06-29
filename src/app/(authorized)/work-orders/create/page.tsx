@@ -27,6 +27,8 @@ import {
   useCreateWorkOrderMutation,
   useGetWorkOrderUniqOptionsQuery,
 } from "@/lib/api/work-orders/api";
+import { useLazyGetInventoryKanbanSummaryQuery } from "@/lib/api/inventory/api";
+import { useGetFinishedGoodParameterizedSummaryQuery } from "@/lib/api/finished-goods/api";
 
 type WorkOrderType = "New" | "Additional" | "Rework" | "Assembly";
 
@@ -49,6 +51,8 @@ type UniqLine = {
   uom?: string;
   process?: string;
   kanbanNumber: string;
+  targetStock?: number | null;
+  stockQty?: number | null;
 };
 
 const nextWoNumber = () => {
@@ -83,6 +87,12 @@ export default function CreateWorkOrderPage() {
   const { data: processRecords = [] } = useGetProcessesQuery(undefined, {
     skip: !apiEnabled,
   });
+  const [getInventoryKanbanSummary] = useLazyGetInventoryKanbanSummaryQuery();
+  const [requestedFinished, setRequestedFinished] = useState<{ id: string; uniq: string } | null>(null);
+  const finishedQuery = useGetFinishedGoodParameterizedSummaryQuery(
+    requestedFinished ? { uniq_code: requestedFinished.uniq } : (null as any),
+    { skip: !apiEnabled || !requestedFinished }
+  );
 
   const fallbackUniqOptions: UniqOption[] = [
     { uniq: "LV7-001", partName: "Engine Mount Assembly", uom: "pcs", processes: ["Cutting", "Welding", "QC"] },
@@ -163,7 +173,89 @@ export default function CreateWorkOrderPage() {
       uom: found?.uom,
       process: undefined,
     });
+    // try to find BOM node to extract process routes and BOM stock
+    const findNode = (nodes: any[] | undefined): any | null => {
+      if (!Array.isArray(nodes)) return null;
+      for (const n of nodes) {
+        const nodeUniq = (n?.uniq_code ?? n?.uniq ?? n?.uniqCode ?? n?.uniq_code) as any;
+        if (String(nodeUniq)?.trim() === String(uniq)) return n;
+        const child = findNode(Array.isArray(n?.children) ? n.children : undefined);
+        if (child) return child;
+      }
+      return null;
+    };
+    const bomData = bomTreeRes?.data;
+    const bomArray = Array.isArray(bomData)
+      ? bomData
+      : Array.isArray((bomData as any)?.items)
+      ? (bomData as any).items
+      : [];
+    const bomNode = findNode(bomArray);
+    if (bomNode) {
+      const nodeProcessRoutes = Array.isArray(bomNode.process_routes)
+        ? bomNode.process_routes
+        : Array.isArray(bomNode.processRoutes)
+        ? bomNode.processRoutes
+        : [];
+      let firstProcessName: string | null = null;
+      if (nodeProcessRoutes.length) {
+        firstProcessName = (nodeProcessRoutes[0]?.process_name ?? nodeProcessRoutes[0]?.processName ?? null) as string | null;
+        if (!firstProcessName) {
+          const pid = nodeProcessRoutes[0]?.process_id ?? nodeProcessRoutes[0]?.processId ?? nodeProcessRoutes[0]?.process ?? null;
+          if (pid) {
+            const pidStr = String(pid);
+            const foundProc = processRecords.find((p) => String(p.id) === pidStr || String(p.process_code) === pidStr);
+            if (foundProc) firstProcessName = foundProc.process_name ?? null;
+          }
+        }
+      }
+      if (firstProcessName) updateLine(id, { process: firstProcessName });
+      const nodeStock = (bomNode.stock_qty ?? bomNode.stock ?? bomNode.stockQty ?? bomNode.quantity ?? null) as any;
+      const stockFromBom = typeof nodeStock === "number" ? nodeStock : (typeof nodeStock === "string" && nodeStock.trim() ? Number(nodeStock) : null);
+      updateLine(id, { stockQty: typeof stockFromBom === "number" ? stockFromBom : 0 });
+    }
+    // fetch kanban standard and finished goods summary for this uniq
+    if (apiEnabled && uniq) {
+      // trigger kanban fetch
+      void (async () => {
+        try {
+          const kanbanPromise = getInventoryKanbanSummary({ uniq_code: uniq }).unwrap();
+          const kanbanRes = await kanbanPromise.catch(() => null);
+          const kanbanData = kanbanRes?.data ?? null;
+          const kanbanPkg = kanbanData?.kanban_pkg_qty ?? null;
+          const safety = kanbanData?.safety_stock_qty ?? null;
+          const targetFromKanban = kanbanPkg ?? safety ?? null;
+          if (targetFromKanban !== null && typeof targetFromKanban === "number") {
+            updateLine(id, { targetStock: targetFromKanban });
+          }
+        } catch (e) {
+          // ignore errors
+        }
+      })();
+
+      // request finished goods summary via hook; effect will apply it to the line
+      setRequestedFinished({ id, uniq });
+    }
   };
+
+  // apply finishedQuery result to the requested line when available
+  useEffect(() => {
+    if (!requestedFinished) return;
+    if (finishedQuery.isError) {
+      setRequestedFinished(null);
+      return;
+    }
+    if (finishedQuery.data) {
+      const finishedData = finishedQuery.data;
+      const targetFromFinished = (finishedData as any)?.target_stock_qty ?? (finishedData as any)?.targetStockQty ?? null;
+      const stockQty = (finishedData as any)?.stock_qty ?? (finishedData as any)?.stockQty ?? null;
+      updateLine(requestedFinished.id, {
+        targetStock: typeof targetFromFinished === "number" ? targetFromFinished : null,
+        stockQty: typeof stockQty === "number" ? stockQty : null,
+      });
+      setRequestedFinished(null);
+    }
+  }, [finishedQuery.data, finishedQuery.isError, requestedFinished]);
 
   const validateLines = () => {
     for (const l of lines) {
@@ -379,6 +471,10 @@ export default function CreateWorkOrderPage() {
                           value={l.qty}
                           onChange={(v) => updateLine(l.id, { qty: typeof v === "number" ? v : undefined })}
                         />
+                        <div className="mt-1 text-[11px] text-gray-500">
+                          <div>Target Stock: {l.targetStock !== undefined && l.targetStock !== null ? String(l.targetStock) : "-"}</div>
+                          <div>Stock Qty: {l.stockQty !== undefined && l.stockQty !== null ? String(l.stockQty) : "0"}</div>
+                        </div>
                       </div>
                       <div className="col-span-1">
                         <Select
