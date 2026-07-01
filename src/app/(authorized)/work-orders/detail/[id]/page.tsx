@@ -315,12 +315,12 @@ export default function WorkOrderDetailPage() {
                 <div className="font-semibold text-gray-900 mt-1">
                   {formatWorkOrderDisplayNumber(workOrder?.reference_wo) || "-"}
                 </div> */}
-                <div className="text-gray-500">Status</div>
+                {/* <div className="text-gray-500">Status</div>
                 <div className="mt-1">
                   <Tag color={normalizeStatusColor(workOrder?.status)} className="!rounded-md">
                     {workOrder?.status || "Pending"}
                   </Tag>
-                </div>
+                </div> */}
               </div>
               
               <div>

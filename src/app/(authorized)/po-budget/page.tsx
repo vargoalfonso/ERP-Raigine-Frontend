@@ -3261,7 +3261,7 @@ export default function PoBudgetPage() {
             <span className="text-blue-600">+</span>
             <div>
               <div className="text-sm font-semibold text-gray-900">
-                Add New PO Budgets
+                Add New PO Budget
               </div>
               <div className="text-xs text-gray-500 mt-1">
                 Select PRL, configure quantities and suppliers, then set period
