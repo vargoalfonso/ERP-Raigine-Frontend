@@ -166,16 +166,16 @@ export default function ProcessCreateFullscreenPage() {
                   <Input value={e.processCode ?? ""} placeholder="Auto Generated" disabled />
                 </div>
 
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Category</div>
-                  <Select
+                {/* <div>
+                  <div className="text-sm text-gray-700 mb-2">Category</div> 
+                <Select
                     value={e.category}
                     onChange={(v) => updateEntry(e.id, { category: String(v) })}
                     options={CATEGORY_OPTIONS}
                     placeholder="Select Category"
                     className="w-full"
-                  />
-                </div>
+                  /> 
+                </div> */}
 
                 <div>
                   <div className="text-sm text-gray-700 mb-2">Process Name</div>
@@ -186,14 +186,14 @@ export default function ProcessCreateFullscreenPage() {
                   />
                 </div>
 
-                <div>
-                  <div className="text-sm text-gray-700 mb-2">Sequence</div>
-                  <Input
+                {/* <div>
+                  <div className="text-sm text-gray-700 mb-2">Sequence</div> 
+                   <Input
                     value={e.sequence ?? ""}
                     onChange={(ev) => updateEntry(e.id, { sequence: ev.target.value })}
                     placeholder="Input Sequence"
-                  />
-                </div>
+                  /> 
+                </div> */}
 
                 <div>
                   <div className="text-sm text-gray-700 mb-2">Status</div>
