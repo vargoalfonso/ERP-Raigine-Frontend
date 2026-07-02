@@ -81,6 +81,7 @@ type BomOption = {
   customerCycle?: string;
   description?: string;
   status?: string;
+  materialCode?: string;
 };
 
 type SupplierOption = {
@@ -312,6 +313,7 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
     customerCycle: pickText(materialSpec?.customer_cycle),
     description: pickText(node.description, node.part_name),
     status: pickText((node as Record<string, unknown>).status, (node as Record<string, unknown>).bom_status),
+    materialCode: pickText(materialSpec?.material_code, materialSpec?.material_grade, (node as Record<string, unknown>).material_code),
   };
 };
 
@@ -621,6 +623,14 @@ function MasterSupplierCreatePageContent() {
       status: normalizeFormStatus(matched.status) ?? form.getFieldValue("status") ?? "active",
     });
 
+    // Also set material code (sebango) when available and not subcon section
+    try {
+      const matCode = matched.materialCode ?? "";
+      if (matCode) form.setFieldValue("sebango_code", matCode);
+    } catch (e) {
+      // ignore
+    }
+
     // Defer UOM so it runs after React effects (bomDetailQuery effect may override if not deferred)
     setTimeout(() => {
       console.log("[handleUniqChange] setFieldValue uom (deferred):", resolvedUom);
@@ -922,7 +932,7 @@ function MasterSupplierCreatePageContent() {
                           options={(() => {
                             const toSelectOpt = (option: BomOption) => ({
                               ...option,
-                              label: [option.label, option.partName, option.productModel]
+                              label: [option.materialCode || option.label, option.partName, option.productModel]
                                 .filter(Boolean)
                                 .join(" — "),
                             });

@@ -557,6 +557,7 @@ export default function Page() {
           <Select placeholder="Category" size="large" disabled={disabled} allowClear>
             <Select.Option value="raw">Raw</Select.Option>
             <Select.Option value="indirect">Indirect</Select.Option>
+            <Select.Option value="subcon">Subcon</Select.Option>
           </Select>
         </Form.Item>
       </div>
@@ -1743,6 +1744,7 @@ export default function Page() {
                       >
                         <Select.Option value="raw">Raw</Select.Option>
                         <Select.Option value="indirect">Indirect</Select.Option>
+                        <Select.Option value="subcon">Subcon</Select.Option>
                       </Select>
                     </Form.Item>
                   </div>

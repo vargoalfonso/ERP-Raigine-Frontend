@@ -323,9 +323,9 @@ export type MachinePatternRecord = {
 
 export type CreateProcessRequest = {
   process_code: string;
-  category: string;
+  category: string |null;
   process_name: string;
-  sequence: number;
+  sequence: number | null;
   is_assembly?: boolean;
   sub_con?: boolean;
   status?: StatusType;

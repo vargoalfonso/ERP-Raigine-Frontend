@@ -10,8 +10,8 @@ type Entry = {
   id: string;
   processName?: string;
   processCode?: string;
-  category?: string;
-  sequence?: number | string;
+  category?: string | null;
+  sequence?: number | string | null;
   isAssembly?: boolean;
   subCon?: boolean;
   status?: string;
@@ -100,17 +100,20 @@ export default function ProcessCreateFullscreenPage() {
     }
 
     try {
-      for (const e of entries) {
-        await createProcess({
-          process_code: String(e.processCode ?? ""),
-          category: String(e.category ?? ""),
-          process_name: String(e.processName ?? ""),
-          sequence: Number(e.sequence ?? 0),
-          is_assembly: e.isAssembly === true,
-          sub_con: e.subCon === true,
-          status: String(e.status ?? "active").toLowerCase(),
-        }).unwrap();
-      }
+     for (const e of entries) {
+  await createProcess({
+    process_code: String(e.processCode ?? ""),
+    category: e.category?.toString().trim() || null,
+    process_name: String(e.processName ?? ""),
+    sequence:
+      e.sequence === "" || e.sequence == null
+        ? null
+        : Number(e.sequence),
+    is_assembly: e.isAssembly === true,
+    sub_con: e.subCon === true,
+    status: String(e.status ?? "active").toLowerCase(),
+  }).unwrap();
+}
       message.success("Processes saved");
       router.push("/system-settings");
     } catch (err: any) {
@@ -166,16 +169,16 @@ export default function ProcessCreateFullscreenPage() {
                   <Input value={e.processCode ?? ""} placeholder="Auto Generated" disabled />
                 </div>
 
-                {/* <div>
-                  <div className="text-sm text-gray-700 mb-2">Category</div> 
-                <Select
+                <div>
+                  {/* <div className="text-sm text-gray-700 mb-2">Category</div> */}
+                  {/* <Select
                     value={e.category}
                     onChange={(v) => updateEntry(e.id, { category: String(v) })}
                     options={CATEGORY_OPTIONS}
                     placeholder="Select Category"
                     className="w-full"
-                  /> 
-                </div> */}
+                  /> */}
+                </div>
 
                 <div>
                   <div className="text-sm text-gray-700 mb-2">Process Name</div>
