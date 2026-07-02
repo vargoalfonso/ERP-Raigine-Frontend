@@ -107,6 +107,17 @@ type BulkItemRow = {
   suppliers: BulkSupplierLine[];
 };
 
+type BomChildDetailRow = {
+  key: string;
+  uniq: string;
+  partName: string;
+  partNumber: string;
+  quantityPerUniq: number;
+  uom: string;
+  weightKg: number;
+  level: number;
+};
+
 type PoBudgetRow = {
   id?: string;
   key: string;
@@ -168,6 +179,35 @@ type AddFormState = {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+function getBomNodeString(
+  node: Record<string, unknown>,
+  keys: string[],
+) {
+  for (const key of keys) {
+    const value = node[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+  return "";
+}
+
+function getBomNodeNumber(
+  node: Record<string, unknown>,
+  keys: string[],
+) {
+  for (const key of keys) {
+    const value = node[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return 0;
 }
 
 function getApiType(tab: BudgetTabId): PoBudgetType {
@@ -332,6 +372,68 @@ export default function PoBudgetPage() {
     () => buildBomUniqIndex(bomTreeRes?.data ?? []),
     [bomTreeRes?.data],
   );
+  const bomChildrenByUniq = useMemo(() => {
+    const result: Record<string, BomChildDetailRow[]> = {};
+    const norm = (s: unknown) => String(s ?? "").trim().toLowerCase();
+
+    const collectChildren = (nodes: unknown[], level: number) => {
+      const rows: BomChildDetailRow[] = [];
+
+      nodes.forEach((node, index) => {
+        if (!isRecord(node)) return;
+
+        const uniq = getBomNodeString(node, ["uniq", "uniq_code"]);
+        const childRows = Array.isArray(node.children)
+          ? collectChildren(node.children, level + 1)
+          : [];
+
+        if (uniq) {
+          rows.push({
+            key: `${uniq}-${level}-${index}`,
+            uniq,
+            partName: getBomNodeString(node, ["part_name"]) || "-",
+            partNumber: getBomNodeString(node, ["part_number"]) || "-",
+            quantityPerUniq: getBomNodeNumber(node, [
+              "qpu",
+              "quantity",
+              "qty_per_uniq",
+            ]),
+            uom:
+              getBomNodeString(node, ["uom", "unit_measurement", "unit"]) ||
+              "-",
+            weightKg: getBomNodeNumber(node, [
+              "stock_weight_kg",
+              "weight_kg",
+              "weightKg",
+              "weight",
+            ]),
+            level,
+          });
+        }
+
+        rows.push(...childRows);
+      });
+
+      return rows;
+    };
+
+    const visit = (node: unknown) => {
+      if (!isRecord(node)) return;
+
+      const uniq = getBomNodeString(node, ["uniq", "uniq_code"]);
+      if (uniq && Array.isArray(node.children) && node.children.length > 0) {
+        result[norm(uniq)] = collectChildren(node.children, 1);
+      }
+
+      if (Array.isArray(node.children)) {
+        node.children.forEach(visit);
+      }
+    };
+
+    const source = Array.isArray(bomTreeRes?.data) ? bomTreeRes.data : [];
+    source.forEach(visit);
+    return result;
+  }, [bomTreeRes?.data]);
 
   const [activeTab, setActiveTab] = useState<BudgetTabId>("raw");
   const [paginationByTab, setPaginationByTab] = useState<TabPaginationState>({
@@ -501,6 +603,8 @@ export default function PoBudgetPage() {
   const [bulkPeriod, setBulkPeriod] = useState<string | undefined>(undefined);
   const [bulkPo1Pct, setBulkPo1Pct] = useState<number>(60);
   const [bulkPo2Pct, setBulkPo2Pct] = useState<number>(40);
+  const [expandedBudgetRowKeys, setExpandedBudgetRowKeys] = useState<string[]>([]);
+  const [expandedBulkRowKeys, setExpandedBulkRowKeys] = useState<string[]>([]);
 
   const { data: customers = [] } = useListCustomersQuery(undefined, {
     skip: !useApi,
@@ -1283,7 +1387,7 @@ export default function PoBudgetPage() {
         if (!po || !Array.isArray(po.items)) continue;
         rows.push(
           ...(po.items as any[]).map((it: any, index: number) => {
-            const uniqCode = String(it.item_uniq_code ?? it.item_uniq ?? "");
+            const uniqCode = String(it.uniq_code ?? it.item_uniq_code ?? it.item_uniq ?? "");
             const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ??
               [])[0];
             return {
@@ -1384,6 +1488,12 @@ export default function PoBudgetPage() {
     return Array.from(deduped.values());
   };
 
+  const hasBomChildren = (uniqCode: string) =>
+    (bomChildrenByUniq[String(uniqCode ?? "").trim().toLowerCase()]?.length ?? 0) > 0;
+
+  const getAutoExpandedBulkKeys = (items: BulkItemRow[]) =>
+    items.filter((item) => hasBomChildren(item.uniq)).map((item) => item.key);
+
   const initialBulkItems = useMemo<BulkItemRow[]>(
     () => buildBulkItemsFromPrl(prlOptions[0]?.value),
     [
@@ -1398,6 +1508,12 @@ export default function PoBudgetPage() {
   );
 
   const [bulkItems, setBulkItems] = useState<BulkItemRow[]>(initialBulkItems);
+  const syncBulkItemsFromPrl = (selection?: string | string[]) => {
+    const nextItems = buildBulkItemsFromPrl(selection);
+    setBulkItems(nextItems);
+    // Auto-expand any bulk rows that have BOM children so user sees details immediately
+    setExpandedBulkRowKeys(getAutoExpandedBulkKeys(nextItems));
+  };
 
   useEffect(() => {
     if (!addForm.period && periodOptions[0]?.value) {
@@ -1457,7 +1573,7 @@ export default function PoBudgetPage() {
   }, [addForm.supplier, addForm.supplierId, resolvedAddSupplierOption]);
 
   useEffect(() => {
-    setBulkItems(buildBulkItemsFromPrl(bulkPrlIds));
+    syncBulkItemsFromPrl(bulkPrlIds);
   }, [bulkPrlIds, approvedPrls.length, defaultUom]);
 
   useEffect(() => {
@@ -1526,12 +1642,143 @@ export default function PoBudgetPage() {
     setBulkPrlPage(1);
     setPrlCache([]);
     setBulkItems([]);
+    setExpandedBulkRowKeys([]);
     setBulkPeriod(periodOptions[0]?.value);
     setBulkPrlIds([]);
     setBulkBudgetType("adhoc");
     setBulkPo1Pct(60);
     setBulkPo2Pct(40);
     setBulkOpen(true);
+  };
+
+  const toggleExpandedRowKey = (
+    rowKey: string,
+    setExpandedKeys: React.Dispatch<React.SetStateAction<string[]>>,
+  ) => {
+    setExpandedKeys((prev) =>
+      prev.includes(rowKey)
+        ? prev.filter((key) => key !== rowKey)
+        : [...prev, rowKey],
+    );
+  };
+
+  const bomChildColumns = useMemo<ColumnsType<BomChildDetailRow>>(
+    () => [
+      {
+        title: "Level",
+        dataIndex: "level",
+        key: "level",
+        width: 72,
+        align: "center",
+        render: (value: number) => (
+          <span className="text-xs text-gray-500">L{value}</span>
+        ),
+      },
+      {
+        title: "UNIQ Child",
+        dataIndex: "uniq",
+        key: "uniq",
+        width: 140,
+        render: (value: string, record) => (
+          <div style={{ paddingLeft: `${Math.max(record.level - 1, 0) * 16}px` }}>
+            <span className="text-sm font-medium text-gray-800">{value}</span>
+          </div>
+        ),
+      },
+      {
+        title: "Part Name",
+        dataIndex: "partName",
+        key: "partName",
+        render: (value: string) => (
+          <span className="text-sm text-gray-700">{value}</span>
+        ),
+      },
+      {
+        title: "Part Number",
+        dataIndex: "partNumber",
+        key: "partNumber",
+        width: 180,
+        render: (value: string) => (
+          <span className="text-sm text-gray-700">{value}</span>
+        ),
+      },
+      {
+        title: "Qty / UNIQ",
+        dataIndex: "quantityPerUniq",
+        key: "quantityPerUniq",
+        width: 110,
+        align: "right",
+        render: (value: number) => (
+          <span className="text-sm text-gray-700">{formatNumber(value)}</span>
+        ),
+      },
+      {
+        title: "UOM",
+        dataIndex: "uom",
+        key: "uom",
+        width: 100,
+        render: (value: string) => (
+          <span className="text-sm text-gray-700">{value}</span>
+        ),
+      },
+      {
+        title: "Weight (kg)",
+        dataIndex: "weightKg",
+        key: "weightKg",
+        width: 110,
+        align: "right",
+        render: (value: number) => (
+          <span className="text-sm text-gray-700">{formatNumber(value)}</span>
+        ),
+      },
+    ],
+    [],
+  );
+
+  const renderBomChildren = (uniqCode: string) => {
+    const key = String(uniqCode ?? "").trim().toLowerCase();
+    const childRows = bomChildrenByUniq[key] ?? [];
+    if (childRows.length === 0) return null;
+    // Card-like layout similar to screenshot: header with uniq badge, model, part number,
+    // and a right-aligned Total Qty box. Below it, render the child table.
+    const totalQty = childRows.reduce(
+      (sum, r) => sum + Number(r.quantityPerUniq || 0),
+      0,
+    );
+
+    return (
+      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <div className="px-3 py-1 rounded-full bg-blue-600 text-white text-sm font-semibold">{uniqCode}</div>
+            <div>
+              <div className="text-sm font-semibold text-gray-800">
+                {bomIndex.assemblyCodeByUniq[uniqCode] || "-"}
+              </div>
+              <div className="text-xs text-gray-500">
+                {bomIndex.partNameByUniq[uniqCode] || bomIndex.partNumberByUniq[uniqCode] || "-"}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="text-xs text-gray-500">Total Qty:</div>
+            <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-md font-semibold">{formatNumber(totalQty)}</div>
+          </div>
+        </div>
+
+        <div className="bg-gray-50 rounded-md p-2">
+          <Table<BomChildDetailRow>
+            dataSource={childRows}
+            columns={bomChildColumns}
+            rowKey="key"
+            size="small"
+            pagination={false}
+            bordered={false}
+          />
+        </div>
+      </div>
+    );
   };
 
   const bulkUpdateSupplier = (
@@ -1980,9 +2227,29 @@ export default function PoBudgetPage() {
         title: "Uniq",
         dataIndex: "uniq",
         key: "uniq",
-        render: (v: string) => (
-          <span className="text-sm text-gray-700">{v}</span>
-        ),
+        render: (value: string, record) => {
+          const childCount = bomChildrenByUniq[value]?.length ?? 0;
+          if (childCount === 0) {
+            return <span className="text-sm text-gray-700">{value}</span>;
+          }
+
+          const expanded = expandedBudgetRowKeys.includes(record.key);
+          return (
+            <button
+              type="button"
+              className="text-left"
+              onClick={() =>
+                toggleExpandedRowKey(record.key, setExpandedBudgetRowKeys)
+              }>
+              <div className="text-sm font-medium text-blue-700 hover:text-blue-800">
+                {value}
+              </div>
+              <div className="text-[11px] text-blue-500">
+                {expanded ? "Hide" : "Show"} {childCount} child part{childCount > 1 ? "s" : ""}
+              </div>
+            </button>
+          );
+        },
       },
       {
         title: "Customer",
@@ -2169,7 +2436,7 @@ export default function PoBudgetPage() {
         ),
       },
     ],
-    [openDetail, openEdit],
+    [bomChildrenByUniq, expandedBudgetRowKeys, openDetail, openEdit],
   );
 
   const tabOptions = useMemo(
@@ -2184,7 +2451,33 @@ export default function PoBudgetPage() {
   const bulkColumns = useMemo<ColumnsType<BulkItemRow>>(
     () => [
       { title: "PRL ID", dataIndex: "prlId", key: "prlId", width: 120 },
-      { title: "UNIQ", dataIndex: "uniq", key: "uniq", width: 90 },
+      {
+        title: "UNIQ",
+        dataIndex: "uniq",
+        key: "uniq",
+        width: 140,
+        render: (value: string, record) => {
+          const childCount = bomChildrenByUniq[value]?.length ?? 0;
+          if (childCount === 0) {
+            return <span className="text-sm text-gray-700">{value}</span>;
+          }
+
+          const expanded = expandedBulkRowKeys.includes(record.key);
+          return (
+            <button
+              type="button"
+              className="text-left rounded-lg px-2 py-1 -mx-2 transition-colors hover:bg-blue-50"
+              onClick={() => toggleExpandedRowKey(record.key, setExpandedBulkRowKeys)}>
+              <div className="text-sm font-semibold text-blue-700 hover:text-blue-800">
+                {value}
+              </div>
+              <div className="text-[11px] text-blue-500">
+                {expanded ? "Hide" : "Click to show"} {childCount} child part{childCount > 1 ? "s" : ""}
+              </div>
+            </button>
+          );
+        },
+      },
       {
         title: "Part Name",
         dataIndex: "partName",
@@ -2357,7 +2650,7 @@ export default function PoBudgetPage() {
         ),
       },
     ],
-    [bulkItems, supplierOptions, uomOptions],
+    [bomChildrenByUniq, expandedBulkRowKeys, supplierOptions, uomOptions],
   );
 
   return (
@@ -2449,6 +2742,14 @@ export default function PoBudgetPage() {
             columns={columns}
             rowKey="key"
             size="middle"
+            expandable={{
+              expandedRowKeys: expandedBudgetRowKeys,
+              onExpandedRowsChange: (keys) =>
+                setExpandedBudgetRowKeys(keys.map((key) => String(key))),
+              expandedRowRender: (record) => renderBomChildren(record.uniq),
+              rowExpandable: (record) => hasBomChildren(record.uniq),
+              showExpandColumn: false,
+            }}
             pagination={{
               current: activePagination.page,
               pageSize: activePagination.pageSize,
@@ -3007,7 +3308,7 @@ export default function PoBudgetPage() {
                   value={bulkPrlIds}
                   onChange={(values) => {
                     setBulkPrlIds(values);
-                    setBulkItems(buildBulkItemsFromPrl(values));
+                    syncBulkItemsFromPrl(values);
                   }}
                   onSearch={handleBulkPrlSearch}
                   onPopupScroll={handleBulkPrlPopupScroll}
@@ -3064,6 +3365,14 @@ export default function PoBudgetPage() {
                 dataSource={bulkItems}
                 columns={bulkColumns}
                 rowKey="key"
+                expandable={{
+                  expandedRowKeys: expandedBulkRowKeys,
+                  onExpandedRowsChange: (keys) =>
+                    setExpandedBulkRowKeys(keys.map((key) => String(key))),
+                  expandedRowRender: (record) => renderBomChildren(record.uniq),
+                  rowExpandable: (record) => hasBomChildren(record.uniq),
+                  showExpandColumn: false,
+                }}
                 pagination={false}
                 size="small"
                 scroll={{ x: 1200 }}

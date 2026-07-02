@@ -871,13 +871,13 @@ export default function WorkOrdersPage() {
       width: 110,
       render: (v: WorkOrderRow["type"]) => typeTag(v),
     },
-    {
-      title: "Status",
-      dataIndex: "status",
-      key: "status",
-      width: 120,
-      render: (v: WorkOrderStatus) => statusTag(v),
-    },
+    // {
+    //   title: "Status",
+    //   dataIndex: "status",
+    //   key: "status",
+    //   width: 120,
+    //   render: (v: WorkOrderStatus) => statusTag(v),
+    // },
     {
       title: "Approval Status",
       dataIndex: "approvalStatus",

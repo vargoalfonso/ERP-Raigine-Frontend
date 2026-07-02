@@ -6067,11 +6067,11 @@ const handleImportKanban = async (file: File) => {
               </div>
               <div>
                 <div className="text-xs text-gray-500">Sequence</div>
-                <div className="font-medium text-gray-900">
+                {/* <div className="font-medium text-gray-900">
                   {Number(
                     processDetailApiData?.sequence ?? processDetailRow.sequence,
                   )}
-                </div>
+                </div> */}
               </div>
               <div>
                 <div className="text-xs text-gray-500">Process Name</div>
@@ -6082,9 +6082,9 @@ const handleImportKanban = async (file: File) => {
               </div>
               <div>
                 <div className="text-xs text-gray-500">Category</div>
-                <div className="font-medium text-gray-900">
+                {/* <div className="font-medium text-gray-900">
                   {processDetailApiData?.category || processDetailRow.category}
-                </div>
+                </div> */}
               </div>
               <div>
                 <div className="text-xs text-gray-500">Status</div>

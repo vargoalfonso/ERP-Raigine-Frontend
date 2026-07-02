@@ -107,6 +107,17 @@ export default function AddForecastPage() {
     return opts;
   }, [bomTreeRes?.data, bomIndex.options]);
 
+  const uniqOptionsForCustomer = (customerId?: string) => {
+    if (!customerId) return uniqOptions;
+    const cust = customers.find(
+      (c) => String(c.id ?? c.customer_id ?? "") === String(customerId),
+    );
+    const codes = Array.isArray(cust?.bom_codes) ? cust!.bom_codes.map((c: any) => String(c).trim()).filter(Boolean) : [];
+    if (codes.length === 0) return [{ label: "belum ada uniq", value: "", disabled: true }];
+    const map = new Map(uniqOptions.map((o) => [o.value, o]));
+    return codes.map((code) => map.get(code) ?? { label: code, value: code });
+  };
+
   const customerOptions = useMemo(
     () =>
       customers
@@ -529,7 +540,7 @@ export default function AddForecastPage() {
                         mode="multiple"
                         value={entry.uniqCode}
                         onChange={(value) => handleUniqChange(entry.id, value)}
-                        options={uniqOptions}
+                        options={uniqOptionsForCustomer(entry.customerUuid)}
                         placeholder="Select one or more UNIQ from BOM"
                         className="w-full"
                         showSearch

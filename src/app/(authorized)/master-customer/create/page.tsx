@@ -63,24 +63,32 @@ export default function CreateCustomerPage() {
   );
 
   const bomOptions = useMemo(() => {
-    const nodes = Array.isArray(bomQuery.data?.data) ? bomQuery.data.data : [];
-    const opts: { label: string; value: string }[] = [];
-    for (const n of nodes) {
+    // Prefer the root-level nodes returned by the API (these are parent-level BOMs).
+    const rootNodes = Array.isArray(bomQuery.data?.data) ? bomQuery.data.data : [];
+    const rootOpts: { label: string; value: string }[] = [];
+    for (const n of rootNodes) {
       const uniq = typeof (n as any)?.uniq === "string" && (n as any).uniq.trim()
         ? (n as any).uniq.trim()
         : typeof (n as any)?.uniq_code === "string"
           ? (n as any).uniq_code.trim()
           : "";
-      if (uniq) opts.push({ label: uniq, value: uniq });
+      if (uniq) rootOpts.push({ label: uniq, value: uniq });
     }
-    if (opts.length) return opts;
+    if (rootOpts.length) return rootOpts;
+
+    // Fallback: if API returned a paginated shape, use only the top-level items array
     const data = bomQuery.data?.data;
-    const arr = Array.isArray(data)
-      ? data
-      : Array.isArray((data as any)?.items)
-      ? (data as any).items
-      : [];
-    return buildBomCodeSelectOptions(arr);
+    const arr = Array.isArray(data) ? data : Array.isArray((data as any)?.items) ? (data as any).items : [];
+    const topLevelOpts: { label: string; value: string }[] = [];
+    for (const n of arr) {
+      const uniq = typeof (n as any)?.uniq === "string" && (n as any).uniq.trim()
+        ? (n as any).uniq.trim()
+        : typeof (n as any)?.uniq_code === "string"
+          ? (n as any).uniq_code.trim()
+          : "";
+      if (uniq) topLevelOpts.push({ label: uniq, value: uniq });
+    }
+    return topLevelOpts;
   }, [bomQuery.data]);
 
   const onSave = async () => {
