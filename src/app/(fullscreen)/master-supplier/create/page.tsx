@@ -506,8 +506,16 @@ function MasterSupplierCreatePageContent() {
 
   const bomOptions = useMemo(() => {
     const mapped = accumulatedBomItems
-      .map(toBomOption)
-      .filter((option): option is BomOption => Boolean(option));
+      .map((node) => {
+        const opt = toBomOption(node as any);
+        if (!opt) return null;
+        // Consider node a parent/top-level when it has no parent pointer or level indicates top (1)
+        const hasParentPointer = Boolean((node as any).parent_id ?? (node as any).parentId ?? (node as any).parent_uuid ?? (node as any).parentUuid);
+        const levelNum = typeof (node as any).level === "number" ? (node as any).level : undefined;
+        const isParent = !hasParentPointer || levelNum === 1;
+        return { ...(opt as BomOption), _isParent: Boolean(isParent) } as BomOption & { _isParent: boolean };
+      })
+      .filter((option): option is BomOption & { _isParent: boolean } => option !== null);
     const deduped = new Map<string, BomOption>();
     mapped.forEach((option) => {
       if (!deduped.has(option.value)) deduped.set(option.value, option);
@@ -623,10 +631,10 @@ function MasterSupplierCreatePageContent() {
       status: normalizeFormStatus(matched.status) ?? form.getFieldValue("status") ?? "active",
     });
 
-    // Also set material code (sebango) when available and not subcon section
+    // Also set material code (sebango) when available for raw/indirect sections only
     try {
       const matCode = matched.materialCode ?? "";
-      if (matCode) form.setFieldValue("sebango_code", matCode);
+      if (matCode && section !== "subcon") form.setFieldValue("sebango_code", matCode);
     } catch (e) {
       // ignore
     }
@@ -930,20 +938,30 @@ function MasterSupplierCreatePageContent() {
                           filterOption={false}
                           placeholder="Search or scroll to browse..."
                           options={(() => {
-                            const toSelectOpt = (option: BomOption) => ({
+                            const toSelectOpt = (option: BomOption & { _isParent?: boolean }) => ({
                               ...option,
-                              label: [option.materialCode || option.label, option.partName, option.productModel]
-                                .filter(Boolean)
-                                .join(" — "),
+                              label:
+                                section === "subcon"
+                                  ? [option.label, option.partName, option.productModel].filter(Boolean).join(" — ")
+                                  : [option.materialCode || "tidak ada", option.partName, option.productModel]
+                                      .filter(Boolean)
+                                      .join(" — "),
                             });
-                            const opts = bomOptions.map(toSelectOpt);
+
+                            const list = bomOptions
+                              .filter((o: BomOption & { _isParent?: boolean }) =>
+                                section === "subcon" ? Boolean((o as any)._isParent) : true
+                              )
+                              .map(toSelectOpt);
+
                             if (
                               selectedBomOption &&
-                              !opts.some((o) => o.value === selectedBomOption.value)
+                              !list.some((o) => o.value === selectedBomOption.value)
                             ) {
-                              opts.unshift(toSelectOpt(selectedBomOption));
+                              // include selected option even if filtered out
+                              list.unshift(toSelectOpt(selectedBomOption as BomOption & { _isParent?: boolean }));
                             }
-                            return opts;
+                            return list;
                           })()}
                           onSearch={setUniqSearch}
                           onChange={(val, opt) => handleUniqChange(val as string, opt as BomOption | BomOption[])}
