@@ -37,8 +37,9 @@ import {
   useDeleteBomParentMutation,
   useGetBomListQuery,
   useImportBomMutation,
+  useGetImportHistoryQuery,
 } from "@/lib/api/bom/api";
-import type { BackendBomNode } from "@/lib/api/bom/api";
+import type { BackendBomNode, ImportHistoryDto } from "@/lib/api/bom/api";
 import { apiBaseUrl, getCookiesFromBrowser } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { getCurrentUserDisplayName } from "@/lib/utils/currentUser";
@@ -107,6 +108,55 @@ type UploadHistoryEntry = {
   previewRows: ImportPreviewRow[];
   previewColumns: string[];
   issues: ImportPreviewIssue[];
+};
+
+const normalizeHistoryStatus = (s: string): "success" | "partial" | "error" => {
+  const v = (s || "").toLowerCase();
+  if (v === "success") return "success";
+  if (v === "partial") return "partial";
+  return "error";
+};
+
+const mapHistoryDtoToEntry = (dto: ImportHistoryDto): UploadHistoryEntry => {
+  const rawRows = Array.isArray(dto.preview_rows) ? dto.preview_rows : [];
+  const previewRows: ImportPreviewRow[] = rawRows
+    .slice(0, MAX_PREVIEW_ROWS)
+    .map((r, i) => {
+      const rec = (r ?? {}) as Record<string, unknown>;
+      const out: ImportPreviewRow = { key: `hist-${dto.id}-${i}` };
+      for (const [k, v] of Object.entries(rec)) {
+        out[k] = v == null ? "" : String(v);
+      }
+      return out;
+    });
+  const previewColumns = Array.from(
+    previewRows.reduce((set, row) => {
+      Object.keys(row).forEach((k) => {
+        if (k !== "key") set.add(k);
+      });
+      return set;
+    }, new Set<string>()),
+  );
+
+  return {
+    id: String(dto.id),
+    fileName: dto.file_name,
+    fileSizeKb: dto.file_size_kb,
+    rowCount: dto.row_count,
+    uploadedBy: dto.uploaded_by || "-",
+    uploadedAt: dto.created_at,
+    status: normalizeHistoryStatus(dto.status),
+    summary: dto.summary,
+    imported: dto.imported_count,
+    failed: dto.failed_count,
+    requestId: dto.request_id,
+    downloadUrl: dto.has_error_file
+      ? `${apiBaseUrl}/products/bom/import/history/${dto.id}/errors`
+      : undefined,
+    previewRows,
+    previewColumns,
+    issues: [],
+  };
 };
 
 const BOM_UPLOAD_HISTORY_STORAGE_KEY = "bom-upload-history-v1";
@@ -233,58 +283,93 @@ const normalizeImportIssue = (
 };
 
 const buildImportPreview = (payload: unknown): ImportPreviewState => {
-  const record = isRecord(payload) ? payload : {};
-  const data = isRecord(record.data) ? record.data : record;
+  const layers: UnknownRecord[] = [];
+  let cursor: unknown = payload;
+  for (let i = 0; i < 4 && isRecord(cursor); i += 1) {
+    layers.push(cursor);
+    cursor = cursor.data;
+  }
 
-  const imported = asNumber(
-    data.imported ?? data.success ?? data.success_count ?? data.created,
-  );
-  const initialFailed = asNumber(
-    data.failed ?? data.error_count ?? data.invalid ?? data.rejected,
-  );
-
-  const rawIssues = [
-    ...(Array.isArray(data.errors) ? data.errors : []),
-    ...(Array.isArray(data.validation_errors) ? data.validation_errors : []),
-    ...(Array.isArray(data.failed_rows) ? data.failed_rows : []),
-    ...(Array.isArray(data.invalid_rows) ? data.invalid_rows : []),
-  ];
-
-  const issues = rawIssues.map(normalizeImportIssue);
-  const failed = initialFailed || issues.length;
-  const message =
-    (typeof data.message === "string" && data.message.trim()) ||
-    (failed > 0
-      ? imported > 0
-        ? `${failed} validation issue${failed > 1 ? "s" : ""} found`
-        : `Upload failed with ${failed} issue${failed > 1 ? "s" : ""}`
-      : `Upload successful. ${imported || 0} row${imported === 1 ? "" : "s"} imported`);
-
-  return {
-    status: failed > 0 ? (imported > 0 ? "partial" : "error") : "success",
-    message,
-    imported,
-    failed,
-    issues,
+  const pick = (...keys: string[]): unknown => {
+    for (const layer of layers) {
+      for (const key of keys) {
+        const value = layer[key];
+        if (value !== undefined && value !== null) return value;
+      }
+    }
+    return undefined;
   };
+
+  const importStatusRaw = String(pick("import_status") ?? "")
+    .trim()
+    .toLowerCase();
+  const imported = asNumber(
+    pick("success_count", "imported", "success", "created"),
+  );
+  const total = asNumber(pick("total"));
+  const initialFailed = asNumber(
+    pick("failed_count", "failed", "error_count", "invalid", "rejected"),
+  );
+
+  const asArray = (value: unknown): unknown[] =>
+    Array.isArray(value) ? value : [];
+  const rawIssues = [
+    ...asArray(pick("errors")),
+    ...asArray(pick("validation_errors")),
+    ...asArray(pick("failed_rows")),
+    ...asArray(pick("invalid_rows")),
+  ];
+  const issues = rawIssues.map(normalizeImportIssue);
+
+  let failed = initialFailed || issues.length;
+  if (!failed && total > 0 && imported < total) {
+    failed = total - imported;
+  }
+
+  let status: "success" | "partial" | "error";
+  if (importStatusRaw === "failed") {
+    status = "error";
+  } else if (importStatusRaw === "partial") {
+    status = "partial";
+  } else if (importStatusRaw === "success") {
+    status = "success";
+  } else {
+    status = failed > 0 ? (imported > 0 ? "partial" : "error") : "success";
+  }
+
+  const backendMessage = pick("message");
+  const message =
+    (typeof backendMessage === "string" && backendMessage.trim()) ||
+    (status === "success"
+      ? `Upload successful. ${imported || 0} row${imported === 1 ? "" : "s"} imported`
+      : status === "partial"
+        ? `Sebagian gagal: ${imported} berhasil, ${failed} gagal dari ${total || imported + failed} BOM`
+        : `Import gagal: ${failed || total || "semua"} BOM tidak dapat diimport`);
+
+  return { status, message, imported, failed, issues };
 };
 
 const extractRequestId = (payload: unknown): string | undefined => {
-  if (!isRecord(payload)) return undefined;
-  const direct = payload.request_id;
-  if (typeof direct === "string" && direct.trim()) return direct.trim();
-  const nested = isRecord(payload.data) ? payload.data.request_id : undefined;
-  return typeof nested === "string" && nested.trim()
-    ? nested.trim()
-    : undefined;
+  let cursor: unknown = payload;
+  for (let i = 0; i < 4 && isRecord(cursor); i += 1) {
+    const direct = cursor.request_id;
+    if (typeof direct === "string" && direct.trim()) return direct.trim();
+    cursor = cursor.data;
+  }
+  return undefined;
 };
 
 const extractDownloadUrl = (payload: unknown): string | undefined => {
-  if (!isRecord(payload)) return undefined;
-  const data = isRecord(payload.data) ? payload.data : payload;
-  const url =
-    data.download_url ?? data.error_download_url ?? data.failed_download_url;
-  return typeof url === "string" && url.trim() ? url.trim() : undefined;
+  let cursor: unknown = payload;
+  for (let i = 0; i < 4 && isRecord(cursor); i += 1) {
+    const url =
+      cursor.download_url ??
+      cursor.error_download_url ??
+      cursor.failed_download_url;
+    if (typeof url === "string" && url.trim()) return url.trim();
+    cursor = cursor.data;
+  }
+  return undefined;
 };
 
 const extractImportStatus = (
@@ -376,22 +461,62 @@ const fetchDownloadPreview = async (
     return { issues: preview.issues, rows };
   }
 
-  const text = await response.text();
-  const rows = parseDelimitedText(text);
-  const issues = rows.map((row, index) => ({
-    key: row.key,
-    rowLabel: row.Row || `Row ${index + 1}`,
-    message: row.Error || row.Message || row.error || "Validation error",
-    values: Object.entries(row).reduce<Record<string, string>>(
-      (acc, [key, value]) => {
-        if (!["key", "Row", "Error", "Message", "error"].includes(key)) {
-          acc[key] = value;
-        }
-        return acc;
-      },
-      {},
-    ),
-  }));
+  // Otherwise read the tabular error report. The backend returns an .xlsx
+  // workbook whose "Items" sheet keeps the failure reason in column A
+  // ("error_field") and echoes the original row in the remaining columns.
+  // CSV is handled as a fallback.
+  let parsedRows: ImportPreviewRow[];
+  if (contentType.includes("csv") || contentType.includes("text/plain")) {
+    parsedRows = parseDelimitedText(await response.text());
+  } else {
+    const buffer = await response.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const sheetName =
+      workbook.SheetNames.find((name) => name.toLowerCase() === "items") ??
+      workbook.SheetNames[0];
+    if (!sheetName) return { issues: [], rows: [] };
+    const sheet = workbook.Sheets[sheetName];
+    parsedRows = XLSX.utils
+      .sheet_to_json<Record<string, unknown>>(sheet, { defval: "" })
+      .slice(0, MAX_PREVIEW_ROWS)
+      .map(normalizePreviewRow);
+  }
+
+  const issues: ImportPreviewIssue[] = [];
+  const rows: ImportPreviewRow[] = [];
+
+  parsedRows.forEach((raw, index) => {
+    const values: Record<string, string> = {};
+    let message = "";
+    for (const [key, value] of Object.entries(raw)) {
+      if (key === "key") continue;
+      const lower = key.trim().toLowerCase();
+      const text = typeof value === "string" ? value : toDisplayText(value);
+      if (
+        lower === "error_field" ||
+        lower === "error field" ||
+        lower === "error" ||
+        lower === "message"
+      ) {
+        if (text && text !== "-") message = text;
+        continue;
+      }
+      values[key] = text;
+    }
+
+    // Rows without a failure reason are template/sample rows — skip them.
+    if (!message) return;
+
+    const rowLabel =
+      values["Uniq Code"] ||
+      values["Bom Group"] ||
+      values["uniq_code"] ||
+      values["bom_group"] ||
+      `Row ${index + 1}`;
+    const key = `err-${index}`;
+    issues.push({ key, rowLabel, message, values });
+    rows.push({ key, row: rowLabel, error: message, ...values });
+  });
 
   return { issues, rows };
 };
@@ -539,11 +664,21 @@ export default function BillOfMaterialPage() {
   const [stagedPreviewRows, setStagedPreviewRows] = useState<
     ImportPreviewRow[]
   >([]);
-  const [uploadHistory, setUploadHistory] = useState<UploadHistoryEntry[]>([]);
+  const { data: importHistoryRes, refetch: refetchHistory } =
+    useGetImportHistoryQuery();
+  const uploadHistory = useMemo<UploadHistoryEntry[]>(
+    () => (importHistoryRes?.data ?? []).map(mapHistoryDtoToEntry),
+    [importHistoryRes],
+  );
+  
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(
     null,
   );
   const [uniqSearch, setUniqSearch] = useState("");
+  const [historyPreviewRows, setHistoryPreviewRows] = useState<
+    ImportPreviewRow[]
+  >([]);
+  const [historyPreviewLoading, setHistoryPreviewLoading] = useState(false);
 
   const {
     data: bomListRes,
@@ -555,6 +690,53 @@ export default function BillOfMaterialPage() {
   const [deleteBomChild, { isLoading: isDeletingChild }] =
     useDeleteBomChildMutation();
   const [importBom] = useImportBomMutation();
+
+  const downloadErrorFile = async (downloadUrl: string, fileName: string) => {
+    try {
+      const token = getCookiesFromBrowser("Authorization");
+      const proxiedUrl = downloadUrl.startsWith("http")
+        ? absoluteDownloadUrlToProxyUrl(downloadUrl)
+        : downloadUrl;
+      const res = await fetch(proxiedUrl, {
+        method: "GET",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (!res.ok) throw new Error(`(${res.status})`);
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      messageApi.error(getApiErrorMessage(err, "Gagal mengunduh file error"));
+    }
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const token = getCookiesFromBrowser("Authorization");
+      const res = await fetch(`${apiBaseUrl}/products/bom/import/template`, {
+        method: "GET",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+      if (!res.ok) throw new Error(`(${res.status})`);
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "bom_template.xlsx";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      messageApi.error(getApiErrorMessage(err, "Gagal mengunduh template"));
+    }
+  };
 
   const bomRows = useMemo(() => {
     const tree = bomListRes?.data ?? [];
@@ -582,27 +764,6 @@ export default function BillOfMaterialPage() {
     : expandedRowKeys;
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const raw = window.localStorage.getItem(BOM_UPLOAD_HISTORY_STORAGE_KEY);
-    if (!raw) return;
-
-    const parsed = safeJsonParse<UploadHistoryEntry[]>(raw, []);
-    setUploadHistory(Array.isArray(parsed) ? parsed : []);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(
-      BOM_UPLOAD_HISTORY_STORAGE_KEY,
-      JSON.stringify(uploadHistory),
-    );
-  }, [uploadHistory]);
-
-  // Ensure we have a selected history entry after loading history from storage.
-  // This fixes the case where the modal was opened and switched to the History
-  // tab before `uploadHistory` was populated from localStorage, leaving the
-  // preview pane empty even though entries exist.
-  useEffect(() => {
     if (selectedHistoryId == null && uploadHistory.length > 0) {
       setSelectedHistoryId(uploadHistory[0].id);
     }
@@ -612,6 +773,30 @@ export default function BillOfMaterialPage() {
     () => uploadHistory.find((entry) => entry.id === selectedHistoryId) ?? null,
     [selectedHistoryId, uploadHistory],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const url = selectedHistoryEntry?.downloadUrl;
+    if (!url) {
+      setHistoryPreviewRows([]);
+      setHistoryPreviewLoading(false);
+      return;
+    }
+    setHistoryPreviewLoading(true);
+    fetchDownloadPreview(url)
+      .then((detail) => {
+        if (!cancelled) setHistoryPreviewRows(detail.rows);
+      })
+      .catch(() => {
+        if (!cancelled) setHistoryPreviewRows([]);
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedHistoryEntry?.id, selectedHistoryEntry?.downloadUrl]);
 
   const previewTableRows = useMemo(() => {
     if (importPreviewRows.length > 0) return importPreviewRows;
@@ -664,23 +849,42 @@ export default function BillOfMaterialPage() {
     ];
   }, [previewFieldKeys]);
 
+  const historyDetailRows = useMemo<ImportPreviewRow[]>(() => {
+    if (historyPreviewRows.length > 0) return historyPreviewRows;
+    return selectedHistoryEntry?.previewRows ?? [];
+  }, [historyPreviewRows, selectedHistoryEntry]);
+
   const historyPreviewColumns = useMemo<
     ColumnsType<Record<string, string>>
   >(() => {
-    const fields = selectedHistoryEntry?.previewColumns ?? [];
-
-    return fields.map((fieldKey) => ({
-      title: fieldKey,
-      dataIndex: fieldKey,
-      key: fieldKey,
-      render: (value: string) => {
-        if (fieldKey.toLowerCase() === "error" && value) {
-          return <span className="text-[#dc2626]">{value}</span>;
-        }
-        return value || "-";
+    const fieldKeys = new Set<string>();
+    for (const row of historyDetailRows) {
+      Object.keys(row).forEach((key) => {
+        if (!["key", "row", "error"].includes(key)) fieldKeys.add(key);
+      });
+    }
+    const base: ColumnsType<Record<string, string>> = [
+      { title: "Row", dataIndex: "row", key: "row", width: 110 },
+      {
+        title: "Issue",
+        dataIndex: "error",
+        key: "error",
+        width: 280,
+        render: (value: string) => (
+          <span className="text-[#dc2626]">{value}</span>
+        ),
       },
-    }));
-  }, [selectedHistoryEntry]);
+    ];
+    return [
+      ...base,
+      ...Array.from(fieldKeys).map((fieldKey) => ({
+        title: fieldKey,
+        dataIndex: fieldKey,
+        key: fieldKey,
+        render: (value: string) => value || "-",
+      })),
+    ];
+  }, [historyDetailRows]);
 
   const resetImportModalState = () => {
     setExcelModalTab("upload");
@@ -692,54 +896,6 @@ export default function BillOfMaterialPage() {
     setImportPreviewRows([]);
     setStagedPreviewRows([]);
     setSelectedHistoryId(null);
-  };
-
-  const persistHistoryEntry = (entry: UploadHistoryEntry) => {
-    setUploadHistory((prev) => [entry, ...prev].slice(0, MAX_HISTORY_ITEMS));
-    setSelectedHistoryId(entry.id);
-  };
-
-  const buildHistoryEntry = (args: {
-    file: File;
-    payload: unknown;
-    preview: ImportPreviewState;
-    previewRows: ImportPreviewRow[];
-  }): UploadHistoryEntry => {
-    const { file, payload, preview, previewRows } = args;
-    const totalFromPayload =
-      isRecord(payload) && isRecord(payload.data)
-        ? asNumber(payload.data.total)
-        : 0;
-    const rowCount =
-      totalFromPayload ||
-      stagedPreviewRows.length ||
-      preview.imported + preview.failed ||
-      previewRows.length;
-    const previewColumns = Array.from(
-      new Set(
-        previewRows.flatMap((row) =>
-          Object.keys(row).filter((key) => key !== "key"),
-        ),
-      ),
-    );
-
-    return {
-      id: crypto.randomUUID(),
-      fileName: file.name,
-      fileSizeKb: Math.max(1, Math.round(file.size / 1024)),
-      rowCount,
-      uploadedBy: getCurrentUserDisplayName() ?? "Current User",
-      uploadedAt: new Date().toISOString(),
-      status: preview.status,
-      summary: preview.message,
-      imported: preview.imported,
-      failed: preview.failed,
-      requestId: extractRequestId(payload),
-      downloadUrl: extractDownloadUrl(payload),
-      previewRows,
-      previewColumns,
-      issues: preview.issues,
-    };
   };
 
   const handleDelete = async (record: BomRow): Promise<boolean> => {
@@ -787,7 +943,8 @@ export default function BillOfMaterialPage() {
               record.isParent
                 ? "inline-flex items-center rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white"
                 : "inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-700"
-            }>
+            }
+          >
             {record.uniq}
           </span>
         );
@@ -887,7 +1044,8 @@ export default function BillOfMaterialPage() {
               } else if (record.imageSrc) {
                 window.open(record.imageSrc, "_blank");
               }
-            }}>
+            }}
+          >
             {record.assetLabel}
           </Button>
         );
@@ -979,7 +1137,8 @@ export default function BillOfMaterialPage() {
             onClick={() => {
               resetImportModalState();
               setExcelModalOpen(true);
-            }}>
+            }}
+          >
             Excel Upload
           </Button>
 
@@ -987,7 +1146,8 @@ export default function BillOfMaterialPage() {
             type="primary"
             icon={<PlusOutlined />}
             className="flex items-center gap-2"
-            onClick={() => router.push("/bill-of-material/create")}>
+            onClick={() => router.push("/bill-of-material/create")}
+          >
             Add BOM Item
           </Button>
         </div>
@@ -1000,7 +1160,7 @@ export default function BillOfMaterialPage() {
           setExcelModalOpen(false);
           resetImportModalState();
         }}
-        width={1024}
+        width={1324}
         destroyOnHidden
         footer={
           <div className="flex items-center justify-end gap-2">
@@ -1008,7 +1168,8 @@ export default function BillOfMaterialPage() {
               onClick={() => {
                 setExcelModalOpen(false);
                 resetImportModalState();
-              }}>
+              }}
+            >
               Close
             </Button>
             {excelModalTab === "upload" && (
@@ -1078,13 +1239,8 @@ export default function BillOfMaterialPage() {
                     setImportPreview(preview);
                     setImportPreviewRows(rows);
 
-                    const historyEntry = buildHistoryEntry({
-                      file: selectedFile,
-                      payload: result,
-                      preview,
-                      previewRows: rows,
-                    });
-                    persistHistoryEntry(historyEntry);
+                    await refetchHistory();
+                    setSelectedHistoryId(null);
 
                     if (preview.imported > 0) {
                       await refetch();
@@ -1131,25 +1287,22 @@ export default function BillOfMaterialPage() {
                     setImportPreview(preview);
                     setImportPreviewRows(rows);
 
-                    const historyEntry = buildHistoryEntry({
-                      file: selectedFile,
-                      payload: err,
-                      preview,
-                      previewRows: rows,
-                    });
-                    persistHistoryEntry(historyEntry);
+                    await refetchHistory();
+                    setSelectedHistoryId(null);
 
                     messageApi.error(
                       getApiErrorMessage(err, "BOM import failed"),
                     );
                   }
                 }}
-                disabled={!selectedFile || isUploading}>
+                disabled={!selectedFile || isUploading}
+              >
                 {importPreview ? "Fix & Re-upload" : "Save"}
               </Button>
             )}
           </div>
-        }>
+        }
+      >
         <div className="mb-4 flex items-center gap-6 border-b border-[#f0f0f0] pb-3 text-sm">
           <button
             type="button"
@@ -1158,7 +1311,8 @@ export default function BillOfMaterialPage() {
               excelModalTab === "upload"
                 ? "flex items-center gap-2 border-b-2 border-[#2563eb] pb-2 font-medium text-[#2563eb]"
                 : "flex items-center gap-2 pb-2 text-[#667085]"
-            }>
+            }
+          >
             <UploadOutlined />
             Upload
           </button>
@@ -1174,7 +1328,8 @@ export default function BillOfMaterialPage() {
               excelModalTab === "history"
                 ? "flex items-center gap-2 border-b-2 border-[#2563eb] pb-2 font-medium text-[#2563eb]"
                 : "flex items-center gap-2 pb-2 text-[#667085]"
-            }>
+            }
+          >
             <HistoryOutlined />
             Upload History
           </button>
@@ -1215,7 +1370,8 @@ export default function BillOfMaterialPage() {
 
                   return Upload.LIST_IGNORE;
                 }}
-                className="[&_.ant-upload-drag]:!rounded-lg [&_.ant-upload-drag]:!border-[#d9d9d9] [&_.ant-upload-drag]:!bg-white [&_.ant-upload-drag]:hover:!border-[#2563eb]">
+                className="[&_.ant-upload-drag]:!rounded-lg [&_.ant-upload-drag]:!border-[#d9d9d9] [&_.ant-upload-drag]:!bg-white [&_.ant-upload-drag]:hover:!border-[#2563eb]"
+              >
                 <div className="flex min-h-[124px] items-center justify-center gap-3 py-6 text-center">
                   <InboxOutlined className="text-2xl text-[#8c8c8c]" />
                   <div>
@@ -1234,10 +1390,11 @@ export default function BillOfMaterialPage() {
             {selectedFile && (
               <div
                 className={
-                  importPreview?.status === "error"
+                  importPreview && importPreview.status !== "success"
                     ? "mb-3 rounded-lg border border-[#fca5a5] bg-white px-4 py-4"
                     : "mb-3 rounded-lg border border-[#e5e7eb] bg-white px-4 py-4"
-                }>
+                }
+              >
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
                     {isUploading ? (
@@ -1266,7 +1423,8 @@ export default function BillOfMaterialPage() {
                       <div className="text-xs text-[#98a2b3]">
                         {isUploading
                           ? "Uploading..."
-                          : importPreview?.status === "error" &&
+                          : importPreview &&
+                              importPreview.status !== "success" &&
                               importPreview.failed > 0
                             ? `Uploaded with ${importPreview.failed} issue${importPreview.failed > 1 ? "s" : ""}`
                             : `${Math.max(1, Math.round(selectedFile.size / 1024))}Kb`}
@@ -1283,13 +1441,14 @@ export default function BillOfMaterialPage() {
                         setSelectedFile(null);
                         setUploadProgress(0);
                         setUploadDone(false);
-                      }}>
+                      }}
+                    >
                       <CloseOutlined />
                     </button>
                   )}
                 </div>
 
-                {importPreview?.status === "error" && (
+                {importPreview && importPreview.status !== "success" && (
                   <div className="mt-3 border-t border-[#f3f4f6] pt-3 text-sm text-[#475467]">
                     File validation completed. Review the issues below before
                     re-uploading.
@@ -1304,12 +1463,17 @@ export default function BillOfMaterialPage() {
                   className={
                     importPreview.status === "success"
                       ? "mb-3 rounded-md border border-[#b7eb8f] bg-[#f6ffed] px-4 py-3 text-sm text-[#135200]"
-                      : "mb-3 rounded-md border border-[#ffccc7] bg-[#fff1f0] px-4 py-3 text-sm text-[#cf1322]"
-                  }>
+                      : importPreview.status === "partial"
+                        ? "mb-3 rounded-md border border-[#ffe58f] bg-[#fffbe6] px-4 py-3 text-sm text-[#ad6800]"
+                        : "mb-3 rounded-md border border-[#ffccc7] bg-[#fff1f0] px-4 py-3 text-sm text-[#cf1322]"
+                  }
+                >
                   <div className="font-semibold">
                     {importPreview.status === "success"
                       ? `Upload successful - ${importPreview.imported} row${importPreview.imported === 1 ? "" : "s"} imported`
-                      : `Upload Error - ${importPreview.failed} validation issue${importPreview.failed === 1 ? "" : "s"} found`}
+                      : importPreview.status === "partial"
+                        ? `Sebagian berhasil - ${importPreview.imported} sukses, ${importPreview.failed} gagal`
+                        : `Upload gagal - ${importPreview.failed} baris bermasalah`}
                   </div>
                   <div className="mt-1">{importPreview.message}</div>
                   {(importPreview.imported > 0 || importPreview.failed > 0) && (
@@ -1353,8 +1517,21 @@ export default function BillOfMaterialPage() {
                 </span>
                 <p>
                   Download our{" "}
-                  <span className="font-medium text-[#2563eb]">CSV</span> or{" "}
-                  <span className="font-medium text-[#2563eb]">XLS</span>{" "}
+                  <button
+                    type="button"
+                    onClick={handleDownloadTemplate}
+                    className="font-medium text-[#2563eb] underline hover:opacity-80"
+                  >
+                    CSV
+                  </button>{" "}
+                  or{" "}
+                  <button
+                    type="button"
+                    onClick={handleDownloadTemplate}
+                    className="font-medium text-[#2563eb] underline hover:opacity-80"
+                  >
+                    XLS
+                  </button>{" "}
                   template as a guide to upload your Inventory.
                 </p>
               </div>
@@ -1370,7 +1547,7 @@ export default function BillOfMaterialPage() {
             </div>
           </>
         ) : (
-          <div className="grid min-h-[520px] grid-cols-[360px_minmax(0,1fr)] gap-4">
+          <div className="grid min-h-[520px] grid-cols-[480px_minmax(0,1fr)] gap-4">
             <div className="min-h-0 rounded-lg border border-[#eaecf0] bg-white">
               <div className="flex items-center justify-between border-b border-[#eaecf0] px-4 py-3">
                 <div className="text-[18px] font-semibold text-[#101828]">
@@ -1392,7 +1569,9 @@ export default function BillOfMaterialPage() {
                     const statusTone =
                       entry.status === "success"
                         ? "bg-[#e8fff1] text-[#027a48]"
-                        : "bg-[#fff1f0] text-[#d92d20]";
+                        : entry.status === "partial"
+                          ? "bg-[#fffbe6] text-[#ad6800]"
+                          : "bg-[#fff1f0] text-[#d92d20]";
                     const cardClassName =
                       entry.status === "success"
                         ? isActive
@@ -1407,11 +1586,13 @@ export default function BillOfMaterialPage() {
                         key={entry.id}
                         type="button"
                         onClick={() => setSelectedHistoryId(entry.id)}
-                        className={`w-full rounded-xl border p-4 text-left transition ${cardClassName}`}>
+                        className={`w-full rounded-xl border p-4 text-left transition ${cardClassName}`}
+                      >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-start gap-3">
                             <div
-                              className={`mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg ${entry.status === "success" ? "bg-[#ecfdf3] text-[#16a34a]" : "bg-[#fef3f2] text-[#dc2626]"}`}>
+                              className={`mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg ${entry.status === "success" ? "bg-[#ecfdf3] text-[#16a34a]" : "bg-[#fef3f2] text-[#dc2626]"}`}
+                            >
                               <FileExcelOutlined className="text-lg" />
                             </div>
                             <div className="min-w-0">
@@ -1420,10 +1601,13 @@ export default function BillOfMaterialPage() {
                                   {entry.fileName}
                                 </div>
                                 <span
-                                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusTone}`}>
+                                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusTone}`}
+                                >
                                   {entry.status === "success"
                                     ? "Success"
-                                    : "Error"}
+                                    : entry.status === "partial"
+                                      ? "Partial"
+                                      : "Failed"}
                                 </span>
                               </div>
                               <div className="mt-1 flex flex-wrap items-center gap-4 text-sm text-[#667085]">
@@ -1435,13 +1619,26 @@ export default function BillOfMaterialPage() {
                                   {new Date(entry.uploadedAt).toLocaleString()}
                                 </span>
                               </div>
-                              <div className="mt-2 text-sm text-[#667085]">
-                                {entry.fileSizeKb}Kb • {entry.rowCount} rows
+                              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[#667085]">
+                                <span>{entry.fileSizeKb}Kb</span>
+                                <span>•</span>
+                                <span>{entry.rowCount} rows</span>
+                                {entry.imported > 0 && (
+                                  <span className="rounded bg-[#ecfdf3] px-1.5 py-0.5 font-medium text-[#027a48]">
+                                    {entry.imported} imported
+                                  </span>
+                                )}
+                                {entry.failed > 0 && (
+                                  <span className="rounded bg-[#fef3f2] px-1.5 py-0.5 font-medium text-[#d92d20]">
+                                    {entry.failed} failed
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
                           <span
-                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm ${isActive ? "bg-[#dbeafe] text-[#175cd3]" : "text-[#175cd3]"}`}>
+                            className={`inline-flex items-center cursor-pointer gap-1 rounded-md px-2 py-1 text-sm ${isActive ? "bg-[#dbeafe] text-[#175cd3]" : "text-[#175cd3]"}`}
+                          >
                             <EyeOutlined /> {isActive ? "Viewing" : "Preview"}
                           </span>
                         </div>
@@ -1468,7 +1665,8 @@ export default function BillOfMaterialPage() {
                   <div className="flex items-start justify-between border-b border-[#eaecf0] px-5 py-4">
                     <div className="flex items-start gap-3">
                       <div
-                        className={`mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg ${selectedHistoryEntry.status === "success" ? "bg-[#ecfdf3] text-[#16a34a]" : "bg-[#fef3f2] text-[#dc2626]"}`}>
+                        className={`mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg ${selectedHistoryEntry.status === "success" ? "bg-[#ecfdf3] text-[#16a34a]" : "bg-[#fef3f2] text-[#dc2626]"}`}
+                      >
                         <FileExcelOutlined className="text-lg" />
                       </div>
                       <div>
@@ -1489,14 +1687,42 @@ export default function BillOfMaterialPage() {
                       </div>
                     </div>
                     {selectedHistoryEntry.downloadUrl && (
-                      <a
-                        href={selectedHistoryEntry.downloadUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-2 rounded-md border border-[#d0d5dd] px-3 py-2 text-sm text-[#175cd3] hover:bg-[#f8fbff]">
-                        <DownloadOutlined />
-                      </a>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          downloadErrorFile(
+                            selectedHistoryEntry.downloadUrl as string,
+                            `errors-${selectedHistoryEntry.fileName}`,
+                          )
+                        }
+                        className="inline-flex items-center gap-2 rounded-md border border-[#d0d5dd] px-3 py-2 text-sm text-[#175cd3] hover:bg-[#f8fbff]"
+                      >
+                        <DownloadOutlined /> Download file error
+                      </button>
                     )}
+                  </div>
+
+                  <div
+                    className={
+                      selectedHistoryEntry.status === "success"
+                        ? "mx-5 mt-4 rounded-lg border border-[#b7eb8f] bg-[#f6ffed] px-4 py-3 text-sm text-[#135200]"
+                        : selectedHistoryEntry.status === "partial"
+                          ? "mx-5 mt-4 rounded-lg border border-[#ffe58f] bg-[#fffbe6] px-4 py-3 text-sm text-[#ad6800]"
+                          : "mx-5 mt-4 rounded-lg border border-[#ffccc7] bg-[#fff1f0] px-4 py-3 text-sm text-[#cf1322]"
+                    }
+                  >
+                    <div className="font-semibold">
+                      {selectedHistoryEntry.status === "success"
+                        ? "Import berhasil"
+                        : selectedHistoryEntry.status === "partial"
+                          ? "Import sebagian berhasil"
+                          : "Import gagal"}
+                    </div>
+                    <div className="mt-1">{selectedHistoryEntry.summary}</div>
+                    <div className="mt-1 text-xs">
+                      Imported: {selectedHistoryEntry.imported} • Failed:{" "}
+                      {selectedHistoryEntry.failed}
+                    </div>
                   </div>
 
                   {selectedHistoryEntry.status !== "success" && (
@@ -1506,10 +1732,14 @@ export default function BillOfMaterialPage() {
                   )}
 
                   <div className="min-h-0 flex-1 p-5 pt-4">
-                    {selectedHistoryEntry.previewRows.length > 0 ? (
+                    {historyPreviewLoading ? (
+                      <div className="flex h-full min-h-[260px] items-center justify-center rounded-lg border border-dashed border-[#d0d5dd] bg-[#fafafa] text-sm text-[#667085]">
+                        Memuat preview…
+                      </div>
+                    ) : historyDetailRows.length > 0 ? (
                       <Table<Record<string, string>>
                         columns={historyPreviewColumns}
-                        dataSource={selectedHistoryEntry.previewRows}
+                        dataSource={historyDetailRows}
                         rowKey="key"
                         size="small"
                         pagination={{ pageSize: 10, showSizeChanger: true }}
@@ -1547,7 +1777,8 @@ export default function BillOfMaterialPage() {
             setDeleteTarget(null);
           }
         }}
-        destroyOnHidden>
+        destroyOnHidden
+      >
         <p>Delete {deleteTarget?.uniq ?? "this BOM item"}?</p>
       </Modal>
       <div className="bg-white rounded-lg shadow-sm border border-gray-100">
@@ -1561,7 +1792,8 @@ export default function BillOfMaterialPage() {
 
           <Typography.Link
             onClick={() => messageApi.info("Tip: Click any row to view CAD")}
-            className="text-sm">
+            className="text-sm"
+          >
             <BulbOutlined /> Click any row to view 3D CAD model
           </Typography.Link>
         </div>
@@ -1616,7 +1848,8 @@ export default function BillOfMaterialPage() {
                       e.stopPropagation();
                       onExpand(record, e);
                     }}
-                    aria-label={expanded ? "Collapse row" : "Expand row"}>
+                    aria-label={expanded ? "Collapse row" : "Expand row"}
+                  >
                     <RightOutlined
                       className={
                         expanded
@@ -1642,12 +1875,14 @@ export default function BillOfMaterialPage() {
             <div className="flex items-center gap-2">
               <Button
                 onClick={() => setExpandedRowKeys(expandableParentKeys)}
-                disabled={expandableParentKeys.length === 0}>
+                disabled={expandableParentKeys.length === 0}
+              >
                 Expand All
               </Button>
               <Button
                 onClick={() => setExpandedRowKeys([])}
-                disabled={expandedRowKeys.length === 0}>
+                disabled={expandedRowKeys.length === 0}
+              >
                 Collapse All
               </Button>
             </div>
