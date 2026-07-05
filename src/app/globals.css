@@ -20,9 +20,15 @@
 }
 
 body {
-  background: #F8FAFC;
-  color: #0a0a0a;
-  font-family: Arial, Helvetica, sans-serif;
+  background: #f8fafc;
+  color: #0f172a;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Scoped horizontal-overflow guard for the BOM edit page (sticky header +
+   wide structure/detail grid). Kept off html/body to avoid global impact. */
+.bom-edit-page {
+  overflow-x: clip;
 }
 
 /* Safety stock select larger border and option spacing */
