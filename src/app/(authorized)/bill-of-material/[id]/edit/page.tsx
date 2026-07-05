@@ -285,6 +285,21 @@ export default function BomEditPage() {
       );
   }, [processes]);
 
+  // Master sequence per process id — the backend orders routing by this value,
+  // NOT by op_seq. We use it to auto-sort routes before submit so the ascending
+  // process-order validation always passes (parent + every child level).
+  const processSequenceByValue = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const p of processes ?? []) {
+      const rawId = (p as any)?.id ?? (p as any)?.ID;
+      const idStr = typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
+      if (!idStr) continue;
+      const seq = Number((p as any)?.sequence ?? (p as any)?.Sequence);
+      map.set(idStr, Number.isFinite(seq) ? seq : Number.MAX_SAFE_INTEGER);
+    }
+    return map;
+  }, [processes]);
+
   const supplierOptions = useMemo(
     () =>
       suppliers
@@ -915,8 +930,8 @@ export default function BomEditPage() {
         return hasMeaningfulValue ? payload : null;
       };
 
-      const mapProcessRoutes = (routes?: ProcessRouteForm[]) =>
-        (routes ?? [])
+      const mapProcessRoutes = (routes?: ProcessRouteForm[]) => {
+        const mapped = (routes ?? [])
           .map((route, index) => {
             const processId = toNumberId(route.process_id);
             if (processId === undefined) return null;
@@ -935,6 +950,19 @@ export default function BomEditPage() {
             return body;
           })
           .filter((item): item is Record<string, unknown> => Boolean(item));
+
+        // Backend requires routing to follow ascending process master sequence
+        // (not op_seq). Sort by each process's master sequence (stable), then
+        // renumber op_seq to stay consistent with the resulting order.
+        return mapped
+          .map((body, index) => ({
+            body,
+            index,
+            seq: processSequenceByValue.get(String(body.process_id)) ?? Number.MAX_SAFE_INTEGER,
+          }))
+          .sort((a, b) => a.seq - b.seq || a.index - b.index)
+          .map((entry, i) => ({ ...entry.body, op_seq: (i + 1) * 10 }));
+      };
 
       const files: Array<{ key: string; file: File }> = [];
       const seenUniqs = new Set<string>();
@@ -1032,14 +1060,22 @@ export default function BomEditPage() {
     } catch (err) {
       const anyErr = err as any;
       const data = anyErr?.data;
+      const pickMessage = (value: unknown): string => {
+        if (!value || typeof value !== "object") return "";
+        const obj = value as Record<string, unknown>;
+        if (typeof obj.message === "string" && obj.message.trim()) return obj.message.trim();
+        if (typeof obj.error === "string" && obj.error.trim()) return obj.error.trim();
+        // Some backends nest the human-readable message under `data`.
+        const nested = pickMessage(obj.data);
+        if (nested) return nested;
+        return "";
+      };
       const detail =
         typeof data === "string"
           ? data
-          : data && typeof data === "object"
-            ? JSON.stringify(data)
-            : anyErr?.message
-              ? String(anyErr.message)
-              : "";
+          : pickMessage(data) ||
+            (data && typeof data === "object" ? JSON.stringify(data) : "") ||
+            (anyErr?.message ? String(anyErr.message) : "");
       if (detail) messageApi.error(detail);
     }
   };
