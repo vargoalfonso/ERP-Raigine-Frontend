@@ -601,6 +601,25 @@ const parseCreateIds = (response: unknown): { id: string; bom_id: string } => {
 const parseCreateId = (response: unknown): string =>
   parseCreateIds(response).id;
 
+// ReplaceBom returns { new_bom_id, old_bom_id, ... } — NOT { bom_id, id }.
+// The new version lives under a brand new bom_id, so the edit page must redirect there.
+const parseReplaceIds = (
+  response: unknown
+): { id: string; bom_id: string; new_bom_id: string; old_bom_id: string } => {
+  const empty = { id: "", bom_id: "", new_bom_id: "", old_bom_id: "" };
+  if (!isRecord(response)) return empty;
+  const data = isRecord(response.data) ? response.data : response;
+  const newId = pickId(
+    (data as any).new_bom_id,
+    (data as any).newBomId,
+    data.bom_id,
+    data.id,
+    data.uuid
+  );
+  const oldId = pickId((data as any).old_bom_id, (data as any).oldBomId);
+  return { id: newId, bom_id: newId, new_bom_id: newId, old_bom_id: oldId };
+};
+
 const BOM_TAG = { type: "BOM" as const, id: "TREE" as const };
 
 export const bomSlice = apiSlice.injectEndpoints({
@@ -813,7 +832,7 @@ export const bomSlice = apiSlice.injectEndpoints({
     }),
 
     replaceBom: builder.mutation<
-      ApiResponse<{ id: string; bom_id: string }>,
+      ApiResponse<{ id: string; bom_id: string; new_bom_id: string; old_bom_id: string }>,
       ReplaceBomRequest
     >({
       query: ({ bom_id, payload, files = [] }) => {
@@ -831,8 +850,7 @@ export const bomSlice = apiSlice.injectEndpoints({
           meta: { useAuthorization: true, contentType: "multipart/form-data" },
         };
       },
-      transformResponse: (response: unknown) =>
-        ok(parseCreateIds(response), "Updated"),
+      transformResponse: (response: unknown) => ok(parseReplaceIds(response), "Updated"),
       invalidatesTags: [BOM_TAG],
     }),
 
