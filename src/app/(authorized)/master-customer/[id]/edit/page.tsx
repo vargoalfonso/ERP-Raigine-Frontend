@@ -261,7 +261,7 @@ export default function EditCustomerPage() {
                 </div>
               }
             >
-              <Form.Item label="Parent Codes" name="bomCodes">
+              <Form.Item label="Parent Codes/ Sebango" name="bomCodes">
                 <Select
                   mode="multiple"
                   allowClear
