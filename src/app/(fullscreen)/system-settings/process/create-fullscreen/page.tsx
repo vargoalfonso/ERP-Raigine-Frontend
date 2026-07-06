@@ -86,7 +86,6 @@ export default function ProcessCreateFullscreenPage() {
   const validateEntry = (e: Entry) => {
     if (!e.processName || !String(e.processName).trim()) return "Process Name is required";
     if (!e.processCode || !String(e.processCode).trim()) return "Process Code is missing";
-    if (e.sequence === undefined || e.sequence === null || String(e.sequence).trim() === "") return "Sequence is required";
     return null;
   };
 

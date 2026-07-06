@@ -2,6 +2,7 @@ import type { FormInstance } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
 
 export type ProcessRouteForm = {
+  route_id?: number | string;
   op_seq?: number;
   process_id?: number | string;
   machine_id?: number | null;
@@ -14,6 +15,7 @@ export type ProcessRouteForm = {
 
 export type MaterialSpecForm = {
   material_code?: string;
+  material_grade?: string;
   form?: string;
   grade?: string;
   type_material?: string;

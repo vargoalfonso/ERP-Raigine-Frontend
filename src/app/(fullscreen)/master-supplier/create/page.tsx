@@ -677,6 +677,12 @@ function MasterSupplierCreatePageContent() {
       customer_cycle: pickText(materialSpec?.customer_cycle),
       description: pickText(bomDetail.description, bomDetail.part_name, bomDetail.uniq_code),
       status: normalizeFormStatus((bomDetail as Record<string, unknown>).status ?? (bomDetail as Record<string, unknown>).bom_status) ?? form.getFieldValue("status") ?? "active",
+      // also populate sebango_code from BOM detail/material spec when available
+      sebango_code: pickText(
+        bomDetail.material_code,
+        materialSpec?.material_code,
+        materialSpec?.materialCode,
+      ),
     });
   }, [bomDetailQuery.data, form, selectedUniqCode]);
 
@@ -692,7 +698,9 @@ function MasterSupplierCreatePageContent() {
       const values = await form.validateFields();
       const payload: SupplierItemMutationRequest = {
         supplier_uuid: pickText(values.supplier_uuid),
-        sebango_code: pickText(values.sebango_code),
+        // prefer explicit `sebango_code`, but fall back to material code when missing
+        // prefer explicit `sebango_code`, then material code, then uniq_code as last resort
+        sebango_code: pickText(values.sebango_code, (values as any).materialCode, (values as any).material_code, values.uniq_code),
         uniq_code: pickText(values.uniq_code),
         type: sectionPayloadTypeValue(section),
         description: pickText(

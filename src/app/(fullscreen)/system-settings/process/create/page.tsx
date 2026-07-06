@@ -62,7 +62,7 @@ export default function ProcessCreatePage() {
   const validateEntry = (e: Entry) => {
     if (!e.category) return "Category is required";
     if (!e.processName) return "Process Name is required";
-    if (e.sequence === undefined || e.sequence === null) return "Sequence is required";
+    if (!e.sequence === undefined || e.sequence === null) return "Sequence is required";
     if (!e.status) return "Status is required";
     return null;
   };
