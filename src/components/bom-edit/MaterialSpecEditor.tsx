@@ -58,8 +58,9 @@ export default function MaterialSpecEditor({ fieldPath, disabled }: MaterialSpec
             allowClear
             placeholder="Select type"
             options={[
-              { label: "Raw", value: "raw" },
-              { label: "Indirect", value: "indirect" },
+              { label: "Raw Material", value: "raw" },
+              { label: "Indirect Raw Material", value: "indirect" },
+              { label: "Subcon", value: "subcon" },
             ]}
           />
         </Form.Item>
