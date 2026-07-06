@@ -26,16 +26,10 @@ export const buildBomCodeSelectOptions = (nodes: BackendBomNode[] = []): Default
 
   const walk = (items: BackendBomNode[]) => {
     for (const item of items) {
+      // Add every uniq code found (no filtering). Label will show only the uniq code.
       const code = pickText(item.uniq_code, item.uniq);
       if (code && !byCode.has(code)) {
-        const partName = pickText(item.part_name);
-        const partNumber = pickText(item.part_number);
-        const description = [partName, partNumber].filter(Boolean).join(" - ");
-
-        byCode.set(code, {
-          value: code,
-          label: description ? `${code} — ${description}` : code,
-        });
+        byCode.set(code, { value: code, label: code });
       }
 
       if (Array.isArray(item.children) && item.children.length > 0) {
