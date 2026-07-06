@@ -34,7 +34,9 @@ export interface PoBudgetEntryRequest {
 }
 
 export interface PoBudgetBulkItemSupplierRequest {
-  supplier_id: number | string;
+  // Optional: backend only requires supplier_name; supplier_id may be null when
+  // the supplier cannot be matched to a numeric master record.
+  supplier_id?: number | string | null;
   supplier_name: string;
   quantity: number;
 }

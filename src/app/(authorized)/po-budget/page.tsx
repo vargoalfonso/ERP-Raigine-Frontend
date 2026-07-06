@@ -83,7 +83,7 @@ const EMPTY_PO_BUDGET_RESPONSE: ApiResponse<ApiPoBudgetRow[]> = {
 
 type BulkBudgetType = "adhoc" | "kanban";
 
-const PRL_LAZY_PAGE_SIZE = 5;
+const PRL_LAZY_PAGE_SIZE = 100;
 
 type BulkSupplierLine = {
   id: string;
@@ -224,6 +224,23 @@ function getBudgetTypeLabel(tab: BudgetTabId) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+// Remove options sharing the same `value` so Ant Design Selects never render
+// duplicate keys (which triggers the "two children with the same key" warning
+// when a supplier appears in more than one supplier-item / UNIQ).
+function dedupeSupplierOptions(options: SupplierOption[]): SupplierOption[] {
+  const seen = new Set<string>();
+  const result: SupplierOption[] = [];
+  for (const option of options) {
+    const key = String(option.value ?? option.label ?? "")
+      .trim()
+      .toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push(option);
+  }
+  return result;
 }
 
 function resolveSupplierName(
@@ -368,9 +385,13 @@ function StatCard(props: {
 
 export default function PoBudgetPage() {
   const { data: bomTreeRes } = useGetBomTreeQuery();
+  const bomTreeNodes = useMemo(() => {
+    const items = bomTreeRes?.data?.items;
+    return Array.isArray(items) ? items : [];
+  }, [bomTreeRes?.data?.items]);
   const bomIndex = useMemo(
-    () => buildBomUniqIndex(bomTreeRes?.data ?? []),
-    [bomTreeRes?.data],
+    () => buildBomUniqIndex(bomTreeNodes),
+    [bomTreeNodes],
   );
   const bomChildrenByUniq = useMemo(() => {
     const result: Record<string, BomChildDetailRow[]> = {};
@@ -430,10 +451,10 @@ export default function PoBudgetPage() {
       }
     };
 
-    const source = Array.isArray(bomTreeRes?.data) ? bomTreeRes.data : [];
+    const source = bomTreeNodes;
     source.forEach(visit);
     return result;
-  }, [bomTreeRes?.data]);
+  }, [bomTreeNodes]);
 
   const [activeTab, setActiveTab] = useState<BudgetTabId>("raw");
   const [paginationByTab, setPaginationByTab] = useState<TabPaginationState>({
@@ -777,7 +798,7 @@ export default function PoBudgetPage() {
     const map = new Map<string, number>();
 
     supplierOnlyList.forEach((supplier) => {
-      const rowId = toIntegerId(supplier.row_id);
+      const rowId = toIntegerId(supplier.row_id) ?? toIntegerId(supplier.id);
       const uuid = String(supplier.id ?? "").trim();
       if (rowId == null || !uuid) return;
       map.set(uuid, rowId);
@@ -790,7 +811,7 @@ export default function PoBudgetPage() {
     const map = new Map<string, number>();
 
     supplierOnlyList.forEach((supplier) => {
-      const rowId = toIntegerId(supplier.row_id);
+      const rowId = toIntegerId(supplier.row_id) ?? toIntegerId(supplier.id);
       const code = String(supplier.supplier_code ?? "")
         .trim()
         .toLowerCase();
@@ -805,7 +826,7 @@ export default function PoBudgetPage() {
     const map = new Map<string, number>();
 
     supplierOnlyList.forEach((supplier) => {
-      const rowId = toIntegerId(supplier.row_id);
+      const rowId = toIntegerId(supplier.row_id) ?? toIntegerId(supplier.id);
       const name = String(supplier.supplier_name ?? "")
         .trim()
         .toLowerCase();
@@ -843,6 +864,10 @@ export default function PoBudgetPage() {
       const byName = supplierRowIdByName.get(supplierName);
       if (byName != null) return byName;
     }
+
+    // Some backends put the numeric supplier PK directly in supplier_uuid.
+    const numericUuid = toIntegerId(input.supplierUuid);
+    if (numericUuid != null) return numericUuid;
 
     const fallbackId = toIntegerId(input.fallbackValue);
     return fallbackId == null ? undefined : fallbackId;
@@ -908,6 +933,7 @@ export default function PoBudgetPage() {
         supplierUuid: item.supplier_uuid,
         supplierCode: item.supplier_code,
         supplierName,
+        fallbackValue: item.supplier_uuid,
       });
       const supplierValue =
         item.supplier_uuid == null ? supplierName : String(item.supplier_uuid);
@@ -1004,7 +1030,9 @@ export default function PoBudgetPage() {
         String(option.label ?? option.supplierName ?? "").trim(),
       ),
     );
-    return filtered.length > 0 ? filtered : supplierOptions;
+    return dedupeSupplierOptions(
+      filtered.length > 0 ? filtered : supplierOptions,
+    );
   }, [addForm.uniq, supplierOptions]);
 
   const approvedPrls = useMemo(
@@ -1052,7 +1080,7 @@ export default function PoBudgetPage() {
       const filtered = supplierOptions.filter((opt) =>
         names.has(String(opt.label ?? "").trim()),
       );
-      if (filtered.length > 0) map.set(uniq, filtered);
+      if (filtered.length > 0) map.set(uniq, dedupeSupplierOptions(filtered));
     });
     return map;
   }, [supplierItemsByUniq, supplierOptions]);
@@ -1598,7 +1626,7 @@ export default function PoBudgetPage() {
   );
 
   const addSupplierModalOptions = useMemo(() => {
-    if (!activeAddSupplierItem) return supplierOptions;
+    if (!activeAddSupplierItem) return dedupeSupplierOptions(supplierOptions);
 
     const uniq = String(activeAddSupplierItem.uniq ?? "").trim();
     let related = supplierItemsByUniq.get(uniq) ?? [];
@@ -1620,7 +1648,9 @@ export default function PoBudgetPage() {
       relatedNames.has(String(opt.label ?? opt.value ?? "").trim()),
     );
     const finalBase = baseOptions.length ? baseOptions : supplierOptions;
-    return finalBase.filter((option) => !existingSuppliers.has(option.value));
+    return dedupeSupplierOptions(
+      finalBase.filter((option) => !existingSuppliers.has(option.value)),
+    );
   }, [activeAddSupplierItem, supplierOptions]);
 
   const addSupplierBudget = activeAddSupplierItem?.quantity ?? 0;
@@ -2075,20 +2105,24 @@ export default function PoBudgetPage() {
       return;
     }
 
+    // Backend only requires supplier_name (supplier_id is optional). So we only
+    // block when we cannot even determine a supplier name for a line.
+    const supplierDisplayName = (value: string) => {
+      const option = supplierOptions.find((opt) => opt.value === value);
+      return String(
+        option?.supplierName ?? option?.label ?? value ?? "",
+      ).trim();
+    };
+
     const unresolvedSupplier = bulkItems.find((item) =>
-      item.suppliers.some((supplier) => {
-        const selectedOption = supplierOptions.find(
-          (option) => option.value === supplier.supplier,
-        );
-        return selectedOption?.supplierId == null;
-      }),
+      item.suppliers.some((supplier) => !supplierDisplayName(supplier.supplier)),
     );
 
     const unresolvedPrlItem = bulkItems.find((item) => item.prlItemId == null);
 
     if (unresolvedSupplier) {
       message.warning(
-        `Supplier row_id for UNIQ ${unresolvedSupplier.uniq} is not resolved yet`,
+        `Supplier name for UNIQ ${unresolvedSupplier.uniq} could not be determined`,
       );
       return;
     }
@@ -2116,16 +2150,22 @@ export default function PoBudgetPage() {
         po2_pct: Number(bulkPo2Pct || 0),
         weight_kg: Number(item.weightKg || 0),
         uom: item.uom,
-        suppliers: item.suppliers.map((supplier) => ({
-          supplier_id: Number(
-            supplierOptions.find((option) => option.value === supplier.supplier)
-              ?.supplierId,
-          ),
-          supplier_name:
-            supplierOptions.find((option) => option.value === supplier.supplier)
-              ?.supplierName ?? supplier.supplier,
-          quantity: Number(supplier.qty || 0),
-        })),
+        suppliers: item.suppliers.map((supplier) => {
+          const option = supplierOptions.find(
+            (opt) => opt.value === supplier.supplier,
+          );
+          const resolvedId = option?.supplierId;
+          return {
+            supplier_id:
+              resolvedId == null || Number.isNaN(Number(resolvedId))
+                ? null
+                : Number(resolvedId),
+            supplier_name: String(
+              option?.supplierName ?? option?.label ?? supplier.supplier ?? "",
+            ).trim(),
+            quantity: Number(supplier.qty || 0),
+          };
+        }),
       })),
     };
 
@@ -2228,7 +2268,9 @@ export default function PoBudgetPage() {
         dataIndex: "uniq",
         key: "uniq",
         render: (value: string, record) => {
-          const childCount = bomChildrenByUniq[value]?.length ?? 0;
+          const childCount =
+            bomChildrenByUniq[String(value ?? "").trim().toLowerCase()]
+              ?.length ?? 0;
           if (childCount === 0) {
             return <span className="text-sm text-gray-700">{value}</span>;
           }
@@ -2457,7 +2499,9 @@ export default function PoBudgetPage() {
         key: "uniq",
         width: 140,
         render: (value: string, record) => {
-          const childCount = bomChildrenByUniq[value]?.length ?? 0;
+          const childCount =
+            bomChildrenByUniq[String(value ?? "").trim().toLowerCase()]
+              ?.length ?? 0;
           if (childCount === 0) {
             return <span className="text-sm text-gray-700">{value}</span>;
           }
@@ -2578,7 +2622,9 @@ export default function PoBudgetPage() {
                         percentage: pct,
                       });
                     }}
-                    options={(supplierOptionsByUniq.get(r.uniq) ?? supplierOptions)
+                    options={dedupeSupplierOptions(
+                      supplierOptionsByUniq.get(r.uniq) ?? supplierOptions,
+                    )
                       .filter(
                         (opt) =>
                           opt.value === s.supplier ||

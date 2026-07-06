@@ -179,7 +179,24 @@ export type ReplaceBomRequest = {
   }>;
 };
 
-const ok = <T,>(data: T, message = "OK"): ApiResponse<T> => ({
+export type ImportHistoryDto = {
+  id: number | string;
+  file_name: string;
+  file_size_kb: number;
+  row_count: number;
+  uploaded_by: string;
+  status: string; // "success" | "partial" | "error"
+  summary: string;
+  imported_count: number;
+  failed_count: number;
+  request_id: string;
+  has_error_file: boolean;
+  preview_rows?: Array<Record<string, unknown>>;
+  created_at: string;
+  updated_at: string;
+};
+
+const ok = <T>(data: T, message = "OK"): ApiResponse<T> => ({
   message,
   status: "success",
   data,
@@ -206,14 +223,22 @@ const parseTreeResponse = (response: unknown): BackendBomNode[] => {
 };
 
 const parseBomListResponse = (response: unknown): BomListResponse => {
-  const empty: BomListResponse = { items: [], totalPages: 1, total: 0, page: 1 };
+  const empty: BomListResponse = {
+    items: [],
+    totalPages: 1,
+    total: 0,
+    page: 1,
+  };
   if (!isRecord(response)) return empty;
   const data = isRecord(response.data) ? response.data : response;
 
   const itemsRaw = isRecord(data) ? (data.items ?? data.data) : undefined;
-  const items = Array.isArray(itemsRaw) ? (itemsRaw as BackendBomNode[]) : parseTreeResponse(response);
+  const items = Array.isArray(itemsRaw)
+    ? (itemsRaw as BackendBomNode[])
+    : parseTreeResponse(response);
 
-  const pag = isRecord(data) && isRecord(data.pagination) ? data.pagination : null;
+  const pag =
+    isRecord(data) && isRecord(data.pagination) ? data.pagination : null;
   const totalPages = typeof pag?.total_pages === "number" ? pag.total_pages : 1;
   const total = typeof pag?.total === "number" ? pag.total : items.length;
   const page = typeof pag?.page === "number" ? pag.page : 1;
@@ -243,14 +268,17 @@ const toBomUniqDetail = (raw: unknown): BomUniqDetail => {
     uniq,
     part_name: typeof r.part_name === "string" ? r.part_name : undefined,
     part_number: typeof r.part_number === "string" ? r.part_number : undefined,
-    material_code: typeof r.material_code === "string" ? r.material_code : undefined,
-    unit_measurement: typeof r.unit_measurement === "string" ? r.unit_measurement : undefined,
+    material_code:
+      typeof r.material_code === "string" ? r.material_code : undefined,
+    unit_measurement:
+      typeof r.unit_measurement === "string" ? r.unit_measurement : undefined,
     created_at: typeof r.created_at === "string" ? r.created_at : undefined,
     updated_at: typeof r.updated_at === "string" ? r.updated_at : undefined,
   };
 };
 
-const isRecord = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === "object";
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  Boolean(v) && typeof v === "object";
 
 const pickString = (v: unknown): string => {
   if (typeof v === "string") return v.trim();
@@ -302,16 +330,31 @@ const normalizeStatusToLabel = (v: unknown): BomStatus => {
 };
 
 const mapNewNodeToLegacy = (raw: unknown): BackendBomNode => {
-  if (!isRecord(raw)) return { description: null, quantity: null, material_code: null, unit_measurement: null, process_routes: null, material_specifications: null, created_at: null, updated_at: null };
+  if (!isRecord(raw))
+    return {
+      description: null,
+      quantity: null,
+      material_code: null,
+      unit_measurement: null,
+      process_routes: null,
+      material_specifications: null,
+      created_at: null,
+      updated_at: null,
+    };
 
   const uniqCode = pickString(raw.uniq_code);
   const uniq = pickString(raw.uniq) || uniqCode;
   const partName = pickString(raw.part_name);
   const partNumber = pickString(raw.part_number);
-  const model = pickString(raw.model) || pickString((raw as any).product_model) || pickString(raw.assembly_code);
+  const model =
+    pickString(raw.model) ||
+    pickString((raw as any).product_model) ||
+    pickString(raw.assembly_code);
 
   const childrenRaw = raw.children;
-  const children = Array.isArray(childrenRaw) ? childrenRaw.map(mapNewNodeToLegacy) : undefined;
+  const children = Array.isArray(childrenRaw)
+    ? childrenRaw.map(mapNewNodeToLegacy)
+    : undefined;
 
   // Keep both new + legacy field names so existing pages continue working.
   const mapped: BackendBomNode = {
@@ -320,7 +363,8 @@ const mapNewNodeToLegacy = (raw: unknown): BackendBomNode => {
     material_code: raw.material_code ?? null,
     unit_measurement: raw.unit_measurement ?? (raw as any).uom ?? null,
     process_routes: raw.process_routes ?? null,
-    material_specifications: raw.material_spec ?? raw.material_specifications ?? null,
+    material_specifications:
+      raw.material_spec ?? raw.material_specifications ?? null,
     created_at: raw.created_at ?? null,
     updated_at: raw.updated_at ?? null,
 
@@ -335,25 +379,26 @@ const mapNewNodeToLegacy = (raw: unknown): BackendBomNode => {
     bom_child_id: pickString(raw.bom_child_id),
     bom_line_id: pickString(raw.bom_line_id),
     uniq_code: uniqCode || uniq,
-    asset:
-      resolveMaybeRelativeUrl(
-        pickAssetUrl(raw.asset) ||
-      pickString((raw as any).asset_url) ||
-      pickString((raw as any).assetUrl) ||
-      pickString(raw.image_url) ||
-      pickString(raw.image) ||
-      pickString(raw.imageUrl) ||
-      pickString(raw.image_path) ||
-      pickString(raw.imagePath)
-      ),
+    asset: resolveMaybeRelativeUrl(
+      pickAssetUrl(raw.asset) ||
+        pickString((raw as any).asset_url) ||
+        pickString((raw as any).assetUrl) ||
+        pickString(raw.image_url) ||
+        pickString(raw.image) ||
+        pickString(raw.imageUrl) ||
+        pickString(raw.image_path) ||
+        pickString(raw.imagePath),
+    ),
     asset_type: (() => {
       const a = raw.asset;
-      if (a && typeof a === "object") return pickString((a as any).asset_type) || undefined;
+      if (a && typeof a === "object")
+        return pickString((a as any).asset_type) || undefined;
       return undefined;
     })(),
     asset_label: (() => {
       const a = raw.asset;
-      if (a && typeof a === "object") return pickString((a as any).label) || undefined;
+      if (a && typeof a === "object")
+        return pickString((a as any).label) || undefined;
       return undefined;
     })(),
     cad_viewable: (() => {
@@ -389,7 +434,7 @@ const mapNewNodeToLegacy = (raw: unknown): BackendBomNode => {
       pickString(raw.image_url) ||
         pickString((raw as any).asset_url) ||
         pickString((raw as any).assetUrl) ||
-        pickAssetUrl(raw.asset)
+        pickAssetUrl(raw.asset),
     ),
     image: pickString(raw.image),
     imageUrl: pickString(raw.imageUrl),
@@ -426,14 +471,20 @@ const buildTreeIfFlat = (nodes: BackendBomNode[]): BackendBomNode[] => {
   if (!Array.isArray(nodes) || nodes.length === 0) return [];
 
   // If backend already sends nested children, keep as-is.
-  const alreadyTree = nodes.some((n) => Array.isArray(n.children) && n.children.length > 0);
+  const alreadyTree = nodes.some(
+    (n) => Array.isArray(n.children) && n.children.length > 0,
+  );
   if (alreadyTree) return nodes;
 
   const hasParentPointers = nodes.some((n) => pickParentId(n));
   if (!hasParentPointers) return nodes;
 
   const byId = new Map<string, BackendBomNode>();
-  const clones = nodes.map((n) => ({ ...n, id: pickNodeId(n), children: [] as BackendBomNode[] }));
+  const clones = nodes.map((n) => ({
+    ...n,
+    id: pickNodeId(n),
+    children: [] as BackendBomNode[],
+  }));
   for (const n of clones) {
     const id = pickNodeId(n);
     if (id) byId.set(id, n);
@@ -469,23 +520,32 @@ const parseBomVersions = (response: unknown): BomVersionsResponse => {
     ? versionsRaw.flatMap((v: any) => {
         const bom_id = pickId(v?.bom_id, v?.bomId, v?.id);
         const bom_version =
-          typeof v?.bom_version === "number" ? v.bom_version : Number(v?.bom_version);
+          typeof v?.bom_version === "number"
+            ? v.bom_version
+            : Number(v?.bom_version);
         if (!bom_id || !Number.isFinite(bom_version)) return [];
         const item: BomVersionMeta = {
           bom_id: String(bom_id),
           bom_version,
           label: typeof v?.label === "string" ? v.label : undefined,
-          bom_status: typeof v?.bom_status === "string" ? v.bom_status : undefined,
+          bom_status:
+            typeof v?.bom_status === "string" ? v.bom_status : undefined,
           is_current: Boolean(v?.is_current),
-          read_only: typeof v?.read_only === "boolean" ? v.read_only : undefined,
-          change_note: typeof v?.change_note === "string" ? v.change_note : undefined,
-          created_at: typeof v?.created_at === "string" ? v.created_at : undefined,
+          read_only:
+            typeof v?.read_only === "boolean" ? v.read_only : undefined,
+          change_note:
+            typeof v?.change_note === "string" ? v.change_note : undefined,
+          created_at:
+            typeof v?.created_at === "string" ? v.created_at : undefined,
         };
         return [item];
       })
     : [];
 
-  const current_bom_id = pickId((data as any).current_bom_id, (data as any).currentBomId);
+  const current_bom_id = pickId(
+    (data as any).current_bom_id,
+    (data as any).currentBomId,
+  );
   const current_version_raw = (data as any).current_version;
   const current_version =
     typeof current_version_raw === "number"
@@ -495,19 +555,34 @@ const parseBomVersions = (response: unknown): BomVersionsResponse => {
         : undefined;
 
   return {
-    root_item_id: typeof (data as any).root_item_id === "number" ? (data as any).root_item_id : undefined,
-    root_item_code: typeof (data as any).root_item_code === "string" ? (data as any).root_item_code : undefined,
-    root_item_name: typeof (data as any).root_item_name === "string" ? (data as any).root_item_name : undefined,
+    root_item_id:
+      typeof (data as any).root_item_id === "number"
+        ? (data as any).root_item_id
+        : undefined,
+    root_item_code:
+      typeof (data as any).root_item_code === "string"
+        ? (data as any).root_item_code
+        : undefined,
+    root_item_name:
+      typeof (data as any).root_item_name === "string"
+        ? (data as any).root_item_name
+        : undefined,
     current_bom_id: current_bom_id || undefined,
     current_version,
     versions,
   };
 };
 
-const parseActivateResponse = (response: unknown): { current_bom_id?: string } => {
+const parseActivateResponse = (
+  response: unknown,
+): { current_bom_id?: string } => {
   if (!isRecord(response)) return {};
   const data = isRecord(response.data) ? response.data : response;
-  const current = pickId((data as any).current_bom_id, (data as any).currentBomId, (data as any).bom_id);
+  const current = pickId(
+    (data as any).current_bom_id,
+    (data as any).currentBomId,
+    (data as any).bom_id,
+  );
   return current ? { current_bom_id: current } : {};
 };
 
@@ -523,7 +598,8 @@ const parseCreateIds = (response: unknown): { id: string; bom_id: string } => {
   };
 };
 
-const parseCreateId = (response: unknown): string => parseCreateIds(response).id;
+const parseCreateId = (response: unknown): string =>
+  parseCreateIds(response).id;
 
 // ReplaceBom returns { new_bom_id, old_bom_id, ... } — NOT { bom_id, id }.
 // The new version lives under a brand new bom_id, so the edit page must redirect there.
@@ -548,7 +624,16 @@ const BOM_TAG = { type: "BOM" as const, id: "TREE" as const };
 
 export const bomSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
-    getBomTree: builder.query<ApiResponse<BomListResponse>, { page?: number; limit?: number; search?: string; type_material?: string; exclude_supplier_uuid?: string } | void>({
+    getBomTree: builder.query<
+      ApiResponse<BomListResponse>,
+      {
+        page?: number;
+        limit?: number;
+        search?: string;
+        type_material?: string;
+        exclude_supplier_uuid?: string;
+      } | void
+    >({
       query: (params) => {
         const page = params?.page ?? 1;
         const limit = params?.limit ?? 1000;
@@ -557,8 +642,13 @@ export const bomSlice = apiSlice.injectEndpoints({
           limit: String(limit),
         });
         if (params?.search) searchParams.set("search", params.search);
-        if (params?.type_material) searchParams.set("type_material", params.type_material);
-        if (params?.exclude_supplier_uuid) searchParams.set("exclude_supplier_uuid", params.exclude_supplier_uuid);
+        if (params?.type_material)
+          searchParams.set("type_material", params.type_material);
+        if (params?.exclude_supplier_uuid)
+          searchParams.set(
+            "exclude_supplier_uuid",
+            params.exclude_supplier_uuid,
+          );
 
         return {
           url: `/products/bom?${searchParams.toString()}`,
@@ -579,7 +669,10 @@ export const bomSlice = apiSlice.injectEndpoints({
       providesTags: [BOM_TAG],
     }),
 
-    getBomList: builder.query<ApiResponse<BackendBomNode[]>, { page?: number; limit?: number } | void>({
+    getBomList: builder.query<
+      ApiResponse<BackendBomNode[]>,
+      { page?: number; limit?: number } | void
+    >({
       query: (params) => {
         const page = params?.page ?? 1;
         const limit = params?.limit ?? 1000;
@@ -600,7 +693,10 @@ export const bomSlice = apiSlice.injectEndpoints({
       },
     }),
 
-    getBomsBySupplier: builder.query<ApiResponse<BackendBomNode[]>, { supplier_id: string; uniq_code?: string; page?: number }>({
+    getBomsBySupplier: builder.query<
+      ApiResponse<BackendBomNode[]>,
+      { supplier_id: string; uniq_code?: string; page?: number }
+    >({
       query: ({ supplier_id, uniq_code, page = 1 }) => {
         const params = new URLSearchParams({ page: String(page), supplier_id });
         if (uniq_code) params.set("uniq_code", uniq_code);
@@ -656,6 +752,18 @@ export const bomSlice = apiSlice.injectEndpoints({
       transformResponse: (response: unknown) => ok(parseBomVersions(response)),
     }),
 
+    getImportHistory: builder.query<ApiResponse<ImportHistoryDto[]>, void>({
+      query: () => ({
+        url: `/products/bom/import/history`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => {
+        const data = (response as { data?: ImportHistoryDto[] })?.data;
+        return ok(Array.isArray(data) ? data : []);
+      },
+    }),
+
     activateBom: builder.mutation<
       ApiResponse<{ current_bom_id?: string }>,
       { bom_id: string; body: ActivateBomRequest }
@@ -666,18 +774,23 @@ export const bomSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(parseActivateResponse(response), "OK"),
+      transformResponse: (response: unknown) =>
+        ok(parseActivateResponse(response), "OK"),
       invalidatesTags: [BOM_TAG],
     }),
 
-    createBom: builder.mutation<ApiResponse<{ id: string; bom_id: string }>, BomCreateRequest>({
+    createBom: builder.mutation<
+      ApiResponse<{ id: string; bom_id: string }>,
+      BomCreateRequest
+    >({
       query: (body) => ({
         url: "/products/bom",
         method: "POST",
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(parseCreateIds(response), "Created"),
+      transformResponse: (response: unknown) =>
+        ok(parseCreateIds(response), "Created"),
       invalidatesTags: [BOM_TAG],
     }),
 
@@ -713,7 +826,8 @@ export const bomSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok({ id: parseCreateId(response) }, "Updated"),
+      transformResponse: (response: unknown) =>
+        ok({ id: parseCreateId(response) }, "Updated"),
       invalidatesTags: [BOM_TAG],
     }),
 
@@ -740,13 +854,17 @@ export const bomSlice = apiSlice.injectEndpoints({
       invalidatesTags: [BOM_TAG],
     }),
 
-    deleteBomParent: builder.mutation<ApiResponse<{ id: string }>, { bom_id: string }>({
+    deleteBomParent: builder.mutation<
+      ApiResponse<{ id: string }>,
+      { bom_id: string }
+    >({
       query: ({ bom_id }) => ({
         url: `/products/bom/${encodeURIComponent(bom_id)}`,
         method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok({ id: parseCreateId(response) }, "Deleted"),
+      transformResponse: (response: unknown) =>
+        ok({ id: parseCreateId(response) }, "Deleted"),
       invalidatesTags: [BOM_TAG],
     }),
 
@@ -759,7 +877,8 @@ export const bomSlice = apiSlice.injectEndpoints({
         method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok({ id: parseCreateId(response) }, "Deleted"),
+      transformResponse: (response: unknown) =>
+        ok({ id: parseCreateId(response) }, "Deleted"),
       invalidatesTags: [BOM_TAG],
     }),
 
@@ -772,7 +891,8 @@ export const bomSlice = apiSlice.injectEndpoints({
         method: "DELETE",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok({ id: parseCreateId(response) }, "Deleted"),
+      transformResponse: (response: unknown) =>
+        ok({ id: parseCreateId(response) }, "Deleted"),
       invalidatesTags: [BOM_TAG],
     }),
 
@@ -791,7 +911,8 @@ export const bomSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok({ id: parseCreateId(response) }, "Updated"),
+      transformResponse: (response: unknown) =>
+        ok({ id: parseCreateId(response) }, "Updated"),
       invalidatesTags: [BOM_TAG],
     }),
   }),
@@ -808,6 +929,7 @@ export const {
   useActivateBomMutation,
   useCreateBomMutation,
   useImportBomMutation,
+  useGetImportHistoryQuery,
   useUpdateBomMutation,
   useReplaceBomMutation,
   useDeleteBomParentMutation,
