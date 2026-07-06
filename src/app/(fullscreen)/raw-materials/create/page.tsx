@@ -33,6 +33,7 @@ import { useCreateInventoryMutation, useUpdateInventoryMutation } from "@/lib/ap
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex, type BomUniqIndex } from "@/lib/utils/bomUniq";
+import { buildBomMaterialSpecIndex, type BomMaterialSpecIndex } from "@/lib/utils/bomMaterialSpec";
 import { useListWarehousesQuery } from "@/lib/api/warehouse/api";
 
 const { Option } = Select;
@@ -120,6 +121,7 @@ const RawMaterialForm = ({
   initialValues,
   formRef,
   bomIndex,
+  materialSpecIndex,
   warehouseOptions,
 }: {
   entryNumber: number;
@@ -130,6 +132,7 @@ const RawMaterialForm = ({
   initialValues?: RawMaterialFormData;
   formRef?: React.MutableRefObject<FormInstance | null>;
   bomIndex?: BomUniqIndex;
+  materialSpecIndex?: BomMaterialSpecIndex;
   warehouseOptions?: Array<{ label: string; value: string }>;
 }) => {
   const [form] = Form.useForm();
@@ -139,12 +142,11 @@ const RawMaterialForm = ({
   const selectedPartName = Form.useWatch("name", form) as string | undefined;
 
   const applyBomAutofill = (uniq: string | undefined) => {
-    if (!uniq || !bomIndex) return;
+    if (!uniq || !materialSpecIndex) return;
 
-    const rmType = bomIndex.rawMaterialTypeByUniq[uniq];
-    const weightKg = bomIndex.weightKgByUniq[uniq];
-    const materialGrade = bomIndex.materialGradeByUniq[uniq];
-
+    const rmType = materialSpecIndex.typeMaterialByUniq[uniq];
+    const weightKg = materialSpecIndex.weightKgByUniq[uniq];
+    const materialGrade = materialSpecIndex.materialGradeByUniq[uniq];
     const isRawOrIndirect = rmType
       ? rmType.toLowerCase() === "raw" || rmType.toLowerCase() === "indirect"
       : false;
@@ -395,6 +397,10 @@ function CreateRawMaterialPageContent() {
   const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
   const warehousesQuery = useListWarehousesQuery(undefined, { skip: !apiEnabled });
   const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeQuery.data?.data ?? []), [bomTreeQuery.data]);
+  const materialSpecIndex = useMemo(
+    () => buildBomMaterialSpecIndex(bomTreeQuery.data?.data ?? []),
+    [bomTreeQuery.data],
+  );
   const warehouseOptions = useMemo(
     () =>
       (warehousesQuery.data ?? [])
@@ -745,6 +751,7 @@ function CreateRawMaterialPageContent() {
                   initialValues={index === 0 ? getInitialValues() : undefined}
                   formRef={entry.formRef}
                   bomIndex={bomIndex}
+                  materialSpecIndex={materialSpecIndex}
                   warehouseOptions={warehouseOptions}
                 />
               </div>
