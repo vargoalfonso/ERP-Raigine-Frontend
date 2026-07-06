@@ -923,12 +923,12 @@ function MasterSupplierCreatePageContent() {
                   <div className="mt-6">
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
                       <Form.Item
-                        label="Uniq / Sebanggo"
+                        label={section === "subcon" ? "Uniq / Sebanggo" : "Material Code"}
                         name="uniq_code"
                         rules={[
                           {
                             required: true,
-                            message: "Please select a Sebango Code",
+                            message: section === "subcon" ? "Please select a Sebango Code" : "Please select a Material Code",
                           },
                         ]}
                       >
@@ -987,7 +987,7 @@ function MasterSupplierCreatePageContent() {
                     </div>
 
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                      <Form.Item
+                      {/* <Form.Item
                         label="Material Code"
                         name="sebango_code"
                         rules={[
@@ -999,7 +999,7 @@ function MasterSupplierCreatePageContent() {
                           placeholder="Enter material code"
                           onChange={(e) => console.log("[sebango_code] onChange:", e.target.value)}
                         />
-                      </Form.Item>
+                      </Form.Item> */}
 
                       <Form.Item label="Grade" name="grade">
                         <Input size="large" placeholder="Auto-filled grade" disabled={autofilled} />
