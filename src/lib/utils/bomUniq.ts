@@ -33,6 +33,8 @@ type BomNodeLike = {
   model_grade?: unknown;
   modelGrade?: unknown;
   size?: unknown;
+  material_spec?: unknown;
+  material_specifications?: unknown;
   children?: unknown;
 };
 
@@ -56,6 +58,8 @@ export type BomUniqIndex = {
   rawMaterialTypeByUniq: Record<string, string>;
   rmSourceByUniq: Record<string, string>;
   weightKgByUniq: Record<string, number>;
+  materialGradeByUniq: Record<string, string>;
+  gradeByUniq: Record<string, string>;
 };
 
 export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
@@ -70,6 +74,8 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
   const rawMaterialTypeByUniq: Record<string, string> = {};
   const rmSourceByUniq: Record<string, string> = {};
   const weightKgByUniq: Record<string, number> = {};
+  const materialGradeByUniq: Record<string, string> = {};
+  const gradeByUniq: Record<string, string> = {};
 
   const pickString = (...values: unknown[]): string => {
     for (const v of values) {
@@ -124,6 +130,12 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
     const packingNumber =
       typeof packingNumberCandidate === "string" ? packingNumberCandidate.trim() : "";
 
+    const materialSpec = isRecord(n.material_spec)
+      ? (n.material_spec as Record<string, unknown>)
+      : isRecord(n.material_specifications)
+        ? (n.material_specifications as Record<string, unknown>)
+        : undefined;
+
     const uom = pickString(
       n.uom,
       n.unit_measurement,
@@ -132,9 +144,12 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
       n.uom_id,
       n.uomId
     );
-    const rmType = pickString(n.raw_material_type, n.rawMaterialType);
+    const rmType = pickString(materialSpec?.type_material, n.raw_material_type, n.rawMaterialType);
     const rmSource = pickString(n.rm_source, n.rmSource);
     const weightKg = pickNumber(
+      materialSpec?.weight_kg,
+      materialSpec?.weight,
+      materialSpec?.unit_weight,
       n.stock_weight_kg,
       n.stockWeightKg,
       n.weight_kg,
@@ -156,6 +171,13 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
       if (rmType && !rawMaterialTypeByUniq[uniq]) rawMaterialTypeByUniq[uniq] = rmType;
       if (rmSource && !rmSourceByUniq[uniq]) rmSourceByUniq[uniq] = rmSource;
       if (typeof weightKg === "number" && !(uniq in weightKgByUniq)) weightKgByUniq[uniq] = weightKg;
+
+      if (materialSpec) {
+        const matGrade = pickString(materialSpec.material_grade);
+        const specGrade = pickString(materialSpec.grade);
+        if (matGrade && !materialGradeByUniq[uniq]) materialGradeByUniq[uniq] = matGrade;
+        if (specGrade && !gradeByUniq[uniq]) gradeByUniq[uniq] = specGrade;
+      }
     }
 
     const children = n.children;
@@ -185,5 +207,7 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
     rawMaterialTypeByUniq,
     rmSourceByUniq,
     weightKgByUniq,
+    materialGradeByUniq,
+    gradeByUniq,
   };
 };

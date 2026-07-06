@@ -27,6 +27,11 @@ import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
   type SupplierItemMutationRequest,
+  type SupplierItemPayloadBomOption,
+  type SupplierItemPayloadDetail,
+  type SupplierItemPayloadFormSnapshot,
+  type SupplierItemPayloadJSON,
+  type SupplierItemPayloadMaterialSpecDetail,
   useCreateSupplierItemMutation,
   useGetSupplierItemByIdQuery,
   useUpdateSupplierItemMutation,
@@ -84,6 +89,8 @@ type BomOption = {
   materialCode?: string;
 };
 
+type JsonMap = Record<string, unknown>;
+
 type SupplierOption = {
   value: string;
   label: string;
@@ -101,6 +108,18 @@ const SECTION_OPTIONS: Array<{ label: string; value: SupplierSection }> = [
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
+const asRecord = (value: unknown): JsonMap | undefined => {
+  if (isRecord(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return isRecord(parsed) ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+};
 const pickText = (...values: unknown[]) => {
   for (const value of values) {
     if (typeof value === "string") {
@@ -200,6 +219,12 @@ const formatSizeFromMaterialSpec = (
   return parts.join(" x ");
 };
 
+const formatCompositeSizeFromMaterialSpec = (
+  materialSpec?: Record<string, unknown>,
+): string => {
+  return formatSizeFromMaterialSpec(materialSpec);
+};
+
 const extractWeightFromMaterialSpec = (
   materialSpec?: Record<string, unknown>,
 ): number | undefined => {
@@ -233,10 +258,52 @@ const extractNumber = (...values: unknown[]): number | undefined => {
   return undefined;
 };
 
+const extractNullableNumber = (...values: unknown[]): number | null => {
+  const value = extractNumber(...values);
+  return value === undefined ? null : value;
+};
+
+const getSupplierItemPayloadJson = (record: unknown): SupplierItemPayloadJSON | undefined => {
+  if (!isRecord(record)) return undefined;
+  return (asRecord(record.payload_json) ?? asRecord(record.payloadJson)) as SupplierItemPayloadJSON | undefined;
+};
+
+const getSupplierItemPayloadDetail = (record: unknown): SupplierItemPayloadDetail | undefined => {
+  const payloadJson = getSupplierItemPayloadJson(record);
+  return (asRecord(payloadJson?.payload_detail) ??
+    (isRecord(record) ? asRecord(record.payload_detail) : undefined)) as SupplierItemPayloadDetail | undefined;
+};
+
+const getSupplierItemPayloadMaterialSpec = (record: unknown): SupplierItemPayloadMaterialSpecDetail | undefined => {
+  const payloadDetail = getSupplierItemPayloadDetail(record);
+  return (asRecord(payloadDetail?.material_spec_detail) as SupplierItemPayloadMaterialSpecDetail | undefined) ??
+    payloadDetail?.material_spec_detail ??
+    undefined;
+};
+
 const normalizeFormStatus = (value: unknown): string | undefined => {
   const raw = pickText(value).toLowerCase();
   if (raw === "active" || raw === "released") return "active";
   if (raw === "inactive" || raw === "obsolete") return "inactive";
+  return undefined;
+};
+
+const normalizeMaterialSpecType = (
+  materialSpec?: Record<string, unknown>,
+): string | undefined => {
+  const raw = pickText(
+    materialSpec?.type,
+    materialSpec?.item_type,
+    materialSpec?.material_type,
+    materialSpec?.form,
+  ).toLowerCase();
+
+  if (!raw) return undefined;
+  if (raw === "rod" || raw === "round bar" || raw === "steel bar") return "steel_bar";
+  if (raw === "pipe") return "pipe";
+  if (raw === "coil") return "coil";
+  if (raw === "wire") return "wire";
+  if (raw === "plate" || raw === "steel plate" || raw === "sheet plate") return "steel_plate";
   return undefined;
 };
 
@@ -246,6 +313,93 @@ const resolveMaterialSpec = (node: BackendBomNode): Record<string, unknown> | un
     : isRecord((node as Record<string, unknown>).material_spec)
       ? ((node as Record<string, unknown>).material_spec as Record<string, unknown>)
       : undefined;
+};
+
+const buildMaterialSpecPayloadDetail = (
+  materialSpec: Record<string, unknown> | undefined,
+  values: Pick<FormValues, "grade" | "size" | "uom" | "weight" | "customer_cycle">,
+  fallback?: SupplierItemPayloadMaterialSpecDetail | null,
+): SupplierItemPayloadMaterialSpecDetail => ({
+  form: pickText(materialSpec?.form, fallback?.form) || null,
+  grade: pickText(values.grade, materialSpec?.grade, fallback?.grade) || null,
+  material_grade:
+    pickText(materialSpec?.material_grade, materialSpec?.material_code, fallback?.material_grade) || null,
+  type_material:
+    pickText(materialSpec?.type_material, materialSpec?.material_type, fallback?.type_material) || null,
+  size_combined:
+    pickText(values.size, fallback?.size_combined) || formatCompositeSizeFromMaterialSpec(materialSpec) || null,
+  width_mm: extractNullableNumber(materialSpec?.width_mm, fallback?.width_mm),
+  diameter_mm: extractNullableNumber(materialSpec?.diameter_mm, fallback?.diameter_mm),
+  thickness_mm: extractNullableNumber(materialSpec?.thickness_mm, fallback?.thickness_mm),
+  length_mm: extractNullableNumber(materialSpec?.length_mm, fallback?.length_mm),
+  weight_kg:
+    typeof values.weight === "number" && Number.isFinite(values.weight)
+      ? values.weight
+      : extractNullableNumber(materialSpec?.weight_kg, materialSpec?.weight, materialSpec?.unit_weight, fallback?.weight_kg),
+  uom: pickText(values.uom, fallback?.uom) || null,
+  customer_cycle:
+    pickText(values.customer_cycle, materialSpec?.customer_cycle, fallback?.customer_cycle) || null,
+});
+
+const buildSupplierItemPayloadDetail = ({
+  section,
+  values,
+  selectedUniqCode,
+  selectedBomLookupId,
+  selectedBomOption,
+  materialSpec,
+  fallback,
+  selectedWarehouse,
+}: {
+  section: SupplierSection;
+  values: FormValues;
+  selectedUniqCode?: string;
+  selectedBomLookupId?: string;
+  selectedBomOption?: BomOption | null;
+  materialSpec?: Record<string, unknown>;
+  fallback?: SupplierItemPayloadDetail;
+  selectedWarehouse?: { value: string; label: string; type: string } | undefined;
+}): SupplierItemPayloadDetail => {
+  const fallbackFormSnapshot = fallback?.form_snapshot;
+  const fallbackBomOption = fallback?.bom_option;
+  const fallbackMaterialSpec = fallback?.material_spec_detail;
+
+  const bomOption: SupplierItemPayloadBomOption | null = selectedBomOption
+    ? {
+        value: selectedBomOption.value,
+        label: selectedBomOption.label,
+        material_code: selectedBomOption.materialCode ?? null,
+        grade: selectedBomOption.grade ?? null,
+        size: selectedBomOption.size ?? null,
+        type: selectedBomOption.type ?? null,
+        uom: selectedBomOption.uom ?? null,
+        weight: selectedBomOption.weight ?? null,
+        quantity: selectedBomOption.quantity ?? null,
+        customer_cycle: selectedBomOption.customerCycle ?? null,
+        part_name: selectedBomOption.partName ?? null,
+        part_number: selectedBomOption.partNumber ?? null,
+        product_model: selectedBomOption.productModel ?? null,
+      }
+    : fallbackBomOption ?? null;
+
+  const formSnapshot: SupplierItemPayloadFormSnapshot = {
+    warehouse_uuid: pickText(values.warehouse_uuid, fallbackFormSnapshot?.warehouse_uuid) || null,
+    warehouse_name: pickText(selectedWarehouse?.label, fallbackFormSnapshot?.warehouse_name) || null,
+    product_model: pickText(values.product_model, fallbackFormSnapshot?.product_model) || null,
+    part_name: pickText(values.part_name, fallbackFormSnapshot?.part_name) || null,
+    part_number: pickText(values.part_number, fallbackFormSnapshot?.part_number) || null,
+    description: pickText(values.description, fallbackFormSnapshot?.description) || null,
+  };
+
+  return {
+    schema_version: 1,
+    source_section: section,
+    bom_lookup_id: pickText(selectedBomLookupId, fallback?.bom_lookup_id) || null,
+    bom_selected_uniq_code: pickText(values.uniq_code, selectedUniqCode, fallback?.bom_selected_uniq_code) || null,
+    bom_option: bomOption,
+    form_snapshot: formSnapshot,
+    material_spec_detail: buildMaterialSpecPayloadDetail(materialSpec, values, fallbackMaterialSpec),
+  };
 };
 
 
@@ -283,12 +437,28 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
   if (!uniqCode) return null;
 
   const materialSpec = resolveMaterialSpec(node);
-  const size =
-    pickText(
-      materialSpec?.size,
-      materialSpec?.material_size,
-      materialSpec?.thickness,
-    ) || formatSizeFromMaterialSpec(materialSpec);
+  const typeMaterial = pickText(
+    materialSpec?.type_material,
+    materialSpec?.material_type,
+    node.type_material,
+  ).toLowerCase();
+  const isRawOrIndirectNode =
+    typeMaterial === "raw" ||
+    typeMaterial === "raw_material" ||
+    typeMaterial === "indirect" ||
+    typeMaterial === "indirect_raw_material";
+  const size = isRawOrIndirectNode
+    ? formatCompositeSizeFromMaterialSpec(materialSpec) ||
+      pickText(
+        materialSpec?.size,
+        materialSpec?.material_size,
+        materialSpec?.thickness,
+      )
+    : pickText(
+        materialSpec?.size,
+        materialSpec?.material_size,
+        materialSpec?.thickness,
+      ) || formatSizeFromMaterialSpec(materialSpec);
 
   return {
     value: uniqCode,
@@ -305,7 +475,7 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
       materialSpec?.form,
       node.material_code,
     ),
-    grade: pickText(materialSpec?.material_grade, materialSpec?.grade),
+    grade: pickText(materialSpec?.grade, materialSpec?.material_grade),
     size,
     uom: pickText(node.unit_measurement, (node as Record<string, unknown>).uom),
     weight: extractWeightFromMaterialSpec(materialSpec),
@@ -313,7 +483,7 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
     customerCycle: pickText(materialSpec?.customer_cycle),
     description: pickText(node.description, node.part_name),
     status: pickText((node as Record<string, unknown>).status, (node as Record<string, unknown>).bom_status),
-    materialCode: pickText(materialSpec?.material_code, materialSpec?.material_grade, (node as Record<string, unknown>).material_code),
+    materialCode: pickText(materialSpec?.material_grade, materialSpec?.material_code, (node as Record<string, unknown>).material_code),
   };
 };
 
@@ -361,6 +531,8 @@ function MasterSupplierCreatePageContent() {
   const readOnly = mode === "view";
   const itemId = String(searchParams.get("id") ?? "").trim();
   const isEditing = mode === "edit";
+  const useMaterialSpecOnlyAutofill =
+    section === "raw-material" || section === "indirect-raw-material";
   const autofilled = Boolean(selectedUniqCode);
 
   const [uniqSearch, setUniqSearch] = useState("");
@@ -540,33 +712,57 @@ function MasterSupplierCreatePageContent() {
     [selectedWarehouseId, warehouseOptions],
   );
 
+  const currentBomDetail = useMemo(() => {
+    const root = bomDetailQuery.data?.data;
+    if (!root || !selectedUniqCode) return null;
+    return findNodeByUniq(root, selectedUniqCode);
+  }, [bomDetailQuery.data, selectedUniqCode]);
+
+  const currentMaterialSpec = useMemo(
+    () => (currentBomDetail ? resolveMaterialSpec(currentBomDetail) : undefined),
+    [currentBomDetail],
+  );
+
   useEffect(() => {
     if (!detailQuery.data) return;
 
+    const payloadDetail = getSupplierItemPayloadDetail(detailQuery.data);
+    const payloadMaterialSpec = getSupplierItemPayloadMaterialSpec(detailQuery.data);
+    const payloadFormSnapshot = asRecord(payloadDetail?.form_snapshot);
+
     setSelectedSupplierId(pickText(detailQuery.data.supplier_uuid) || undefined);
+    setSelectedUniqCode(
+      pickText(detailQuery.data.uniq_code, payloadDetail?.bom_selected_uniq_code) || "",
+    );
+    setSelectedBomLookupId(pickText(payloadDetail?.bom_lookup_id));
+
     form.setFieldsValue({
       supplier_uuid: pickText(detailQuery.data.supplier_uuid),
       warehouse_uuid: pickText(
         detailQuery.data.warehouse_uuid,
         detailQuery.data.warehouse_id,
+        payloadFormSnapshot?.warehouse_uuid,
       ),
-      uniq_code: pickText(detailQuery.data.uniq_code),
-      sebango_code: pickText(detailQuery.data.sebango_code),
-      type: pickText(detailQuery.data.type),
-      product_model: pickText(detailQuery.data.product_model),
-      part_name: pickText(detailQuery.data.part_name),
-      part_number: pickText(detailQuery.data.part_number),
-      grade: pickText(detailQuery.data.grade),
-      size: pickText(detailQuery.data.size),
-      uom: pickText(detailQuery.data.uom),
+      uniq_code: pickText(detailQuery.data.uniq_code, payloadDetail?.bom_selected_uniq_code),
+      sebango_code: pickText(
+        detailQuery.data.sebango_code,
+        payloadMaterialSpec?.material_grade,
+      ),
+      type: pickText(detailQuery.data.material_type, detailQuery.data.type, payloadMaterialSpec?.type_material),
+      product_model: pickText(detailQuery.data.product_model, payloadFormSnapshot?.product_model),
+      part_name: pickText(detailQuery.data.part_name, payloadFormSnapshot?.part_name),
+      part_number: pickText(detailQuery.data.part_number, payloadFormSnapshot?.part_number),
+      grade: pickText(detailQuery.data.grade, payloadMaterialSpec?.grade),
+      size: pickText(detailQuery.data.size, payloadMaterialSpec?.size_combined),
+      uom: pickText(detailQuery.data.uom, payloadMaterialSpec?.uom),
       quantity: Number(detailQuery.data.quantity ?? 0),
-      weight: Number(detailQuery.data.weight ?? 0),
+      weight: extractNumber(detailQuery.data.weight, payloadMaterialSpec?.weight_kg) ?? 0,
       pcs_per_kanban: Number(detailQuery.data.pcs_per_kanban ?? 0),
       percentage: detailQuery.data.percentage !== undefined && detailQuery.data.percentage !== null
         ? Number(detailQuery.data.percentage)
         : undefined,
-      customer_cycle: pickText(detailQuery.data.customer_cycle),
-      description: pickText(detailQuery.data.description),
+      customer_cycle: pickText(detailQuery.data.customer_cycle, payloadMaterialSpec?.customer_cycle),
+      description: pickText(detailQuery.data.description, payloadFormSnapshot?.description),
       status: pickText(detailQuery.data.status) || "active",
     });
   }, [detailQuery.data, form]);
@@ -578,6 +774,7 @@ function MasterSupplierCreatePageContent() {
     setSelectedBomLookupId("");
     form.setFieldsValue({
       uniq_code: undefined,
+      sebango_code: undefined,
       product_model: undefined,
       part_name: undefined,
       part_number: undefined,
@@ -585,8 +782,10 @@ function MasterSupplierCreatePageContent() {
       grade: undefined,
       size: undefined,
       uom: undefined,
+      quantity: undefined,
       weight: undefined,
       customer_cycle: undefined,
+      description: undefined,
     });
   };
 
@@ -599,22 +798,27 @@ function MasterSupplierCreatePageContent() {
     setSelectedBomLookupId(matched.lookupId ?? "");
     setSelectedBomOption({ ...matched, label: matched.value });
 
+    if (useMaterialSpecOnlyAutofill) {
+      form.setFieldsValue({
+        uniq_code: matched.value,
+        sebango_code: matched.materialCode,
+        product_model: undefined,
+        part_name: undefined,
+        part_number: undefined,
+        type: matched.type,
+        grade: matched.grade,
+        size: matched.size,
+        quantity: undefined,
+        uom: undefined,
+        weight: matched.weight,
+        customer_cycle: matched.customerCycle,
+        description: undefined,
+      });
+      return;
+    }
+
     const rawUom = matched.uom?.trim() ?? "";
     const resolvedUom = resolveUomValue(rawUom, uoms, uomOptions);
-
-    console.log("[handleUniqChange] selected:", {
-      value,
-      rawUom,
-      resolvedUom,
-      lookupId: matched.lookupId,
-      option_value: matched.value,
-      option_label: matched.label,
-      type: matched.type,
-      productModel: matched.productModel,
-      partName: matched.partName,
-      uom: matched.uom,
-      currentFormUniq: form.getFieldValue("uniq_code"),
-    });
 
     form.setFieldsValue({
       uniq_code: matched.value,
@@ -631,17 +835,7 @@ function MasterSupplierCreatePageContent() {
       status: normalizeFormStatus(matched.status) ?? form.getFieldValue("status") ?? "active",
     });
 
-    // Also set material code (sebango) when available for raw/indirect sections only
-    try {
-      const matCode = matched.materialCode ?? "";
-      if (matCode && section !== "subcon") form.setFieldValue("sebango_code", matCode);
-    } catch (e) {
-      // ignore
-    }
-
-    // Defer UOM so it runs after React effects (bomDetailQuery effect may override if not deferred)
     setTimeout(() => {
-      console.log("[handleUniqChange] setFieldValue uom (deferred):", resolvedUom);
       if (resolvedUom) form.setFieldValue("uom", resolvedUom);
     }, 0);
   };
@@ -654,6 +848,32 @@ function MasterSupplierCreatePageContent() {
     if (!bomDetail) return;
 
     const materialSpec = resolveMaterialSpec(bomDetail);
+
+    if (useMaterialSpecOnlyAutofill) {
+      form.setFieldsValue({
+        uniq_code: pickText(bomDetail.uniq_code, bomDetail.uniq),
+        sebango_code: pickText(
+          materialSpec?.material_grade,
+          materialSpec?.material_code,
+          bomDetail.material_code,
+        ),
+        product_model: undefined,
+        part_name: undefined,
+        part_number: undefined,
+        type: normalizeMaterialSpecType(materialSpec),
+        grade: pickText(materialSpec?.grade),
+        size:
+          formatCompositeSizeFromMaterialSpec(materialSpec) ||
+          pickText(materialSpec?.size, materialSpec?.material_size, materialSpec?.thickness) ||
+          formatSizeFromMaterialSpec(materialSpec),
+        quantity: undefined,
+        uom: undefined,
+        weight: extractWeightFromMaterialSpec(materialSpec),
+        customer_cycle: pickText(materialSpec?.customer_cycle),
+        description: undefined,
+      });
+      return;
+    }
 
     form.setFieldsValue({
       uniq_code: pickText(bomDetail.uniq_code, bomDetail.uniq),
@@ -668,7 +888,7 @@ function MasterSupplierCreatePageContent() {
         materialSpec?.form,
         bomDetail.material_code,
       ),
-      grade: pickText(materialSpec?.material_grade, materialSpec?.grade),
+      grade: pickText(materialSpec?.grade, materialSpec?.material_grade),
       size:
         pickText(materialSpec?.size, materialSpec?.material_size, materialSpec?.thickness) ||
         formatSizeFromMaterialSpec(materialSpec),
@@ -677,14 +897,13 @@ function MasterSupplierCreatePageContent() {
       customer_cycle: pickText(materialSpec?.customer_cycle),
       description: pickText(bomDetail.description, bomDetail.part_name, bomDetail.uniq_code),
       status: normalizeFormStatus((bomDetail as Record<string, unknown>).status ?? (bomDetail as Record<string, unknown>).bom_status) ?? form.getFieldValue("status") ?? "active",
-      // also populate sebango_code from BOM detail/material spec when available
       sebango_code: pickText(
         bomDetail.material_code,
         materialSpec?.material_code,
         materialSpec?.materialCode,
       ),
     });
-  }, [bomDetailQuery.data, form, selectedUniqCode]);
+  }, [bomDetailQuery.data, form, selectedUniqCode, useMaterialSpecOnlyAutofill]);
 
   const handleSave = async () => {
     if (!apiEnabled) {
@@ -696,6 +915,18 @@ function MasterSupplierCreatePageContent() {
 
     try {
       const values = await form.validateFields();
+      const existingPayloadDetail = getSupplierItemPayloadDetail(detailQuery.data);
+      const payloadDetail = buildSupplierItemPayloadDetail({
+        section,
+        values,
+        selectedUniqCode,
+        selectedBomLookupId,
+        selectedBomOption,
+        materialSpec: currentMaterialSpec,
+        fallback: existingPayloadDetail,
+        selectedWarehouse,
+      });
+
       const payload: SupplierItemMutationRequest = {
         supplier_uuid: pickText(values.supplier_uuid),
         // prefer explicit `sebango_code`, but fall back to material code when missing
@@ -717,6 +948,15 @@ function MasterSupplierCreatePageContent() {
           pickText(values.status) ||
           pickText(detailQuery.data?.status) ||
           "active",
+        warehouse_uuid: pickText(values.warehouse_uuid),
+        warehouse_name: selectedWarehouse?.label,
+        product_model: pickText(values.product_model),
+        part_name: pickText(values.part_name),
+        part_number: pickText(values.part_number),
+        material_type: pickText(values.type),
+        grade: pickText(values.grade),
+        size: pickText(values.size),
+        payload_detail: payloadDetail,
       };
 
       // preserve optional `percentage` form field in outgoing payload when present
@@ -982,15 +1222,27 @@ function MasterSupplierCreatePageContent() {
                       </Form.Item>
 
                       <Form.Item label="Product Model" name="product_model">
-                        <Input size="large" placeholder="Auto-filled from BOM" disabled={autofilled} />
+                        <Input
+                          size="large"
+                          placeholder={useMaterialSpecOnlyAutofill ? "Input manually" : "Auto-filled from BOM"}
+                          disabled={section === "subcon" && autofilled}
+                        />
                       </Form.Item>
 
                       <Form.Item label="Part Name" name="part_name">
-                        <Input size="large" placeholder="Auto-filled from BOM" disabled={autofilled} />
+                        <Input
+                          size="large"
+                          placeholder={useMaterialSpecOnlyAutofill ? "Input manually" : "Auto-filled from BOM"}
+                          disabled={section === "subcon" && autofilled}
+                        />
                       </Form.Item>
 
                       <Form.Item label="Part Number" name="part_number">
-                        <Input size="large" placeholder="Auto-filled from BOM" disabled={autofilled} />
+                        <Input
+                          size="large"
+                          placeholder={useMaterialSpecOnlyAutofill ? "Input manually" : "Auto-filled from BOM"}
+                          disabled={section === "subcon" && autofilled}
+                        />
                       </Form.Item>
                     </div>
 
@@ -1010,11 +1262,19 @@ function MasterSupplierCreatePageContent() {
                       </Form.Item> */}
 
                       <Form.Item label="Grade" name="grade">
-                        <Input size="large" placeholder="Auto-filled grade" disabled={autofilled} />
+                        <Input
+                          size="large"
+                          placeholder={useMaterialSpecOnlyAutofill ? "Auto-filled from material spec" : "Auto-filled grade"}
+                          disabled={section === "subcon" && autofilled}
+                        />
                       </Form.Item>
 
                       <Form.Item label="Size" name="size">
-                        <Input size="large" placeholder="Auto-filled size" disabled={autofilled} />
+                        <Input
+                          size="large"
+                          placeholder={useMaterialSpecOnlyAutofill ? "Auto-filled from material spec" : "Auto-filled size"}
+                          disabled={section === "subcon" && autofilled}
+                        />
                       </Form.Item>
 
                       <Form.Item label="UOM" name="uom">
@@ -1040,7 +1300,7 @@ function MasterSupplierCreatePageContent() {
                             { label: "Wire", value: "wire" },
                             { label: "Steel Plate", value: "steel_plate" },
                           ]}
-                          disabled={autofilled}
+                          disabled={section === "subcon" && autofilled}
                         />
                       </Form.Item>
 
@@ -1086,8 +1346,8 @@ function MasterSupplierCreatePageContent() {
                           min={0}
                           size="large"
                           className="w-full"
-                          placeholder="Weight (default 0)"
-                          disabled={autofilled}
+                          placeholder={useMaterialSpecOnlyAutofill ? "Auto-filled from material spec" : "Weight (default 0)"}
+                          disabled={section === "subcon" && autofilled}
                         />
                       </Form.Item>
                     </div>

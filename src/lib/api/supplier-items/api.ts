@@ -4,6 +4,19 @@ type UnknownRecord = Record<string, unknown>;
 
 const isRecord = (value: unknown): value is UnknownRecord => Boolean(value) && typeof value === "object";
 
+const toRecord = (value: unknown): UnknownRecord | undefined => {
+  if (isRecord(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return isRecord(parsed) ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+};
+
 const toText = (value: unknown): string | undefined => {
   if (typeof value === "string") {
     const trimmed = value.trim();
@@ -46,6 +59,60 @@ const parseObjectResponse = <T,>(response: unknown): T | null => {
   return response as T;
 };
 
+export type SupplierItemPayloadBomOption = {
+  value?: string | null;
+  label?: string | null;
+  material_code?: string | null;
+  grade?: string | null;
+  size?: string | null;
+  type?: string | null;
+  uom?: string | null;
+  weight?: number | null;
+  quantity?: number | null;
+  customer_cycle?: string | null;
+  part_name?: string | null;
+  part_number?: string | null;
+  product_model?: string | null;
+};
+
+export type SupplierItemPayloadFormSnapshot = {
+  warehouse_uuid?: string | null;
+  warehouse_name?: string | null;
+  product_model?: string | null;
+  part_name?: string | null;
+  part_number?: string | null;
+  description?: string | null;
+};
+
+export type SupplierItemPayloadMaterialSpecDetail = {
+  form?: string | null;
+  grade?: string | null;
+  material_grade?: string | null;
+  type_material?: string | null;
+  size_combined?: string | null;
+  width_mm?: number | null;
+  diameter_mm?: number | null;
+  thickness_mm?: number | null;
+  length_mm?: number | null;
+  weight_kg?: number | null;
+  uom?: string | null;
+  customer_cycle?: string | null;
+};
+
+export type SupplierItemPayloadDetail = {
+  schema_version?: number;
+  source_section?: string | null;
+  bom_lookup_id?: string | null;
+  bom_selected_uniq_code?: string | null;
+  bom_option?: SupplierItemPayloadBomOption | null;
+  form_snapshot?: SupplierItemPayloadFormSnapshot | null;
+  material_spec_detail?: SupplierItemPayloadMaterialSpecDetail | null;
+};
+
+export type SupplierItemPayloadJSON = UnknownRecord & {
+  payload_detail?: SupplierItemPayloadDetail;
+};
+
 export type SupplierItemRecord = {
   row_id?: number;
   id?: string;
@@ -73,6 +140,8 @@ export type SupplierItemRecord = {
   part_number?: string;
   grade?: string;
   size?: string;
+  payload_json?: SupplierItemPayloadJSON;
+  payload_detail?: SupplierItemPayloadDetail;
   created_at?: string;
   updated_at?: string;
   [key: string]: unknown;
@@ -98,6 +167,8 @@ export type SupplierItemMutationRequest = {
   material_type?: string;
   grade?: string;
   size?: string;
+  percentage?: string | number;
+  payload_detail?: SupplierItemPayloadDetail;
 };
 
 const normalizeSupplierItem = (record: unknown): SupplierItemRecord => {
@@ -105,6 +176,11 @@ const normalizeSupplierItem = (record: unknown): SupplierItemRecord => {
   const supplier = isRecord(row.supplier) ? row.supplier : undefined;
   const warehouse = isRecord(row.warehouse) ? row.warehouse : undefined;
   const product = isRecord(row.product) ? row.product : undefined;
+  const payloadJson = (toRecord(row.payload_json) ?? toRecord(row.payloadJson)) as SupplierItemPayloadJSON | undefined;
+  const payloadDetail = (toRecord(payloadJson?.payload_detail) ?? toRecord(row.payload_detail)) as SupplierItemPayloadDetail | undefined;
+  const materialSpecDetail = payloadDetail?.material_spec_detail;
+  const formSnapshot = payloadDetail?.form_snapshot;
+  const bomOption = payloadDetail?.bom_option;
 
   return {
     ...row,
@@ -151,19 +227,21 @@ const normalizeSupplierItem = (record: unknown): SupplierItemRecord => {
     uniq_code: toText(row.uniq_code) ?? toText(row.uniq),
     type: toText(row.type),
     material_type: toText(row.material_type) ?? toText(row.item_type) ?? toText(row.raw_material_type),
-    description: toText(row.description),
+    description: toText(row.description) ?? toText(formSnapshot?.description),
     quantity: toNumber(row.quantity),
-    uom: toText(row.uom),
-    weight: toNumber(row.weight),
+    uom: toText(row.uom) ?? toText(materialSpecDetail?.uom),
+    weight: toNumber(row.weight) ?? toNumber(materialSpecDetail?.weight_kg),
     pcs_per_kanban: toNumber(row.pcs_per_kanban) ?? toNumber(row.qty_per_kanban),
-    customer_cycle: toText(row.customer_cycle) ?? toText(row.cycle_days) ?? toText(row.cycle),
+    customer_cycle: toText(row.customer_cycle) ?? toText(row.cycle_days) ?? toText(row.cycle) ?? toText(materialSpecDetail?.customer_cycle),
     status: toText(row.status) ?? "active",
-    product_model: toText(row.product_model) ?? toText(product?.model) ?? toText(product?.description),
-    part_name: toText(row.part_name) ?? toText(product?.part_name),
-    part_number: toText(row.part_number) ?? toText(product?.part_number),
-    grade: toText(row.grade) ?? toText(row.material_grade),
-    size: toText(row.size),
+    product_model: toText(row.product_model) ?? toText(formSnapshot?.product_model) ?? toText(bomOption?.product_model) ?? toText(product?.model) ?? toText(product?.description),
+    part_name: toText(row.part_name) ?? toText(formSnapshot?.part_name) ?? toText(bomOption?.part_name) ?? toText(product?.part_name),
+    part_number: toText(row.part_number) ?? toText(formSnapshot?.part_number) ?? toText(bomOption?.part_number) ?? toText(product?.part_number),
+    grade: toText(row.grade) ?? toText(materialSpecDetail?.grade) ?? toText(row.material_grade),
+    size: toText(row.size) ?? toText(materialSpecDetail?.size_combined),
     percentage: toNumber(row.percentage),
+    payload_json: payloadJson,
+    payload_detail: payloadDetail,
     created_at: toText(row.created_at),
     updated_at: toText(row.updated_at),
   };

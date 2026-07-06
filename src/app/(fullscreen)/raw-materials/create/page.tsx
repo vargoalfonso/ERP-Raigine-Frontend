@@ -138,33 +138,34 @@ const RawMaterialForm = ({
   const selectedUniq = Form.useWatch("uniq", form) as string | undefined;
   const selectedPartName = Form.useWatch("name", form) as string | undefined;
 
-  const normalizeRmSource = (value: string): string => {
-    const v = value.trim();
-    const lowered = v.toLowerCase();
-    if (lowered === "supplier") return "supplier";
-    if (lowered === "process") return "process";
-    if (lowered === "direct") return "direct";
-    return v;
-  };
-
   const applyBomAutofill = (uniq: string | undefined) => {
     if (!uniq || !bomIndex) return;
-    const partName = bomIndex.partNameByUniq[uniq];
-    const partNumber = bomIndex.partNumberByUniq[uniq];
-    const model = bomIndex.modelByUniq[uniq] || bomIndex.assemblyCodeByUniq[uniq];
-    const uom = bomIndex.uomByUniq[uniq];
-    const rmType = bomIndex.rawMaterialTypeByUniq[uniq];
-    const rmSource = bomIndex.rmSourceByUniq[uniq];
-    const weightKg = bomIndex.weightKgByUniq[uniq];
 
-    const nextValues: Partial<RawMaterialFormData> = {};
-    if (partName) nextValues.name = partName;
-    if (partNumber) nextValues.part_no = partNumber;
-    if (model) nextValues.model = model;
-    if (uom) nextValues.unit = uom;
+    const rmType = bomIndex.rawMaterialTypeByUniq[uniq];
+    const weightKg = bomIndex.weightKgByUniq[uniq];
+    const materialGrade = bomIndex.materialGradeByUniq[uniq];
+
+    const isRawOrIndirect = rmType
+      ? rmType.toLowerCase() === "raw" || rmType.toLowerCase() === "indirect"
+      : false;
+
+    const nextValues: Partial<RawMaterialFormData> = {
+      name: undefined,
+      part_no: undefined,
+      model: undefined,
+      unit: undefined,
+      master_list_supplier_id: undefined,
+    };
+
     if (rmType) nextValues.category = rmType;
-    if (rmSource) nextValues.master_list_supplier_id = normalizeRmSource(rmSource);
     if (typeof weightKg === "number" && Number.isFinite(weightKg)) nextValues.price = weightKg;
+
+    // For raw/indirect types, use material_spec.material_grade as material code.
+    if (isRawOrIndirect && materialGrade) {
+      nextValues.code = materialGrade;
+    } else {
+      nextValues.code = undefined;
+    }
 
     if (Object.keys(nextValues).length > 0) form.setFieldsValue(nextValues);
   };
@@ -491,6 +492,11 @@ function CreateRawMaterialPageContent() {
         return;
       }
 
+      // Use material_grade as material_code for raw/indirect types
+      const rmType = (values.category ?? "").toLowerCase();
+      const isRawOrIndirect = rmType === "raw" || rmType === "indirect";
+      const materialCode = isRawOrIndirect && values.code ? values.code.trim() : uniq_code;
+
       const rm_source = typeof values.master_list_supplier_id === "string" ? values.master_list_supplier_id.trim().toLowerCase() : undefined;
       const warehouse_location = typeof values.warehouse_id === "string" ? values.warehouse_id.trim() : undefined;
       const uom = typeof values.unit === "string" ? values.unit.trim() : undefined;
@@ -498,7 +504,7 @@ function CreateRawMaterialPageContent() {
 
       // Backend contract (manual create): only these fields.
       const createBody = {
-        uniq_code,
+        uniq_code: materialCode,
         raw_material_type: values.category,
         rm_source,
         warehouse_location,
