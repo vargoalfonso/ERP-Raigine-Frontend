@@ -9,15 +9,27 @@ import {
   useAddPoBudgetEntryMutation,
   useAddPoBudgetBulkMutation,
   useGetPoBudgetDetailQuery,
+  useLazyGetPoBudgetPrlDetailQuery,
   useUpdatePoBudgetEntryMutation,
   type PoBudgetRow as ApiPoBudgetRow,
   type PoBudgetType,
   type PoBudgetEntryRequest,
   type PoBudgetGroupedDetail,
+  type PoBudgetPrlDetail,
   type PoBudgetUpdateRequest,
 } from "@/lib/api/po-budget/api";
 import type { ApiResponse } from "@/types";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import {
+  buildBulkChildRowsFromPrlDetail,
+  buildSingleChildRowsFromPrlDetail,
+  buildSingleStoredDetailPayload,
+  getChildSupplierLookupUniq,
+  getStoredChildren,
+  isChildBudgetType,
+  type PoBudgetChildRow,
+  type PoBudgetChildRowSupplier,
+} from "../../../components/po-budget/poBudgetChildAdapters";
 import {
   useListSuppliersQuery,
   type SupplierRecord,
@@ -51,7 +63,6 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
-  CheckOutlined,
   CloseOutlined,
   FileExcelOutlined,
   PlusOutlined,
@@ -85,31 +96,14 @@ type BulkBudgetType = "adhoc" | "kanban";
 
 const PRL_LAZY_PAGE_SIZE = 100;
 
-type BulkSupplierLine = {
-  id: string;
-  supplier: string;
-  qty: number;
-  percentage?: number;
-};
+type BulkSupplierLine = PoBudgetChildRowSupplier;
 
-type BulkItemRow = {
-  key: string;
-  prlId: string;
-  prlItemId: number | null;
-  uniq: string;
-  productModel: string;
-  partName: string;
-  partNumber: string;
-  weightKg: number;
-  uom: string;
-  quantity: number;
-  existingRawMaterial: string;
-  suppliers: BulkSupplierLine[];
-};
+type BulkItemRow = PoBudgetChildRow;
 
 type BomChildDetailRow = {
   key: string;
   uniq: string;
+  childUniqCode?: string;
   partName: string;
   partNumber: string;
   quantityPerUniq: number;
@@ -136,6 +130,7 @@ type PoBudgetRow = {
   totalPo: number;
   apoPrl: number;
   period: string;
+  detailJson?: ApiPoBudgetRow["detailJson"];
   status: "approved" | "pending";
   approval: "Approved" | "Pending";
 };
@@ -179,35 +174,6 @@ type AddFormState = {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
-}
-
-function getBomNodeString(
-  node: Record<string, unknown>,
-  keys: string[],
-) {
-  for (const key of keys) {
-    const value = node[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return String(value);
-    }
-  }
-  return "";
-}
-
-function getBomNodeNumber(
-  node: Record<string, unknown>,
-  keys: string[],
-) {
-  for (const key of keys) {
-    const value = node[key];
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    if (typeof value === "string" && value.trim()) {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-  }
-  return 0;
 }
 
 function getApiType(tab: BudgetTabId): PoBudgetType {
@@ -393,68 +359,6 @@ export default function PoBudgetPage() {
     () => buildBomUniqIndex(bomTreeNodes),
     [bomTreeNodes],
   );
-  const bomChildrenByUniq = useMemo(() => {
-    const result: Record<string, BomChildDetailRow[]> = {};
-    const norm = (s: unknown) => String(s ?? "").trim().toLowerCase();
-
-    const collectChildren = (nodes: unknown[], level: number) => {
-      const rows: BomChildDetailRow[] = [];
-
-      nodes.forEach((node, index) => {
-        if (!isRecord(node)) return;
-
-        const uniq = getBomNodeString(node, ["uniq", "uniq_code"]);
-        const childRows = Array.isArray(node.children)
-          ? collectChildren(node.children, level + 1)
-          : [];
-
-        if (uniq) {
-          rows.push({
-            key: `${uniq}-${level}-${index}`,
-            uniq,
-            partName: getBomNodeString(node, ["part_name"]) || "-",
-            partNumber: getBomNodeString(node, ["part_number"]) || "-",
-            quantityPerUniq: getBomNodeNumber(node, [
-              "qpu",
-              "quantity",
-              "qty_per_uniq",
-            ]),
-            uom:
-              getBomNodeString(node, ["uom", "unit_measurement", "unit"]) ||
-              "-",
-            weightKg: getBomNodeNumber(node, [
-              "stock_weight_kg",
-              "weight_kg",
-              "weightKg",
-              "weight",
-            ]),
-            level,
-          });
-        }
-
-        rows.push(...childRows);
-      });
-
-      return rows;
-    };
-
-    const visit = (node: unknown) => {
-      if (!isRecord(node)) return;
-
-      const uniq = getBomNodeString(node, ["uniq", "uniq_code"]);
-      if (uniq && Array.isArray(node.children) && node.children.length > 0) {
-        result[norm(uniq)] = collectChildren(node.children, 1);
-      }
-
-      if (Array.isArray(node.children)) {
-        node.children.forEach(visit);
-      }
-    };
-
-    const source = bomTreeNodes;
-    source.forEach(visit);
-    return result;
-  }, [bomTreeNodes]);
 
   const [activeTab, setActiveTab] = useState<BudgetTabId>("raw");
   const [paginationByTab, setPaginationByTab] = useState<TabPaginationState>({
@@ -612,6 +516,7 @@ export default function PoBudgetPage() {
 
   const [addEntry] = useAddPoBudgetEntryMutation();
   const [addBulk] = useAddPoBudgetBulkMutation();
+  const [loadPoBudgetPrlDetail] = useLazyGetPoBudgetPrlDetailQuery();
   const [updateEntry] = useUpdatePoBudgetEntryMutation();
 
   const [addOpen, setAddOpen] = useState(false);
@@ -624,8 +529,11 @@ export default function PoBudgetPage() {
   const [bulkPeriod, setBulkPeriod] = useState<string | undefined>(undefined);
   const [bulkPo1Pct, setBulkPo1Pct] = useState<number>(60);
   const [bulkPo2Pct, setBulkPo2Pct] = useState<number>(40);
+  const [selectedSinglePrlId, setSelectedSinglePrlId] = useState<string | undefined>(undefined);
+  const [singleChildRows, setSingleChildRows] = useState<BulkItemRow[]>([]);
+  const [bulkPrlDetailCache, setBulkPrlDetailCache] = useState<Record<string, PoBudgetPrlDetail>>({});
   const [expandedBudgetRowKeys, setExpandedBudgetRowKeys] = useState<string[]>([]);
-  const [expandedBulkRowKeys, setExpandedBulkRowKeys] = useState<string[]>([]);
+  const [, setExpandedBulkRowKeys] = useState<string[]>([]);
 
   const { data: customers = [] } = useListCustomersQuery(undefined, {
     skip: !useApi,
@@ -1370,6 +1278,76 @@ export default function PoBudgetPage() {
     );
   }, [approvedPrls, bulkPrlIds]);
 
+  useEffect(() => {
+    if (!useApi || !selectedSinglePrlId || !isChildBudgetType(getApiType(activeTab))) {
+      setSingleChildRows([]);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await loadPoBudgetPrlDetail(
+          { id: selectedSinglePrlId, budgetType: getApiType(activeTab) },
+          true,
+        ).unwrap();
+        if (cancelled) return;
+        setSingleChildRows(buildSingleChildRowsFromPrlDetail(result.data));
+      } catch (error) {
+        if (cancelled) return;
+        setSingleChildRows([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, loadPoBudgetPrlDetail, selectedSinglePrlId]);
+
+  useEffect(() => {
+    if (!useApi || !bulkOpen || !isChildBudgetType(getApiType(activeTab)) || bulkPrlIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const prlIds = Array.from(
+      new Set(
+        bulkPrlIds
+          .map((value) => parsePrlSelection(String(value))?.prlId ?? "")
+          .filter(Boolean),
+      ),
+    );
+
+    (async () => {
+      for (const prlId of prlIds) {
+        if (cancelled || bulkPrlDetailCache[prlId]) continue;
+        try {
+          const result = await loadPoBudgetPrlDetail(
+            { id: prlId, budgetType: getApiType(activeTab) },
+            true,
+          ).unwrap();
+          if (cancelled) return;
+          setBulkPrlDetailCache((prev) => ({
+            ...prev,
+            [prlId]: result.data,
+          }));
+        } catch (error) {
+          if (cancelled) return;
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    bulkOpen,
+    bulkPrlDetailCache,
+    bulkPrlIds,
+    loadPoBudgetPrlDetail,
+  ]);
+
   const buildAutoSuppliers = (
     uniqCode: string,
     totalQty: number,
@@ -1404,6 +1382,9 @@ export default function PoBudgetPage() {
     if (selectedValues.length === 0) return [];
 
     const rows: BulkItemRow[] = [];
+    const activeBudgetType = getApiType(activeTab);
+    const childBudget = isChildBudgetType(activeBudgetType);
+    const usedChildPrlIds = new Set<string>();
 
     for (const selectedValue of selectedValues) {
       // support selecting a customer PO via `po:<id>` value
@@ -1423,6 +1404,7 @@ export default function PoBudgetPage() {
               prlId: `po:${poId}`,
               prlItemId: null,
               uniq: uniqCode,
+              childUniqCode: uniqCode,
               productModel: String(
                 it.product_model ??
                   bomIndex.assemblyCodeByUniq[uniqCode] ??
@@ -1447,7 +1429,23 @@ export default function PoBudgetPage() {
         continue;
       }
 
-      const parsed = parsePrlSelection(selectedValue);
+      const parsed = parsePrlSelection(String(selectedValue));
+      if (childBudget && parsed?.prlId) {
+        if (usedChildPrlIds.has(parsed.prlId)) continue;
+        usedChildPrlIds.add(parsed.prlId);
+        const detail = bulkPrlDetailCache[parsed.prlId];
+        if (!detail) continue;
+        const childRows = buildBulkChildRowsFromPrlDetail(detail).map((row) => ({
+          ...row,
+          suppliers: buildAutoSuppliers(
+            getChildSupplierLookupUniq(row),
+            Number(row.quantity || 0),
+          ),
+        }));
+        rows.push(...childRows);
+        continue;
+      }
+
       const matchedRows = parsed
         ? approvedPrls.filter((item) => {
             const itemPrlId = String(item.prl_id ?? item.id ?? "");
@@ -1468,20 +1466,20 @@ export default function PoBudgetPage() {
           const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ??
             [])[0];
           const prlRowId = getPrlRowId(item as Record<string, unknown>);
-              if (prlRowId == null) {
-                try {
-                  // eslint-disable-next-line no-console
-                  console.debug("po-budget: unresolved PRL row_id", {
-                    uniqCode,
-                    prlSnippet: {
-                      prl_id: (item as any).prl_id ?? (item as any).id,
-                      row_id: (item as any).row_id,
-                    },
-                  });
-                } catch (e) {
-                  /* ignore */
-                }
-              }
+          if (prlRowId == null) {
+            try {
+              // eslint-disable-next-line no-console
+              console.debug("po-budget: unresolved PRL row_id", {
+                uniqCode,
+                prlSnippet: {
+                  prl_id: (item as any).prl_id ?? (item as any).id,
+                  row_id: (item as any).row_id,
+                },
+              });
+            } catch (e) {
+              /* ignore */
+            }
+          }
 
           return {
             key: String(
@@ -1490,6 +1488,7 @@ export default function PoBudgetPage() {
             prlId: String(item.prl_id ?? item.id ?? ""),
             prlItemId: prlRowId,
             uniq: uniqCode,
+            childUniqCode: uniqCode,
             productModel: String(
               item.product_model ??
                 bomIndex.assemblyCodeByUniq[uniqCode] ??
@@ -1516,11 +1515,25 @@ export default function PoBudgetPage() {
     return Array.from(deduped.values());
   };
 
-  const hasBomChildren = (uniqCode: string) =>
-    (bomChildrenByUniq[String(uniqCode ?? "").trim().toLowerCase()]?.length ?? 0) > 0;
+  const mapStoredChildrenToRows = (
+    detailJson: PoBudgetRow["detailJson"] | undefined,
+  ): BomChildDetailRow[] =>
+    getStoredChildren(detailJson).map((child, index) => ({
+      key: `${String(child.uniq_code ?? child.uniq ?? "child")}-${index}`,
+      uniq: String(child.uniq ?? child.material_spec?.material_grade ?? "").trim(),
+      childUniqCode: String(child.uniq_code ?? "").trim(),
+      partName: String(child.part_name ?? "-"),
+      partNumber: String(child.part_number ?? "-"),
+      quantityPerUniq: Number(child.quantity ?? child.qty_per_uniq ?? 0),
+      uom: String(child.uom ?? ""),
+      weightKg: Number(child.weight_kg ?? child.material_spec?.weight_kg ?? 0),
+      level: 1,
+    }));
 
-  const getAutoExpandedBulkKeys = (items: BulkItemRow[]) =>
-    items.filter((item) => hasBomChildren(item.uniq)).map((item) => item.key);
+  const hasStoredChildren = (row: PoBudgetRow) =>
+    mapStoredChildrenToRows(row.detailJson).length > 0;
+
+  const getAutoExpandedBulkKeys = (_items: BulkItemRow[]) => [];
 
   const initialBulkItems = useMemo<BulkItemRow[]>(
     () => buildBulkItemsFromPrl(prlOptions[0]?.value),
@@ -1602,7 +1615,13 @@ export default function PoBudgetPage() {
 
   useEffect(() => {
     syncBulkItemsFromPrl(bulkPrlIds);
-  }, [bulkPrlIds, approvedPrls.length, defaultUom]);
+  }, [
+    activeTab,
+    bulkPrlIds,
+    approvedPrls.length,
+    defaultUom,
+    bulkPrlDetailCache,
+  ]);
 
   useEffect(() => {
     const selectedPeriod = getPrlPeriodValue(selectedBulkPrl);
@@ -1628,7 +1647,11 @@ export default function PoBudgetPage() {
   const addSupplierModalOptions = useMemo(() => {
     if (!activeAddSupplierItem) return dedupeSupplierOptions(supplierOptions);
 
-    const uniq = String(activeAddSupplierItem.uniq ?? "").trim();
+    const uniq = String(
+      isChildBudgetType(getApiType(activeTab))
+        ? getChildSupplierLookupUniq(activeAddSupplierItem)
+        : activeAddSupplierItem.uniq ?? "",
+    ).trim();
     let related = supplierItemsByUniq.get(uniq) ?? [];
     if (!related.length) {
       related = supplierItems.filter(
@@ -1640,17 +1663,14 @@ export default function PoBudgetPage() {
         .map((r) => String(r.supplier_name ?? r.supplier ?? "").trim())
         .filter(Boolean),
     );
-    const existingSuppliers = new Set(
-      activeAddSupplierItem.suppliers.map((s) => s.supplier),
-    );
-
     const baseOptions = supplierOptions.filter((opt) =>
       relatedNames.has(String(opt.label ?? opt.value ?? "").trim()),
     );
     const finalBase = baseOptions.length ? baseOptions : supplierOptions;
-    return dedupeSupplierOptions(
-      finalBase.filter((option) => !existingSuppliers.has(option.value)),
-    );
+    // NOTE: we intentionally do NOT filter out suppliers already assigned to
+    // this item here.  confirmAddSupplier() handles the duplicate check with a
+    // clearer warning instead of silently hiding options.
+    return dedupeSupplierOptions(finalBase);
   }, [activeAddSupplierItem, supplierOptions]);
 
   const addSupplierBudget = activeAddSupplierItem?.quantity ?? 0;
@@ -1671,6 +1691,7 @@ export default function PoBudgetPage() {
     setBulkPrlSearch("");
     setBulkPrlPage(1);
     setPrlCache([]);
+    setBulkPrlDetailCache({});
     setBulkItems([]);
     setExpandedBulkRowKeys([]);
     setBulkPeriod(periodOptions[0]?.value);
@@ -1679,6 +1700,12 @@ export default function PoBudgetPage() {
     setBulkPo1Pct(60);
     setBulkPo2Pct(40);
     setBulkOpen(true);
+  };
+
+  const openAddBudget = () => {
+    setSelectedSinglePrlId(undefined);
+    setSingleChildRows([]);
+    setAddOpen(true);
   };
 
   const toggleExpandedRowKey = (
@@ -1695,23 +1722,18 @@ export default function PoBudgetPage() {
   const bomChildColumns = useMemo<ColumnsType<BomChildDetailRow>>(
     () => [
       {
-        title: "Level",
-        dataIndex: "level",
-        key: "level",
-        width: 72,
-        align: "center",
-        render: (value: number) => (
-          <span className="text-xs text-gray-500">L{value}</span>
-        ),
-      },
-      {
-        title: "UNIQ Child",
+        title: "Material Grade",
         dataIndex: "uniq",
         key: "uniq",
-        width: 140,
+        width: 160,
         render: (value: string, record) => (
-          <div style={{ paddingLeft: `${Math.max(record.level - 1, 0) * 16}px` }}>
-            <span className="text-sm font-medium text-gray-800">{value}</span>
+          <div>
+            <Tag color="blue" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+              {value || "-"}
+            </Tag>
+            {record.childUniqCode ? (
+              <div className="text-[11px] text-gray-500 mt-1">{record.childUniqCode}</div>
+            ) : null}
           </div>
         ),
       },
@@ -1733,7 +1755,7 @@ export default function PoBudgetPage() {
         ),
       },
       {
-        title: "Qty / UNIQ",
+        title: "Quantity",
         dataIndex: "quantityPerUniq",
         key: "quantityPerUniq",
         width: 110,
@@ -1748,7 +1770,7 @@ export default function PoBudgetPage() {
         key: "uom",
         width: 100,
         render: (value: string) => (
-          <span className="text-sm text-gray-700">{value}</span>
+          <span className="text-sm text-gray-700">{value || "-"}</span>
         ),
       },
       {
@@ -1765,12 +1787,8 @@ export default function PoBudgetPage() {
     [],
   );
 
-  const renderBomChildren = (uniqCode: string) => {
-    const key = String(uniqCode ?? "").trim().toLowerCase();
-    const childRows = bomChildrenByUniq[key] ?? [];
+  const renderStoredChildren = (childRows: BomChildDetailRow[]) => {
     if (childRows.length === 0) return null;
-    // Card-like layout similar to screenshot: header with uniq badge, model, part number,
-    // and a right-aligned Total Qty box. Below it, render the child table.
     const totalQty = childRows.reduce(
       (sum, r) => sum + Number(r.quantityPerUniq || 0),
       0,
@@ -1779,15 +1797,12 @@ export default function PoBudgetPage() {
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
         <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-3">
-            <div className="px-3 py-1 rounded-full bg-blue-600 text-white text-sm font-semibold">{uniqCode}</div>
-            <div>
-              <div className="text-sm font-semibold text-gray-800">
-                {bomIndex.assemblyCodeByUniq[uniqCode] || "-"}
-              </div>
-              <div className="text-xs text-gray-500">
-                {bomIndex.partNameByUniq[uniqCode] || bomIndex.partNumberByUniq[uniqCode] || "-"}
-              </div>
+          <div>
+            <div className="text-sm font-semibold text-gray-800">
+              Child Material Detail
+            </div>
+            <div className="text-xs text-gray-500">
+              Snapshot stored from PRL / PO Budget detail JSON
             </div>
           </div>
 
@@ -2052,6 +2067,18 @@ export default function PoBudgetPage() {
       po1_pct: Number(addForm.po1Pct || 0),
       po2_pct: Number(addForm.po2Pct || 0),
       prl: Number(derivedPrlAmount || addForm.prl || 0),
+      detail_jsonb: isChildBudgetType(getApiType(activeTab))
+        ? buildSingleStoredDetailPayload({
+            prlId: selectedSinglePrlId,
+            parentUniqCode: addForm.uniq,
+            parentPartName: addForm.partName,
+            parentPartNumber: addForm.partNumber,
+            purchaseRequest: Number(addForm.purchaseRequest || 0),
+            supplierId: effectiveSupplierId,
+            supplierName: addForm.supplier,
+            rows: singleChildRows,
+          })
+        : undefined,
     };
 
     try {
@@ -2060,6 +2087,8 @@ export default function PoBudgetPage() {
       }
       message.success("Budget entry saved");
       setAddOpen(false);
+      setSelectedSinglePrlId(undefined);
+      setSingleChildRows([]);
       setAddForm({
         customer: "",
         customerId: null,
@@ -2145,11 +2174,19 @@ export default function PoBudgetPage() {
       items: bulkItems.map((item) => ({
         prl_item_id: Number(item.prlItemId),
         uniq_code: item.uniq,
+        child_uniq_code: item.childUniqCode,
+        product_model: item.productModel,
+        model: item.productModel,
+        part_name: item.partName,
+        part_number: item.partNumber,
+        qty_per_uniq: Number(item.qtyPerUniq || 0),
         sales_plan: Number(item.quantity || 0),
         po1_pct: Number(bulkPo1Pct || 0),
         po2_pct: Number(bulkPo2Pct || 0),
         weight_kg: Number(item.weightKg || 0),
         uom: item.uom,
+        existing_raw_material: item.existingRawMaterial,
+        material_spec: item.materialSpec,
         suppliers: item.suppliers.map((supplier) => {
           const option = supplierOptions.find(
             (opt) => opt.value === supplier.supplier,
@@ -2170,6 +2207,7 @@ export default function PoBudgetPage() {
     };
 
     try {
+      let created = bulkItems.length > 0 ? 1 : 0;
       if (useApi) {
         const token = getCookiesFromBrowser("Authorization");
         if (!token) {
@@ -2179,7 +2217,7 @@ export default function PoBudgetPage() {
           return;
         }
         const result = await addBulk({ type: getApiType(activeTab), body }).unwrap();
-        const created = Number(result.data?.created ?? 0);
+        created = Number(result.data?.created ?? 0);
         const errors = Array.isArray(result.data?.errors) ? result.data.errors.filter(Boolean) : [];
 
         if (errors.length > 0) {
@@ -2193,7 +2231,7 @@ export default function PoBudgetPage() {
         }
       }
       message.success(
-        `Bulk ${getBudgetTypeLabel(activeTab)} PO Budget with ${bulkItems.length} UNIQ saved successfully`,
+        `Bulk ${getBudgetTypeLabel(activeTab)} PO Budget saved successfully (${created} entr${created === 1 ? "y" : "ies"} created)`,
       );
       setBulkOpen(false);
     } catch (error) {
@@ -2268,10 +2306,8 @@ export default function PoBudgetPage() {
         dataIndex: "uniq",
         key: "uniq",
         render: (value: string, record) => {
-          const childCount =
-            bomChildrenByUniq[String(value ?? "").trim().toLowerCase()]
-              ?.length ?? 0;
-          if (childCount === 0) {
+          const childCount = mapStoredChildrenToRows(record.detailJson).length;
+          if (activeTab === "subcon" || childCount === 0) {
             return <span className="text-sm text-gray-700">{value}</span>;
           }
 
@@ -2478,7 +2514,7 @@ export default function PoBudgetPage() {
         ),
       },
     ],
-    [bomChildrenByUniq, expandedBudgetRowKeys, openDetail, openEdit],
+    [activeTab, expandedBudgetRowKeys, openDetail, openEdit],
   );
 
   const tabOptions = useMemo(
@@ -2497,30 +2533,21 @@ export default function PoBudgetPage() {
         title: "UNIQ",
         dataIndex: "uniq",
         key: "uniq",
-        width: 140,
-        render: (value: string, record) => {
-          const childCount =
-            bomChildrenByUniq[String(value ?? "").trim().toLowerCase()]
-              ?.length ?? 0;
-          if (childCount === 0) {
-            return <span className="text-sm text-gray-700">{value}</span>;
-          }
-
-          const expanded = expandedBulkRowKeys.includes(record.key);
-          return (
-            <button
-              type="button"
-              className="text-left rounded-lg px-2 py-1 -mx-2 transition-colors hover:bg-blue-50"
-              onClick={() => toggleExpandedRowKey(record.key, setExpandedBulkRowKeys)}>
-              <div className="text-sm font-semibold text-blue-700 hover:text-blue-800">
-                {value}
-              </div>
-              <div className="text-[11px] text-blue-500">
-                {expanded ? "Hide" : "Click to show"} {childCount} child part{childCount > 1 ? "s" : ""}
-              </div>
-            </button>
-          );
-        },
+        width: 160,
+        render: (value: string, record) => (
+          <div>
+            {isChildBudgetType(getApiType(activeTab)) ? (
+              <Tag color="blue" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+                {value || "-"}
+              </Tag>
+            ) : (
+              <span className="text-sm text-gray-700">{value}</span>
+            )}
+            {isChildBudgetType(getApiType(activeTab)) && record.childUniqCode ? (
+              <div className="text-[11px] text-gray-500 mt-1">{record.childUniqCode}</div>
+            ) : null}
+          </div>
+        ),
       },
       {
         title: "Part Name",
@@ -2609,7 +2636,10 @@ export default function PoBudgetPage() {
                   <Select
                     value={s.supplier}
                     onChange={(v) => {
-                      const opts = supplierOptionsByUniq.get(r.uniq) ?? supplierOptions;
+                      const supplierLookupUniq = isChildBudgetType(getApiType(activeTab))
+                        ? getChildSupplierLookupUniq(r)
+                        : r.uniq;
+                      const opts = supplierOptionsByUniq.get(supplierLookupUniq) ?? supplierOptions;
                       const opt = opts.find((o) => o.value === v);
                       const pct = opt?.percentage;
                       const autoQty =
@@ -2623,7 +2653,11 @@ export default function PoBudgetPage() {
                       });
                     }}
                     options={dedupeSupplierOptions(
-                      supplierOptionsByUniq.get(r.uniq) ?? supplierOptions,
+                      supplierOptionsByUniq.get(
+                        isChildBudgetType(getApiType(activeTab))
+                          ? getChildSupplierLookupUniq(r)
+                          : r.uniq,
+                      ) ?? supplierOptions,
                     )
                       .filter(
                         (opt) =>
@@ -2696,7 +2730,7 @@ export default function PoBudgetPage() {
         ),
       },
     ],
-    [bomChildrenByUniq, expandedBulkRowKeys, supplierOptions, uomOptions],
+    [activeTab, supplierOptions, supplierOptionsByUniq, uomOptions, bulkItems],
   );
 
   return (
@@ -2725,7 +2759,7 @@ export default function PoBudgetPage() {
               type="primary"
               className="!rounded-lg"
               icon={<PlusOutlined />}
-              onClick={() => setAddOpen(true)}>
+              onClick={openAddBudget}>
               Add Budget Entry
             </Button>
           </div>
@@ -2792,8 +2826,10 @@ export default function PoBudgetPage() {
               expandedRowKeys: expandedBudgetRowKeys,
               onExpandedRowsChange: (keys) =>
                 setExpandedBudgetRowKeys(keys.map((key) => String(key))),
-              expandedRowRender: (record) => renderBomChildren(record.uniq),
-              rowExpandable: (record) => hasBomChildren(record.uniq),
+              expandedRowRender: (record) =>
+                renderStoredChildren(mapStoredChildrenToRows(record.detailJson)),
+              rowExpandable: (record) =>
+                activeTab !== "subcon" && hasStoredChildren(record),
               showExpandColumn: false,
             }}
             pagination={{
@@ -2887,6 +2923,8 @@ export default function PoBudgetPage() {
                   );
                 }
                 if (!matched) {
+                  setSelectedSinglePrlId(undefined);
+                  setSingleChildRows([]);
                   setAddForm((p) => ({ ...p, prl: "" }));
                   return;
                 }
@@ -2901,6 +2939,12 @@ export default function PoBudgetPage() {
                       String(it.uniq_code ?? it.item_uniq_code ?? "").trim() ===
                       uniqCode,
                   ) as any;
+                }
+                if (activeTab !== "subcon" && parsed?.prlId) {
+                  setSelectedSinglePrlId(parsed.prlId);
+                } else {
+                  setSelectedSinglePrlId(undefined);
+                  setSingleChildRows([]);
                 }
                 setAddForm((prev) => ({
                   ...prev,
@@ -2924,6 +2968,20 @@ export default function PoBudgetPage() {
                 }));
               }}
             />
+            {activeTab !== "subcon" && singleChildRows.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {singleChildRows.map((child) => (
+                  <Tag
+                    key={child.key}
+                    color="blue"
+                    className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+                  >
+                    {child.uniq || "-"}
+                    {child.childUniqCode ? ` • ${child.childUniqCode}` : ""}
+                  </Tag>
+                ))}
+              </div>
+            ) : null}
           </div>
           <div>
             <div className="text-xs text-gray-600 mb-1">Customer Name</div>
@@ -3294,6 +3352,7 @@ export default function PoBudgetPage() {
               format={(value) => (value ? value.format("MMMM YYYY") : "")}
             />
           </div>
+
         </div>
       </Modal>
 
@@ -3411,14 +3470,6 @@ export default function PoBudgetPage() {
                 dataSource={bulkItems}
                 columns={bulkColumns}
                 rowKey="key"
-                expandable={{
-                  expandedRowKeys: expandedBulkRowKeys,
-                  onExpandedRowsChange: (keys) =>
-                    setExpandedBulkRowKeys(keys.map((key) => String(key))),
-                  expandedRowRender: (record) => renderBomChildren(record.uniq),
-                  rowExpandable: (record) => hasBomChildren(record.uniq),
-                  showExpandColumn: false,
-                }}
                 pagination={false}
                 size="small"
                 scroll={{ x: 1200 }}
@@ -4032,7 +4083,9 @@ export default function PoBudgetPage() {
             />
             {activeAddSupplierItem ? (
               <div className="text-[11px] text-gray-500 mt-1">
-                Showing suppliers for UNIQ {activeAddSupplierItem.uniq}
+                Showing suppliers for UNIQ {isChildBudgetType(getApiType(activeTab))
+                  ? getChildSupplierLookupUniq(activeAddSupplierItem)
+                  : activeAddSupplierItem.uniq}
               </div>
             ) : null}
           </div>
