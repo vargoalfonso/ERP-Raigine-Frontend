@@ -1345,12 +1345,12 @@ function MasterSupplierCreatePageContent() {
                           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-12">
                             <Form.Item
                               className="md:col-span-2 xl:col-span-6"
-                              label="Material Code"
+                              label="UNIQ Code"
                               name="uniq_code"
                               rules={[
                                 {
                                   required: true,
-                                  message: "Please select a Material Code",
+                                  message: "Please select a UNIQ Code",
                                 },
                               ]}>
                               <Select
@@ -1364,7 +1364,10 @@ function MasterSupplierCreatePageContent() {
                                   ) => ({
                                     ...option,
                                     label: [
-                                      option.materialCode || "tidak ada",
+                                      option.value,
+                                      option.materialCode
+                                        ? `MG: ${option.materialCode}`
+                                        : "",
                                       option.partName,
                                       option.productModel,
                                     ]
@@ -1575,7 +1578,7 @@ function MasterSupplierCreatePageContent() {
                               label={
                                 section === "subcon"
                                   ? "Uniq / Sebanggo"
-                                  : "Material Code"
+                                  : "UNIQ Code"
                               }
                               name="uniq_code"
                               rules={[
@@ -1584,7 +1587,7 @@ function MasterSupplierCreatePageContent() {
                                   message:
                                     section === "subcon"
                                       ? "Please select a Sebango Code"
-                                      : "Please select a Material Code",
+                                      : "Please select a UNIQ Code",
                                 },
                               ]}>
                               <Select
@@ -1607,7 +1610,10 @@ function MasterSupplierCreatePageContent() {
                                             .filter(Boolean)
                                             .join(" — ")
                                         : [
-                                            option.materialCode || "tidak ada",
+                                            option.value,
+                                            option.materialCode
+                                              ? `MG: ${option.materialCode}`
+                                              : "",
                                             option.partName,
                                             option.productModel,
                                           ]
