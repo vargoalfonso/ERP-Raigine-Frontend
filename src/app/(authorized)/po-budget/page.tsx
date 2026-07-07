@@ -290,6 +290,12 @@ function normalizeCustomerName(value: unknown) {
     .toLowerCase();
 }
 
+function normalizeLookupValue(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+}
+
 function isIntegerId(value: string) {
   return /^\d+$/.test(value.trim());
 }
@@ -617,6 +623,8 @@ export default function PoBudgetPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkPrlIds, setBulkPrlIds] = useState<string[]>([]);
+  const [bulkPoIds, setBulkPoIds] = useState<string[]>([]);
+  const [bulkSource, setBulkSource] = useState<"prl" | "po">("prl");
   const [bulkPrlSearch, setBulkPrlSearch] = useState("");
   const [bulkPrlPage, setBulkPrlPage] = useState(1);
   const [prlCache, setPrlCache] = useState<PrlRecord[]>([]);
@@ -1013,13 +1021,18 @@ export default function PoBudgetPage() {
 
   const addSupplierOptions = useMemo<SupplierOption[]>(() => {
     const selectedUniq = String(addForm.uniq ?? "").trim();
-    if (!selectedUniq) return supplierOptions;
+    const selectedSebango = String(addForm.partNumber ?? "").trim();
+    if (!selectedUniq && !selectedSebango) return supplierOptions;
 
-    // supplierItemsByUniq is declared later in the file; use raw supplierItems here to avoid TDZ
-    const related = supplierItems.filter(
-      (it) =>
-        String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === selectedUniq,
-    );
+    const related = supplierItems.filter((it) => {
+      const uniqMatch =
+        normalizeLookupValue(it.uniq_code ?? it.item_uniq_code) ===
+        normalizeLookupValue(selectedUniq);
+      const sebangoMatch =
+        normalizeLookupValue(it.sebango_code) ===
+        normalizeLookupValue(selectedSebango);
+      return uniqMatch || sebangoMatch;
+    });
     const relatedNames = new Set(
       related
         .map((r) => String(r.supplier_name ?? r.supplier ?? "").trim())
@@ -1033,7 +1046,7 @@ export default function PoBudgetPage() {
     return dedupeSupplierOptions(
       filtered.length > 0 ? filtered : supplierOptions,
     );
-  }, [addForm.uniq, supplierOptions]);
+  }, [addForm.partNumber, addForm.uniq, supplierItems, supplierOptions]);
 
   const approvedPrls = useMemo(
     () =>
@@ -1070,6 +1083,66 @@ export default function PoBudgetPage() {
 
     return grouped;
   }, [activeTab, supplierItems]);
+
+  const supplierItemsByLookupKey = useMemo(() => {
+    const grouped = new Map<string, SupplierItemRecord[]>();
+
+    supplierItems.forEach((item) => {
+      const status = String(item.status ?? "active").toLowerCase();
+      const itemTab = normalizeSupplierItemType(
+        item.type ?? item.material_type,
+      );
+      if ((status && status !== "active") || (itemTab && itemTab !== activeTab)) {
+        return;
+      }
+
+      const lookupKeys = [
+        normalizeLookupValue(item.uniq_code),
+        normalizeLookupValue(item.sebango_code),
+      ].filter(Boolean);
+
+      lookupKeys.forEach((lookupKey) => {
+        const current = grouped.get(lookupKey) ?? [];
+        current.push(item);
+        grouped.set(lookupKey, current);
+      });
+    });
+
+    return grouped;
+  }, [activeTab, supplierItems]);
+
+  const findSupplierItemsForProduct = (
+    uniqCode?: string,
+    sebangoCode?: string,
+  ) => {
+    const matches = [
+      ...(supplierItemsByLookupKey.get(normalizeLookupValue(uniqCode)) ?? []),
+      ...(supplierItemsByLookupKey.get(normalizeLookupValue(sebangoCode)) ?? []),
+    ];
+
+    const deduped = new Map<string, SupplierItemRecord>();
+    matches.forEach((item, index) => {
+      const key = String(
+        item.id ?? item.supplier_item_uuid ?? item.row_id ?? `${uniqCode ?? ""}-${sebangoCode ?? ""}-${index}`,
+      );
+      if (!deduped.has(key)) deduped.set(key, item);
+    });
+
+    return Array.from(deduped.values()).sort(
+      (left, right) => Number(left.row_id ?? 0) - Number(right.row_id ?? 0),
+    );
+  };
+
+  const getBomDefaultsForUniq = (uniqCode?: string) => {
+    const uniq = String(uniqCode ?? "").trim();
+    return {
+      uom: uniq ? String(bomIndex.uomByUniq[uniq] ?? "") : "",
+      weightKg:
+        uniq && bomIndex.weightKgByUniq[uniq] != null
+          ? String(bomIndex.weightKgByUniq[uniq])
+          : "",
+    };
+  };
 
   const supplierOptionsByUniq = useMemo(() => {
     const map = new Map<string, SupplierOption[]>();
@@ -1416,8 +1489,14 @@ export default function PoBudgetPage() {
         rows.push(
           ...(po.items as any[]).map((it: any, index: number) => {
             const uniqCode = String(it.uniq_code ?? it.item_uniq_code ?? it.item_uniq ?? "");
-            const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ??
-              [])[0];
+            const partNumber = String(
+              it.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "",
+            );
+            const supplierItemMatch = findSupplierItemsForProduct(
+              uniqCode,
+              partNumber,
+            )[0];
+            const bomDefaults = getBomDefaultsForUniq(uniqCode);
             return {
               key: `po-${poId}-${index}`,
               prlId: `po:${poId}`,
@@ -1434,8 +1513,12 @@ export default function PoBudgetPage() {
               partNumber: String(
                 it.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "-",
               ),
-              weightKg: Number(supplierItemMatch?.weight ?? 0),
-              uom: String(supplierItemMatch?.uom ?? defaultUom),
+              weightKg: Number(
+                bomDefaults.weightKg || supplierItemMatch?.weight || 0,
+              ),
+              uom: String(
+                bomDefaults.uom || supplierItemMatch?.uom || defaultUom,
+              ),
               quantity: Number(it.quantity ?? 0),
               existingRawMaterial: String(
                 supplierItemMatch?.description ?? "-",
@@ -1465,8 +1548,14 @@ export default function PoBudgetPage() {
       rows.push(
         ...matchedRows.map((item, index) => {
           const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "");
-          const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ??
-            [])[0];
+          const partNumber = String(
+            item.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "",
+          );
+          const supplierItemMatch = findSupplierItemsForProduct(
+            uniqCode,
+            partNumber,
+          )[0];
+          const bomDefaults = getBomDefaultsForUniq(uniqCode);
           const prlRowId = getPrlRowId(item as Record<string, unknown>);
               if (prlRowId == null) {
                 try {
@@ -1501,8 +1590,12 @@ export default function PoBudgetPage() {
             partNumber: String(
               item.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "-",
             ),
-            weightKg: Number(supplierItemMatch?.weight ?? 0),
-            uom: String(supplierItemMatch?.uom ?? defaultUom),
+            weightKg: Number(
+              bomDefaults.weightKg || supplierItemMatch?.weight || 0,
+            ),
+            uom: String(
+              bomDefaults.uom || supplierItemMatch?.uom || defaultUom,
+            ),
             quantity: Number(item.quantity ?? 0),
             existingRawMaterial: String(supplierItemMatch?.description ?? "-"),
             suppliers: buildAutoSuppliers(uniqCode, Number(item.quantity ?? 0)),
@@ -1675,6 +1768,7 @@ export default function PoBudgetPage() {
     setExpandedBulkRowKeys([]);
     setBulkPeriod(periodOptions[0]?.value);
     setBulkPrlIds([]);
+    setBulkPoIds([]);
     setBulkBudgetType("adhoc");
     setBulkPo1Pct(60);
     setBulkPo2Pct(40);
@@ -2838,7 +2932,7 @@ export default function PoBudgetPage() {
         title={
           <div>
             <div className="text-sm font-semibold text-gray-900">
-              Add New PO Budget Entry
+              Add New PR Budget Entry
             </div>
             <div className="text-xs text-gray-500 mt-1">{addSubtitle}</div>
           </div>
@@ -2893,15 +2987,14 @@ export default function PoBudgetPage() {
                 const uniqCode = String(
                   matched.uniq_code ?? matched.item_uniq_code ?? "",
                 ).trim();
-                let supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ??
-                  [])[0];
-                if (!supplierItemMatch) {
-                  supplierItemMatch = supplierItems.find(
-                    (it) =>
-                      String(it.uniq_code ?? it.item_uniq_code ?? "").trim() ===
-                      uniqCode,
-                  ) as any;
-                }
+                const partNumber = String(
+                  matched.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "",
+                );
+                const supplierItemMatch = findSupplierItemsForProduct(
+                  uniqCode,
+                  partNumber,
+                )[0];
+                const bomDefaults = getBomDefaultsForUniq(uniqCode);
                 setAddForm((prev) => ({
                   ...prev,
                   prl: raw,
@@ -2913,8 +3006,12 @@ export default function PoBudgetPage() {
                   partNumber: matched.part_number ?? "",
                   period: getPrlPeriodValue(matched) || "",
                   salesPlan: Number(matched.quantity ?? 0),
-                  uom: String(supplierItemMatch?.uom ?? ""),
-                  weightKg: supplierItemMatch?.weight == null ? "" : String(supplierItemMatch.weight),
+                  uom: bomDefaults.uom || String(supplierItemMatch?.uom ?? ""),
+                  weightKg:
+                    bomDefaults.weightKg ||
+                    (supplierItemMatch?.weight == null
+                      ? ""
+                      : String(supplierItemMatch.weight)),
                   supplier: String(supplierItemMatch?.supplier_name ?? ""),
                   supplierId: resolveSupplierRowId({
                     supplierUuid: supplierItemMatch?.supplier_uuid,
@@ -2949,37 +3046,46 @@ export default function PoBudgetPage() {
                   String(selected?.label ?? ""),
                   addForm.uniq,
                 );
-                  // determine uniq from matched PRL if available, otherwise use current addForm.uniq
-                  const resolvedUniq = String(matchedPrl ? (matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "") : (addForm.uniq ?? "")).trim();
-                  let supplierItemMatch = (supplierItemsByUniq.get(resolvedUniq) ?? [])[0];
-                  if (!supplierItemMatch) {
-                    supplierItemMatch = supplierItems.find((it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === resolvedUniq) as any;
-                  }
-                  setAddForm((prev) => ({
-                    ...prev,
-                    customerId: selectedCustomerId,
-                    customer: String(selected?.label ?? ""),
-                    // If we found a matched PRL, prefer its uniq and PRL-derived fields
-                    uniq: matchedPrl
-                      ? String(matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "")
-                      : prev.uniq,
-                    productModel: matchedPrl?.product_model ?? prev.productModel,
-                    partName: matchedPrl?.part_name ?? prev.partName,
-                    partNumber: matchedPrl?.part_number ?? prev.partNumber,
-                    period: getPrlPeriodValue(matchedPrl) || prev.period,
-                    salesPlan: Number(matchedPrl?.quantity ?? prev.salesPlan ?? 0),
-                    // Supplier info: prefer explicit supplierItemMatch when available, otherwise keep previous
-                    supplier: supplierItemMatch?.supplier_name ?? prev.supplier ?? "",
-                    supplierId:
-                      resolveSupplierRowId({
-                        supplierUuid: supplierItemMatch?.supplier_uuid,
-                        supplierCode: supplierItemMatch?.supplier_code,
-                        supplierName: supplierItemMatch?.supplier_name,
-                      }) ?? prev.supplierId,
-                    uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
-                    weightKg: supplierItemMatch?.weight == null ? prev.weightKg : String(supplierItemMatch.weight),
-                    description: supplierItemMatch?.description ?? prev.description,
-                  }));
+                const resolvedUniq = String(
+                  matchedPrl
+                    ? (matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "")
+                    : (addForm.uniq ?? ""),
+                ).trim();
+                const resolvedPartNumber = String(
+                  matchedPrl?.part_number ?? addForm.partNumber ?? "",
+                ).trim();
+                const supplierItemMatch = findSupplierItemsForProduct(
+                  resolvedUniq,
+                  resolvedPartNumber,
+                )[0];
+                const bomDefaults = getBomDefaultsForUniq(resolvedUniq);
+                setAddForm((prev) => ({
+                  ...prev,
+                  customerId: selectedCustomerId,
+                  customer: String(selected?.label ?? ""),
+                  uniq: matchedPrl
+                    ? String(matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "")
+                    : prev.uniq,
+                  productModel: matchedPrl?.product_model ?? prev.productModel,
+                  partName: matchedPrl?.part_name ?? prev.partName,
+                  partNumber: matchedPrl?.part_number ?? prev.partNumber,
+                  period: getPrlPeriodValue(matchedPrl) || prev.period,
+                  salesPlan: Number(matchedPrl?.quantity ?? prev.salesPlan ?? 0),
+                  supplier: String(supplierItemMatch?.supplier_name ?? prev.supplier ?? ""),
+                  supplierId:
+                    resolveSupplierRowId({
+                      supplierUuid: supplierItemMatch?.supplier_uuid,
+                      supplierCode: supplierItemMatch?.supplier_code,
+                      supplierName: supplierItemMatch?.supplier_name,
+                    }) ?? prev.supplierId,
+                  uom: bomDefaults.uom || String(supplierItemMatch?.uom ?? prev.uom ?? ""),
+                  weightKg:
+                    bomDefaults.weightKg ||
+                    (supplierItemMatch?.weight == null
+                      ? prev.weightKg
+                      : String(supplierItemMatch.weight)),
+                  description: supplierItemMatch?.description ?? prev.description,
+                }));
               }}
             />
           </div>
@@ -3019,27 +3125,6 @@ export default function PoBudgetPage() {
                       item.uniq_code ?? item.item_uniq_code ?? "",
                     ).trim() === uniqCode,
                 );
-                let supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ??
-                  [])[0];
-                const supplierItemMatchFromMap = supplierItemMatch;
-                if (!supplierItemMatch) {
-                  supplierItemMatch = supplierItems.find(
-                    (it) =>
-                      String(it.uniq_code ?? it.item_uniq_code ?? "").trim() ===
-                      uniqCode,
-                  ) as any;
-                }
-                // Debug logging to help trace missing mappings (remove after verification)
-                try {
-                  // eslint-disable-next-line no-console
-                  console.debug("po-budget: uniq lookup", {
-                    uniqCode,
-                    fromMap: supplierItemMatchFromMap,
-                    fromFallback: supplierItemMatch,
-                  });
-                } catch (e) {
-                  /* ignore */
-                }
                 const partName =
                   matchedPrl?.part_name ??
                   bomIndex.partNameByUniq[uniqCode] ??
@@ -3058,6 +3143,12 @@ export default function PoBudgetPage() {
                   "";
                 const customerId =
                   matchedPrl?.customer_id ?? matchedPrl?.customer?.code ?? null;
+                const relatedSupplierItems = findSupplierItemsForProduct(
+                  uniqCode,
+                  partNumber,
+                );
+                const supplierItemMatch = relatedSupplierItems[0];
+                const bomDefaults = getBomDefaultsForUniq(uniqCode);
 
                 setAddForm((prev) => ({
                   ...prev,
@@ -3067,19 +3158,18 @@ export default function PoBudgetPage() {
                   productModel,
                   partName,
                   partNumber,
-                  uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
+                  uom: bomDefaults.uom || String(supplierItemMatch?.uom ?? prev.uom ?? ""),
                   weightKg:
-                    supplierItemMatch?.weight == null
+                    bomDefaults.weightKg ||
+                    (supplierItemMatch?.weight == null
                       ? prev.weightKg
-                      : String(supplierItemMatch.weight),
+                      : String(supplierItemMatch.weight)),
                   salesPlan: Number(
                     matchedPrl?.quantity ?? prev.salesPlan ?? 0,
                   ),
                   description:
                     supplierItemMatch?.description ?? prev.description,
-                  supplier:
-                    String(supplierItemMatch?.supplier_name ?? "") ||
-                    prev.supplier,
+                  supplier: String(supplierItemMatch?.supplier_name ?? prev.supplier ?? ""),
                   supplierId:
                     resolveSupplierRowId({
                       supplierUuid: supplierItemMatch?.supplier_uuid,
@@ -3331,10 +3421,10 @@ export default function PoBudgetPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-gray-900">
-                  Step 1: Choose PRL
+                  Step 1: Choose Source
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
-                  Select Production Requirement List to generate PO Budget
+                  Select source for generating PO Budget (PRL or PO)
                 </div>
               </div>
               <Tag className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
@@ -3344,28 +3434,60 @@ export default function PoBudgetPage() {
 
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <div className="text-xs text-gray-600 mb-1">
-                  Select PRL UNIQ
-                </div>
+                <div className="text-xs text-gray-600 mb-1">Source</div>
                 <Select
-                  mode="multiple"
-                  allowClear
-                  showSearch
-                  value={bulkPrlIds}
-                  onChange={(values) => {
-                    setBulkPrlIds(values);
-                    syncBulkItemsFromPrl(values);
-                  }}
-                  onSearch={handleBulkPrlSearch}
-                  onPopupScroll={handleBulkPrlPopupScroll}
-                  options={prlOptions}
-                  className="w-full"
-                  placeholder="Search and select one or more PRL UNIQ"
-                  optionFilterProp="label"
-                  filterOption={false}
-                  loading={prlsFetching}
-                  maxTagCount="responsive"
+                  value={bulkSource}
+                  onChange={(v) => setBulkSource(v as "prl" | "po")}
+                  options={[{ label: "PRL", value: "prl" }, { label: "Customer PO", value: "po" }]}
+                  className="w-full mb-3"
                 />
+
+                {bulkSource === "prl" ? (
+                  <>
+                    <div className="text-xs text-gray-600 mb-1">Select PRL UNIQ</div>
+                    <Select
+                      mode="multiple"
+                      allowClear
+                      showSearch
+                      value={bulkPrlIds}
+                      onChange={(values) => {
+                        setBulkPrlIds(values);
+                        syncBulkItemsFromPrl(values);
+                      }}
+                      onSearch={handleBulkPrlSearch}
+                      onPopupScroll={handleBulkPrlPopupScroll}
+                      options={prlOptions}
+                      className="w-full"
+                      placeholder="Search and select one or more PRL UNIQ"
+                      optionFilterProp="label"
+                      filterOption={false}
+                      loading={prlsFetching}
+                      maxTagCount="responsive"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <div className="text-xs text-gray-600 mb-1">Select Customer PO</div>
+                    <Select
+                      mode="multiple"
+                      showSearch
+                      allowClear
+                      options={(customerPos || []).map((p) => ({ label: `${p.po_number} — ${p.customer?.customer_name ?? ""}`, value: String(p.id) }))}
+                      className="w-full"
+                      placeholder="Search and select one or more Customer PO"
+                      optionFilterProp="label"
+                      filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+                      value={bulkPoIds}
+                      onChange={(value) => {
+                        const values = value ? (Array.isArray(value) ? value : [value]) : [];
+                        setBulkPoIds(values as string[]);
+                        // call sync with po:<id> tokens so existing builder handles PO items
+                        const mapped = (values as string[]).map((v) => `po:${v}`);
+                        syncBulkItemsFromPrl(mapped);
+                      }}
+                    />
+                  </>
+                )}
               </div>
               <div>
                 <div className="text-xs text-gray-600 mb-1">
