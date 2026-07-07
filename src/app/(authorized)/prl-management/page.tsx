@@ -113,6 +113,11 @@ const getPrlStatusColor = (value: PrlStatus) => {
   return "default";
 };
 
+const canDeletePrlStatus = (value: PrlStatus) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "pending" || normalized === "rejected";
+};
+
 type ForecastRow = {
   key: string;
   prlId: string;
@@ -806,6 +811,7 @@ export default function PrlManagementPage() {
             size="small"
             type="text"
             danger
+            disabled={!canDeletePrlStatus(record.status)}
             icon={<DeleteOutlined />}
             onClick={() => {
               let confirmModal: any = null;

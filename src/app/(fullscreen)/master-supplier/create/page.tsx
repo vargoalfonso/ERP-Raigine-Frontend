@@ -61,6 +61,11 @@ type FormValues = {
   grade?: string;
   size?: string;
   uom?: string;
+  material_form?: string;
+  width_mm?: number;
+  diameter_mm?: number;
+  thickness_mm?: number;
+  length_mm?: number;
   quantity?: number;
   weight?: number;
   pcs_per_kanban?: number;
@@ -171,11 +176,15 @@ const sectionToTypeMaterial = (section: SupplierSection): string => {
   return "raw";
 };
 
-const sectionMatchesTypeMaterial = (section: SupplierSection, typeMaterial: string | undefined): boolean => {
+const sectionMatchesTypeMaterial = (
+  section: SupplierSection,
+  typeMaterial: string | undefined,
+): boolean => {
   if (!typeMaterial) return false;
   const t = typeMaterial.toLowerCase();
   if (section === "raw-material") return t === "raw" || t === "raw_material";
-  if (section === "indirect-raw-material") return t === "indirect" || t === "indirect_raw_material";
+  if (section === "indirect-raw-material")
+    return t === "indirect" || t === "indirect_raw_material";
   if (section === "subcon") return t === "subcon";
   return false;
 };
@@ -225,6 +234,22 @@ const formatCompositeSizeFromMaterialSpec = (
   return formatSizeFromMaterialSpec(materialSpec);
 };
 
+const formatCompositeSizeFromDimensions = (values: {
+  width_mm?: unknown;
+  diameter_mm?: unknown;
+  thickness_mm?: unknown;
+  length_mm?: unknown;
+}): string => {
+  const parts = [
+    pickText(values.diameter_mm) ? `Ø${pickText(values.diameter_mm)}` : "",
+    pickText(values.width_mm) ? `W${pickText(values.width_mm)}` : "",
+    pickText(values.thickness_mm) ? `T${pickText(values.thickness_mm)}` : "",
+    pickText(values.length_mm) ? `L${pickText(values.length_mm)}` : "",
+  ].filter(Boolean);
+
+  return parts.join(" x ");
+};
+
 const extractWeightFromMaterialSpec = (
   materialSpec?: Record<string, unknown>,
 ): number | undefined => {
@@ -263,22 +288,40 @@ const extractNullableNumber = (...values: unknown[]): number | null => {
   return value === undefined ? null : value;
 };
 
-const getSupplierItemPayloadJson = (record: unknown): SupplierItemPayloadJSON | undefined => {
+const getSupplierItemPayloadJson = (
+  record: unknown,
+): SupplierItemPayloadJSON | undefined => {
   if (!isRecord(record)) return undefined;
-  return (asRecord(record.payload_json) ?? asRecord(record.payloadJson)) as SupplierItemPayloadJSON | undefined;
+  return (asRecord(record.payload_json) ?? asRecord(record.payloadJson)) as
+    | SupplierItemPayloadJSON
+    | undefined;
 };
 
-const getSupplierItemPayloadDetail = (record: unknown): SupplierItemPayloadDetail | undefined => {
+const getSupplierItemPayloadDetail = (
+  record: unknown,
+): SupplierItemPayloadDetail | undefined => {
   const payloadJson = getSupplierItemPayloadJson(record);
   return (asRecord(payloadJson?.payload_detail) ??
-    (isRecord(record) ? asRecord(record.payload_detail) : undefined)) as SupplierItemPayloadDetail | undefined;
+    (isRecord(record) ? asRecord(record.payload_detail) : undefined)) as
+    | SupplierItemPayloadDetail
+    | undefined;
 };
 
-const getSupplierItemPayloadMaterialSpec = (record: unknown): SupplierItemPayloadMaterialSpecDetail | undefined => {
+const getSupplierItemPayloadMaterialSpec = (
+  record: unknown,
+): SupplierItemPayloadMaterialSpecDetail | undefined => {
   const payloadDetail = getSupplierItemPayloadDetail(record);
-  return (asRecord(payloadDetail?.material_spec_detail) as SupplierItemPayloadMaterialSpecDetail | undefined) ??
+  return (
+    (asRecord(payloadDetail?.material_spec) as
+      | SupplierItemPayloadMaterialSpecDetail
+      | undefined) ??
+    (asRecord(payloadDetail?.material_spec_detail) as
+      | SupplierItemPayloadMaterialSpecDetail
+      | undefined) ??
+    payloadDetail?.material_spec ??
     payloadDetail?.material_spec_detail ??
-    undefined;
+    undefined
+  );
 };
 
 const normalizeFormStatus = (value: unknown): string | undefined => {
@@ -299,111 +342,103 @@ const normalizeMaterialSpecType = (
   ).toLowerCase();
 
   if (!raw) return undefined;
-  if (raw === "rod" || raw === "round bar" || raw === "steel bar") return "steel_bar";
+  if (raw === "rod" || raw === "round bar" || raw === "steel bar")
+    return "steel_bar";
   if (raw === "pipe") return "pipe";
   if (raw === "coil") return "coil";
   if (raw === "wire") return "wire";
-  if (raw === "plate" || raw === "steel plate" || raw === "sheet plate") return "steel_plate";
+  if (raw === "plate" || raw === "steel plate" || raw === "sheet plate")
+    return "steel_plate";
   return undefined;
 };
 
-const resolveMaterialSpec = (node: BackendBomNode): Record<string, unknown> | undefined => {
+const resolveMaterialSpec = (
+  node: BackendBomNode,
+): Record<string, unknown> | undefined => {
   return isRecord(node.material_specifications)
     ? node.material_specifications
     : isRecord((node as Record<string, unknown>).material_spec)
-      ? ((node as Record<string, unknown>).material_spec as Record<string, unknown>)
+      ? ((node as Record<string, unknown>).material_spec as Record<
+          string,
+          unknown
+        >)
       : undefined;
 };
 
 const buildMaterialSpecPayloadDetail = (
   materialSpec: Record<string, unknown> | undefined,
-  values: Pick<FormValues, "grade" | "size" | "uom" | "weight" | "customer_cycle">,
+  values: Pick<
+    FormValues,
+    | "grade"
+    | "material_form"
+    | "width_mm"
+    | "diameter_mm"
+    | "thickness_mm"
+    | "length_mm"
+    | "weight"
+  >,
   fallback?: SupplierItemPayloadMaterialSpecDetail | null,
 ): SupplierItemPayloadMaterialSpecDetail => ({
-  form: pickText(materialSpec?.form, fallback?.form) || null,
-  grade: pickText(values.grade, materialSpec?.grade, fallback?.grade) || null,
   material_grade:
-    pickText(materialSpec?.material_grade, materialSpec?.material_code, fallback?.material_grade) || null,
-  type_material:
-    pickText(materialSpec?.type_material, materialSpec?.material_type, fallback?.type_material) || null,
-  size_combined:
-    pickText(values.size, fallback?.size_combined) || formatCompositeSizeFromMaterialSpec(materialSpec) || null,
-  width_mm: extractNullableNumber(materialSpec?.width_mm, fallback?.width_mm),
-  diameter_mm: extractNullableNumber(materialSpec?.diameter_mm, fallback?.diameter_mm),
-  thickness_mm: extractNullableNumber(materialSpec?.thickness_mm, fallback?.thickness_mm),
-  length_mm: extractNullableNumber(materialSpec?.length_mm, fallback?.length_mm),
+    pickText(
+      materialSpec?.material_grade,
+      materialSpec?.material_code,
+      fallback?.material_grade,
+    ) || null,
+  grade: pickText(values.grade, materialSpec?.grade, fallback?.grade) || null,
+  form:
+    pickText(values.material_form, materialSpec?.form, fallback?.form) || null,
+  width_mm: extractNullableNumber(
+    values.width_mm,
+    materialSpec?.width_mm,
+    fallback?.width_mm,
+  ),
+  diameter_mm: extractNullableNumber(
+    values.diameter_mm,
+    materialSpec?.diameter_mm,
+    fallback?.diameter_mm,
+  ),
+  thickness_mm: extractNullableNumber(
+    values.thickness_mm,
+    materialSpec?.thickness_mm,
+    fallback?.thickness_mm,
+  ),
+  length_mm: extractNullableNumber(
+    values.length_mm,
+    materialSpec?.length_mm,
+    fallback?.length_mm,
+  ),
   weight_kg:
     typeof values.weight === "number" && Number.isFinite(values.weight)
       ? values.weight
-      : extractNullableNumber(materialSpec?.weight_kg, materialSpec?.weight, materialSpec?.unit_weight, fallback?.weight_kg),
-  uom: pickText(values.uom, fallback?.uom) || null,
-  customer_cycle:
-    pickText(values.customer_cycle, materialSpec?.customer_cycle, fallback?.customer_cycle) || null,
+      : extractNullableNumber(
+          materialSpec?.weight_kg,
+          materialSpec?.weight,
+          materialSpec?.unit_weight,
+          fallback?.weight_kg,
+        ),
 });
 
 const buildSupplierItemPayloadDetail = ({
-  section,
-  values,
-  selectedUniqCode,
-  selectedBomLookupId,
-  selectedBomOption,
   materialSpec,
+  values,
   fallback,
-  selectedWarehouse,
 }: {
-  section: SupplierSection;
-  values: FormValues;
-  selectedUniqCode?: string;
-  selectedBomLookupId?: string;
-  selectedBomOption?: BomOption | null;
   materialSpec?: Record<string, unknown>;
+  values: FormValues;
   fallback?: SupplierItemPayloadDetail;
-  selectedWarehouse?: { value: string; label: string; type: string } | undefined;
-}): SupplierItemPayloadDetail => {
-  const fallbackFormSnapshot = fallback?.form_snapshot;
-  const fallbackBomOption = fallback?.bom_option;
-  const fallbackMaterialSpec = fallback?.material_spec_detail;
+}): SupplierItemPayloadDetail => ({
+  material_spec: buildMaterialSpecPayloadDetail(
+    materialSpec,
+    values,
+    fallback?.material_spec ?? fallback?.material_spec_detail ?? null,
+  ),
+});
 
-  const bomOption: SupplierItemPayloadBomOption | null = selectedBomOption
-    ? {
-        value: selectedBomOption.value,
-        label: selectedBomOption.label,
-        material_code: selectedBomOption.materialCode ?? null,
-        grade: selectedBomOption.grade ?? null,
-        size: selectedBomOption.size ?? null,
-        type: selectedBomOption.type ?? null,
-        uom: selectedBomOption.uom ?? null,
-        weight: selectedBomOption.weight ?? null,
-        quantity: selectedBomOption.quantity ?? null,
-        customer_cycle: selectedBomOption.customerCycle ?? null,
-        part_name: selectedBomOption.partName ?? null,
-        part_number: selectedBomOption.partNumber ?? null,
-        product_model: selectedBomOption.productModel ?? null,
-      }
-    : fallbackBomOption ?? null;
-
-  const formSnapshot: SupplierItemPayloadFormSnapshot = {
-    warehouse_uuid: pickText(values.warehouse_uuid, fallbackFormSnapshot?.warehouse_uuid) || null,
-    warehouse_name: pickText(selectedWarehouse?.label, fallbackFormSnapshot?.warehouse_name) || null,
-    product_model: pickText(values.product_model, fallbackFormSnapshot?.product_model) || null,
-    part_name: pickText(values.part_name, fallbackFormSnapshot?.part_name) || null,
-    part_number: pickText(values.part_number, fallbackFormSnapshot?.part_number) || null,
-    description: pickText(values.description, fallbackFormSnapshot?.description) || null,
-  };
-
-  return {
-    schema_version: 1,
-    source_section: section,
-    bom_lookup_id: pickText(selectedBomLookupId, fallback?.bom_lookup_id) || null,
-    bom_selected_uniq_code: pickText(values.uniq_code, selectedUniqCode, fallback?.bom_selected_uniq_code) || null,
-    bom_option: bomOption,
-    form_snapshot: formSnapshot,
-    material_spec_detail: buildMaterialSpecPayloadDetail(materialSpec, values, fallbackMaterialSpec),
-  };
-};
-
-
-const findNodeByUniq = (node: BackendBomNode | undefined, uniqCode: string): BackendBomNode | null => {
+const findNodeByUniq = (
+  node: BackendBomNode | undefined,
+  uniqCode: string,
+): BackendBomNode | null => {
   if (!node) return null;
   if (pickText(node.uniq_code, node.uniq) === uniqCode) return node;
 
@@ -430,7 +465,6 @@ const flattenBomTree = (nodes: BackendBomNode[]): BackendBomNode[] => {
   walk(nodes);
   return flattened;
 };
-
 
 const toBomOption = (node: BackendBomNode): BomOption | null => {
   const uniqCode = pickText(node.uniq_code, node.uniq);
@@ -479,11 +513,22 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
     size,
     uom: pickText(node.unit_measurement, (node as Record<string, unknown>).uom),
     weight: extractWeightFromMaterialSpec(materialSpec),
-    quantity: extractNumber(node.quantity, node.qpu, (node as Record<string, unknown>).qty_per_uniq),
+    quantity: extractNumber(
+      node.quantity,
+      node.qpu,
+      (node as Record<string, unknown>).qty_per_uniq,
+    ),
     customerCycle: pickText(materialSpec?.customer_cycle),
     description: pickText(node.description, node.part_name),
-    status: pickText((node as Record<string, unknown>).status, (node as Record<string, unknown>).bom_status),
-    materialCode: pickText(materialSpec?.material_grade, materialSpec?.material_code, (node as Record<string, unknown>).material_code),
+    status: pickText(
+      (node as Record<string, unknown>).status,
+      (node as Record<string, unknown>).bom_status,
+    ),
+    materialCode: pickText(
+      materialSpec?.material_grade,
+      materialSpec?.material_code,
+      (node as Record<string, unknown>).material_code,
+    ),
   };
 };
 
@@ -506,7 +551,8 @@ const resolveUomValue = (
       u.code?.toLowerCase() === lower || u.unit_code?.toLowerCase() === lower,
   );
   if (byCode) {
-    const name = byCode.name ?? byCode.unit_name ?? byCode.code ?? byCode.unit_code ?? "";
+    const name =
+      byCode.name ?? byCode.unit_name ?? byCode.code ?? byCode.unit_code ?? "";
     const opt = uomOptions.find((o) => o.value === name);
     if (opt) return opt.value;
   }
@@ -520,8 +566,12 @@ function MasterSupplierCreatePageContent() {
   const [form] = Form.useForm<FormValues>();
   const [selectedBomLookupId, setSelectedBomLookupId] = useState("");
   const [selectedUniqCode, setSelectedUniqCode] = useState("");
-  const [selectedSupplierId, setSelectedSupplierId] = useState<string | undefined>();
-  const [selectedBomOption, setSelectedBomOption] = useState<BomOption | null>(null);
+  const [selectedSupplierId, setSelectedSupplierId] = useState<
+    string | undefined
+  >();
+  const [selectedBomOption, setSelectedBomOption] = useState<BomOption | null>(
+    null,
+  );
 
   const apiEnabled = Boolean(apiBaseUrl);
   const section = normalizeSection(searchParams.get("section"));
@@ -538,7 +588,9 @@ function MasterSupplierCreatePageContent() {
   const [uniqSearch, setUniqSearch] = useState("");
   const [debouncedUniqSearch, setDebouncedUniqSearch] = useState("");
   const [uniqPage, setUniqPage] = useState(1);
-  const [accumulatedBomItems, setAccumulatedBomItems] = useState<BackendBomNode[]>([]);
+  const [accumulatedBomItems, setAccumulatedBomItems] = useState<
+    BackendBomNode[]
+  >([]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedUniqSearch(uniqSearch), 400);
@@ -553,7 +605,11 @@ function MasterSupplierCreatePageContent() {
 
   const { data: suppliers = [], isLoading: suppliersLoading } =
     useListSuppliersQuery(
-      { material_category: sectionToMaterialCategory(section), status: "Active", limit: 1000 },
+      {
+        material_category: sectionToMaterialCategory(section),
+        status: "Active",
+        limit: 1000,
+      },
       { skip: !apiEnabled },
     );
   const { data: warehouses = [], isLoading: warehousesLoading } =
@@ -569,16 +625,17 @@ function MasterSupplierCreatePageContent() {
 
   const BOM_PAGE_SIZE = 10;
 
-  const { data: bomPageResult, isFetching: bomSearchFetching } = useGetBomTreeQuery(
-    {
-      search: debouncedUniqSearch || undefined,
-      type_material: sectionToTypeMaterial(section),
-      exclude_supplier_uuid: selectedSupplierId || undefined,
-      page: uniqPage,
-      limit: BOM_PAGE_SIZE,
-    },
-    { skip: !apiEnabled },
-  );
+  const { data: bomPageResult, isFetching: bomSearchFetching } =
+    useGetBomTreeQuery(
+      {
+        search: debouncedUniqSearch || undefined,
+        type_material: sectionToTypeMaterial(section),
+        exclude_supplier_uuid: selectedSupplierId || undefined,
+        page: uniqPage,
+        limit: BOM_PAGE_SIZE,
+      },
+      { skip: !apiEnabled },
+    );
 
   // Accumulate pages — replace on page 1, append on subsequent pages
   useEffect(() => {
@@ -588,10 +645,17 @@ function MasterSupplierCreatePageContent() {
     if (newItems.length === 0) return;
     setAccumulatedBomItems((prev) => {
       if (uniqPage === 1) return newItems;
-      const existingCodes = new Set(prev.map((n) => pickText(n.uniq_code, n.uniq)));
-      return [...prev, ...newItems.filter((n) => !existingCodes.has(pickText(n.uniq_code, n.uniq)))];
+      const existingCodes = new Set(
+        prev.map((n) => pickText(n.uniq_code, n.uniq)),
+      );
+      return [
+        ...prev,
+        ...newItems.filter(
+          (n) => !existingCodes.has(pickText(n.uniq_code, n.uniq)),
+        ),
+      ];
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bomPageResult?.data?.items]);
 
   const bomDetailQuery = useGetBomByIdQuery(selectedBomLookupId, {
@@ -608,7 +672,11 @@ function MasterSupplierCreatePageContent() {
     () =>
       suppliers
         .map((supplier) => {
-          const value = pickText(supplier.supplier_uuid, supplier.uuid, supplier.id);
+          const value = pickText(
+            supplier.supplier_uuid,
+            supplier.uuid,
+            supplier.id,
+          );
           const supplierName = pickText(supplier.supplier_name);
           const supplierCode = pickText(supplier.supplier_code);
           const matchValues = [
@@ -682,12 +750,26 @@ function MasterSupplierCreatePageContent() {
         const opt = toBomOption(node as any);
         if (!opt) return null;
         // Consider node a parent/top-level when it has no parent pointer or level indicates top (1)
-        const hasParentPointer = Boolean((node as any).parent_id ?? (node as any).parentId ?? (node as any).parent_uuid ?? (node as any).parentUuid);
-        const levelNum = typeof (node as any).level === "number" ? (node as any).level : undefined;
+        const hasParentPointer = Boolean(
+          (node as any).parent_id ??
+          (node as any).parentId ??
+          (node as any).parent_uuid ??
+          (node as any).parentUuid,
+        );
+        const levelNum =
+          typeof (node as any).level === "number"
+            ? (node as any).level
+            : undefined;
         const isParent = !hasParentPointer || levelNum === 1;
-        return { ...(opt as BomOption), _isParent: Boolean(isParent) } as BomOption & { _isParent: boolean };
+        return {
+          ...(opt as BomOption),
+          _isParent: Boolean(isParent),
+        } as BomOption & { _isParent: boolean };
       })
-      .filter((option): option is BomOption & { _isParent: boolean } => option !== null);
+      .filter(
+        (option): option is BomOption & { _isParent: boolean } =>
+          option !== null,
+      );
     const deduped = new Map<string, BomOption>();
     mapped.forEach((option) => {
       if (!deduped.has(option.value)) deduped.set(option.value, option);
@@ -697,8 +779,10 @@ function MasterSupplierCreatePageContent() {
 
   const handleUniqPopupScroll = (event: React.UIEvent<HTMLDivElement>) => {
     const target = event.target as HTMLDivElement;
-    const nearBottom = target.scrollTop + target.offsetHeight >= target.scrollHeight - 40;
-    const canLoadMore = !bomSearchFetching && uniqPage < (bomPageResult?.data?.totalPages ?? 1);
+    const nearBottom =
+      target.scrollTop + target.offsetHeight >= target.scrollHeight - 40;
+    const canLoadMore =
+      !bomSearchFetching && uniqPage < (bomPageResult?.data?.totalPages ?? 1);
     if (nearBottom && canLoadMore) {
       setUniqPage((prev) => prev + 1);
     }
@@ -719,50 +803,64 @@ function MasterSupplierCreatePageContent() {
   }, [bomDetailQuery.data, selectedUniqCode]);
 
   const currentMaterialSpec = useMemo(
-    () => (currentBomDetail ? resolveMaterialSpec(currentBomDetail) : undefined),
+    () =>
+      currentBomDetail ? resolveMaterialSpec(currentBomDetail) : undefined,
     [currentBomDetail],
   );
 
   useEffect(() => {
     if (!detailQuery.data) return;
 
-    const payloadDetail = getSupplierItemPayloadDetail(detailQuery.data);
-    const payloadMaterialSpec = getSupplierItemPayloadMaterialSpec(detailQuery.data);
-    const payloadFormSnapshot = asRecord(payloadDetail?.form_snapshot);
-
-    setSelectedSupplierId(pickText(detailQuery.data.supplier_uuid) || undefined);
-    setSelectedUniqCode(
-      pickText(detailQuery.data.uniq_code, payloadDetail?.bom_selected_uniq_code) || "",
+    const payloadMaterialSpec = getSupplierItemPayloadMaterialSpec(
+      detailQuery.data,
     );
-    setSelectedBomLookupId(pickText(payloadDetail?.bom_lookup_id));
+
+    setSelectedSupplierId(
+      pickText(detailQuery.data.supplier_uuid) || undefined,
+    );
+    setSelectedUniqCode(pickText(detailQuery.data.uniq_code) || "");
+    setSelectedBomLookupId("");
 
     form.setFieldsValue({
       supplier_uuid: pickText(detailQuery.data.supplier_uuid),
       warehouse_uuid: pickText(
         detailQuery.data.warehouse_uuid,
         detailQuery.data.warehouse_id,
-        payloadFormSnapshot?.warehouse_uuid,
       ),
-      uniq_code: pickText(detailQuery.data.uniq_code, payloadDetail?.bom_selected_uniq_code),
+      uniq_code: pickText(detailQuery.data.uniq_code),
       sebango_code: pickText(
         detailQuery.data.sebango_code,
         payloadMaterialSpec?.material_grade,
       ),
-      type: pickText(detailQuery.data.material_type, detailQuery.data.type, payloadMaterialSpec?.type_material),
-      product_model: pickText(detailQuery.data.product_model, payloadFormSnapshot?.product_model),
-      part_name: pickText(detailQuery.data.part_name, payloadFormSnapshot?.part_name),
-      part_number: pickText(detailQuery.data.part_number, payloadFormSnapshot?.part_number),
+      type: pickText(detailQuery.data.material_type, detailQuery.data.type),
+      product_model: pickText(detailQuery.data.product_model),
+      part_name: pickText(detailQuery.data.part_name),
+      part_number: pickText(detailQuery.data.part_number),
       grade: pickText(detailQuery.data.grade, payloadMaterialSpec?.grade),
-      size: pickText(detailQuery.data.size, payloadMaterialSpec?.size_combined),
-      uom: pickText(detailQuery.data.uom, payloadMaterialSpec?.uom),
+      size: pickText(
+        detailQuery.data.size,
+        formatCompositeSizeFromDimensions(payloadMaterialSpec ?? {}),
+      ),
+      uom: pickText(detailQuery.data.uom),
+      material_form: pickText(payloadMaterialSpec?.form),
+      width_mm: extractNumber(payloadMaterialSpec?.width_mm),
+      diameter_mm: extractNumber(payloadMaterialSpec?.diameter_mm),
+      thickness_mm: extractNumber(payloadMaterialSpec?.thickness_mm),
+      length_mm: extractNumber(payloadMaterialSpec?.length_mm),
       quantity: Number(detailQuery.data.quantity ?? 0),
-      weight: extractNumber(detailQuery.data.weight, payloadMaterialSpec?.weight_kg) ?? 0,
+      weight:
+        extractNumber(
+          detailQuery.data.weight,
+          payloadMaterialSpec?.weight_kg,
+        ) ?? 0,
       pcs_per_kanban: Number(detailQuery.data.pcs_per_kanban ?? 0),
-      percentage: detailQuery.data.percentage !== undefined && detailQuery.data.percentage !== null
-        ? Number(detailQuery.data.percentage)
-        : undefined,
-      customer_cycle: pickText(detailQuery.data.customer_cycle, payloadMaterialSpec?.customer_cycle),
-      description: pickText(detailQuery.data.description, payloadFormSnapshot?.description),
+      percentage:
+        detailQuery.data.percentage !== undefined &&
+        detailQuery.data.percentage !== null
+          ? Number(detailQuery.data.percentage)
+          : undefined,
+      customer_cycle: pickText(detailQuery.data.customer_cycle),
+      description: pickText(detailQuery.data.description),
       status: pickText(detailQuery.data.status) || "active",
     });
   }, [detailQuery.data, form]);
@@ -782,6 +880,11 @@ function MasterSupplierCreatePageContent() {
       grade: undefined,
       size: undefined,
       uom: undefined,
+      material_form: undefined,
+      width_mm: undefined,
+      diameter_mm: undefined,
+      thickness_mm: undefined,
+      length_mm: undefined,
       quantity: undefined,
       weight: undefined,
       customer_cycle: undefined,
@@ -789,8 +892,13 @@ function MasterSupplierCreatePageContent() {
     });
   };
 
-  const handleUniqChange = (value: string, optionFromSelect?: BomOption | BomOption[]) => {
-    const opt = Array.isArray(optionFromSelect) ? optionFromSelect[0] : optionFromSelect;
+  const handleUniqChange = (
+    value: string,
+    optionFromSelect?: BomOption | BomOption[],
+  ) => {
+    const opt = Array.isArray(optionFromSelect)
+      ? optionFromSelect[0]
+      : optionFromSelect;
     const matched = opt ?? bomOptions.find((option) => option.value === value);
     if (!matched) return;
 
@@ -808,8 +916,13 @@ function MasterSupplierCreatePageContent() {
         type: matched.type,
         grade: matched.grade,
         size: matched.size,
+        material_form: undefined,
+        width_mm: undefined,
+        diameter_mm: undefined,
+        thickness_mm: undefined,
+        length_mm: undefined,
         quantity: undefined,
-        uom: undefined,
+        uom: matched.uom,
         weight: matched.weight,
         customer_cycle: matched.customerCycle,
         description: undefined,
@@ -832,7 +945,10 @@ function MasterSupplierCreatePageContent() {
       weight: matched.weight,
       customer_cycle: matched.customerCycle,
       description: matched.description || matched.partName,
-      status: normalizeFormStatus(matched.status) ?? form.getFieldValue("status") ?? "active",
+      status:
+        normalizeFormStatus(matched.status) ??
+        form.getFieldValue("status") ??
+        "active",
     });
 
     setTimeout(() => {
@@ -864,8 +980,17 @@ function MasterSupplierCreatePageContent() {
         grade: pickText(materialSpec?.grade),
         size:
           formatCompositeSizeFromMaterialSpec(materialSpec) ||
-          pickText(materialSpec?.size, materialSpec?.material_size, materialSpec?.thickness) ||
+          pickText(
+            materialSpec?.size,
+            materialSpec?.material_size,
+            materialSpec?.thickness,
+          ) ||
           formatSizeFromMaterialSpec(materialSpec),
+        material_form: pickText(materialSpec?.form),
+        width_mm: extractNumber(materialSpec?.width_mm),
+        diameter_mm: extractNumber(materialSpec?.diameter_mm),
+        thickness_mm: extractNumber(materialSpec?.thickness_mm),
+        length_mm: extractNumber(materialSpec?.length_mm),
         quantity: undefined,
         uom: undefined,
         weight: extractWeightFromMaterialSpec(materialSpec),
@@ -877,7 +1002,10 @@ function MasterSupplierCreatePageContent() {
 
     form.setFieldsValue({
       uniq_code: pickText(bomDetail.uniq_code, bomDetail.uniq),
-      product_model: pickText((bomDetail as Record<string, unknown>).model, bomDetail.assembly_code),
+      product_model: pickText(
+        (bomDetail as Record<string, unknown>).model,
+        bomDetail.assembly_code,
+      ),
       part_name: pickText(bomDetail.part_name, bomDetail.description),
       part_number: pickText(bomDetail.part_number),
       type: pickText(
@@ -890,20 +1018,42 @@ function MasterSupplierCreatePageContent() {
       ),
       grade: pickText(materialSpec?.grade, materialSpec?.material_grade),
       size:
-        pickText(materialSpec?.size, materialSpec?.material_size, materialSpec?.thickness) ||
-        formatSizeFromMaterialSpec(materialSpec),
-      quantity: extractNumber(bomDetail.quantity, bomDetail.qpu, (bomDetail as Record<string, unknown>).qty_per_uniq),
+        pickText(
+          materialSpec?.size,
+          materialSpec?.material_size,
+          materialSpec?.thickness,
+        ) || formatSizeFromMaterialSpec(materialSpec),
+      quantity: extractNumber(
+        bomDetail.quantity,
+        bomDetail.qpu,
+        (bomDetail as Record<string, unknown>).qty_per_uniq,
+      ),
       weight: extractWeightFromMaterialSpec(materialSpec),
       customer_cycle: pickText(materialSpec?.customer_cycle),
-      description: pickText(bomDetail.description, bomDetail.part_name, bomDetail.uniq_code),
-      status: normalizeFormStatus((bomDetail as Record<string, unknown>).status ?? (bomDetail as Record<string, unknown>).bom_status) ?? form.getFieldValue("status") ?? "active",
+      description: pickText(
+        bomDetail.description,
+        bomDetail.part_name,
+        bomDetail.uniq_code,
+      ),
+      status:
+        normalizeFormStatus(
+          (bomDetail as Record<string, unknown>).status ??
+            (bomDetail as Record<string, unknown>).bom_status,
+        ) ??
+        form.getFieldValue("status") ??
+        "active",
       sebango_code: pickText(
         bomDetail.material_code,
         materialSpec?.material_code,
         materialSpec?.materialCode,
       ),
     });
-  }, [bomDetailQuery.data, form, selectedUniqCode, useMaterialSpecOnlyAutofill]);
+  }, [
+    bomDetailQuery.data,
+    form,
+    selectedUniqCode,
+    useMaterialSpecOnlyAutofill,
+  ]);
 
   const handleSave = async () => {
     if (!apiEnabled) {
@@ -915,23 +1065,27 @@ function MasterSupplierCreatePageContent() {
 
     try {
       const values = await form.validateFields();
-      const existingPayloadDetail = getSupplierItemPayloadDetail(detailQuery.data);
-      const payloadDetail = buildSupplierItemPayloadDetail({
-        section,
-        values,
-        selectedUniqCode,
-        selectedBomLookupId,
-        selectedBomOption,
-        materialSpec: currentMaterialSpec,
-        fallback: existingPayloadDetail,
-        selectedWarehouse,
-      });
+      const existingPayloadDetail = getSupplierItemPayloadDetail(
+        detailQuery.data,
+      );
+      const payloadDetail = useMaterialSpecOnlyAutofill
+        ? buildSupplierItemPayloadDetail({
+            values,
+            materialSpec: currentMaterialSpec,
+            fallback: existingPayloadDetail,
+          })
+        : undefined;
 
       const payload: SupplierItemMutationRequest = {
         supplier_uuid: pickText(values.supplier_uuid),
         // prefer explicit `sebango_code`, but fall back to material code when missing
         // prefer explicit `sebango_code`, then material code, then uniq_code as last resort
-        sebango_code: pickText(values.sebango_code, (values as any).materialCode, (values as any).material_code, values.uniq_code),
+        sebango_code: pickText(
+          values.sebango_code,
+          (values as any).materialCode,
+          (values as any).material_code,
+          values.uniq_code,
+        ),
         uniq_code: pickText(values.uniq_code),
         type: sectionPayloadTypeValue(section),
         description: pickText(
@@ -960,18 +1114,27 @@ function MasterSupplierCreatePageContent() {
       };
 
       // preserve optional `percentage` form field in outgoing payload when present
-      const percentageValue = values.percentage !== undefined ? String(values.percentage) : undefined;
-      const payloadAny = percentageValue !== undefined ? ({ ...payload, percentage: percentageValue } as any) : payload;
+      const percentageValue =
+        values.percentage !== undefined ? String(values.percentage) : undefined;
+      const payloadAny =
+        percentageValue !== undefined
+          ? ({ ...payload, percentage: percentageValue } as any)
+          : payload;
 
       if (isEditing) {
-        await updateSupplierItem({ id: itemId, body: payloadAny as SupplierItemMutationRequest }).unwrap();
+        await updateSupplierItem({
+          id: itemId,
+          body: payloadAny as SupplierItemMutationRequest,
+        }).unwrap();
         setFlashMessage({
           type: "success",
           content: "Supplier item updated",
           targetPath: "/master-supplier",
         });
       } else {
-        await createSupplierItem(payloadAny as SupplierItemMutationRequest).unwrap();
+        await createSupplierItem(
+          payloadAny as SupplierItemMutationRequest,
+        ).unwrap();
         setFlashMessage({
           type: "success",
           content: "Supplier item created",
@@ -1086,370 +1249,639 @@ function MasterSupplierCreatePageContent() {
         ) : null}
 
         <Form form={form} layout="vertical" disabled={readOnly}>
-        {(!apiEnabled || !detailQuery.isLoading) &&
-        (!apiEnabled || !detailQuery.error) ? (
-          <>
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
-              <div className="space-y-6">
-                <Card className="overflow-hidden rounded-2xl border border-[#dfe8f5] shadow-sm">
-                  <div className="flex items-start justify-between gap-4 border-b border-[#eef2f6] pb-5">
-                    <div>
-                      <Typography.Title level={4} className="!mb-1">
-                        Step 1: Select Supplier
-                      </Typography.Title>
-                      <Typography.Text type="secondary">
-                        Configure supplier details
-                      </Typography.Text>
+          {(!apiEnabled || !detailQuery.isLoading) &&
+          (!apiEnabled || !detailQuery.error) ? (
+            <>
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
+                <div className="space-y-6">
+                  <Card className="overflow-hidden rounded-2xl border border-[#dfe8f5] shadow-sm">
+                    <div className="flex items-start justify-between gap-4 border-b border-[#eef2f6] pb-5">
+                      <div>
+                        <Typography.Title level={4} className="!mb-1">
+                          Step 1: Select Supplier
+                        </Typography.Title>
+                        <Typography.Text type="secondary">
+                          Configure supplier details
+                        </Typography.Text>
+                      </div>
+                      <span className="rounded-full bg-[#eef4ff] px-3 py-1 text-xs font-semibold text-[#316cff]">
+                        Required
+                      </span>
                     </div>
-                    <span className="rounded-full bg-[#eef4ff] px-3 py-1 text-xs font-semibold text-[#316cff]">
-                      Required
-                    </span>
-                  </div>
 
-                  <div className="mt-6">
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      <Form.Item
-                        label="Supplier Name"
-                        name="supplier_uuid"
-                        rules={[
-                          { required: true, message: "Please select a supplier" },
-                        ]}
-                      >
-                        <Select
-                          size="large"
-                          showSearch
-                          placeholder="Select supplier"
-                          options={supplierOptions}
-                          optionFilterProp="label"
-                          onChange={handleSupplierChange}
-                        />
-                      </Form.Item>
+                    <div className="mt-6">
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        <Form.Item
+                          label="Supplier Name"
+                          name="supplier_uuid"
+                          rules={[
+                            {
+                              required: true,
+                              message: "Please select a supplier",
+                            },
+                          ]}>
+                          <Select
+                            size="large"
+                            showSearch
+                            placeholder="Select supplier"
+                            options={supplierOptions}
+                            optionFilterProp="label"
+                            onChange={handleSupplierChange}
+                          />
+                        </Form.Item>
 
-                      <Form.Item label="Supplier ID">
-                        <Input
-                          size="large"
-                          value={selectedSupplier?.supplierCode || selectedSupplier?.value || ""}
-                          placeholder="Auto-filled from supplier selection"
-                          disabled
-                        />
-                      </Form.Item>
+                        <Form.Item label="Supplier ID">
+                          <Input
+                            size="large"
+                            value={
+                              selectedSupplier?.supplierCode ||
+                              selectedSupplier?.value ||
+                              ""
+                            }
+                            placeholder="Auto-filled from supplier selection"
+                            disabled
+                          />
+                        </Form.Item>
 
-                      <Form.Item
-                        label="Warehouse"
-                        name="warehouse_uuid"
-                        rules={[
-                          { required: true, message: "Please select a warehouse" },
-                        ]}
-                      >
-                        <Select
-                          size="large"
-                          showSearch
-                          placeholder="Select warehouse"
-                          options={warehouseOptions}
-                          optionFilterProp="label"
-                        />
-                      </Form.Item>
+                        <Form.Item
+                          label="Warehouse"
+                          name="warehouse_uuid"
+                          rules={[
+                            {
+                              required: true,
+                              message: "Please select a warehouse",
+                            },
+                          ]}>
+                          <Select
+                            size="large"
+                            showSearch
+                            placeholder="Select warehouse"
+                            options={warehouseOptions}
+                            optionFilterProp="label"
+                          />
+                        </Form.Item>
+                      </div>
                     </div>
-                  </div>
-                </Card>
+                  </Card>
 
-                <Card className="overflow-hidden rounded-2xl border border-[#dfe8f5] shadow-sm">
-                  <div className="flex items-start justify-between gap-4 border-b border-[#eef2f6] pb-5">
-                    <div>
-                      <Typography.Title level={4} className="!mb-1">
-                        Step 2: Input Data
-                      </Typography.Title>
-                      <Typography.Text type="secondary">
-                        Configure product codes and identification information
-                      </Typography.Text>
+                  <Card className="overflow-hidden rounded-2xl border border-[#dfe8f5] shadow-sm">
+                    <div className="flex items-start justify-between gap-4 border-b border-[#eef2f6] pb-5">
+                      <div>
+                        <Typography.Title level={4} className="!mb-1">
+                          Step 2: Input Data
+                        </Typography.Title>
+                        <Typography.Text type="secondary">
+                          Configure product codes and identification information
+                        </Typography.Text>
+                      </div>
+                      <span className="rounded-full bg-[#eef4ff] px-3 py-1 text-xs font-semibold text-[#316cff]">
+                        Required
+                      </span>
                     </div>
-                    <span className="rounded-full bg-[#eef4ff] px-3 py-1 text-xs font-semibold text-[#316cff]">
-                      Required
-                    </span>
-                  </div>
 
-                  <div className="mt-6">
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                      <Form.Item
-                        label={section === "subcon" ? "Uniq / Sebanggo" : "Material Code"}
-                        name="uniq_code"
-                        rules={[
-                          {
-                            required: true,
-                            message: section === "subcon" ? "Please select a Sebango Code" : "Please select a Material Code",
-                          },
-                        ]}
-                      >
-                        <Select
-                          size="large"
-                          showSearch
-                          filterOption={false}
-                          placeholder="Search or scroll to browse..."
-                          options={(() => {
-                            const toSelectOpt = (option: BomOption & { _isParent?: boolean }) => ({
-                              ...option,
-                              label:
-                                section === "subcon"
-                                  ? [option.label, option.partName, option.productModel].filter(Boolean).join(" — ")
-                                  : [option.materialCode || "tidak ada", option.partName, option.productModel]
+                    <div className="mt-6">
+                      {useMaterialSpecOnlyAutofill ? (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-12">
+                            <Form.Item
+                              className="md:col-span-2 xl:col-span-6"
+                              label="Material Code"
+                              name="uniq_code"
+                              rules={[
+                                {
+                                  required: true,
+                                  message: "Please select a Material Code",
+                                },
+                              ]}>
+                              <Select
+                                size="large"
+                                showSearch
+                                filterOption={false}
+                                placeholder="Search or scroll to browse..."
+                                options={(() => {
+                                  const toSelectOpt = (
+                                    option: BomOption & { _isParent?: boolean },
+                                  ) => ({
+                                    ...option,
+                                    label: [
+                                      option.materialCode || "tidak ada",
+                                      option.partName,
+                                      option.productModel,
+                                    ]
                                       .filter(Boolean)
                                       .join(" — "),
-                            });
+                                  });
 
-                            const list = bomOptions
-                              .filter((o: BomOption & { _isParent?: boolean }) =>
-                                section === "subcon" ? Boolean((o as any)._isParent) : true
-                              )
-                              .map(toSelectOpt);
+                                  const list = bomOptions.map(toSelectOpt);
 
-                            if (
-                              selectedBomOption &&
-                              !list.some((o) => o.value === selectedBomOption.value)
-                            ) {
-                              // include selected option even if filtered out
-                              list.unshift(toSelectOpt(selectedBomOption as BomOption & { _isParent?: boolean }));
-                            }
-                            return list;
-                          })()}
-                          onSearch={setUniqSearch}
-                          onChange={(val, opt) => handleUniqChange(val as string, opt as BomOption | BomOption[])}
-                          onPopupScroll={handleUniqPopupScroll}
-                          loading={bomSearchFetching}
-                          disabled={readOnly || !selectedSupplierId}
-                          
-                          notFoundContent={bomSearchFetching ? "Loading..." : "No items found"}
-                        />
-                      </Form.Item>
+                                  if (
+                                    selectedBomOption &&
+                                    !list.some(
+                                      (o) =>
+                                        o.value === selectedBomOption.value,
+                                    )
+                                  ) {
+                                    list.unshift(
+                                      toSelectOpt(
+                                        selectedBomOption as BomOption & {
+                                          _isParent?: boolean;
+                                        },
+                                      ),
+                                    );
+                                  }
+                                  return list;
+                                })()}
+                                onSearch={setUniqSearch}
+                                onChange={(val, opt) =>
+                                  handleUniqChange(
+                                    val as string,
+                                    opt as BomOption | BomOption[],
+                                  )
+                                }
+                                onPopupScroll={handleUniqPopupScroll}
+                                loading={bomSearchFetching}
+                                disabled={readOnly || !selectedSupplierId}
+                                notFoundContent={
+                                  bomSearchFetching
+                                    ? "Loading..."
+                                    : "No items found"
+                                }
+                              />
+                            </Form.Item>
 
-                      <Form.Item label="Product Model" name="product_model">
-                        <Input
-                          size="large"
-                          placeholder={useMaterialSpecOnlyAutofill ? "Input manually" : "Auto-filled from BOM"}
-                          disabled={section === "subcon" && autofilled}
-                        />
-                      </Form.Item>
+                            <Form.Item
+                              className="md:col-span-1 xl:col-span-2"
+                              label="Grade"
+                              name="grade">
+                              <Input
+                                size="large"
+                                placeholder="Auto-filled from material spec"
+                              />
+                            </Form.Item>
 
-                      <Form.Item label="Part Name" name="part_name">
-                        <Input
-                          size="large"
-                          placeholder={useMaterialSpecOnlyAutofill ? "Input manually" : "Auto-filled from BOM"}
-                          disabled={section === "subcon" && autofilled}
-                        />
-                      </Form.Item>
+                            <Form.Item
+                              className="md:col-span-1 xl:col-span-2"
+                              label="Form"
+                              name="material_form">
+                              <Input
+                                size="large"
+                                placeholder="Auto-filled from material spec"
+                              />
+                            </Form.Item>
 
-                      <Form.Item label="Part Number" name="part_number">
-                        <Input
-                          size="large"
-                          placeholder={useMaterialSpecOnlyAutofill ? "Input manually" : "Auto-filled from BOM"}
-                          disabled={section === "subcon" && autofilled}
-                        />
-                      </Form.Item>
+                            <Form.Item
+                              className="md:col-span-2 xl:col-span-2"
+                              label="Supplier Cycle"
+                              name="customer_cycle">
+                              <Input
+                                size="large"
+                                placeholder="Auto-filled from material spec"
+                              />
+                            </Form.Item>
+
+                            <Form.Item
+                              className="md:col-span-1 xl:col-span-3"
+                              label="Width (mm)"
+                              name="width_mm">
+                              <InputNumber
+                                size="large"
+                                className="w-full"
+                                placeholder="Auto-filled from material spec"
+                              />
+                            </Form.Item>
+
+                            <Form.Item
+                              className="md:col-span-1 xl:col-span-3"
+                              label="Diameter (mm)"
+                              name="diameter_mm">
+                              <InputNumber
+                                size="large"
+                                className="w-full"
+                                placeholder="Auto-filled from material spec"
+                              />
+                            </Form.Item>
+
+                            <Form.Item
+                              className="md:col-span-1 xl:col-span-3"
+                              label="Thickness (mm)"
+                              name="thickness_mm">
+                              <InputNumber
+                                size="large"
+                                className="w-full"
+                                placeholder="Auto-filled from material spec"
+                              />
+                            </Form.Item>
+
+                            <Form.Item
+                              className="md:col-span-1 xl:col-span-3"
+                              label="Length (mm)"
+                              name="length_mm">
+                              <InputNumber
+                                size="large"
+                                className="w-full"
+                                placeholder="Auto-filled from material spec"
+                              />
+                            </Form.Item>
+
+                            <Form.Item
+                              className="md:col-span-1 xl:col-span-3"
+                              label="Weight (kg)"
+                              name="weight">
+                              <InputNumber
+                                size="large"
+                                className="w-full"
+                                placeholder="Auto-filled from material spec"
+                              />
+                            </Form.Item>
+
+                            <Form.Item
+                              className="md:col-span-1 xl:col-span-3"
+                              label="Quantity/Kanban"
+                              name="pcs_per_kanban"
+                              rules={[
+                                {
+                                  required: true,
+                                  message: "Please input Quantity per kanban",
+                                },
+                              ]}>
+                              <InputNumber
+                                min={0}
+                                size="large"
+                                className="w-full"
+                                placeholder="qty/kanban"
+                              />
+                            </Form.Item>
+
+                            <Form.Item
+                              className="md:col-span-1 xl:col-span-3"
+                              label="Percentage (%)"
+                              name="percentage"
+                              rules={[
+                                {
+                                  type: "number",
+                                  min: 0,
+                                  max: 100,
+                                  message:
+                                    "Percentage must be between 0 and 100",
+                                },
+                              ]}>
+                              <InputNumber
+                                min={0}
+                                max={100}
+                                precision={2}
+                                size="large"
+                                className="w-full"
+                                placeholder="e.g. 30.00"
+                                onChange={(val) => {
+                                  if (typeof val === "number") {
+                                    form.setFieldValue(
+                                      "percentage",
+                                      Math.min(100, Math.max(0, val)),
+                                    );
+                                  }
+                                }}
+                              />
+                            </Form.Item>
+
+                            <Form.Item
+                              className="md:col-span-1 xl:col-span-3"
+                              label="Status"
+                              name="status"
+                              initialValue="active">
+                              <Select
+                                size="large"
+                                options={[
+                                  { label: "Active", value: "active" },
+                                  { label: "Inactive", value: "inactive" },
+                                ]}
+                              />
+                            </Form.Item>
+
+                            <Form.Item
+                              className="md:col-span-2 xl:col-span-12"
+                              label="Description"
+                              name="description">
+                              <Input
+                                size="large"
+                                placeholder="Optional description"
+                              />
+                            </Form.Item>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                            <Form.Item
+                              label={
+                                section === "subcon"
+                                  ? "Uniq / Sebanggo"
+                                  : "Material Code"
+                              }
+                              name="uniq_code"
+                              rules={[
+                                {
+                                  required: true,
+                                  message:
+                                    section === "subcon"
+                                      ? "Please select a Sebango Code"
+                                      : "Please select a Material Code",
+                                },
+                              ]}>
+                              <Select
+                                size="large"
+                                showSearch
+                                filterOption={false}
+                                placeholder="Search or scroll to browse..."
+                                options={(() => {
+                                  const toSelectOpt = (
+                                    option: BomOption & { _isParent?: boolean },
+                                  ) => ({
+                                    ...option,
+                                    label:
+                                      section === "subcon"
+                                        ? [
+                                            option.label,
+                                            option.partName,
+                                            option.productModel,
+                                          ]
+                                            .filter(Boolean)
+                                            .join(" — ")
+                                        : [
+                                            option.materialCode || "tidak ada",
+                                            option.partName,
+                                            option.productModel,
+                                          ]
+                                            .filter(Boolean)
+                                            .join(" — "),
+                                  });
+
+                                  const list = bomOptions
+                                    .filter(
+                                      (
+                                        o: BomOption & { _isParent?: boolean },
+                                      ) =>
+                                        section === "subcon"
+                                          ? Boolean((o as any)._isParent)
+                                          : true,
+                                    )
+                                    .map(toSelectOpt);
+
+                                  if (
+                                    selectedBomOption &&
+                                    !list.some(
+                                      (o) =>
+                                        o.value === selectedBomOption.value,
+                                    )
+                                  ) {
+                                    list.unshift(
+                                      toSelectOpt(
+                                        selectedBomOption as BomOption & {
+                                          _isParent?: boolean;
+                                        },
+                                      ),
+                                    );
+                                  }
+                                  return list;
+                                })()}
+                                onSearch={setUniqSearch}
+                                onChange={(val, opt) =>
+                                  handleUniqChange(
+                                    val as string,
+                                    opt as BomOption | BomOption[],
+                                  )
+                                }
+                                onPopupScroll={handleUniqPopupScroll}
+                                loading={bomSearchFetching}
+                                disabled={readOnly || !selectedSupplierId}
+                                notFoundContent={
+                                  bomSearchFetching
+                                    ? "Loading..."
+                                    : "No items found"
+                                }
+                              />
+                            </Form.Item>
+
+                            <Form.Item
+                              label="Product Model"
+                              name="product_model">
+                              <Input
+                                size="large"
+                                placeholder="Auto-filled from BOM"
+                                disabled={section === "subcon" && autofilled}
+                              />
+                            </Form.Item>
+
+                            <Form.Item label="Part Name" name="part_name">
+                              <Input
+                                size="large"
+                                placeholder="Auto-filled from BOM"
+                                disabled={section === "subcon" && autofilled}
+                              />
+                            </Form.Item>
+
+                            <Form.Item label="Part Number" name="part_number">
+                              <Input
+                                size="large"
+                                placeholder="Auto-filled from BOM"
+                                disabled={section === "subcon" && autofilled}
+                              />
+                            </Form.Item>
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                            <Form.Item label="Grade" name="grade">
+                              <Input
+                                size="large"
+                                placeholder="Auto-filled grade"
+                                disabled={section === "subcon" && autofilled}
+                              />
+                            </Form.Item>
+
+                            <Form.Item label="Size" name="size">
+                              <Input
+                                size="large"
+                                placeholder="Auto-filled size"
+                                disabled={section === "subcon" && autofilled}
+                              />
+                            </Form.Item>
+
+                            <Form.Item label="UOM" name="uom">
+                              <Select
+                                size="large"
+                                showSearch
+                                placeholder="Select UOM"
+                                options={uomOptions}
+                                optionFilterProp="label"
+                              />
+                            </Form.Item>
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                            <Form.Item label="Type" name="type">
+                              <Select
+                                size="large"
+                                placeholder="Select Type"
+                                options={[
+                                  { label: "Steel Bar", value: "steel_bar" },
+                                  { label: "Pipe", value: "pipe" },
+                                  { label: "Coil", value: "coil" },
+                                  { label: "Wire", value: "wire" },
+                                  {
+                                    label: "Steel Plate",
+                                    value: "steel_plate",
+                                  },
+                                ]}
+                                disabled={section === "subcon" && autofilled}
+                              />
+                            </Form.Item>
+
+                            <Form.Item
+                              label="Quantity/Kanban"
+                              name="pcs_per_kanban"
+                              rules={[
+                                {
+                                  required: true,
+                                  message: "Please input Quantity per kanban",
+                                },
+                              ]}>
+                              <InputNumber
+                                min={0}
+                                size="large"
+                                className="w-full"
+                                placeholder="qty/kanban"
+                              />
+                            </Form.Item>
+
+                            <Form.Item label="Weight" name="weight">
+                              <InputNumber
+                                min={0}
+                                size="large"
+                                className="w-full"
+                                placeholder="Weight (default 0)"
+                                disabled={section === "subcon" && autofilled}
+                              />
+                            </Form.Item>
+                          </div>
+                        </>
+                      )}
+
+                      {!useMaterialSpecOnlyAutofill ? (
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                          <Form.Item
+                            label="Percentage (%)"
+                            name="percentage"
+                            rules={[
+                              {
+                                type: "number",
+                                min: 0,
+                                max: 100,
+                                message: "Percentage must be between 0 and 100",
+                              },
+                            ]}>
+                            <InputNumber
+                              min={0}
+                              max={100}
+                              precision={2}
+                              size="large"
+                              className="w-full"
+                              placeholder="e.g. 30.00"
+                              onChange={(val) => {
+                                if (typeof val === "number") {
+                                  form.setFieldValue(
+                                    "percentage",
+                                    Math.min(100, Math.max(0, val)),
+                                  );
+                                }
+                              }}
+                            />
+                          </Form.Item>
+
+                          <Form.Item
+                            label="Supplier Cycle"
+                            name="customer_cycle"
+                            rules={[
+                              {
+                                // required: true,
+                                message: "Please input Supplier cycle",
+                              },
+                            ]}>
+                            <Input
+                              size="large"
+                              placeholder="e.g. Daily / Weekly / Monthly"
+                            />
+                          </Form.Item>
+
+                          <Form.Item label="Description" name="description">
+                            <Input
+                              size="large"
+                              placeholder="Optional description"
+                            />
+                          </Form.Item>
+
+                          <Form.Item
+                            label="Status"
+                            name="status"
+                            initialValue="active">
+                            <Select
+                              size="large"
+                              options={[
+                                { label: "Active", value: "active" },
+                                { label: "Inactive", value: "inactive" },
+                              ]}
+                            />
+                          </Form.Item>
+                        </div>
+                      ) : null}
                     </div>
+                  </Card>
+                </div>
 
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                      {/* <Form.Item
-                        label="Material Code"
-                        name="sebango_code"
-                        rules={[
-                          { required: true, message: "Please input material code" },
-                        ]}
-                      >
-                        <Input
-                          size="large"
-                          placeholder="Enter material code"
-                          onChange={(e) => console.log("[sebango_code] onChange:", e.target.value)}
-                        />
-                      </Form.Item> */}
-
-                      <Form.Item label="Grade" name="grade">
-                        <Input
-                          size="large"
-                          placeholder={useMaterialSpecOnlyAutofill ? "Auto-filled from material spec" : "Auto-filled grade"}
-                          disabled={section === "subcon" && autofilled}
-                        />
-                      </Form.Item>
-
-                      <Form.Item label="Size" name="size">
-                        <Input
-                          size="large"
-                          placeholder={useMaterialSpecOnlyAutofill ? "Auto-filled from material spec" : "Auto-filled size"}
-                          disabled={section === "subcon" && autofilled}
-                        />
-                      </Form.Item>
-
-                      <Form.Item label="UOM" name="uom">
-                        <Select
-                          size="large"
-                          showSearch
-                          placeholder="Select UOM"
-                          options={uomOptions}
-                          optionFilterProp="label"
-                        />
-                      </Form.Item>
+                <div className="space-y-6">
+                  <Card className="rounded-2xl border border-[#dfe8f5] shadow-sm">
+                    <Typography.Title level={5} className="!mb-4">
+                      Summary
+                    </Typography.Title>
+                    <div className="space-y-4">
+                      <div className="rounded-xl bg-[#f8fbff] p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-[#7a8ca8]">
+                          Supplier
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-[#1f2d3d]">
+                          {selectedSupplier?.label ?? "-"}
+                        </div>
+                      </div>
+                      <div className="rounded-xl bg-[#f8fbff] p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-[#7a8ca8]">
+                          Warehouse
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-[#1f2d3d]">
+                          {selectedWarehouse?.label ?? "-"}
+                        </div>
+                      </div>
+                      <div className="rounded-xl bg-[#f8fbff] p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-[#7a8ca8]">
+                          Material Section
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-[#1f2d3d]">
+                          {sectionLabel(section)}
+                        </div>
+                      </div>
+                      <div className="rounded-xl bg-[#f8fbff] p-4">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-[#7a8ca8]">
+                          Selected Uniq
+                        </div>
+                        <div className="mt-1 text-sm font-semibold text-[#1f2d3d]">
+                          {selectedUniqCode ||
+                            form.getFieldValue("uniq_code") ||
+                            "-"}
+                        </div>
+                      </div>
                     </div>
-
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                      <Form.Item label="Type" name="type">
-                        <Select
-                          size="large"
-                          placeholder="Select Type"
-                          options={[
-                            { label: "Steel Bar", value: "steel_bar" },
-                            { label: "Pipe", value: "pipe" },
-                            { label: "Coil", value: "coil" },
-                            { label: "Wire", value: "wire" },
-                            { label: "Steel Plate", value: "steel_plate" },
-                          ]}
-                          disabled={section === "subcon" && autofilled}
-                        />
-                      </Form.Item>
-
-                      <Form.Item
-                        label="Quantity/Kanban"
-                        name="pcs_per_kanban"
-                        rules={[
-                          {
-                            required: true,
-                            message: "Please input Quantity per kanban",
-                          },
-                        ]}
-                      >
-                        <InputNumber
-                          min={0}
-                          size="large"
-                          className="w-full"
-                          placeholder="qty/kanban"
-                        />
-                      </Form.Item>
-
-                      {/* <Form.Item
-                        label="Quantity"
-                        name="quantity"
-                        rules={[
-                          {  message: "Please input quantity" },
-                        ]}
-                      >
-                        <InputNumber
-                          min={0}
-                          size="large"
-                          className="w-full"
-                          placeholder="Enter quantity"
-                          disabled={autofilled}
-                        />
-                      </Form.Item> */}
-
-                      <Form.Item
-                        label="Weight"
-                        name="weight"
-                      >
-                        <InputNumber
-                          min={0}
-                          size="large"
-                          className="w-full"
-                          placeholder={useMaterialSpecOnlyAutofill ? "Auto-filled from material spec" : "Weight (default 0)"}
-                          disabled={section === "subcon" && autofilled}
-                        />
-                      </Form.Item>
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                      <Form.Item
-                        label="Percentage (%)"
-                        name="percentage"
-                        rules={[
-                          { type: "number", min: 0, max: 100, message: "Percentage must be between 0 and 100" },
-                        ]}
-                      >
-                        <InputNumber
-                          min={0}
-                          max={100}
-                          precision={2}
-                          size="large"
-                          className="w-full"
-                          placeholder="e.g. 30.00"
-                          onChange={(val) => {
-                            if (typeof val === "number") {
-                              form.setFieldValue("percentage", Math.min(100, Math.max(0, val)));
-                            }
-                          }}
-                        />
-                      </Form.Item>
-
-                      <Form.Item
-                        label="Supplier Cycle"
-                        name="customer_cycle"
-                        rules={[
-                          {
-                            // required: true,
-                            message: "Please input Supplier cycle",
-                          },
-                        ]}
-                      >
-                        <Input size="large" placeholder="e.g. Daily / Weekly / Monthly"/>
-                      </Form.Item>
-
-                      <Form.Item label="Description" name="description">
-                        <Input size="large" placeholder="Optional description" />
-                      </Form.Item>
-
-                      <Form.Item label="Status" name="status" initialValue="active">
-                        <Select
-                          size="large"
-                          options={[
-                            { label: "Active", value: "active" },
-                            { label: "Inactive", value: "inactive" },
-                          ]}
-                        />
-                      </Form.Item>
-                    </div>
-                  </div>
-                </Card>
+                  </Card>
+                </div>
               </div>
-
-              <div className="space-y-6">
-                <Card className="rounded-2xl border border-[#dfe8f5] shadow-sm">
-                  <Typography.Title level={5} className="!mb-4">
-                    Summary
-                  </Typography.Title>
-                  <div className="space-y-4">
-                    <div className="rounded-xl bg-[#f8fbff] p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-[#7a8ca8]">
-                        Supplier
-                      </div>
-                      <div className="mt-1 text-sm font-semibold text-[#1f2d3d]">
-                        {selectedSupplier?.label ?? "-"}
-                      </div>
-                    </div>
-                    <div className="rounded-xl bg-[#f8fbff] p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-[#7a8ca8]">
-                        Warehouse
-                      </div>
-                      <div className="mt-1 text-sm font-semibold text-[#1f2d3d]">
-                        {selectedWarehouse?.label ?? "-"}
-                      </div>
-                    </div>
-                    <div className="rounded-xl bg-[#f8fbff] p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-[#7a8ca8]">
-                        Material Section
-                      </div>
-                      <div className="mt-1 text-sm font-semibold text-[#1f2d3d]">
-                        {sectionLabel(section)}
-                      </div>
-                    </div>
-                    <div className="rounded-xl bg-[#f8fbff] p-4">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-[#7a8ca8]">
-                        Selected Uniq
-                      </div>
-                      <div className="mt-1 text-sm font-semibold text-[#1f2d3d]">
-                        {selectedUniqCode || form.getFieldValue("uniq_code") || "-"}
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-              </div>
-            </div>
-          </>
-        ) : null}
+            </>
+          ) : null}
         </Form>
       </div>
     </div>
