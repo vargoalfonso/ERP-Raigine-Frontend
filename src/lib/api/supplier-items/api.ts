@@ -85,21 +85,19 @@ export type SupplierItemPayloadFormSnapshot = {
 };
 
 export type SupplierItemPayloadMaterialSpecDetail = {
-  form?: string | null;
-  grade?: string | null;
   material_grade?: string | null;
-  type_material?: string | null;
-  size_combined?: string | null;
+  grade?: string | null;
+  form?: string | null;
   width_mm?: number | null;
   diameter_mm?: number | null;
   thickness_mm?: number | null;
   length_mm?: number | null;
   weight_kg?: number | null;
-  uom?: string | null;
-  customer_cycle?: string | null;
 };
 
 export type SupplierItemPayloadDetail = {
+  material_spec?: SupplierItemPayloadMaterialSpecDetail | null;
+  // legacy compatibility for previously saved payloads
   schema_version?: number;
   source_section?: string | null;
   bom_lookup_id?: string | null;
@@ -178,7 +176,7 @@ const normalizeSupplierItem = (record: unknown): SupplierItemRecord => {
   const product = isRecord(row.product) ? row.product : undefined;
   const payloadJson = (toRecord(row.payload_json) ?? toRecord(row.payloadJson)) as SupplierItemPayloadJSON | undefined;
   const payloadDetail = (toRecord(payloadJson?.payload_detail) ?? toRecord(row.payload_detail)) as SupplierItemPayloadDetail | undefined;
-  const materialSpecDetail = payloadDetail?.material_spec_detail;
+  const materialSpecDetail = payloadDetail?.material_spec ?? payloadDetail?.material_spec_detail;
   const formSnapshot = payloadDetail?.form_snapshot;
   const bomOption = payloadDetail?.bom_option;
 
@@ -229,16 +227,16 @@ const normalizeSupplierItem = (record: unknown): SupplierItemRecord => {
     material_type: toText(row.material_type) ?? toText(row.item_type) ?? toText(row.raw_material_type),
     description: toText(row.description) ?? toText(formSnapshot?.description),
     quantity: toNumber(row.quantity),
-    uom: toText(row.uom) ?? toText(materialSpecDetail?.uom),
+    uom: toText(row.uom),
     weight: toNumber(row.weight) ?? toNumber(materialSpecDetail?.weight_kg),
     pcs_per_kanban: toNumber(row.pcs_per_kanban) ?? toNumber(row.qty_per_kanban),
-    customer_cycle: toText(row.customer_cycle) ?? toText(row.cycle_days) ?? toText(row.cycle) ?? toText(materialSpecDetail?.customer_cycle),
+    customer_cycle: toText(row.customer_cycle) ?? toText(row.cycle_days) ?? toText(row.cycle),
     status: toText(row.status) ?? "active",
     product_model: toText(row.product_model) ?? toText(formSnapshot?.product_model) ?? toText(bomOption?.product_model) ?? toText(product?.model) ?? toText(product?.description),
     part_name: toText(row.part_name) ?? toText(formSnapshot?.part_name) ?? toText(bomOption?.part_name) ?? toText(product?.part_name),
     part_number: toText(row.part_number) ?? toText(formSnapshot?.part_number) ?? toText(bomOption?.part_number) ?? toText(product?.part_number),
     grade: toText(row.grade) ?? toText(materialSpecDetail?.grade) ?? toText(row.material_grade),
-    size: toText(row.size) ?? toText(materialSpecDetail?.size_combined),
+    size: toText(row.size),
     percentage: toNumber(row.percentage),
     payload_json: payloadJson,
     payload_detail: payloadDetail,

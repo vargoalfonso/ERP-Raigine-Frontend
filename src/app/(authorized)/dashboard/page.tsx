@@ -534,8 +534,8 @@ export default function Dashboard() {
                           {item.uniq_code}
                         </p>
                         <p className="text-xs text-gray-500">
-                          {item.produced_units.toLocaleString()} /{" "}
-                          {item.total_units.toLocaleString()} units
+                          {(item.produced_units ?? item.produced_qty ?? 0).toLocaleString()} /{" "}
+                          {(item.total_units ?? item.target_qty ?? item.total_qty ?? 0).toLocaleString()} units
                         </p>
                       </div>
                       <div className="text-right">

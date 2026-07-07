@@ -6,6 +6,24 @@ type UnknownRecord = Record<string, unknown>;
 const isRecord = (value: unknown): value is UnknownRecord =>
   typeof value === "object" && value !== null;
 
+const toText = (value: unknown): string | undefined => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+};
+
+const toNumber = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+};
+
 const ok = <T>(data: T, message = "OK"): ApiResponse<T> => ({
   message,
   status: "success",
@@ -129,8 +147,11 @@ export interface MainDashboardSummary {
   }>;
   current_uniq_progress: Array<{
     uniq_code: string;
-    total_units: number;
-    produced_units: number;
+    total_units?: number;
+    produced_units?: number;
+    total_qty?: number;
+    produced_qty?: number;
+    target_qty?: number;
     progress_percent: number;
     status: string;
   }>;
@@ -165,6 +186,39 @@ export interface DashboardQueryParams {
   end_date?: string;
 }
 
+const normalizeMainDashboardSummary = (data: unknown): MainDashboardSummary => {
+  const root = isRecord(data) ? data : {};
+  const currentUniqProgress = Array.isArray(root.current_uniq_progress)
+    ? root.current_uniq_progress.map((item) => {
+        const row = isRecord(item) ? item : {};
+        const producedUnits =
+          toNumber(row.produced_units) ??
+          toNumber(row.produced_qty) ??
+          0;
+        const totalUnits =
+          toNumber(row.total_units) ??
+          toNumber(row.target_qty) ??
+          toNumber(row.total_qty) ??
+          0;
+        return {
+          ...row,
+          uniq_code: toText(row.uniq_code) ?? "-",
+          produced_units: producedUnits,
+          total_units: totalUnits,
+          produced_qty: toNumber(row.produced_qty) ?? producedUnits,
+          target_qty: toNumber(row.target_qty) ?? totalUnits,
+          progress_percent: toNumber(row.progress_percent) ?? 0,
+          status: toText(row.status) ?? "-",
+        };
+      })
+    : [];
+
+  return {
+    ...(root as unknown as MainDashboardSummary),
+    current_uniq_progress: currentUniqProgress,
+  };
+};
+
 export const dashboardApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     getDashboardOverview: builder.query<ApiResponse<DashboardOverview>, void>({
@@ -193,9 +247,7 @@ export const dashboardApiSlice = apiSlice.injectEndpoints({
       }),
       transformResponse: (response: unknown) => {
         const root = isRecord(response) ? response : {};
-        const data = isRecord(root.data)
-          ? (root.data as unknown as MainDashboardSummary)
-          : ({} as MainDashboardSummary);
+        const data = normalizeMainDashboardSummary(root.data);
         return ok(data, typeof root.message === "string" ? root.message : "OK");
       },
     }),
