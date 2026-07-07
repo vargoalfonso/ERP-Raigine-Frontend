@@ -93,7 +93,25 @@ export default function EditCustomerPage() {
       : Array.isArray((data as any)?.items)
       ? (data as any).items
       : [];
-    return buildBomCodeSelectOptions(arr);
+    // Only include parent/top-level BOM codes (no parent pointer or level === 1)
+    const parentCodes = new Set<string>();
+    const walk = (items: any[]) => {
+      for (const node of items) {
+        const hasParent = Boolean(node.parent_id ?? node.parentId ?? node.parent_uuid ?? node.parentUuid);
+        const levelNum = typeof node.level === "number" ? node.level : undefined;
+        if (!hasParent || levelNum === 1) {
+          const code = String(node.uniq_code ?? node.uniq ?? "").trim();
+          if (code) parentCodes.add(code);
+        }
+        // do not traverse children for parent detection; children are not considered parent-level
+      }
+    };
+    walk(arr);
+    // Build select options from parentCodes
+    const options = Array.from(parentCodes)
+      .map((c) => ({ value: c, label: c }))
+      .sort((a, b) => String(a.value ?? "").localeCompare(String(b.value ?? "")));
+    return options;
   }, [bomQuery.data]);
 
   const onSave = async () => {
