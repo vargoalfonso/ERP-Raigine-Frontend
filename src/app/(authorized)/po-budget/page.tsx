@@ -25,7 +25,7 @@ import {
   buildSingleChildRowsFromPrlDetail,
   buildSingleStoredDetailPayload,
   getChildSupplierLookupUniq,
-  getStoredChildren,
+  getStoredParents,
   isChildBudgetType,
   type PoBudgetChildRow,
   type PoBudgetChildRowSupplier,
@@ -60,11 +60,11 @@ import {
   Table,
   Tag,
   message,
-  Collapse,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   CloseOutlined,
+  DownOutlined,
   FileExcelOutlined,
   PlusOutlined,
   EyeOutlined,
@@ -117,6 +117,7 @@ type PoBudgetRow = {
   id?: string;
   key: string;
   uniq: string;
+  prlRef?: string;
   customer: string;
   productModel: string;
   partName: string;
@@ -590,6 +591,14 @@ function resolveSupplierName(
   const [bulkPrlDetailCache, setBulkPrlDetailCache] = useState<Record<string, PoBudgetPrlDetail>>({});
   const [expandedBudgetRowKeys, setExpandedBudgetRowKeys] = useState<string[]>([]);
   const [, setExpandedBulkRowKeys] = useState<string[]>([]);
+  // Material tree in the list: tracks EXPANDED keys (default = collapsed).
+  const [expandedStoredParentKeys, setExpandedStoredParentKeys] = useState<
+    string[]
+  >([]);
+  // Bulk modal groups: tracks COLLAPSED keys (default = expanded).
+  const [collapsedBulkGroupKeys, setCollapsedBulkGroupKeys] = useState<
+    string[]
+  >([]);
 
   const { data: customers = [] } = useListCustomersQuery(undefined, {
     skip: !useApi,
@@ -1307,7 +1316,7 @@ function resolveSupplierName(
         item.customer?.customer_name ?? item.customer_name ?? "-",
       );
       return {
-        label: `${prlId} - ${customerName} - ${uniqCode}`,
+        label: `${prlId} — ${uniqCode} (${customerName})`,
         value: `prl::${encodeURIComponent(prlId)}::${encodeURIComponent(prlItemId)}`,
       };
     });
@@ -1547,6 +1556,7 @@ function resolveSupplierName(
               prlItemId: null,
               uniq: uniqCode,
               childUniqCode: uniqCode,
+              parentUniqCode: uniqCode,
               productModel: String(
                 it.product_model ??
                   bomIndex.assemblyCodeByUniq[uniqCode] ??
@@ -1641,6 +1651,7 @@ function resolveSupplierName(
             prlItemId: prlRowId,
             uniq: uniqCode,
             childUniqCode: uniqCode,
+            parentUniqCode: uniqCode,
             productModel: String(
               item.product_model ??
                 bomIndex.assemblyCodeByUniq[uniqCode] ??
@@ -1671,23 +1682,89 @@ function resolveSupplierName(
     return Array.from(deduped.values());
   };
 
-  const mapStoredChildrenToRows = (
-    detailJson: PoBudgetRow["detailJson"] | undefined,
-  ): BomChildDetailRow[] =>
-    getStoredChildren(detailJson).map((child, index) => ({
-      key: `${String(child.uniq_code ?? child.uniq ?? "child")}-${index}`,
-      uniq: String(child.uniq ?? child.material_spec?.material_grade ?? "").trim(),
-      childUniqCode: String(child.uniq_code ?? "").trim(),
-      partName: String(child.part_name ?? "-"),
-      partNumber: String(child.part_number ?? "-"),
-      quantityPerUniq: Number(child.quantity ?? child.qty_per_uniq ?? 0),
-      uom: String(child.uom ?? ""),
-      weightKg: Number(child.weight_kg ?? child.material_spec?.weight_kg ?? 0),
-      level: 1,
-    }));
+  const flattenStoredChildTree = (
+    children: PoBudgetPrlDetail["items"][number]["children"] | undefined,
+    level = 1,
+    parentKey = "child",
+  ): BomChildDetailRow[] => {
+    const source = Array.isArray(children) ? children : [];
+    return source.flatMap((child, index) => {
+      const row: BomChildDetailRow = {
+        key: `${parentKey}-${String(child.uniq_code ?? child.uniq ?? index)}`,
+        uniq: String(
+          child.uniq ?? child.material_spec?.material_grade ?? "",
+        ).trim(),
+        childUniqCode: String(child.uniq_code ?? "").trim(),
+        partName: String(child.part_name ?? "-"),
+        partNumber: String(child.part_number ?? "-"),
+        quantityPerUniq: Number(child.quantity ?? child.qty_per_uniq ?? 0),
+        uom: String(child.uom ?? ""),
+        weightKg: Number(child.weight_kg ?? child.material_spec?.weight_kg ?? 0),
+        level,
+      };
+      const descendants = flattenStoredChildTree(
+        child.children as PoBudgetPrlDetail["items"][number]["children"],
+        level + 1,
+        row.key,
+      );
+      return [row, ...descendants];
+    });
+  };
+
+  const uniqueTextValues = (values: string[]) => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const value of values.map((v) => String(v || "").trim()).filter(Boolean)) {
+      const key = value.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(value);
+    }
+    return result;
+  };
+
+  const formatChildSummary = (labels: string[]) => {
+    const visible = uniqueTextValues(labels);
+    if (visible.length === 0) return "";
+    const shown = visible.slice(0, 4).join(", ");
+    const rest = visible.length - 4;
+    return rest > 0 ? `${shown} +${rest} more` : shown;
+  };
+
+  const buildParentChildSummary = (
+    children: PoBudgetPrlDetail["items"][number]["children"] | undefined,
+  ) => {
+    const source = Array.isArray(children) ? children : [];
+    if (source.length === 0) return "";
+
+    const gradeLabels = uniqueTextValues(
+      source.map((child) =>
+        String(
+          child.uniq ??
+            child.material_spec?.material_grade ??
+            child.uniq_code ??
+            "",
+        ).trim(),
+      ),
+    );
+
+    if (gradeLabels.length > 1) {
+      return formatChildSummary(gradeLabels);
+    }
+
+    const uniqCodes = uniqueTextValues(
+      source.map((child) => String(child.uniq_code ?? "").trim()),
+    );
+
+    if (uniqCodes.length > 0) {
+      return formatChildSummary(uniqCodes);
+    }
+
+    return formatChildSummary(gradeLabels);
+  };
 
   const hasStoredChildren = (row: PoBudgetRow) =>
-    mapStoredChildrenToRows(row.detailJson).length > 0;
+    getStoredParents(row.detailJson).length > 0;
 
   const getAutoExpandedBulkKeys = (_items: BulkItemRow[]) => [];
 
@@ -1708,9 +1785,97 @@ function resolveSupplierName(
   const syncBulkItemsFromPrl = (selection?: string | string[]) => {
     const nextItems = buildBulkItemsFromPrl(selection);
     setBulkItems(nextItems);
-    // Auto-expand any bulk rows that have BOM children so user sees details immediately
     setExpandedBulkRowKeys(getAutoExpandedBulkKeys(nextItems));
   };
+
+  const bulkParentGroups = useMemo(() => {
+    const order: string[] = [];
+    const groups = new Map<
+      string,
+      {
+        key: string;
+        prlId: string;
+        parentUniqCode: string;
+        partName: string;
+        partNumber: string;
+        budgetQty: number;
+        rows: BulkItemRow[];
+      }
+    >();
+
+    for (const row of bulkItems) {
+      const groupKey = `${row.prlId}::${row.parentUniqCode || row.prlItemId || row.key}`;
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          key: groupKey,
+          prlId: row.prlId,
+          parentUniqCode: row.parentUniqCode || row.uniq,
+          partName: row.isHeader ? row.partName : "",
+          partNumber: row.isHeader ? row.partNumber : "",
+          budgetQty: row.isHeader ? Number(row.quantity || 0) : 0,
+          rows: [],
+        });
+        order.push(groupKey);
+      }
+
+      const group = groups.get(groupKey)!;
+      if (row.isHeader) {
+        group.parentUniqCode = row.parentUniqCode || group.parentUniqCode;
+        group.partName = row.partName || group.partName;
+        group.partNumber = row.partNumber || group.partNumber;
+        group.budgetQty = Number(row.quantity || group.budgetQty || 0);
+      } else {
+        group.rows.push(row);
+        if (!group.partName) group.partName = row.partName;
+        if (!group.partNumber) group.partNumber = row.partNumber;
+        if (!group.budgetQty) group.budgetQty = Number(row.quantity || 0);
+      }
+    }
+
+    return order
+      .map((key) => groups.get(key))
+      .filter(Boolean)
+      .map((group) => ({
+        ...group!,
+        childLabels: group!.rows.map((row) => row.uniq || row.childUniqCode).filter(Boolean),
+        totalChildQty: group!.rows.reduce(
+          (sum, row) => sum + Number(row.quantity || 0),
+          0,
+        ),
+      }));
+  }, [bulkItems]);
+
+  const bulkPrlGroups = useMemo(() => {
+    const order: string[] = [];
+    const groups = new Map<
+      string,
+      {
+        prlId: string;
+        prlNumber: string;
+        customerName: string;
+        period: string;
+        parents: typeof bulkParentGroups;
+      }
+    >();
+
+    for (const group of bulkParentGroups) {
+      const prlId = group.prlId;
+      if (!groups.has(prlId)) {
+        const detail = bulkPrlDetailCache[prlId];
+        groups.set(prlId, {
+          prlId,
+          prlNumber: detail?.prl_number || prlId,
+          customerName: detail?.customer_name || "-",
+          period: detail?.period || "",
+          parents: [],
+        });
+        order.push(prlId);
+      }
+      groups.get(prlId)!.parents.push(group);
+    }
+
+    return order.map((prlId) => groups.get(prlId)!);
+  }, [bulkParentGroups, bulkPrlDetailCache]);
 
   useEffect(() => {
     if (!addForm.period && periodOptions[0]?.value) {
@@ -1850,6 +2015,7 @@ function resolveSupplierName(
     setBulkPrlDetailCache({});
     setBulkItems([]);
     setExpandedBulkRowKeys([]);
+    setCollapsedBulkGroupKeys([]);
     setBulkPeriod(periodOptions[0]?.value);
     setBulkPrlIds([]);
     setBulkPoIds([]);
@@ -1882,15 +2048,16 @@ function resolveSupplierName(
         title: "Material Grade",
         dataIndex: "uniq",
         key: "uniq",
-        width: 160,
-
+        width: 200,
         render: (value: string, record) => (
-          <div>
-            <Tag color="blue" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+          <div className="flex items-center gap-2">
+            <Tag color="blue" className="!m-0">
               {value || "-"}
             </Tag>
             {record.childUniqCode ? (
-              <div className="text-[11px] text-gray-500 mt-1">{record.childUniqCode}</div>
+              <span className="text-xs text-gray-500">
+                {record.childUniqCode}
+              </span>
             ) : null}
           </div>
         ),
@@ -1899,8 +2066,13 @@ function resolveSupplierName(
         title: "Part Name",
         dataIndex: "partName",
         key: "partName",
-        render: (value: string) => (
-          <span className="text-sm text-gray-700">{value}</span>
+        render: (value: string, record) => (
+          <div
+            className="text-sm text-gray-700"
+            style={{ paddingLeft: `${Math.max(0, (record.level - 1) * 16)}px` }}>
+            {record.level > 1 ? <span className="text-gray-400 mr-1">↳</span> : null}
+            {value}
+          </div>
         ),
       },
        
@@ -1946,41 +2118,106 @@ function resolveSupplierName(
     [],
   );
 
-  const renderStoredChildren = (childRows: BomChildDetailRow[]) => {
-    if (childRows.length === 0) return null;
-    const totalQty = childRows.reduce(
-      (sum, r) => sum + Number(r.quantityPerUniq || 0),
+  const renderStoredChildren = (row: PoBudgetRow) => {
+    const parents = getStoredParents(row.detailJson);
+    if (parents.length === 0) return null;
+
+    const allChildren = parents.flatMap((p) =>
+      Array.isArray(p.children) ? p.children : [],
+    );
+    const totalQty = allChildren.reduce(
+      (sum, r) => sum + Number(r.quantity ?? r.qty_per_uniq ?? 0),
       0,
     );
 
     return (
-      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <div className="text-sm font-semibold text-gray-800">
-              Child Material Detail
-            </div>
-            <div className="text-xs text-gray-500">
-              Snapshot stored from PRL / PO Budget detail JSON
-            </div>
+      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+          <div className="text-[13px] font-semibold text-gray-700">
+            Material Tree
           </div>
-
-          <div className="flex items-center gap-4">
-            <div className="text-xs text-gray-500">Total Qty:</div>
-            <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-md font-semibold">{formatNumber(totalQty)}</div>
+          <div className="text-xs text-gray-500">
+            {parents.length} parent{parents.length !== 1 ? "s" : ""} ·{" "}
+            {allChildren.length} material{allChildren.length !== 1 ? "s" : ""} ·
+            qty {formatNumber(totalQty)}
           </div>
         </div>
 
-        <div className="bg-gray-50 rounded-md p-2">
-          <Table<BomChildDetailRow>
-            dataSource={childRows}
-            columns={bomChildColumns}
-            rowKey="key"
-            size="small"
-            pagination={false}
-            bordered={false}
-          />
-        </div>
+        {parents.map((parent, pIdx) => {
+          const parentChildren = Array.isArray(parent.children)
+            ? parent.children
+            : [];
+          const parentRows: BomChildDetailRow[] = flattenStoredChildTree(
+            parentChildren as PoBudgetPrlDetail["items"][number]["children"],
+            1,
+            `parent-${pIdx}`,
+          );
+          const parentTotal = parentRows.reduce(
+            (sum, r) => sum + r.quantityPerUniq,
+            0,
+          );
+
+          const collapseKey = `${row.key}::parent-${pIdx}`;
+          const isCollapsed = !expandedStoredParentKeys.includes(collapseKey);
+
+          return (
+            <div
+              key={`stored-parent-${pIdx}`}
+              className="border-b border-gray-100 last:border-b-0">
+              <div
+                className="flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50/40 cursor-pointer select-none"
+                onClick={() =>
+                  toggleExpandedRowKey(
+                    collapseKey,
+                    setExpandedStoredParentKeys,
+                  )
+                }>
+                <div className="flex items-center gap-2 min-w-0">
+                  <Tag color="blue" className="!m-0">
+                    {parent.uniq_code || "-"}
+                  </Tag>
+                  <span className="text-sm font-medium text-gray-800 truncate">
+                    {parent.part_name || "-"}
+                  </span>
+                  {parent.part_number ? (
+                    <span className="text-xs text-gray-400 shrink-0">
+                      {parent.part_number}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-xs text-gray-500">
+                    {parentRows.length} item
+                    {parentRows.length !== 1 ? "s" : ""} · qty{" "}
+                    <span className="font-medium text-gray-700">
+                      {formatNumber(parentTotal)}
+                    </span>
+                  </span>
+                  <DownOutlined
+                    className={`!text-[10px] !text-gray-400 transition-transform ${
+                      isCollapsed ? "-rotate-90" : ""
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {isCollapsed ? null : parentRows.length > 0 ? (
+                <Table<BomChildDetailRow>
+                  dataSource={parentRows}
+                  columns={bomChildColumns}
+                  rowKey="key"
+                  size="small"
+                  pagination={false}
+                  bordered={false}
+                />
+              ) : (
+                <div className="px-4 py-3 text-xs text-gray-400">
+                  No child material found for this parent.
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -2135,6 +2372,33 @@ function resolveSupplierName(
     );
   };
 
+  // Update total qty of one UNIQ group: header keeps the total, children get an
+  // equal split, and each supplier line with a percentage is rescaled from it.
+  const bulkUpdateGroupQty = (
+    group: (typeof bulkParentGroups)[number],
+    nextQty: number,
+  ) => {
+    const qty = Math.max(0, Number(nextQty || 0));
+    const childKeys = new Set(group.rows.map((row) => row.key));
+    const perChildQty = Math.round(qty / Math.max(1, group.rows.length));
+
+    setBulkItems((prev) =>
+      prev.map((it) => {
+        const itemGroupKey = `${it.prlId}::${it.parentUniqCode || it.prlItemId || it.key}`;
+        if (itemGroupKey !== group.key) return it;
+        if (it.isHeader) return { ...it, quantity: qty };
+        if (!childKeys.has(it.key)) return it;
+
+        const suppliers = it.suppliers.map((s) =>
+          s.percentage && s.percentage > 0
+            ? { ...s, qty: Math.round((perChildQty * s.percentage) / 100) }
+            : s,
+        );
+        return { ...it, quantity: perChildQty, suppliers };
+      }),
+    );
+  };
+
   const computedPo1Units = useMemo(() => {
     const pr = Number(addForm.purchaseRequest || 0);
     const pct = Number(addForm.po1Pct || 0);
@@ -2281,7 +2545,10 @@ function resolveSupplierName(
 
     const selectedPrl = selectedBulkPrl;
 
-    const missingSupplierItems = bulkItems.filter(
+    // Only consider non-header (child) rows for validation and payload
+    const nonHeaderItems = bulkItems.filter((item) => !item.isHeader);
+
+    const missingSupplierItems = nonHeaderItems.filter(
       (item) => item.suppliers.length === 0,
     );
     if (missingSupplierItems.length > 0) {
@@ -2302,11 +2569,11 @@ function resolveSupplierName(
       ).trim();
     };
 
-    const unresolvedSupplier = bulkItems.find((item) =>
+    const unresolvedSupplier = nonHeaderItems.find((item) =>
       item.suppliers.some((supplier) => !supplierDisplayName(supplier.supplier)),
     );
 
-    const unresolvedPrlItem = bulkItems.find((item) => item.prlItemId == null);
+    const unresolvedPrlItem = nonHeaderItems.find((item) => item.prlItemId == null);
 
     if (unresolvedSupplier) {
       message.warning(
@@ -2324,13 +2591,13 @@ function resolveSupplierName(
 
     const body = {
       prl_id: String(
-        bulkItems[0]?.prlId || selectedPrl?.prl_id || selectedPrl?.id || "",
+        nonHeaderItems[0]?.prlId || selectedPrl?.prl_id || selectedPrl?.id || "",
       ),
       budget_subtype: bulkBudgetType === "adhoc" ? "adhoc" : "regular",
       period: normalizePeriodForApi(bulkPeriod),
       po1_pct: Number(bulkPo1Pct || 0),
       po2_pct: Number(bulkPo2Pct || 0),
-      items: bulkItems.map((item) => ({
+      items: nonHeaderItems.map((item) => ({
         prl_item_id: Number(item.prlItemId),
         uniq_code: item.uniq,
         child_uniq_code: item.childUniqCode,
@@ -2461,28 +2728,39 @@ function resolveSupplierName(
   const columns = useMemo<ColumnsType<PoBudgetRow>>(
     () => [
       {
-        title: "Uniq",
+        title: activeTab === "subcon" ? "Uniq" : "PRL ID",
         dataIndex: "uniq",
         key: "uniq",
         render: (value: string, record) => {
-          const childCount = mapStoredChildrenToRows(record.detailJson).length;
+          const parentCount = getStoredParents(record.detailJson).length;
+          const childCount = getStoredParents(record.detailJson).reduce(
+            (sum, p) => sum + (Array.isArray(p.children) ? p.children.length : 0),
+            0,
+          );
+          const displayValue =
+            activeTab !== "subcon" && record.prlRef ? record.prlRef : value;
+
           if (activeTab === "subcon" || childCount === 0) {
-            return <span className="text-sm text-gray-700">{value}</span>;
+            return (
+              <span className="text-sm font-medium text-gray-700">
+                {displayValue}
+              </span>
+            );
           }
 
           const expanded = expandedBudgetRowKeys.includes(record.key);
           return (
             <button
               type="button"
-              className="text-left"
+              className="text-left group"
               onClick={() =>
                 toggleExpandedRowKey(record.key, setExpandedBudgetRowKeys)
               }>
-              <div className="text-sm font-medium text-blue-700 hover:text-blue-800">
-                {value}
+              <div className="text-sm font-semibold text-blue-700 group-hover:text-blue-800">
+                {displayValue}
               </div>
-              <div className="text-[11px] text-blue-500">
-                {expanded ? "Hide" : "Show"} {childCount} child part{childCount > 1 ? "s" : ""}
+              <div className="text-[11px] text-blue-500 mt-0.5">
+                {expanded ? "Hide" : "Show"} {parentCount} parent group{parentCount > 1 ? "s" : ""}
               </div>
             </button>
           );
@@ -2687,23 +2965,36 @@ function resolveSupplierName(
 
   const bulkColumns = useMemo<ColumnsType<BulkItemRow>>(
     () => [
-      { title: "PRL ID", dataIndex: "prlId", key: "prlId", width: 120 },
       {
-        title: "UNIQ",
+        title: "#",
+        key: "index",
+        width: 48,
+        align: "center",
+        render: (_value, _record, index) => (
+          <span className="text-xs text-gray-400">{index + 1}</span>
+        ),
+      },
+      {
+        title: "Child UNIQ",
         dataIndex: "uniq",
         key: "uniq",
         width: 160,
         render: (value: string, record) => (
           <div>
             {isChildBudgetType(getApiType(activeTab)) ? (
-              <Tag color="blue" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+              <Tag
+                color="blue"
+                className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
                 {value || "-"}
               </Tag>
             ) : (
               <span className="text-sm text-gray-700">{value}</span>
             )}
-            {isChildBudgetType(getApiType(activeTab)) && record.childUniqCode ? (
-              <div className="text-[11px] text-gray-500 mt-1">{record.childUniqCode}</div>
+            {isChildBudgetType(getApiType(activeTab)) &&
+            record.childUniqCode ? (
+              <div className="text-[11px] text-gray-500 mt-1">
+                {record.childUniqCode}
+              </div>
             ) : null}
           </div>
         ),
@@ -2756,7 +3047,7 @@ function resolveSupplierName(
         ),
       },
       {
-        title: "Quantity (Editable)",
+        title: "Quantity",
         dataIndex: "quantity",
         key: "quantity",
         width: 140,
@@ -2770,7 +3061,7 @@ function resolveSupplierName(
         ),
       },
       {
-        title: "Existing Raw Material",
+        title: "Existing RM",
         dataIndex: "existingRawMaterial",
         key: "existingRawMaterial",
         width: 140,
@@ -2783,6 +3074,7 @@ function resolveSupplierName(
         key: "suppliers",
         width: 320,
         render: (_, r) => {
+          if (r.isHeader) return null;
           const total = r.suppliers.reduce(
             (sum, s) => sum + Number(s.qty || 0),
             0,
@@ -2795,10 +3087,14 @@ function resolveSupplierName(
                   <Select
                     value={s.supplier}
                     onChange={(v) => {
-                      const supplierLookupUniq = isChildBudgetType(getApiType(activeTab))
+                      const supplierLookupUniq = isChildBudgetType(
+                        getApiType(activeTab),
+                      )
                         ? getChildSupplierLookupUniq(r)
                         : r.uniq;
-                      const opts = supplierOptionsByUniq.get(supplierLookupUniq) ?? supplierOptions;
+                      const opts =
+                        supplierOptionsByUniq.get(supplierLookupUniq) ??
+                        supplierOptions;
                       const opt = opts.find((o) => o.value === v);
                       const pct = opt?.percentage;
                       const autoQty =
@@ -2823,7 +3119,8 @@ function resolveSupplierName(
                           opt.value === s.supplier ||
                           !r.suppliers.some(
                             (other) =>
-                              other.id !== s.id && other.supplier === opt.value,
+                              other.id !== s.id &&
+                              other.supplier === opt.value,
                           ),
                       )
                       .map((opt) => ({
@@ -2845,7 +3142,9 @@ function resolveSupplierName(
                     }
                     value={s.qty}
                     onChange={(v) =>
-                      bulkUpdateSupplier(r.key, s.id, { qty: Number(v || 0) })
+                      bulkUpdateSupplier(r.key, s.id, {
+                        qty: Number(v || 0),
+                      })
                     }
                     className="w-[90px]"
                     size="small"
@@ -2884,7 +3183,7 @@ function resolveSupplierName(
             size="small"
             className="!rounded-lg"
             onClick={() => bulkAddSupplierLine(r.key)}>
-            + Add Supplier
+            + Supplier
           </Button>
         ),
       },
@@ -3002,8 +3301,7 @@ function resolveSupplierName(
               expandedRowKeys: expandedBudgetRowKeys,
               onExpandedRowsChange: (keys) =>
                 setExpandedBudgetRowKeys(keys.map((key) => String(key))),
-              expandedRowRender: (record) =>
-                renderStoredChildren(mapStoredChildrenToRows(record.detailJson)),
+              expandedRowRender: (record) => renderStoredChildren(record),
               rowExpandable: (record) =>
                 activeTab !== "subcon" && hasStoredChildren(record),
               showExpandColumn: false,
@@ -3608,18 +3906,6 @@ function resolveSupplierName(
                       loading={prlsFetching}
                       maxTagCount="responsive"
                     />
-                    {/* For each selected PRL show parent material grade and a dropdown of child uniqs + material grade */}
-                    <div className="mt-3 space-y-2">
-                      {bulkPrlIds && bulkPrlIds.length > 0 && bulkPrlIds.map((val) => {
-                        const parsed = parsePrlSelection(String(val));
-                        const prlId = parsed?.prlId ?? String(val);
-                        const detail = bulkPrlDetailCache[String(prlId)];
-                        if (!detail) return null;
-
-                        const parents = Array.isArray(detail.items) ? detail.items : [];
-                        
-                      })}
-                    </div>
                   </>
                 ) : (
                   <>
@@ -3669,31 +3955,133 @@ function resolveSupplierName(
                   Step 2: Configure Items & Suppliers
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
-                  Edit quantities and add multiple suppliers for each item
+                  Expand a UNIQ to edit quantities and suppliers.
                 </div>
               </div>
-              <Tag
-                color="green"
-                className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
-                {bulkItems.length} Items
-              </Tag>
+              <div className="text-xs text-gray-500 shrink-0 text-right">
+                {bulkPrlGroups.length} PRL · {bulkParentGroups.length} UNIQ ·{" "}
+                {bulkItems.filter((it) => !it.isHeader).length} material
+                {bulkItems.filter((it) => !it.isHeader).length !== 1 ? "s" : ""}
+              </div>
             </div>
 
-            <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-xs text-blue-700">
-              <b>Note:</b> You can edit quantity for each item and add multiple
-              suppliers. Total supplier quantities cannot exceed item quantity.
-            </div>
+            {bulkParentGroups.length === 0 ? (
+              <div className="mt-4 rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
+                Select a PRL in Step 1 to see its items here.
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {bulkPrlGroups.map((prlGroup) => (
+                  <div
+                    key={prlGroup.prlId}
+                    className="rounded-lg border border-gray-200 overflow-hidden">
+                    <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-gray-50 border-b border-gray-100">
+                      <div className="min-w-0 truncate">
+                        <span className="text-sm font-semibold text-gray-800">
+                          {prlGroup.prlNumber}
+                        </span>
+                        <span className="text-xs text-gray-500 ml-2">
+                          {prlGroup.customerName}
+                          {prlGroup.period ? ` · ${prlGroup.period}` : ""}
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-500 shrink-0">
+                        {prlGroup.parents.length} UNIQ
+                      </div>
+                    </div>
 
-            <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
-              <Table<BulkItemRow>
-                dataSource={bulkItems}
-                columns={bulkColumns}
-                rowKey="key"
-                pagination={false}
-                size="small"
-                scroll={{ x: 1200 }}
-              />
-            </div>
+                    {prlGroup.parents.map((group) => {
+                      const isCollapsed = collapsedBulkGroupKeys.includes(
+                        group.key,
+                      );
+                      return (
+                        <div
+                          key={group.key}
+                          className="border-b border-gray-100 last:border-b-0">
+                          <div
+                            className="flex items-center justify-between gap-3 px-4 py-2 bg-blue-50/40 cursor-pointer select-none"
+                            onClick={() =>
+                              toggleExpandedRowKey(
+                                group.key,
+                                setCollapsedBulkGroupKeys,
+                              )
+                            }>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Tag color="blue" className="!m-0">
+                                {group.parentUniqCode || "-"}
+                              </Tag>
+                              <span className="text-sm font-semibold text-gray-800 truncate">
+                                {group.partName || "-"}
+                              </span>
+                              {group.partNumber ? (
+                                <span className="text-xs text-gray-400 shrink-0">
+                                  {group.partNumber}
+                                </span>
+                              ) : null}
+                              {group.childLabels?.length ? (
+                                <span className="text-xs text-gray-500 truncate hidden md:inline">
+                                  · {formatChildSummary(group.childLabels)}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div
+                              className="flex items-center gap-2 shrink-0"
+                              onClick={(e) => e.stopPropagation()}>
+                              <span className="text-xs text-gray-500">
+                                Total Qty:
+                              </span>
+                              <InputNumber
+                                min={0}
+                                size="small"
+                                value={group.budgetQty}
+                                onChange={(v) =>
+                                  bulkUpdateGroupQty(group, Number(v || 0))
+                                }
+                                className="w-[100px]"
+                              />
+                              <DownOutlined
+                                className={`!text-[10px] !text-gray-400 transition-transform cursor-pointer ${
+                                  isCollapsed ? "-rotate-90" : ""
+                                }`}
+                                onClick={() =>
+                                  toggleExpandedRowKey(
+                                    group.key,
+                                    setCollapsedBulkGroupKeys,
+                                  )
+                                }
+                              />
+                            </div>
+                          </div>
+
+                          {isCollapsed ? null : (
+                            <>
+                              <Table<BulkItemRow>
+                                dataSource={group.rows}
+                                columns={bulkColumns}
+                                rowKey="key"
+                                pagination={false}
+                                size="small"
+                                scroll={{ x: 1000 }}
+                              />
+                              <div className="flex items-center justify-end gap-1.5 bg-blue-50/40 border-t border-gray-100 px-4 py-2 text-xs text-gray-600">
+                                Total material to procure for{" "}
+                                {group.parentUniqCode || "-"}:
+                                <span className="text-sm font-semibold text-blue-700">
+                                  {formatNumber(group.totalChildQty)}
+                                </span>
+                                <span className="text-gray-400">
+                                  {group.rows[0]?.uom || ""}
+                                </span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="rounded-xl border border-purple-200 bg-white p-4">
