@@ -47,9 +47,21 @@ export type PoBudgetPrlChild = {
   uom?: string | null;
   material_spec?: PoBudgetChildMaterialSpec;
   suppliers?: PoBudgetChildSupplier[];
+  children?: PoBudgetPrlChild[];
+};
+
+export type PoBudgetStoredDetailParent = {
+  prl_row_id?: number | string;
+  uniq_code?: string;
+  part_name?: string;
+  part_number?: string;
+  quantity?: number;
+  children?: PoBudgetPrlChild[];
 };
 
 export type PoBudgetStoredDetail = {
+  prl_id?: string;
+  period?: string;
   parent?: {
     prl_id?: string;
     prl_row_id?: number | string;
@@ -58,6 +70,7 @@ export type PoBudgetStoredDetail = {
     part_number?: string;
   };
   children?: PoBudgetPrlChild[];
+  parents?: PoBudgetStoredDetailParent[];
 };
 
 export interface PoBudgetEntryRequest {
@@ -159,6 +172,7 @@ export type PoBudgetRow = {
   id?: string;
   poBudgetRef?: string;
   uniq: string;
+  prlRef?: string;
   customer: string;
   customerId?: string;
   contactPerson?: string;
@@ -312,12 +326,49 @@ const toPoBudgetSummary = (payload: unknown): PoBudgetSummary => {
 
 const toPoBudgetStoredDetail = (value: unknown): PoBudgetStoredDetail | undefined => {
   if (!isRecord(value)) return undefined;
+
+  // New format: {prl_id, period, parents: [...]}
+  if (Array.isArray(value.parents)) {
+    const parents: PoBudgetStoredDetailParent[] = (value.parents as unknown[]).map((p) => {
+      if (!isRecord(p)) return { children: [] as PoBudgetPrlChild[] };
+      return {
+        prl_row_id: getString(p, ["prl_row_id"]),
+        uniq_code: getString(p, ["uniq_code"]),
+        part_name: getString(p, ["part_name"]),
+        part_number: getString(p, ["part_number"]),
+        quantity: getNumber(p, ["quantity"]),
+        children: Array.isArray(p.children)
+          ? (p.children as PoBudgetPrlChild[])
+          : [],
+      };
+    });
+    return {
+      prl_id: getString(value, ["prl_id"]),
+      period: getString(value, ["period"]),
+      parents,
+    };
+  }
+
+  // Old format: {parent: {...}, children: [...]}
   const parent = isRecord(value.parent) ? value.parent : undefined;
   const children = Array.isArray(value.children)
     ? (value.children as PoBudgetPrlChild[])
     : undefined;
 
   if (!parent && (!children || children.length === 0)) return undefined;
+
+  // Auto-normalize to new format
+  const normalizedParents: PoBudgetStoredDetailParent[] = parent
+    ? [
+        {
+          prl_row_id: getString(parent, ["prl_row_id"]),
+          uniq_code: getString(parent, ["uniq_code"]),
+          part_name: getString(parent, ["part_name"]),
+          part_number: getString(parent, ["part_number"]),
+          children: children ?? [],
+        },
+      ]
+    : [];
 
   return {
     parent: parent
@@ -330,6 +381,7 @@ const toPoBudgetStoredDetail = (value: unknown): PoBudgetStoredDetail | undefine
         }
       : undefined,
     children,
+    parents: normalizedParents,
   };
 };
 
@@ -352,6 +404,7 @@ const toPoBudgetRow = (item: unknown, index: number): PoBudgetRow => {
     id: getString(record, ["id"]),
     poBudgetRef: getString(record, ["po_budget_ref"]),
     uniq: getString(record, ["uniq_code", "uniq", "item_uniq_code"]) ?? `ITEM-${index + 1}`,
+    prlRef: getString(record, ["prl_ref"]),
     customer: getString(record, ["customer_name", "customer"]) ?? "-",
     customerId: getString(record, ["customer_id"]),
     contactPerson: getString(record, ["contact_person", "contactPerson", "pic_name", "pic", "contact_name"]),
