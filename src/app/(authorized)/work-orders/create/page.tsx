@@ -20,7 +20,7 @@ import { useRouter } from "next/navigation";
 import dayjs, { type Dayjs } from "dayjs";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
-import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { useGetBomTreeQuery, useGetBomListQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import { useGetProcessesQuery } from "@/lib/api/system-settings/api";
 import {
@@ -81,7 +81,7 @@ export default function CreateWorkOrderPage() {
 
   const [woNumber] = useState(() => nextWoNumber());
   const [lines, setLines] = useState<UniqLine[]>([{ id: "l-1", kanbanNumber: nextKanbanNumber(0) }]);
-  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
+  const { data: bomTreeRes } = useGetBomListQuery({ page: 1, limit: 1000 }, {
     skip: !apiEnabled,
   });
   const { data: processRecords = [] } = useGetProcessesQuery(undefined, {
@@ -105,6 +105,41 @@ export default function CreateWorkOrderPage() {
     [bomTreeRes?.data]
   );
 
+  const bomProcessMap = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    const nodes: any[] = (() => {
+      const anyRes = bomTreeRes as any;
+      if (!anyRes) return [];
+      if (Array.isArray(anyRes.data)) return anyRes.data;
+      if (Array.isArray(anyRes.data?.items)) return anyRes.data.items;
+      if (Array.isArray(anyRes.items)) return anyRes.items;
+      return [];
+    })();
+    const extract = (n: any) => {
+      const uniq = String(n?.uniq ?? n?.uniq_code ?? n?.uniqCode ?? "").trim();
+      if (!uniq) return;
+      const routes = Array.isArray(n?.process_routes) ? n.process_routes : Array.isArray(n?.processRoutes) ? n.processRoutes : [];
+      const names: string[] = [];
+      for (const r of routes) {
+        const name = (r?.process_name ?? r?.processName ?? null) as string | null;
+        if (name && String(name).trim()) names.push(String(name).trim());
+        else if (r?.process_id) {
+          const pid = String(r.process_id);
+          const found = processRecords.find((p: any) => String(p.id) === pid || String(p.process_code) === pid);
+          if (found && found.process_name) names.push(found.process_name);
+        }
+      }
+      if (names.length) map[uniq] = Array.from(new Set(names));
+    };
+    for (const n of nodes) {
+      extract(n);
+      if (Array.isArray(n?.children)) {
+        for (const c of n.children) extract(c);
+      }
+    }
+    return map;
+  }, [bomTreeRes?.data, processRecords]);
+
   const processNameOptions = useMemo(() => {
     const names = processRecords
       .map((item) => item.process_name)
@@ -114,14 +149,17 @@ export default function CreateWorkOrderPage() {
 
   const uniqOptions = useMemo<UniqOption[]>(() => {
     if (apiEnabled && uniqOptionsQuery.data?.length) {
-      return uniqOptionsQuery.data.map((o) => ({
-        uniq: o.uniq_code,
-        partName: o.part_name ?? bomIndex.partNameByUniq[o.uniq_code] ?? "",
-        partNumber: o.part_number ?? bomIndex.partNumberByUniq[o.uniq_code] ?? "",
-        model: o.model ?? bomIndex.assemblyCodeByUniq[o.uniq_code] ?? "",
-        uom: o.uom ?? "pcs",
-        processes: processNameOptions,
-      }));
+      return uniqOptionsQuery.data.map((o) => {
+        const code = o.uniq_code;
+        return {
+          uniq: code,
+          partName: o.part_name ?? bomIndex.partNameByUniq[code] ?? "",
+          partNumber: o.part_number ?? bomIndex.partNumberByUniq[code] ?? "",
+          model: o.model ?? bomIndex.assemblyCodeByUniq[code] ?? "",
+          uom: o.uom ?? "pcs",
+          processes: bomProcessMap[code] ?? processNameOptions,
+        };
+      });
     }
 
     if (!bomIndex.options.length) return fallbackUniqOptions;
@@ -131,13 +169,22 @@ export default function CreateWorkOrderPage() {
       partNumber: bomIndex.partNumberByUniq[option.value] ?? "",
       model: bomIndex.assemblyCodeByUniq[option.value] ?? "",
       uom: "pcs",
-      processes: processNameOptions,
+      processes: bomProcessMap[option.value] ?? processNameOptions,
     }));
   }, [apiEnabled, bomIndex, processNameOptions, uniqOptionsQuery.data]);
 
   const uniqSelectOptions = useMemo(
-    () => uniqOptions.map((u) => ({ label: u.uniq, value: u.uniq })),
-    [uniqOptions]
+    () => {
+      // ensure we include all UNIQs from BOM as dropdown options (de-duplicated)
+      const fromBom = bomIndex.options.map((o) => ({ label: o.value, value: o.value }));
+      const fromApi = uniqOptions.map((u) => ({ label: u.uniq, value: u.uniq }));
+      const map = new Map<string, { label: string; value: string }>();
+      for (const it of [...fromBom, ...fromApi]) {
+        if (!map.has(it.value)) map.set(it.value, it);
+      }
+      return Array.from(map.values());
+    },
+    [uniqOptions, bomIndex]
   );
 
   useEffect(() => {
@@ -170,7 +217,7 @@ export default function CreateWorkOrderPage() {
       partName: found?.partName,
       partNumber: found?.partNumber,
       model: found?.model,
-      uom: found?.uom,
+      uom: found?.uom ?? bomIndex.uomByUniq[uniq] ?? "pcs",
       process: undefined,
     });
     // try to find BOM node to extract process routes and BOM stock
@@ -191,25 +238,34 @@ export default function CreateWorkOrderPage() {
       ? (bomData as any).items
       : [];
     const bomNode = findNode(bomArray);
-    if (bomNode) {
-      const nodeProcessRoutes = Array.isArray(bomNode.process_routes)
-        ? bomNode.process_routes
-        : Array.isArray(bomNode.processRoutes)
-        ? bomNode.processRoutes
-        : [];
-      let firstProcessName: string | null = null;
-      if (nodeProcessRoutes.length) {
-        firstProcessName = (nodeProcessRoutes[0]?.process_name ?? nodeProcessRoutes[0]?.processName ?? null) as string | null;
-        if (!firstProcessName) {
-          const pid = nodeProcessRoutes[0]?.process_id ?? nodeProcessRoutes[0]?.processId ?? nodeProcessRoutes[0]?.process ?? null;
-          if (pid) {
-            const pidStr = String(pid);
-            const foundProc = processRecords.find((p) => String(p.id) === pidStr || String(p.process_code) === pidStr);
-            if (foundProc) firstProcessName = foundProc.process_name ?? null;
+      if (bomNode) {
+        // prefer explicit process_routes on the BOM node
+        const nodeProcessRoutes = Array.isArray(bomNode.process_routes)
+          ? bomNode.process_routes
+          : Array.isArray(bomNode.processRoutes)
+          ? bomNode.processRoutes
+          : [];
+        let firstProcessName: string | null = null;
+        if (nodeProcessRoutes.length) {
+          firstProcessName = (nodeProcessRoutes[0]?.process_name ?? nodeProcessRoutes[0]?.processName ?? null) as string | null;
+          if (!firstProcessName) {
+            const pid = nodeProcessRoutes[0]?.process_id ?? nodeProcessRoutes[0]?.processId ?? nodeProcessRoutes[0]?.process ?? null;
+            if (pid) {
+              const pidStr = String(pid);
+              const foundProc = processRecords.find((p) => String(p.id) === pidStr || String(p.process_code) === pidStr);
+              if (foundProc) firstProcessName = foundProc.process_name ?? null;
+            }
           }
         }
-      }
-      if (firstProcessName) updateLine(id, { process: firstProcessName });
+
+        const mapped = bomProcessMap[uniq];
+        const firstFromMap = Array.isArray(mapped) && mapped.length ? mapped[0] : null;
+        if (firstProcessName) updateLine(id, { process: firstProcessName });
+        else if (firstFromMap) updateLine(id, { process: firstFromMap });
+
+        // prefer UoM from BOM node fields if present
+        const nodeUom = String(bomNode.unit_measurement ?? bomNode.unitMeasurement ?? bomNode.uom ?? bomNode.unit ?? "").trim();
+        if (nodeUom) updateLine(id, { uom: nodeUom });
       const nodeStock = (bomNode.stock_qty ?? bomNode.stock ?? bomNode.stockQty ?? bomNode.quantity ?? null) as any;
       const stockFromBom = typeof nodeStock === "number" ? nodeStock : (typeof nodeStock === "string" && nodeStock.trim() ? Number(nodeStock) : null);
       updateLine(id, { stockQty: typeof stockFromBom === "number" ? stockFromBom : 0 });

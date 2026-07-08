@@ -60,6 +60,7 @@ import {
   Table,
   Tag,
   message,
+  Collapse,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -209,35 +210,6 @@ function dedupeSupplierOptions(options: SupplierOption[]): SupplierOption[] {
   return result;
 }
 
-function resolveSupplierName(
-  supplierValue: unknown,
-  supplierNameByCode: Map<string, string>,
-) {
-  if (typeof supplierValue === "string") {
-    return supplierNameByCode.get(supplierValue) ?? supplierValue;
-  }
-
-  if (isRecord(supplierValue)) {
-    if (
-      typeof supplierValue.supplier_name === "string" &&
-      supplierValue.supplier_name.trim()
-    ) {
-      return supplierValue.supplier_name;
-    }
-
-    if (
-      typeof supplierValue.supplier_code === "string" &&
-      supplierValue.supplier_code.trim()
-    ) {
-      return (
-        supplierNameByCode.get(supplierValue.supplier_code) ??
-        supplierValue.supplier_code
-      );
-    }
-  }
-
-  return "-";
-}
 
 function normalizeSupplierItemType(value: unknown): BudgetTabId | null {
   const raw = String(value ?? "")
@@ -264,6 +236,22 @@ function normalizeLookupValue(value: unknown) {
 
 function isIntegerId(value: string) {
   return /^\d+$/.test(value.trim());
+}
+
+function collectMaterialGrades(node: Record<string, any>) {
+  const out: Array<{ id?: number; uniq?: string; material_grade?: string | null }> = [];
+
+  function walk(n: Record<string, any>) {
+    if (!n || typeof n !== "object") return;
+    const ms = (n.material_spec ?? {}) as Record<string, any>;
+    out.push({ id: n.id, uniq: n.uniq ?? n.uniq_code, material_grade: ms.material_grade ?? null });
+    if (Array.isArray(n.children)) {
+      for (const c of n.children) walk(c);
+    }
+  }
+
+  walk(node);
+  return out;
 }
 
 function toIntegerId(value: unknown): number | null {
@@ -359,8 +347,68 @@ export default function PoBudgetPage() {
   const { data: bomTreeRes } = useGetBomTreeQuery();
   const bomTreeNodes = useMemo(() => {
     const items = bomTreeRes?.data?.items;
-    return Array.isArray(items) ? items : [];
-  }, [bomTreeRes?.data?.items]);
+    if (Array.isArray(items)) return items;
+    // some endpoints return a single BOM object in data
+    const rawData = bomTreeRes?.data;
+    if (!rawData) return [];
+    if (Array.isArray(rawData)) return rawData;
+    if (typeof rawData === "object") return [rawData as any];
+    return [];
+  }, [bomTreeRes?.data]);
+  const materialGrades = useMemo(() => {
+    const all: Array<{ id?: number; uniq?: string; material_grade?: string | null }> = [];
+    for (const node of bomTreeNodes) {
+      all.push(...collectMaterialGrades(node as Record<string, any>));
+    }
+    return all;
+  }, [bomTreeNodes]);
+function resolveSupplierName(
+  supplierValue: unknown,
+  supplierNameByCode: Map<string, string>,
+) {
+  if (typeof supplierValue === "string") {
+    return supplierNameByCode.get(supplierValue) ?? supplierValue;
+  }
+
+  if (isRecord(supplierValue)) {
+    if (
+      typeof supplierValue.supplier_name === "string" &&
+      supplierValue.supplier_name.trim()
+    ) {
+      return supplierValue.supplier_name;
+    }
+
+    if (
+      typeof supplierValue.supplier_code === "string" &&
+      supplierValue.supplier_code.trim()
+    ) {
+      return (
+        supplierNameByCode.get(supplierValue.supplier_code) ??
+        supplierValue.supplier_code
+      );
+    }
+  }
+
+  return "-";
+}
+
+  useEffect(() => {
+    if (materialGrades.length > 0) {
+      // temporary: log collected grades for debugging / verification
+      // you can replace this with UI rendering as needed
+      // eslint-disable-next-line no-console
+      console.log("Collected material grades:", materialGrades);
+    }
+  }, [materialGrades]);
+
+  const uniqueMaterialGrades = useMemo(() => {
+    const set = new Set<string>();
+    materialGrades.forEach((m) => {
+      const v = String(m.material_grade ?? "").trim();
+      if (v && v !== "-" && v.toLowerCase() !== "null") set.add(v);
+    });
+    return Array.from(set).sort();
+  }, [materialGrades]);
   const bomIndex = useMemo(
     () => buildBomUniqIndex(bomTreeNodes),
     [bomTreeNodes],
@@ -1428,6 +1476,21 @@ export default function PoBudgetPage() {
     const items = (supplierItemsByUniq.get(uniqCode) ?? [])
       .slice()
       .sort((a, b) => (a.row_id ?? 0) - (b.row_id ?? 0));
+
+    if (items.length === 0) {
+      // No supplier-items registered for this uniq — show a single fallback entry
+      // indicating missing data. This aligns with the UI requirement to show
+      // "tidak ada data" when a uniq has no registered suppliers.
+      return [
+        {
+          id: `auto-1`,
+          supplier: "Tidak ada data",
+          qty: totalQty,
+          percentage: 100,
+        },
+      ];
+    }
+
     return items
       .filter((si) => Boolean(si.supplier_name || si.supplier_uuid))
       .map((si, idx) => {
@@ -1820,6 +1883,7 @@ export default function PoBudgetPage() {
         dataIndex: "uniq",
         key: "uniq",
         width: 160,
+
         render: (value: string, record) => (
           <div>
             <Tag color="blue" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
@@ -1839,6 +1903,7 @@ export default function PoBudgetPage() {
           <span className="text-sm text-gray-700">{value}</span>
         ),
       },
+       
       {
         title: "Part Number",
         dataIndex: "partNumber",
@@ -2885,8 +2950,25 @@ export default function PoBudgetPage() {
           icon={<MdQueryStats size={18} />}
           accent="bg-purple-50 text-purple-600"
         />
-        <StatCard
-          label="APO - PRL"
+      {/* <div className="mb-6"> */}
+        {/* <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+          <div className="text-sm text-gray-600 mb-2">Material Grades</div>
+          <div className="text-xs text-gray-400 mb-2">Found {uniqueMaterialGrades.length} grades from {bomTreeNodes.length} BOM nodes</div>
+          <div className="flex flex-wrap gap-2">
+            {uniqueMaterialGrades.length === 0 ? (
+              <div className="text-sm text-gray-400">No material grades found</div>
+            ) : (
+              uniqueMaterialGrades.map((g) => (
+                <Tag key={g} color="blue">
+                  {g}
+                </Tag>
+              ))
+            )}
+          </div>
+        </div> */}
+      {/* </div> */}
+          <StatCard
+            label="APO - PRL"
           value={formatNumber(summary.delta_apo_prl)}
           icon={<MdInventory2 size={18} />}
           accent="bg-orange-50 text-orange-600"
@@ -3040,6 +3122,8 @@ export default function PoBudgetPage() {
                   setSelectedSinglePrlId(undefined);
                   setSingleChildRows([]);
                 }
+                const bomDefaults = getBomDefaultsForUniq(uniqCode);
+
                 setAddForm((prev) => ({
                   ...prev,
                   prl: raw,
@@ -3504,7 +3588,7 @@ export default function PoBudgetPage() {
 
                 {bulkSource === "prl" ? (
                   <>
-                    <div className="text-xs text-gray-600 mb-1">Select PRL UNIQ</div>
+                    <div className="text-xs text-gray-600 mb-1">Select PRL</div>
                     <Select
                       mode="multiple"
                       allowClear
@@ -3524,6 +3608,18 @@ export default function PoBudgetPage() {
                       loading={prlsFetching}
                       maxTagCount="responsive"
                     />
+                    {/* For each selected PRL show parent material grade and a dropdown of child uniqs + material grade */}
+                    <div className="mt-3 space-y-2">
+                      {bulkPrlIds && bulkPrlIds.length > 0 && bulkPrlIds.map((val) => {
+                        const parsed = parsePrlSelection(String(val));
+                        const prlId = parsed?.prlId ?? String(val);
+                        const detail = bulkPrlDetailCache[String(prlId)];
+                        if (!detail) return null;
+
+                        const parents = Array.isArray(detail.items) ? detail.items : [];
+                        
+                      })}
+                    </div>
                   </>
                 ) : (
                   <>
