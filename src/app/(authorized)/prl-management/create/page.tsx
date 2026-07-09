@@ -100,11 +100,34 @@ export default function AddForecastPage() {
   }, [bomTreeRes?.data]);
 
   const uniqOptions = useMemo(() => {
-    const nodes = Array.isArray(bomTreeRes?.data) ? bomTreeRes?.data : [];
-    console.log("[PRL Create] topLevel nodes count:", nodes.length, nodes);
-    const opts = bomIndex.options;
-    console.log("[PRL Create] uniqOptions (from bomIndex):", opts);
-    return opts;
+    // Prefer top-level BOM nodes only (parents). If BOM tree is unavailable,
+    // fall back to the full uniq list from bomIndex.
+    const bomData = bomTreeRes?.data;
+    const topNodes: any[] = Array.isArray(bomData)
+      ? bomData
+      : Array.isArray((bomData as any)?.items)
+      ? (bomData as any).items
+      : Array.isArray((bomData as any)?.rows)
+      ? (bomData as any).rows
+      : [];
+
+    if (topNodes.length > 0) {
+      const opts = topNodes
+        .map((n) => {
+          const code = String(n?.uniq ?? n?.uniq_code ?? n?.uniqCode ?? "").trim();
+          return code ? { label: code, value: code } : null;
+        })
+        .filter(Boolean) as { label: string; value: string }[];
+      // Ensure uniqueness and stable order
+      const map = new Map<string, { label: string; value: string }>();
+      for (const it of opts) if (!map.has(it.value)) map.set(it.value, it);
+      const res = Array.from(map.values());
+      console.log("[PRL Create] uniqOptions (top-level parents):", res);
+      return res;
+    }
+
+    console.log("[PRL Create] uniqOptions (fallback bomIndex):", bomIndex.options);
+    return bomIndex.options;
   }, [bomTreeRes?.data, bomIndex.options]);
 
   const uniqOptionsForCustomer = (customerId?: string) => {
