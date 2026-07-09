@@ -1,9 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { Button, DatePicker, Input, InputNumber, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { LeftOutlined, PlusOutlined } from "@ant-design/icons";
+import { LeftOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import dayjs, { Dayjs } from "dayjs";
 import { apiBaseUrl } from "@/lib/api/instance";
@@ -13,24 +13,37 @@ import {
 } from "@/lib/api/procurement-po/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetPoBudgetListQuery, type PoBudgetType } from "@/lib/api/po-budget/api";
+import { getStoredParents } from "@/components/po-budget/poBudgetChildAdapters";
 
 type PoItemRow = {
   key: string;
-  uniq: string;
+  parentUniq: string;
+  childUniq: string;
+  materialGrade: string;
   partNumber: string;
   partName: string;
-  model: string;
+  form: string;
+  supplier: string;
   qty: number;
   uom: string;
-  packingNumber: string;
-  pcsPerKanban: number;
-  budgetPoIdr: number;
+  weightKg: number;
+};
+
+type PoStageGroup = {
+  stage: 1 | 2;
+  label: string;
+  pct: number;
+  items: PoItemRow[];
+  totalQty: number;
+};
+
+const specText = (spec: Record<string, unknown> | undefined, key: string): string => {
+  const value = spec?.[key];
+  if (value == null || value === "") return "-";
+  return String(value);
 };
 
 const formatNumber = (n: number) => new Intl.NumberFormat("en-US").format(n);
-const formatIdr = (n: number) => `${formatNumber(n)} IDR`;
-
-const pad3 = (n: number) => String(n).padStart(3, "0");
 
 const tabToPoType = (tab: string | null): ProcurementPoType => {
   if (tab === "indirect") return "indirect";
@@ -74,6 +87,29 @@ function CreatePoProcurementPageContent() {
     { skip: !apiEnabled },
   );
 
+  // Only budget entries whose period matches the Period selected in Step 1 are
+  // eligible — the backend generate call filters by period too, so surfacing
+  // other periods here would let the user pick entries that can never generate.
+  const periodKey = useMemo(
+    () => (period ? period.format("MMMM YYYY") : ""),
+    [period],
+  );
+
+  const budgetRowsForPeriod = useMemo(() => {
+    const rows = poBudgetQuery.data?.data ?? [];
+    if (!periodKey) return rows;
+    return rows.filter((row) => {
+      const rowPeriod = String(row.period ?? "").trim();
+      if (!rowPeriod) return false;
+      // Compare on month+year so "July 2026" and "2026-07" both line up.
+      const rowMonth = dayjs(rowPeriod, ["MMMM YYYY", "YYYY-MM", "MM/YYYY"], true);
+      const parsed = rowMonth.isValid() ? rowMonth : dayjs(rowPeriod);
+      return parsed.isValid()
+        ? parsed.format("MMMM YYYY") === periodKey
+        : rowPeriod === periodKey;
+    });
+  }, [poBudgetQuery.data?.data, periodKey]);
+
   const poBudgetOptions = useMemo<{ label: string; value: number }[]>(() => {
     if (!apiEnabled) {
       return [
@@ -82,11 +118,11 @@ function CreatePoProcurementPageContent() {
       ];
     }
 
-    return (poBudgetQuery.data?.data ?? []).map((row) => ({
+    return budgetRowsForPeriod.map((row) => ({
       label: `${row.poBudgetRef ?? row.id ?? row.key} - ${row.uniq} - ${row.supplier}`,
       value: Number(row.id ?? row.key),
     }));
-  }, [apiEnabled, poBudgetQuery.data?.data]);
+  }, [apiEnabled, budgetRowsForPeriod]);
 
   const poSequenceOptions = useMemo(
     () => [
@@ -97,70 +133,110 @@ function CreatePoProcurementPageContent() {
     []
   );
 
-  const baseItems: PoItemRow[] = useMemo(() => {
-    const selectedRows = (poBudgetQuery.data?.data ?? []).filter((row) =>
+  // Split every selected budget entry's detail_jsonb children into PO1 / PO2
+  // preview rows (childQty * pct / 100), iterating all parents and children.
+  const poStageGroups: PoStageGroup[] = useMemo(() => {
+    const selectedRows = budgetRowsForPeriod.filter((row) =>
       selectedBudgetIds.includes(Number(row.id ?? row.key)),
     );
-
     if (!selectedRows.length) return [];
 
-    return selectedRows.map((row, index) => ({
-      key: String(row.id ?? row.key ?? index + 1),
-      uniq: row.uniq,
-      partNumber: row.partNumber ?? "-",
-      partName: row.partName,
-      model: row.productModel,
-      qty: row.totalPo || row.pr || row.salesPlan || 0,
-      uom: row.uom ?? "-",
-      packingNumber: row.poBudgetRef ?? "-",
-      pcsPerKanban: 0,
-      budgetPoIdr: row.totalPo || 0,
-    }));
-  }, [poBudgetQuery.data?.data, selectedBudgetIds]);
+    const buildStage = (stage: 1 | 2): PoStageGroup => {
+      const items: PoItemRow[] = [];
+      let seq = 0;
 
-  const poGroups = useMemo(
-    () => [
-      {
-        id: "(auto)",
-        supplierName: baseItems[0]?.partName ? "Auto from PO Budget" : "-",
-        totalQty: baseItems.reduce((sum, r) => sum + (r.qty || 0), 0),
-        totalUniq: baseItems.length,
-        items: baseItems.map((r) => ({ ...r, key: `xxx-${r.key}` })),
-      },
-    ],
-    [baseItems]
-  );
+      for (const row of selectedRows) {
+        const pct = stage === 1 ? row.po1Pct : row.po2Pct;
+        const parents = getStoredParents(row.detailJson);
+
+        for (const parent of parents) {
+          const children = Array.isArray(parent.children) ? parent.children : [];
+          for (const child of children) {
+            const childSpec = (child.material_spec ?? {}) as Record<string, unknown>;
+            const childQty = Number(child.quantity ?? child.qty_per_uniq ?? 0);
+            const stageQty = Math.round((childQty * (pct || 0)) / 100);
+            if (stageQty <= 0) continue;
+
+            const suppliers = Array.isArray(child.suppliers) ? child.suppliers : [];
+            const supplierName =
+              suppliers[0]?.supplier_name ?? row.supplier ?? "-";
+
+            items.push({
+              key: `s${stage}-${row.id ?? row.key}-${seq++}`,
+              parentUniq: String(parent.uniq_code ?? row.uniq ?? "-"),
+              childUniq: String(child.uniq_code ?? "-"),
+              materialGrade: String(
+                child.uniq ?? childSpec.material_grade ?? child.uniq_code ?? "-",
+              ),
+              partNumber: String(child.part_number ?? "-"),
+              partName: String(child.part_name ?? "-"),
+              form: specText(childSpec, "form"),
+              supplier: String(supplierName),
+              qty: stageQty,
+              uom: String(child.uom ?? row.uom ?? "-"),
+              weightKg: Number(child.weight_kg ?? childSpec.weight_kg ?? 0),
+            });
+          }
+        }
+      }
+
+      return {
+        stage,
+        label: `PO ${stage}`,
+        pct: 0,
+        items,
+        totalQty: items.reduce((sum, r) => sum + r.qty, 0),
+      };
+    };
+
+    const stages: (1 | 2)[] =
+      generateMode === "stage_1"
+        ? [1]
+        : generateMode === "stage_2"
+          ? [2]
+          : [1, 2];
+
+    return stages.map(buildStage).filter((g) => g.items.length > 0);
+  }, [budgetRowsForPeriod, selectedBudgetIds, generateMode]);
 
   const columns: ColumnsType<PoItemRow> = [
-    { title: "Uniq", dataIndex: "uniq", key: "uniq", width: 90 },
-    { title: "Part Number", dataIndex: "partNumber", key: "partNumber", width: 120 },
-    { title: "Part Name", dataIndex: "partName", key: "partName", width: 140 },
-    { title: "Model", dataIndex: "model", key: "model", width: 110 },
-    { title: "Qty", dataIndex: "qty", key: "qty", width: 80 },
-    { title: "UoM", dataIndex: "uom", key: "uom", width: 80 },
+    { title: "Parent UNIQ", dataIndex: "parentUniq", key: "parentUniq", width: 110 },
     {
-      title: "Packing Number",
-      dataIndex: "packingNumber",
-      key: "packingNumber",
-      width: 140,
-      render: (v: string) => <span className="text-blue-600">{v}</span>,
+      title: "Material Grade",
+      dataIndex: "materialGrade",
+      key: "materialGrade",
+      width: 130,
+      render: (v: string, r) => (
+        <div>
+          <span className="text-sm font-medium text-gray-800">{v}</span>
+          {r.childUniq && r.childUniq !== "-" ? (
+            <div className="text-[11px] text-gray-400">{r.childUniq}</div>
+          ) : null}
+        </div>
+      ),
     },
-    { title: "Pcs/Kanban", dataIndex: "pcsPerKanban", key: "pcsPerKanban", width: 110 },
+    { title: "Part Name", dataIndex: "partName", key: "partName", width: 160 },
+    { title: "Part Number", dataIndex: "partNumber", key: "partNumber", width: 120 },
+    { title: "Form", dataIndex: "form", key: "form", width: 90 },
+    { title: "Supplier", dataIndex: "supplier", key: "supplier", width: 150 },
     {
-      title: "Budget PO",
-      dataIndex: "budgetPoIdr",
-      key: "budgetPoIdr",
-      width: 140,
+      title: "Qty",
+      dataIndex: "qty",
+      key: "qty",
+      width: 90,
       align: "right",
-      render: (v: number) => <span className="text-xs text-gray-700">{formatIdr(v)}</span>,
+      render: (v: number) => <span className="font-medium text-gray-800">{formatNumber(v)}</span>,
+    },
+    { title: "UoM", dataIndex: "uom", key: "uom", width: 70 },
+    {
+      title: "Weight (kg)",
+      dataIndex: "weightKg",
+      key: "weightKg",
+      width: 100,
+      align: "right",
+      render: (v: number) => <span className="text-xs text-gray-700">{formatNumber(v)}</span>,
     },
   ];
-
-  const handleGeneratePo = () => {
-    if (!selectedBudgetIds.length) return message.error("Select PO Budget entries");
-    if (!generateMode) return message.error("Select generate mode");
-    message.success("PO data prepared");
-  };
 
   const handleSave = async () => {
     if (!period) {
@@ -183,7 +259,7 @@ function CreatePoProcurementPageContent() {
     try {
       await generatePo({
         po_type: poType,
-        period: period.format("YYYY-MM"),
+        period: period.format("MMMM YYYY"),
         po_budget_entry_ids: selectedBudgetIds,
         external_system: externalSystem,
         external_po_number: externalPoNumber || undefined,
@@ -251,7 +327,11 @@ function CreatePoProcurementPageContent() {
                 picker="month"
                 format="MM/YYYY"
                 value={period}
-                onChange={(v) => setPeriod(v)}
+                onChange={(v) => {
+                  setPeriod(v);
+                  // Entries are period-scoped; clear any selection from the old period.
+                  setSelectedBudgetIds([]);
+                }}
                 className="w-full !rounded-lg"
               />
             </div>
@@ -340,45 +420,37 @@ function CreatePoProcurementPageContent() {
                 className="!rounded-lg"
               />
             </div>
-            <div className="md:col-span-2 flex items-end">
-              <Button type="primary" className="!rounded-lg w-full" icon={<PlusOutlined />} onClick={handleGeneratePo}>
-                Generate PO
-              </Button>
-            </div>
           </div>
 
           <div className="mt-6 space-y-6">
-            {poGroups.map((g, idx) => (
-              <div key={g.id} className={idx === 0 ? "" : "pt-4 border-t border-gray-100"}>
-                <div className="text-sm font-semibold text-gray-900">PO 1: {g.id}</div>
-
-                <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <div className="text-xs text-gray-500">Supplier</div>
-                    <div className="text-sm font-semibold text-gray-800">{g.supplierName}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500">Total Quantity</div>
-                    <div className="text-sm font-semibold text-gray-800">{formatNumber(g.totalQty)} pcs</div>
-                  </div>
-                  <div>
-                    <div className="text-xs text-gray-500">Total Uniq</div>
-                    <div className="text-sm font-semibold text-gray-800">{formatNumber(g.totalUniq)}</div>
-                  </div>
-                </div>
-
-                <div className="mt-3 overflow-hidden rounded-xl border border-gray-100">
-                  <Table<PoItemRow>
-                    columns={columns}
-                    dataSource={g.items}
-                    rowKey="key"
-                    size="middle"
-                    pagination={false}
-                    scroll={{ x: "max-content" }}
-                  />
-                </div>
+            {poStageGroups.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
+                Select PO Budget entries above to preview the PO1 / PO2 child split.
               </div>
-            ))}
+            ) : (
+              poStageGroups.map((g) => (
+                <div key={g.stage}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-gray-900">{g.label}</div>
+                    <div className="text-xs text-gray-500">
+                      {g.items.length} material{g.items.length !== 1 ? "s" : ""} · total qty{" "}
+                      <span className="font-semibold text-gray-800">{formatNumber(g.totalQty)}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 overflow-hidden rounded-xl border border-gray-100">
+                    <Table<PoItemRow>
+                      columns={columns}
+                      dataSource={g.items}
+                      rowKey="key"
+                      size="middle"
+                      pagination={false}
+                      scroll={{ x: "max-content" }}
+                    />
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

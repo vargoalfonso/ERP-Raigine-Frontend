@@ -108,6 +108,9 @@ export type ProcurementPoItem = {
   id?: string;
   line_no?: number;
   uniq_code?: string;
+  child_uniq_code?: string;
+  material_grade?: string;
+  material_spec?: Record<string, unknown>;
   part_number?: string;
   part_name?: string;
   model?: string;
@@ -205,6 +208,9 @@ const toProcurementPoItem = (raw: unknown): ProcurementPoItem => {
     id: toText(record.id),
     line_no: toNumber(record.line_no),
     uniq_code: toText(record.uniq_code) ?? toText(record.item_uniq_code) ?? toText(record.uniq),
+    child_uniq_code: toText(record.child_uniq_code),
+    material_grade: toText(record.material_grade),
+    material_spec: isRecord(record.material_spec) ? record.material_spec : undefined,
     part_number: toText(record.part_number),
     part_name: toText(record.part_name),
     model: toText(record.model),
