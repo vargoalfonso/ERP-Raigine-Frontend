@@ -1,7 +1,7 @@
 "use client";
 
 import { apiBaseUrl, apiSlice, getCookiesFromBrowser } from "@/lib/api/instance";
-import { getCurrentUserProfile, getCurrentUserTokenPayload, getCurrentUserUid } from "@/lib/utils/currentUser";
+import { getCurrentUserProfile, getCurrentUserTokenPayload, getCurrentUserUid, type CurrentUserProfile } from "@/lib/utils/currentUser";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePathname } from "next/navigation";
@@ -92,13 +92,25 @@ export default function Navbar() {
   //   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const pathname = usePathname();
   const pageTitle = getPageTitle(pathname);
-  const currentDate = getCurrentDate();
+  // Computed after mount to avoid SSR/client hydration mismatch (locale/timezone).
+  const [currentDate, setCurrentDate] = useState("");
   const router = useRouter();
   const dispatch = useDispatch();
-  const [currentUser, setCurrentUser] = useState(() => getCurrentUserProfile());
+  // Start from a deterministic default so the server-rendered HTML matches the
+  // client's first render. The real profile (from cookie/JWT) is loaded in the
+  // effect below, which only runs on the client.
+  const DEFAULT_USER_PROFILE: CurrentUserProfile = {
+    displayName: null,
+    role: null,
+    initials: "AI",
+  };
+  const [currentUser, setCurrentUser] = useState<CurrentUserProfile>(
+    DEFAULT_USER_PROFILE,
+  );
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
   useEffect(() => {
+    setCurrentDate(getCurrentDate());
     let cancelled = false;
 
     const hydrateCurrentUser = async () => {
