@@ -51,6 +51,24 @@ const parseArrayResponse = <T,>(response: unknown): T[] => {
   return [];
 };
 
+// Locate the `pagination` block regardless of how deeply the array payload
+// is nested (top-level, data.pagination, or data.data.pagination).
+const parseListPagination = (response: unknown): { page?: number; totalPages?: number } => {
+  if (!isRecord(response)) return {};
+  const candidates = [response, response.data, isRecord(response.data) ? response.data.data : undefined];
+  for (const candidate of candidates) {
+    if (!isRecord(candidate)) continue;
+    const pagination = candidate.pagination;
+    if (isRecord(pagination)) {
+      return {
+        page: toNumber(pagination.page),
+        totalPages: toNumber(pagination.total_pages ?? pagination.totalPages),
+      };
+    }
+  }
+  return {};
+};
+
 const parseObjectResponse = <T,>(response: unknown): T | null => {
   if (!isRecord(response)) return null;
   const data = response.data;
@@ -267,12 +285,29 @@ export const supplierItemsApiSlice = apiSlice
   .injectEndpoints({
     endpoints: (builder) => ({
       listSupplierItems: builder.query<SupplierItemRecord[], ListSupplierItemsParams | void>({
-        query: (params) => ({
-          url: `/supplier-items${buildQueryString({ type: params?.type, status: params?.status, search: params?.search })}`,
-          method: "GET",
-          meta: { useAuthorization: true, contentType: "application/json" },
-        }),
-        transformResponse: (response: unknown) => parseArrayResponse<unknown>(response).map(normalizeSupplierItem),
+        queryFn: async (params, _api, _extraOptions, fetchWithBQ) => {
+          const qs = { type: params?.type, status: params?.status, search: params?.search };
+          const items: unknown[] = [];
+          let page = 1;
+          const maxPages = 50; // safety cap: 50 * 100 = 5,000 rows
+
+          while (page <= maxPages) {
+            const url = `/supplier-items${buildQueryString({ ...qs, limit: "100", page: String(page) })}`;
+            const result = await fetchWithBQ({
+              url,
+              method: "GET",
+              meta: { useAuthorization: true, contentType: "application/json" },
+            });
+            if (result.error) return { error: result.error };
+
+            items.push(...parseArrayResponse<unknown>(result.data));
+            const { totalPages } = parseListPagination(result.data);
+            if (!totalPages || page >= totalPages) break;
+            page += 1;
+          }
+
+          return { data: items.map(normalizeSupplierItem) };
+        },
         providesTags: (result) => {
           const base: Array<{ type: typeof TAG; id: string }> = [{ type: TAG, id: "LIST" }];
           if (!result) return base;
