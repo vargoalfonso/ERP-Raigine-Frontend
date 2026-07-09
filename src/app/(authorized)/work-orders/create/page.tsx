@@ -9,11 +9,13 @@ import {
   InputNumber,
   Select,
   Tag,
+  Tooltip,
   message,
 } from "antd";
 import {
   ArrowLeftOutlined,
   DeleteOutlined,
+  ExclamationCircleOutlined,
   PlusOutlined,
   SaveOutlined,
 } from "@ant-design/icons";
@@ -56,6 +58,7 @@ type UniqLine = {
   kanbanNumber: string;
   targetStock?: number | null;
   stockQty?: number | null;
+  qpu?: number | null;  // Qty Per Uniq dari BOM
   level?: number;
 };
 
@@ -375,6 +378,7 @@ export default function CreateWorkOrderPage() {
           partNumber: String(c?.part_number ?? "") || undefined,
           model: String(c?.model ?? c?.assembly_code ?? "") || undefined,
           qty: childQty,
+          qpu: typeof rawQty === "number" ? rawQty : (typeof rawQty === "string" && rawQty.trim() !== "" ? Number(rawQty) : null),
           uom: String(c?.unit_measurement ?? c?.uom ?? "pcs") || undefined,
           process: childAllProcesses[0] ?? undefined,
           processes: childAllProcesses,
@@ -388,6 +392,8 @@ export default function CreateWorkOrderPage() {
       if (!detailChildren.length) return;
       setLines((prev) => {
         const baseLines = prev.filter((l) => l.id !== id && l.parentId !== id);
+        // QPU untuk parent: ambil dari qty_per_uniq di BOM node jika ada
+        const parentQpu = bomNode?.qty_per_uniq ?? bomNode?.qpu ?? bomNode?.qty ?? null;
         const parentLine: UniqLine = {
           id,
           uniq,
@@ -395,6 +401,7 @@ export default function CreateWorkOrderPage() {
           partNumber: found?.partNumber,
           model: found?.model,
           qty: undefined,
+          qpu: typeof parentQpu === "number" ? parentQpu : null,
           uom: found?.uom ?? bomIndex.uomByUniq[uniq] ?? "pcs",
           process: bomProcessMap[uniq]?.[0] ?? undefined,
           kanbanNumber: nextKanbanNumber(0),
@@ -423,7 +430,7 @@ export default function CreateWorkOrderPage() {
           } catch (e) {
             detail = null;
           }
-          const detailData = detail?.data;
+          const detailData = detail?.data ?? detail;
           const detailChildren =
             Array.isArray(detailData?.children) && (detailData.children as any[]).length > 0
               ? (detailData.children as any[])
@@ -721,13 +728,38 @@ export default function CreateWorkOrderPage() {
 
                       {/* Quantity */}
                       <div className="col-span-1">
-                        <InputNumber
-                          className="!rounded-lg w-full"
-                          placeholder="Qty"
-                          min={0}
-                          value={l.qty}
-                          onChange={(v) => updateLine(l.id, { qty: typeof v === "number" ? v : undefined })}
-                        />
+                        <div className="flex items-center gap-1">
+                          <InputNumber
+                            className="!rounded-lg flex-1 min-w-0"
+                            placeholder="Qty"
+                            min={0}
+                            value={l.qty}
+                            onChange={(v) => updateLine(l.id, { qty: typeof v === "number" ? v : undefined })}
+                          />
+                          <Tooltip
+                            placement="right"
+                            title={
+                              <div className="text-xs space-y-1">
+                                <div>
+                                  <span className="text-gray-300">QPU:&nbsp;</span>
+                                  <span className="font-semibold text-white">
+                                    {l.qpu != null ? String(l.qpu) : "-"}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-300">Stock:&nbsp;</span>
+                                  <span className="font-semibold text-white">
+                                    {l.stockQty != null ? String(l.stockQty) : "0"}
+                                  </span>
+                                </div>
+                              </div>
+                            }
+                          >
+                            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 cursor-pointer hover:bg-blue-200 transition-colors flex-shrink-0">
+                              <ExclamationCircleOutlined style={{ fontSize: 11 }} />
+                            </span>
+                          </Tooltip>
+                        </div>
                         {!isChild && (
                           <div className="mt-1 text-[11px] text-gray-500">
                             <div>Target Stock: {l.targetStock !== undefined && l.targetStock !== null ? String(l.targetStock) : "-"}</div>
