@@ -186,6 +186,8 @@ export type PoBudgetRow = {
   pr: number;
   po1: number;
   po2: number;
+  po1Pct: number;
+  po2Pct: number;
   prl: number;
   totalPo: number;
   apoPrl: number;
@@ -418,6 +420,8 @@ const toPoBudgetRow = (item: unknown, index: number): PoBudgetRow => {
     pr: purchaseRequest,
     po1,
     po2,
+    po1Pct,
+    po2Pct,
     prl,
     totalPo,
     apoPrl,

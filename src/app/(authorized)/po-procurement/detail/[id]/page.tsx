@@ -167,7 +167,7 @@ export default function PoProcurementDetailPage() {
       uniq: String(it.uniq_code ?? "-") || "-",
       partNumber: String(it.part_number ?? "-") || "-",
       partName: String(it.part_name ?? "-") || "-",
-      model: String(it.model ?? "-") || "-",
+      model: String(it.material_grade ?? it.model ?? "-") || "-",
       qty: Number(it.qty ?? 0),
       uom: String(it.uom ?? "-") || "-",
       packingNumber: "-",
@@ -211,7 +211,7 @@ export default function PoProcurementDetailPage() {
       width: 120,
     },
     { title: "Part Name", dataIndex: "partName", key: "partName", width: 140 },
-    { title: "Model", dataIndex: "model", key: "model", width: 110 },
+    { title: "Material Grade", dataIndex: "model", key: "model", width: 130 },
     { title: "Qty", dataIndex: "qty", key: "qty", width: 80 },
     { title: "UoM", dataIndex: "uom", key: "uom", width: 80 },
     {
