@@ -1306,18 +1306,28 @@ function resolveSupplierName(
   const defaultUom = uomOptions[0]?.value ?? "";
 
   const prlOptions = useMemo(() => {
-    const fromPrl = approvedPrls.map((item, index) => {
+    // Group by prl_id so one PRL ID that covers multiple UNIQ codes appears as a single option.
+    // The downstream parsePrlSelection already handles an empty prlItemId (parts[2] ?? ""),
+    // and selectedBulkPrl has a fallback that matches by prlId alone when prlItemId is empty.
+    const prlGroups = new Map<string, { customerName: string; uniqs: string[] }>();
+    for (const item of approvedPrls) {
       const prlId = String(item.prl_id ?? item.id ?? "");
-      const prlItemId = String(
-        getPrlRowId(item as Record<string, unknown>) ?? item.id ?? index,
-      );
-      const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "-");
+      if (!prlId) continue;
       const customerName = String(
         item.customer?.customer_name ?? item.customer_name ?? "-",
       );
+      const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "").trim();
+      if (!prlGroups.has(prlId)) {
+        prlGroups.set(prlId, { customerName, uniqs: [] });
+      }
+      const group = prlGroups.get(prlId)!;
+      if (uniqCode && !group.uniqs.includes(uniqCode)) group.uniqs.push(uniqCode);
+    }
+    const fromPrl = Array.from(prlGroups.entries()).map(([prlId, group]) => {
+      const uniqSummary = group.uniqs.length > 0 ? group.uniqs.join(", ") : "-";
       return {
-        label: `${prlId} — ${uniqCode} (${customerName})`,
-        value: `prl::${encodeURIComponent(prlId)}::${encodeURIComponent(prlItemId)}`,
+        label: `${prlId} — ${uniqSummary} (${group.customerName})`,
+        value: `prl::${encodeURIComponent(prlId)}`,
       };
     });
 
@@ -2294,14 +2304,15 @@ function resolveSupplierName(
     );
     const remaining = Math.max(0, target.quantity - allocated);
     setAddSupplierItemKey(itemKey);
-    setAddSupplierForm({ supplier: undefined, qty: remaining });
+    // Kalau remaining=0 (semua ter-alokasi), set qty undefined agar user input sendiri
+    setAddSupplierForm({ supplier: undefined, qty: remaining > 0 ? remaining : undefined });
     setAddSupplierOpen(true);
   };
 
   const confirmAddSupplier = () => {
     if (!addSupplierItemKey) return;
     const supplier = addSupplierForm.supplier;
-    const qty = Number(addSupplierForm.qty || 0);
+    const qty = addSupplierForm.qty != null ? Number(addSupplierForm.qty) : 0;
     if (!supplier) {
       message.warning("Please select supplier");
       return;
@@ -2325,7 +2336,10 @@ function resolveSupplierName(
       0,
     );
     if (allocated + qty > target.quantity) {
-      message.warning("Total quantity cannot exceed budget");
+      const remaining = Math.max(0, target.quantity - allocated);
+      message.warning(
+        `Total quantity cannot exceed budget${remaining > 0 ? ` (remaining: ${remaining})` : ""}`,
+      );
       return;
     }
 
@@ -4670,11 +4684,14 @@ function resolveSupplierName(
                 const autoQty =
                   pct != null && pct > 0 && addSupplierBudget > 0
                     ? Math.round((addSupplierBudget * pct) / 100)
-                    : addSupplierRemaining;
+                    : addSupplierRemaining > 0
+                    ? addSupplierRemaining
+                    : undefined; // remaining=0 → biarkan user input sendiri
                 setAddSupplierForm((p) => ({
                   ...p,
                   supplier: v,
-                  qty: autoQty,
+                  // Hanya set qty otomatis jika ada nilai; jangan timpa 0 ke qty
+                  ...(autoQty !== undefined ? { qty: autoQty } : {}),
                   percentage: pct,
                 }));
               }}
@@ -4708,10 +4725,10 @@ function resolveSupplierName(
             </div>
             <InputNumber
               min={0}
-              max={addSupplierRemaining}
+              max={addSupplierBudget || undefined}
               value={addSupplierForm.qty}
               onChange={(v) =>
-                setAddSupplierForm((p) => ({ ...p, qty: Number(v || 0) }))
+                setAddSupplierForm((p) => ({ ...p, qty: v != null ? Number(v) : undefined }))
               }
               placeholder="Enter quantity"
               className="w-full"
