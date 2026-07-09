@@ -53,6 +53,7 @@ type UniqLine = {
   kanbanNumber: string;
   targetStock?: number | null;
   stockQty?: number | null;
+  level?: number;
 };
 
 const nextWoNumber = () => {
@@ -175,8 +176,21 @@ export default function CreateWorkOrderPage() {
 
   const uniqSelectOptions = useMemo(
     () => {
-      // ensure we include all UNIQs from BOM as dropdown options (de-duplicated)
-      const fromBom = bomIndex.options.map((o) => ({ label: o.value, value: o.value }));
+      // ensure we include only parent/top-level UNIQs from BOM as dropdown options (de-duplicated)
+      const bomData = bomTreeRes?.data;
+      const topNodes: any[] = Array.isArray(bomData)
+        ? bomData
+        : Array.isArray((bomData as any)?.items)
+        ? (bomData as any).items
+        : Array.isArray((bomData as any)?.rows)
+        ? (bomData as any).rows
+        : [];
+      const fromBom = topNodes
+        .map((n) => {
+          const code = String(n?.uniq ?? n?.uniq_code ?? n?.uniqCode ?? "").trim();
+          return code ? { label: code, value: code } : null;
+        })
+        .filter(Boolean) as { label: string; value: string }[];
       const fromApi = uniqOptions.map((u) => ({ label: u.uniq, value: u.uniq }));
       const map = new Map<string, { label: string; value: string }>();
       for (const it of [...fromBom, ...fromApi]) {
@@ -211,6 +225,27 @@ export default function CreateWorkOrderPage() {
   };
 
   const onSelectUniq = (id: string, uniq: string) => {
+    const getFirstProcessName = (node: any): string | null => {
+      if (!node) return null;
+      const routes = Array.isArray(node.process_routes)
+        ? node.process_routes
+        : Array.isArray(node.processRoutes)
+        ? node.processRoutes
+        : Array.isArray(node.processes)
+        ? node.processes
+        : [];
+      if (routes.length) {
+        const name = routes[0]?.process_name ?? routes[0]?.processName ?? routes[0]?.name ?? null;
+        if (name && String(name).trim()) return String(name).trim();
+        const pid = routes[0]?.process_id ?? routes[0]?.processId ?? routes[0]?.process ?? null;
+        if (pid) {
+          const pidStr = String(pid);
+          const foundProc = processRecords.find((p) => String(p.id) === pidStr || String(p.process_code) === pidStr);
+          if (foundProc) return foundProc.process_name ?? null;
+        }
+      }
+      return null;
+    };
     const found = uniqOptions.find((u) => u.uniq === uniq);
     updateLine(id, {
       uniq,
@@ -224,10 +259,12 @@ export default function CreateWorkOrderPage() {
     const findNode = (nodes: any[] | undefined): any | null => {
       if (!Array.isArray(nodes)) return null;
       for (const n of nodes) {
-        const nodeUniq = (n?.uniq_code ?? n?.uniq ?? n?.uniqCode ?? n?.uniq_code) as any;
-        if (String(nodeUniq)?.trim() === String(uniq)) return n;
-        const child = findNode(Array.isArray(n?.children) ? n.children : undefined);
-        if (child) return child;
+        const nodeUniq = String(n?.uniq ?? n?.uniq_code ?? n?.uniqCode ?? "").trim();
+        if (nodeUniq && nodeUniq === String(uniq).trim()) return n;
+        if (Array.isArray(n?.children)) {
+          const child = findNode(n.children as any[]);
+          if (child) return child;
+        }
       }
       return null;
     };
@@ -239,6 +276,13 @@ export default function CreateWorkOrderPage() {
       : [];
     const bomNode = findNode(bomArray);
       if (bomNode) {
+        // debug: ensure node was found
+        try {
+          // eslint-disable-next-line no-console
+          console.debug("Found BOM node for uniq", uniq, bomNode);
+        } catch (e) {
+          // ignore
+        }
         // prefer explicit process_routes on the BOM node
         const nodeProcessRoutes = Array.isArray(bomNode.process_routes)
           ? bomNode.process_routes
@@ -270,6 +314,51 @@ export default function CreateWorkOrderPage() {
       const stockFromBom = typeof nodeStock === "number" ? nodeStock : (typeof nodeStock === "string" && nodeStock.trim() ? Number(nodeStock) : null);
       updateLine(id, { stockQty: typeof stockFromBom === "number" ? stockFromBom : 0 });
     }
+    // if selected node has children, expand lines to include children mapping
+    const children = Array.isArray(bomNode?.children) ? bomNode.children : [];
+    if (children.length) {
+      // map children into new lines, keeping existing kanban numbering sequence
+      setLines((prev) => {
+        const baseLines = prev.filter((l) => l.id !== id);
+        const parentLine: UniqLine = {
+          id,
+          uniq,
+          partName: found?.partName,
+          partNumber: found?.partNumber,
+          model: found?.model,
+          qty: undefined,
+          uom: found?.uom ?? bomIndex.uomByUniq[uniq] ?? "pcs",
+          process: bomProcessMap[uniq]?.[0] ?? undefined,
+          kanbanNumber: nextKanbanNumber(0),
+        };
+          const childLines: UniqLine[] = children.map((c: any, idx: number) => {
+            try {
+              // eslint-disable-next-line no-console
+              console.debug("Expanding child:", { uniq: c?.uniq ?? c?.uniq_code ?? c?.uniqCode, process_routes: c?.process_routes ?? c?.processRoutes ?? c?.processes });
+            } catch (e) {
+              // ignore
+            }
+          const childUniq = String(c?.uniq ?? c?.uniq_code ?? c?.uniqCode ?? "").trim();
+          return {
+            id: `l-${Date.now()}-${idx}`,
+            uniq: childUniq || undefined,
+            partName: String(c?.part_name ?? "") || undefined,
+            partNumber: String(c?.part_number ?? "") || undefined,
+            model: String(c?.model ?? c?.assembly_code ?? "") || undefined,
+            qty: undefined,
+            uom: String(c?.unit_measurement ?? c?.uom ?? "pcs") || undefined,
+              process: getFirstProcessName(c) ?? bomProcessMap[childUniq]?.[0] ?? undefined,
+              kanbanNumber: nextKanbanNumber(idx + 1),
+              level: typeof c?.level === "number" ? c.level : 1,
+          };
+        });
+        const merged = [parentLine, ...childLines, ...baseLines];
+        return merged.map((l, idx) => ({ ...l, kanbanNumber: nextKanbanNumber(idx) }));
+      });
+      // stop further individual line updates
+      return;
+    }
+
     // fetch kanban standard and finished goods summary for this uniq
     if (apiEnabled && uniq) {
       // trigger kanban fetch
@@ -331,6 +420,7 @@ export default function CreateWorkOrderPage() {
         message.error(lineError);
         return;
       }
+      
 
       if (!apiEnabled) {
         message.success("Work order created (mock)");
@@ -495,6 +585,7 @@ export default function CreateWorkOrderPage() {
 
               <div className="divide-y divide-gray-100">
                 {lines.map((l, idx) => {
+                  const isChild = (l.level ?? 0) > 0;
                   const selectedUniq = uniqOptions.find((u) => u.uniq === l.uniq);
                   const processOptions = (selectedUniq?.processes.length ? selectedUniq.processes : processNameOptions).map((p) => ({ label: p, value: p }));
 
@@ -507,10 +598,14 @@ export default function CreateWorkOrderPage() {
                           value={l.uniq}
                           options={uniqSelectOptions}
                           onChange={(v) => onSelectUniq(l.id, v)}
+                          disabled={isChild}
                         />
                       </div>
                       <div className="col-span-3">
-                        <Input className="!rounded-lg" value={l.partName} placeholder="Auto-filled from BOM" disabled />
+                        <div style={{ paddingLeft: `${(l.level ?? 0) * 12}px` }} className="flex items-center gap-2">
+                          {isChild ? <span className="w-2 h-2 rounded-full bg-gray-400 block" /> : null}
+                          <Input className="!rounded-lg" value={l.partName} placeholder="Auto-filled from BOM" disabled />
+                        </div>
                         {l.partNumber || l.model ? (
                           <div className="mt-1 text-[11px] text-gray-400">
                             {[l.partNumber ? `Part No: ${l.partNumber}` : "", l.model ? `Model: ${l.model}` : ""]
@@ -526,6 +621,7 @@ export default function CreateWorkOrderPage() {
                           min={0}
                           value={l.qty}
                           onChange={(v) => updateLine(l.id, { qty: typeof v === "number" ? v : undefined })}
+                          disabled={isChild}
                         />
                         <div className="mt-1 text-[11px] text-gray-500">
                           <div>Target Stock: {l.targetStock !== undefined && l.targetStock !== null ? String(l.targetStock) : "-"}</div>
@@ -543,17 +639,22 @@ export default function CreateWorkOrderPage() {
                             { label: "kg", value: "kg" },
                           ]}
                           onChange={(v) => updateLine(l.id, { uom: v })}
+                          disabled={isChild}
                         />
                       </div>
                       <div className="col-span-2">
-                        <Select
-                          className="!rounded-lg w-full"
-                          placeholder="Process"
-                          value={l.process}
-                          options={processOptions}
-                          onChange={(v) => updateLine(l.id, { process: v })}
-                          disabled={!l.uniq || !processOptions.length}
-                        />
+                        {isChild ? (
+                          <div className="!rounded-lg w-full h-9 flex items-center text-gray-400">•{l.process ? ` ${l.process}` : " Process not set"}</div>
+                        ) : (
+                          <Select
+                            className="!rounded-lg w-full"
+                            placeholder="Process"
+                            value={l.process}
+                            options={processOptions}
+                            onChange={(v) => updateLine(l.id, { process: v })}
+                            disabled={!l.uniq || !processOptions.length}
+                          />
+                        )}
                       </div>
                       <div className="col-span-2">
                         <Input className="!rounded-lg" value={l.kanbanNumber} disabled />
