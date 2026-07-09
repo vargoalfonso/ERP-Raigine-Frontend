@@ -8,6 +8,7 @@ import {
   Input,
   InputNumber,
   Select,
+  Tag,
   message,
 } from "antd";
 import {
@@ -18,7 +19,7 @@ import {
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import dayjs, { type Dayjs } from "dayjs";
-import { apiBaseUrl } from "@/lib/api/instance";
+import { apiBaseUrl, generateHeaders } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetBomTreeQuery, useGetBomListQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
@@ -43,6 +44,7 @@ type UniqOption = {
 
 type UniqLine = {
   id: string;
+  parentId?: string; // ID of parent line (for child rows)
   uniq?: string;
   partName?: string;
   partNumber?: string;
@@ -50,6 +52,7 @@ type UniqLine = {
   qty?: number;
   uom?: string;
   process?: string;
+  processes?: string[]; // All processes from BOM (used for child rows)
   kanbanNumber: string;
   targetStock?: number | null;
   stockQty?: number | null;
@@ -176,7 +179,6 @@ export default function CreateWorkOrderPage() {
 
   const uniqSelectOptions = useMemo(
     () => {
-      // ensure we include only parent/top-level UNIQs from BOM as dropdown options (de-duplicated)
       const bomData = bomTreeRes?.data;
       const topNodes: any[] = Array.isArray(bomData)
         ? bomData
@@ -212,9 +214,16 @@ export default function CreateWorkOrderPage() {
     });
   };
 
+  // FIX #3: Hapus parent sekaligus semua child-nya
   const removeLine = (id: string) => {
     setLines((prev) => {
-      const next = prev.filter((l) => l.id !== id);
+      // Kumpulkan ID yang harus dihapus: parent + semua child-nya
+      const toRemove = new Set<string>();
+      toRemove.add(id);
+      prev.forEach((l) => {
+        if (l.parentId === id) toRemove.add(l.id);
+      });
+      const next = prev.filter((l) => !toRemove.has(l.id));
       const ensured = next.length ? next : [{ id: `l-${Date.now()}`, kanbanNumber: nextKanbanNumber(0) }];
       return ensured.map((l, idx) => ({ ...l, kanbanNumber: nextKanbanNumber(idx) }));
     });
@@ -246,6 +255,34 @@ export default function CreateWorkOrderPage() {
       }
       return null;
     };
+
+    // Ambil semua process names dari BOM node (untuk child: multiple processes)
+    const getAllProcessNames = (node: any): string[] => {
+      if (!node) return [];
+      const routes = Array.isArray(node.process_routes)
+        ? node.process_routes
+        : Array.isArray(node.processRoutes)
+        ? node.processRoutes
+        : Array.isArray(node.processes)
+        ? node.processes
+        : [];
+      const names: string[] = [];
+      for (const r of routes) {
+        const name = r?.process_name ?? r?.processName ?? r?.name ?? null;
+        if (name && String(name).trim()) {
+          names.push(String(name).trim());
+        } else {
+          const pid = r?.process_id ?? r?.processId ?? r?.process ?? null;
+          if (pid) {
+            const pidStr = String(pid);
+            const foundProc = processRecords.find((p) => String(p.id) === pidStr || String(p.process_code) === pidStr);
+            if (foundProc?.process_name) names.push(foundProc.process_name);
+          }
+        }
+      }
+      return Array.from(new Set(names));
+    };
+
     const found = uniqOptions.find((u) => u.uniq === uniq);
     updateLine(id, {
       uniq,
@@ -255,7 +292,7 @@ export default function CreateWorkOrderPage() {
       uom: found?.uom ?? bomIndex.uomByUniq[uniq] ?? "pcs",
       process: undefined,
     });
-    // try to find BOM node to extract process routes and BOM stock
+
     const findNode = (nodes: any[] | undefined): any | null => {
       if (!Array.isArray(nodes)) return null;
       for (const n of nodes) {
@@ -268,6 +305,7 @@ export default function CreateWorkOrderPage() {
       }
       return null;
     };
+
     const bomData = bomTreeRes?.data;
     const bomArray = Array.isArray(bomData)
       ? bomData
@@ -275,51 +313,81 @@ export default function CreateWorkOrderPage() {
       ? (bomData as any).items
       : [];
     const bomNode = findNode(bomArray);
-      if (bomNode) {
-        // debug: ensure node was found
-        try {
-          // eslint-disable-next-line no-console
-          console.debug("Found BOM node for uniq", uniq, bomNode);
-        } catch (e) {
-          // ignore
-        }
-        // prefer explicit process_routes on the BOM node
-        const nodeProcessRoutes = Array.isArray(bomNode.process_routes)
-          ? bomNode.process_routes
-          : Array.isArray(bomNode.processRoutes)
-          ? bomNode.processRoutes
-          : [];
-        let firstProcessName: string | null = null;
-        if (nodeProcessRoutes.length) {
-          firstProcessName = (nodeProcessRoutes[0]?.process_name ?? nodeProcessRoutes[0]?.processName ?? null) as string | null;
-          if (!firstProcessName) {
-            const pid = nodeProcessRoutes[0]?.process_id ?? nodeProcessRoutes[0]?.processId ?? nodeProcessRoutes[0]?.process ?? null;
-            if (pid) {
-              const pidStr = String(pid);
-              const foundProc = processRecords.find((p) => String(p.id) === pidStr || String(p.process_code) === pidStr);
-              if (foundProc) firstProcessName = foundProc.process_name ?? null;
-            }
+
+    if (bomNode) {
+      try { console.debug("Found BOM node for uniq", uniq, bomNode); } catch (e) { /* ignore */ }
+
+      const nodeProcessRoutes = Array.isArray(bomNode.process_routes)
+        ? bomNode.process_routes
+        : Array.isArray(bomNode.processRoutes)
+        ? bomNode.processRoutes
+        : [];
+      let firstProcessName: string | null = null;
+      if (nodeProcessRoutes.length) {
+        firstProcessName = (nodeProcessRoutes[0]?.process_name ?? nodeProcessRoutes[0]?.processName ?? null) as string | null;
+        if (!firstProcessName) {
+          const pid = nodeProcessRoutes[0]?.process_id ?? nodeProcessRoutes[0]?.processId ?? nodeProcessRoutes[0]?.process ?? null;
+          if (pid) {
+            const pidStr = String(pid);
+            const foundProc = processRecords.find((p) => String(p.id) === pidStr || String(p.process_code) === pidStr);
+            if (foundProc) firstProcessName = foundProc.process_name ?? null;
           }
         }
+      }
 
-        const mapped = bomProcessMap[uniq];
-        const firstFromMap = Array.isArray(mapped) && mapped.length ? mapped[0] : null;
-        if (firstProcessName) updateLine(id, { process: firstProcessName });
-        else if (firstFromMap) updateLine(id, { process: firstFromMap });
+      const mapped = bomProcessMap[uniq];
+      const firstFromMap = Array.isArray(mapped) && mapped.length ? mapped[0] : null;
+      if (firstProcessName) updateLine(id, { process: firstProcessName });
+      else if (firstFromMap) updateLine(id, { process: firstFromMap });
 
-        // prefer UoM from BOM node fields if present
-        const nodeUom = String(bomNode.unit_measurement ?? bomNode.unitMeasurement ?? bomNode.uom ?? bomNode.unit ?? "").trim();
-        if (nodeUom) updateLine(id, { uom: nodeUom });
+      const nodeUom = String(bomNode.unit_measurement ?? bomNode.unitMeasurement ?? bomNode.uom ?? bomNode.unit ?? "").trim();
+      if (nodeUom) updateLine(id, { uom: nodeUom });
+
       const nodeStock = (bomNode.stock_qty ?? bomNode.stock ?? bomNode.stockQty ?? bomNode.quantity ?? null) as any;
       const stockFromBom = typeof nodeStock === "number" ? nodeStock : (typeof nodeStock === "string" && nodeStock.trim() ? Number(nodeStock) : null);
       updateLine(id, { stockQty: typeof stockFromBom === "number" ? stockFromBom : 0 });
     }
-    // if selected node has children, expand lines to include children mapping
-    const children = Array.isArray(bomNode?.children) ? bomNode.children : [];
-    if (children.length) {
-      // map children into new lines, keeping existing kanban numbering sequence
+
+    // --- Helper: build child UniqLine[] dari children array (detail endpoint) ---
+    const buildChildLines = (detailChildren: any[]): UniqLine[] =>
+      detailChildren.map((c: any, idx: number) => {
+        const childUniq = String(c?.uniq ?? c?.uniq_code ?? c?.uniqCode ?? "").trim();
+        // qty: pakai quantity (sudah di-map dari qty_per_uniq oleh mapNewNodeToLegacy) atau fallback
+        const rawQty =
+          c?.quantity ?? c?.qty_per_uniq ?? c?.qty ?? c?.bom_qty ??
+          c?.component_qty ?? c?.required_qty ?? c?.bom_quantity ?? null;
+        const childQty: number | undefined =
+          typeof rawQty === "number" ? rawQty
+          : typeof rawQty === "string" && rawQty.trim() !== "" ? Number(rawQty)
+          : undefined;
+        // process: dari detail children yang sudah punya process_routes
+        const childProcessesDirect = getAllProcessNames(c);
+        const childProcessesFromMap = bomProcessMap[childUniq] ?? [];
+        const childAllProcesses: string[] =
+          childProcessesDirect.length > 0 ? childProcessesDirect
+          : childProcessesFromMap.length > 0 ? childProcessesFromMap
+          : [];
+        return {
+          id: `l-${Date.now()}-${idx}`,
+          parentId: id,
+          uniq: childUniq || undefined,
+          partName: String(c?.part_name ?? "") || undefined,
+          partNumber: String(c?.part_number ?? "") || undefined,
+          model: String(c?.model ?? c?.assembly_code ?? "") || undefined,
+          qty: childQty,
+          uom: String(c?.unit_measurement ?? c?.uom ?? "pcs") || undefined,
+          process: childAllProcesses[0] ?? undefined,
+          processes: childAllProcesses,
+          kanbanNumber: nextKanbanNumber(idx + 1),
+          level: typeof c?.level === "number" ? c.level : 1,
+        };
+      });
+
+    // --- Helper: apply child lines ke state ---
+    const applyChildLines = (detailChildren: any[]) => {
+      if (!detailChildren.length) return;
       setLines((prev) => {
-        const baseLines = prev.filter((l) => l.id !== id);
+        const baseLines = prev.filter((l) => l.id !== id && l.parentId !== id);
         const parentLine: UniqLine = {
           id,
           uniq,
@@ -331,37 +399,55 @@ export default function CreateWorkOrderPage() {
           process: bomProcessMap[uniq]?.[0] ?? undefined,
           kanbanNumber: nextKanbanNumber(0),
         };
-          const childLines: UniqLine[] = children.map((c: any, idx: number) => {
-            try {
-              // eslint-disable-next-line no-console
-              console.debug("Expanding child:", { uniq: c?.uniq ?? c?.uniq_code ?? c?.uniqCode, process_routes: c?.process_routes ?? c?.processRoutes ?? c?.processes });
-            } catch (e) {
-              // ignore
-            }
-          const childUniq = String(c?.uniq ?? c?.uniq_code ?? c?.uniqCode ?? "").trim();
-          return {
-            id: `l-${Date.now()}-${idx}`,
-            uniq: childUniq || undefined,
-            partName: String(c?.part_name ?? "") || undefined,
-            partNumber: String(c?.part_number ?? "") || undefined,
-            model: String(c?.model ?? c?.assembly_code ?? "") || undefined,
-            qty: undefined,
-            uom: String(c?.unit_measurement ?? c?.uom ?? "pcs") || undefined,
-              process: getFirstProcessName(c) ?? bomProcessMap[childUniq]?.[0] ?? undefined,
-              kanbanNumber: nextKanbanNumber(idx + 1),
-              level: typeof c?.level === "number" ? c.level : 1,
-          };
-        });
+        const childLines = buildChildLines(detailChildren);
         const merged = [parentLine, ...childLines, ...baseLines];
         return merged.map((l, idx) => ({ ...l, kanbanNumber: nextKanbanNumber(idx) }));
       });
-      // stop further individual line updates
+    };
+
+    // Shallow children dari cache list (tidak punya process_routes)
+    const shallowChildren = Array.isArray(bomNode?.children) ? bomNode.children : [];
+    // bom_id untuk fetch detail endpoint yang punya process_routes per child
+    const bomId = bomNode?.bom_id ? String(bomNode.bom_id).trim() : "";
+
+    if (apiEnabled && bomId) {
+      // PENTING: list endpoint tidak return process_routes di children.
+      // Harus fetch /products/bom/{bom_id} (detail) untuk dapat process_routes.
+      void (async () => {
+        try {
+          let detail: any = null;
+          try {
+            const headers = await generateHeaders({ useAuthorization: true });
+            const res = await fetch(`${apiBaseUrl}/products/bom/${encodeURIComponent(bomId)}`, { method: "GET", headers });
+            if (res.ok) detail = await res.json();
+          } catch (e) {
+            detail = null;
+          }
+          const detailData = detail?.data;
+          const detailChildren =
+            Array.isArray(detailData?.children) && (detailData.children as any[]).length > 0
+              ? (detailData.children as any[])
+              : shallowChildren;
+          applyChildLines(detailChildren);
+        } catch {
+          // fallback ke shallow jika fetch gagal
+          if (shallowChildren.length) applyChildLines(shallowChildren);
+        }
+        // kanban summary
+        try {
+          const kanbanRes = await getInventoryKanbanSummary({ uniq_code: uniq }).unwrap().catch(() => null);
+          const kanbanData = (kanbanRes as any)?.data ?? null;
+          const targetFromKanban = kanbanData?.kanban_pkg_qty ?? kanbanData?.safety_stock_qty ?? null;
+          if (typeof targetFromKanban === "number") updateLine(id, { targetStock: targetFromKanban });
+        } catch { /* ignore */ }
+      })();
+      if (shallowChildren.length) return; // children akan diisi oleh async di atas
+    } else if (shallowChildren.length) {
+      applyChildLines(shallowChildren);
       return;
     }
 
-    // fetch kanban standard and finished goods summary for this uniq
     if (apiEnabled && uniq) {
-      // trigger kanban fetch
       void (async () => {
         try {
           const kanbanPromise = getInventoryKanbanSummary({ uniq_code: uniq }).unwrap();
@@ -373,17 +459,13 @@ export default function CreateWorkOrderPage() {
           if (targetFromKanban !== null && typeof targetFromKanban === "number") {
             updateLine(id, { targetStock: targetFromKanban });
           }
-        } catch (e) {
-          // ignore errors
-        }
+        } catch (e) { /* ignore */ }
       })();
 
-      // request finished goods summary via hook; effect will apply it to the line
       setRequestedFinished({ id, uniq });
     }
   };
 
-  // apply finishedQuery result to the requested line when available
   useEffect(() => {
     if (!requestedFinished) return;
     if (finishedQuery.isError) {
@@ -405,9 +487,12 @@ export default function CreateWorkOrderPage() {
   const validateLines = () => {
     for (const l of lines) {
       if (!l.uniq) return "Select UNIQ";
-      if (!l.qty || l.qty <= 0) return "Enter Qty";
-      if (!l.uom) return "Select UoM";
-      if (!l.process) return "Select Process";
+      // Child rows tidak perlu qty/uom/process divalidasi secara individual
+      if (!l.parentId) {
+        if (!l.qty || l.qty <= 0) return "Enter Qty";
+        if (!l.uom) return "Select UoM";
+        if (!l.process) return "Select Process";
+      }
     }
     return null;
   };
@@ -420,7 +505,6 @@ export default function CreateWorkOrderPage() {
         message.error(lineError);
         return;
       }
-      
 
       if (!apiEnabled) {
         message.success("Work order created (mock)");
@@ -451,16 +535,10 @@ export default function CreateWorkOrderPage() {
       }
 
       router.push("/work-orders");
-
-      // values + lines are available here if later you want persistence.
       void values;
     } catch (err) {
-      if (err && typeof err === "object" && "errorFields" in err) {
-        return;
-      }
-      if (err) {
-        message.error(getApiErrorMessage(err, "Failed to create work order"));
-      }
+      if (err && typeof err === "object" && "errorFields" in err) return;
+      if (err) message.error(getApiErrorMessage(err, "Failed to create work order"));
     }
   };
 
@@ -573,6 +651,7 @@ export default function CreateWorkOrderPage() {
             </div>
 
             <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
+              {/* Header */}
               <div className="px-4 py-3 bg-gray-50 text-xs font-semibold text-gray-600 grid grid-cols-12 gap-3">
                 <div className="col-span-2">UNIQ</div>
                 <div className="col-span-3">Part Name</div>
@@ -590,30 +669,57 @@ export default function CreateWorkOrderPage() {
                   const processOptions = (selectedUniq?.processes.length ? selectedUniq.processes : processNameOptions).map((p) => ({ label: p, value: p }));
 
                   return (
-                    <div key={l.id} className="px-4 py-3 grid grid-cols-12 gap-3 items-center">
+                    // FIX #2: Child row menjorok ke dalam dengan border kiri biru + background beda
+                    <div
+                      key={l.id}
+                      className={[
+                        "px-4 py-3 grid grid-cols-12 gap-3 items-center",
+                        isChild
+                          ? "bg-blue-50/40 border-l-4 border-l-blue-300 pl-8"
+                          : "bg-white",
+                      ].join(" ")}
+                    >
+                      {/* UNIQ */}
                       <div className="col-span-2">
-                        <Select
-                          className="!rounded-lg w-full"
-                          placeholder="Select"
-                          value={l.uniq}
-                          options={uniqSelectOptions}
-                          onChange={(v) => onSelectUniq(l.id, v)}
-                          disabled={isChild}
-                        />
+                        {isChild ? (
+                          // Child: tampilkan UNIQ sebagai text saja (read-only)
+                          <div className="flex items-center gap-1">
+                            <span className="text-blue-400 text-xs">↳</span>
+                            <span className="text-xs text-gray-600 font-mono">{l.uniq ?? "-"}</span>
+                          </div>
+                        ) : (
+                          <Select
+                            className="!rounded-lg w-full"
+                            placeholder="Select"
+                            value={l.uniq}
+                            options={uniqSelectOptions}
+                            onChange={(v) => onSelectUniq(l.id, v)}
+                          />
+                        )}
                       </div>
+
+                      {/* Part Name */}
                       <div className="col-span-3">
-                        <div style={{ paddingLeft: `${(l.level ?? 0) * 12}px` }} className="flex items-center gap-2">
-                          {isChild ? <span className="w-2 h-2 rounded-full bg-gray-400 block" /> : null}
-                          <Input className="!rounded-lg" value={l.partName} placeholder="Auto-filled from BOM" disabled />
+                        <div
+                          className="flex items-center gap-2"
+                        >
+                          <Input
+                            className="!rounded-lg"
+                            value={l.partName}
+                            placeholder="Auto-filled from BOM"
+                            disabled
+                          />
                         </div>
-                        {l.partNumber || l.model ? (
+                        {(l.partNumber || l.model) && (
                           <div className="mt-1 text-[11px] text-gray-400">
                             {[l.partNumber ? `Part No: ${l.partNumber}` : "", l.model ? `Model: ${l.model}` : ""]
                               .filter(Boolean)
                               .join(" • ")}
                           </div>
-                        ) : null}
+                        )}
                       </div>
+
+                      {/* Quantity */}
                       <div className="col-span-1">
                         <InputNumber
                           className="!rounded-lg w-full"
@@ -621,13 +727,16 @@ export default function CreateWorkOrderPage() {
                           min={0}
                           value={l.qty}
                           onChange={(v) => updateLine(l.id, { qty: typeof v === "number" ? v : undefined })}
-                          disabled={isChild}
                         />
-                        <div className="mt-1 text-[11px] text-gray-500">
-                          <div>Target Stock: {l.targetStock !== undefined && l.targetStock !== null ? String(l.targetStock) : "-"}</div>
-                          <div>Stock Qty: {l.stockQty !== undefined && l.stockQty !== null ? String(l.stockQty) : "0"}</div>
-                        </div>
+                        {!isChild && (
+                          <div className="mt-1 text-[11px] text-gray-500">
+                            <div>Target Stock: {l.targetStock !== undefined && l.targetStock !== null ? String(l.targetStock) : "-"}</div>
+                            <div>Stock Qty: {l.stockQty !== undefined && l.stockQty !== null ? String(l.stockQty) : "0"}</div>
+                          </div>
+                        )}
                       </div>
+
+                      {/* UoM */}
                       <div className="col-span-1">
                         <Select
                           className="!rounded-lg w-full"
@@ -642,9 +751,23 @@ export default function CreateWorkOrderPage() {
                           disabled={isChild}
                         />
                       </div>
+
+                      {/* Process Name */}
+                      {/* FIX #1: Child tampilkan SEMUA process dari BOM sebagai tags */}
                       <div className="col-span-2">
                         {isChild ? (
-                          <div className="!rounded-lg w-full h-9 flex items-center text-gray-400">•{l.process ? ` ${l.process}` : " Process not set"}</div>
+                          <div className="flex flex-wrap gap-1">
+                            {(l.processes && l.processes.length > 0)
+                              ? l.processes.map((p, pi) => (
+                                  <Tag key={pi} color="blue" className="text-[11px] m-0">
+                                    {p}
+                                  </Tag>
+                                ))
+                              : l.process
+                              ? <Tag color="blue" className="text-[11px] m-0">{l.process}</Tag>
+                              : <span className="text-xs text-gray-400">-</span>
+                            }
+                          </div>
                         ) : (
                           <Select
                             className="!rounded-lg w-full"
@@ -656,17 +779,24 @@ export default function CreateWorkOrderPage() {
                           />
                         )}
                       </div>
+
+                      {/* Kanban Number */}
                       <div className="col-span-2">
                         <Input className="!rounded-lg" value={l.kanbanNumber} disabled />
                       </div>
+
+                      {/* Actions */}
                       <div className="col-span-1 flex justify-end">
-                        <Button
-                          type="text"
-                          danger
-                          icon={<DeleteOutlined />}
-                          onClick={() => removeLine(l.id)}
-                          aria-label={`delete-line-${idx}`}
-                        />
+                        {/* Child tidak punya tombol delete sendiri (ikut parent) */}
+                        {!isChild && (
+                          <Button
+                            type="text"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={() => removeLine(l.id)}
+                            aria-label={`delete-line-${idx}`}
+                          />
+                        )}
                       </div>
                     </div>
                   );
