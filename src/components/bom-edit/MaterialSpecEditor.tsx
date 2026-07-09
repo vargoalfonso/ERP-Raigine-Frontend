@@ -17,9 +17,9 @@ export default function MaterialSpecEditor({ fieldPath, disabled }: MaterialSpec
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <Form.Item
-          name={[...fieldPath, "material_spec", "material_code"]}
-          label="Material Code"
-          rules={disabled ? [] : [{ required: true, message: "Material Code is required" }]}
+          name={[...fieldPath, "material_spec", "material_grade"]}
+          label="Material Grade"
+          rules={disabled ? [] : [{ required: true, message: "Material Grade is required" }]}
         >
           <Input placeholder="e.g., STKM550" disabled={disabled} />
         </Form.Item>
@@ -58,8 +58,9 @@ export default function MaterialSpecEditor({ fieldPath, disabled }: MaterialSpec
             allowClear
             placeholder="Select type"
             options={[
-              { label: "Raw", value: "raw" },
-              { label: "Indirect", value: "indirect" },
+              { label: "Raw Material", value: "raw" },
+              { label: "Indirect Raw Material", value: "indirect" },
+              { label: "Subcon", value: "subcon" },
             ]}
           />
         </Form.Item>

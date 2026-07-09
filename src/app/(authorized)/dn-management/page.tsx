@@ -430,21 +430,130 @@ export default function DnManagementPage() {
         </html>
       `;
 
-      const w = window.open("", "_blank", "noopener,noreferrer");
-      if (!w) {
-        window.alert("Pop-up blocked. Please allow pop-ups to print.");
-        return;
+      // Render label HTML into the current page and trigger print dialog (no redirect)
+      const printInPlace = () => {
+        const container = document.createElement("div");
+        container.id = "__copilot_print_container";
+        container.style.position = "fixed";
+        container.style.left = "0";
+        container.style.top = "0";
+        container.style.width = "100%";
+        container.style.height = "100%";
+        container.style.zIndex = "2147483647";
+        container.style.background = "white";
+        container.style.overflow = "auto";
+        container.innerHTML = html;
+
+        const style = document.createElement("style");
+        style.setAttribute("data-copilot-print", "true");
+        style.textContent = `
+          @media print {
+            body * { visibility: hidden !important; }
+            #__copilot_print_container, #__copilot_print_container * { visibility: visible !important; }
+            #__copilot_print_container { position: static !important; width: auto !important; height: auto !important; }
+          }
+        `;
+
+        document.head.appendChild(style);
+        document.body.appendChild(container);
+
+        try {
+          window.print();
+        } finally {
+          setTimeout(() => {
+            try { document.body.removeChild(container); } catch {};
+            try { const s = document.querySelector('style[data-copilot-print]'); if (s) s.remove(); } catch {};
+          }, 1000);
+        }
+      };
+
+      printInPlace();
+      // Trigger automatic downloads for QR + simple e-label PNGs
+      const downloadBlob = (blob: Blob, filename: string) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      };
+
+      const fetchImage = async (url: string): Promise<HTMLImageElement | null> => {
+        if (!url) return null;
+        // If data URL, load directly
+        if (typeof url === "string" && url.startsWith("data:")) {
+          return await new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => resolve(null);
+            img.src = url;
+          });
+        }
+        try {
+          const res = await fetch(url, { cache: "no-store" });
+          const blob = await res.blob();
+          return await new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => resolve(null);
+            img.src = URL.createObjectURL(blob);
+          });
+        } catch {
+          return null;
+        }
+      };
+
+      const renderLabelPng = async (qrUrl: string, uniq: string, packing: string, index: number) => {
+        const img = await fetchImage(qrUrl);
+        // canvas size: 400x520
+        const cw = 400;
+        const ch = 520;
+        const canvas = document.createElement("canvas");
+        canvas.width = cw;
+        canvas.height = ch;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        // background
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, cw, ch);
+        // draw QR (centered)
+        if (img) {
+          const size = 320;
+          const x = (cw - size) / 2;
+          ctx.drawImage(img, x, 20, size, size);
+        }
+        // draw texts
+        ctx.fillStyle = "#111827";
+        ctx.font = "bold 14px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(uniq || "-", cw / 2, 370);
+        ctx.font = "12px Arial";
+        ctx.fillText(`Packing: ${packing || "-"}`, cw / 2, 394);
+        ctx.fillText(`PO: ${poNumber || "-"}`, cw / 2, 414);
+
+        return await new Promise<Blob | null>((resolve) => {
+          canvas.toBlob((b) => resolve(b), "image/png");
+        });
+      };
+
+      // Download sequentially to avoid browser popup/download blocking
+      for (let i = 0; i < labels.length; i += 1) {
+        const it = labels[i];
+        const safeUniq = (it.uniq || "uniq").replaceAll(/[^a-z0-9\-_]/gi, "_");
+        const safePacking = (it.packing || "packing").replaceAll(/[^a-z0-9\-_]/gi, "_");
+        try {
+          // Generate and download a single combined label PNG (QR + texts)
+          const labelBlob = await renderLabelPng(it.qr, it.uniq, it.packing, i);
+          if (labelBlob) {
+            downloadBlob(labelBlob, `${title.replaceAll(/[^a-z0-9\-]/gi, "_")}-LABEL-${safeUniq}-${safePacking}-${i + 1}.png`);
+          }
+        } catch {
+          // ignore individual failures
+        }
       }
-      w.document.open();
-      w.document.write(html);
-      w.document.close();
-      w.addEventListener(
-        "load",
-        () => {
-          w.print();
-        },
-        { once: true }
-      );
+      // printing already handled via writeAndPrint for new window or iframe
     } finally {
       setBarcodePreparing(false);
     }

@@ -236,7 +236,7 @@ export default function CreateCustomerPage() {
                 </div>
               }
             >
-              <Form.Item label="BOM Codes" name="bomCodes">
+              <Form.Item label="Parent Codes/ Sebango" name="bomCodes">
                 <Select
                   mode="multiple"
                   allowClear

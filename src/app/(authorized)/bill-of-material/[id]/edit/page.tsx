@@ -283,6 +283,7 @@ export default function BomEditPage() {
   useEffect(() => {
     if (!bom) return;
     const mapRouteFromApi = (route: any): ProcessRouteForm => ({
+      route_id: route?.route_id ?? route?.id ?? undefined,
       op_seq: typeof route?.op_seq === "number" ? route.op_seq : undefined,
       process_id: route?.process_id ?? undefined,
       machine_id: route?.machine_id != null ? Number(route.machine_id) || null : null,
@@ -300,14 +301,14 @@ export default function BomEditPage() {
     const mapMaterialSpecFromApi = (spec: any): MaterialSpecForm | undefined => {
       if (!spec || typeof spec !== "object") return undefined;
       return {
-        material_code:
-          typeof spec.material_code === "string"
-            ? spec.material_code
-            : typeof spec.material_grade === "string"
-              ? spec.material_grade
-              : typeof spec.grade === "string"
-                ? spec.grade
-                : undefined,
+        material_grade:
+          typeof spec.material_grade === "string"
+            ? spec.material_grade
+            : typeof spec.material_code === "string"
+              ? spec.material_code
+            : typeof spec.grade === "string"
+              ? spec.grade
+              : undefined,
         form: typeof spec.form === "string" ? spec.form : undefined,
         type_material:
           typeof spec.type_material === "string"
@@ -469,8 +470,8 @@ export default function BomEditPage() {
       if (!assemblyMode) {
         const spec = values.material_spec;
         const specMissing =
-          !cleanText(spec?.material_code) && !cleanText(spec?.grade)
-            ? "Material Code/Grade"
+          !cleanText(spec?.material_grade) && !cleanText(spec?.grade)
+            ? "Material Grade/Grade"
             : !cleanText(spec?.form)
               ? "Form"
               : "";
@@ -496,9 +497,12 @@ export default function BomEditPage() {
 
       const mapMaterialSpec = (spec?: MaterialSpecForm) => {
         const normalizedForm = normalizeMaterialForm(spec?.form);
+        const resolvedMaterialGrade =
+          cleanText(spec?.material_grade) ?? cleanText(spec?.grade) ?? null;
+        const resolvedGrade = cleanText(spec?.grade) ?? null;
         const payload: Record<string, unknown> = {
-          grade: cleanText(spec?.grade) ?? cleanText(spec?.material_code) ?? null,
-          material_grade: cleanText(spec?.grade) ?? cleanText(spec?.material_code) ?? null,
+          grade: resolvedGrade,
+          material_grade: resolvedMaterialGrade,
           type_material: cleanText(spec?.type_material) ?? null,
           form: normalizedForm ?? null,
           width_mm:
@@ -537,6 +541,7 @@ export default function BomEditPage() {
             const processId = toNumberId(route.process_id);
             if (processId === undefined) return null;
             const body: Record<string, unknown> = {
+              route_id: toNumberId(route.route_id) ?? route.route_id ?? undefined,
               op_seq:
                 typeof route.op_seq === "number" && Number.isFinite(route.op_seq)
                   ? route.op_seq
@@ -606,6 +611,8 @@ export default function BomEditPage() {
           if (childFile && childUploadKey) files.push({ key: `upload_${childUploadKey}`, file: childFile });
 
           return {
+            child_id: child.child_id ?? null,
+            line_id: child.line_id ?? null,
             uniq_code: uniqCode,
             parent_uniq_code: parentUniq,
             level,

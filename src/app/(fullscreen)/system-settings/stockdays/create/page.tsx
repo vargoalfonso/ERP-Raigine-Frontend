@@ -16,6 +16,8 @@ import {
   useGetStockdaysByIdQuery,
   useUpdateStockdaysMutation,
 } from "@/lib/api/system-settings/api";
+import { useGetInventoryListQuery } from "@/lib/api/inventory/api";
+import { useGetFinishedGoodsQuery } from "@/lib/api/finished-goods/api";
 
 type FormValues = {
   inventoryType?: string;
@@ -79,7 +81,48 @@ function PageContent() {
 
   const selectedInventoryType = Form.useWatch("inventoryType", form);
 
+  const normalizedInventoryType = String(selectedInventoryType ?? "").trim().toLowerCase();
+  const inventoryApiType = (() => {
+    switch (normalizedInventoryType) {
+      case "raw_material":
+      case "raw-material":
+        return "raw-materials";
+      case "indirect_material":
+      case "indirect-raw-material":
+        return "indirect-materials";
+      case "subcon":
+        return "subcon-materials";
+      case "finished_goods":
+      case "finished-goods":
+        return "finished-goods";
+      default:
+        return undefined;
+    }
+  })();
+
+  const { data: inventoryListResp } = useGetInventoryListQuery(
+    inventoryApiType ? { type: inventoryApiType as any, page: 1, limit: 1000 } : ({} as any),
+    { skip: !inventoryApiType || !apiEnabled }
+  );
+  const finishedGoodsQuery = useGetFinishedGoodsQuery({ page: 1, limit: 1000 }, { skip: !apiEnabled });
+
   const uniqOptions = useMemo(() => {
+    const currentItemCode = String(form.getFieldValue("itemCode") ?? "").trim();
+
+    // prefer inventory API results when available for the selected type
+    const apiItems =
+      inventoryApiType === "finished-goods"
+        ? (finishedGoodsQuery?.data?.items ?? [])
+        : (inventoryListResp as any)?.data ?? inventoryListResp ?? [];
+    const apiOptions = (apiItems as any[])
+      .map((r) => {
+        const uniq = r?.uniq_code ?? r?.uniq ?? r?.UniqCode ?? r?.uniqCode;
+        if (!uniq) return null;
+        const label = uniq + (r?.part_name ? ` - ${r.part_name}` : "");
+        return { value: String(uniq), label };
+      })
+      .filter(Boolean) as { value: string; label: string }[];
+
     const baseOptions = bomIndex.options.map((item) => ({
       value: item.value,
       label: bomIndex.partNameByUniq[item.value]
@@ -87,24 +130,23 @@ function PageContent() {
         : item.value,
     }));
 
-    const currentItemCode = String(form.getFieldValue("itemCode") ?? "").trim();
     const used = new Set<string>();
-
     for (const item of stockdaysList ?? []) {
       const uniq = String(item?.item_code ?? "").trim();
       const inventoryType = String(item?.inventory_type ?? "").trim();
       if (!uniq) continue;
-      if (selectedInventoryType && inventoryType && inventoryType !== selectedInventoryType) {
-        continue;
-      }
+      if (selectedInventoryType && inventoryType && inventoryType !== selectedInventoryType) continue;
       used.add(uniq);
     }
 
-    return baseOptions.filter((option) => {
+    // choose source: apiOptions if inventory type selected and results exist, otherwise bomIndex
+    const source = inventoryApiType && apiOptions.length > 0 ? apiOptions : baseOptions;
+
+    return source.filter((option) => {
       if (currentItemCode && option.value === currentItemCode) return true;
       return !used.has(option.value);
     });
-  }, [bomIndex, form, selectedInventoryType, stockdaysList]);
+  }, [inventoryListResp, bomIndex, form, selectedInventoryType, stockdaysList, inventoryApiType]);
 
   const detailQuery = useGetStockdaysByIdQuery(id, {
     skip: !apiEnabled || !id,

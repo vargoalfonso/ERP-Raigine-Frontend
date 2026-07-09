@@ -51,6 +51,7 @@ type ProcessRouteRow = {
 };
 
 type MaterialSpec = {
+  material_code?: string | null;
   grade?: string | null;
   material_grade?: string | null;
   type_material?: string | null;
@@ -187,6 +188,7 @@ const parseMaterialSpec = (raw: unknown): MaterialSpec | null => {
   if (!raw || typeof raw !== "object") return null;
   const s = raw as any;
   return {
+    material_code: asStr(s.material_code) ?? asStr(s.material_grade) ?? null,
     material_grade: asStr(s.material_grade) ?? null,
     type_material: asStr(s.type_material) ?? asStr(s.material_type) ?? null,
     grade: asStr(s.grade) ?? asStr(s.material_grade) ?? null,
@@ -257,6 +259,7 @@ const MaterialSpecDesc = ({ spec }: { spec: MaterialSpec | null | undefined }) =
 
   return (
     <Descriptions size="small" column={{ xs: 2, md: 4 }} bordered>
+      {/* <Descriptions.Item label="Material Code">{spec.material_code ?? "—"}</Descriptions.Item> */}
       <Descriptions.Item label="Material Grade">{spec.material_grade ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Grade">{spec.grade ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Type Material">{spec.type_material ?? "—"}</Descriptions.Item>

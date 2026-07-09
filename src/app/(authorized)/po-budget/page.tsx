@@ -9,15 +9,27 @@ import {
   useAddPoBudgetEntryMutation,
   useAddPoBudgetBulkMutation,
   useGetPoBudgetDetailQuery,
+  useLazyGetPoBudgetPrlDetailQuery,
   useUpdatePoBudgetEntryMutation,
   type PoBudgetRow as ApiPoBudgetRow,
   type PoBudgetType,
   type PoBudgetEntryRequest,
   type PoBudgetGroupedDetail,
+  type PoBudgetPrlDetail,
   type PoBudgetUpdateRequest,
 } from "@/lib/api/po-budget/api";
 import type { ApiResponse } from "@/types";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import {
+  buildBulkChildRowsFromPrlDetail,
+  buildSingleChildRowsFromPrlDetail,
+  buildSingleStoredDetailPayload,
+  getChildSupplierLookupUniq,
+  getStoredParents,
+  isChildBudgetType,
+  type PoBudgetChildRow,
+  type PoBudgetChildRowSupplier,
+} from "../../../components/po-budget/poBudgetChildAdapters";
 import {
   useListSuppliersQuery,
   type SupplierRecord,
@@ -51,8 +63,8 @@ import {
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
-  CheckOutlined,
   CloseOutlined,
+  DownOutlined,
   FileExcelOutlined,
   PlusOutlined,
   EyeOutlined,
@@ -85,31 +97,14 @@ type BulkBudgetType = "adhoc" | "kanban";
 
 const PRL_LAZY_PAGE_SIZE = 100;
 
-type BulkSupplierLine = {
-  id: string;
-  supplier: string;
-  qty: number;
-  percentage?: number;
-};
+type BulkSupplierLine = PoBudgetChildRowSupplier;
 
-type BulkItemRow = {
-  key: string;
-  prlId: string;
-  prlItemId: number | null;
-  uniq: string;
-  productModel: string;
-  partName: string;
-  partNumber: string;
-  weightKg: number;
-  uom: string;
-  quantity: number;
-  existingRawMaterial: string;
-  suppliers: BulkSupplierLine[];
-};
+type BulkItemRow = PoBudgetChildRow;
 
 type BomChildDetailRow = {
   key: string;
   uniq: string;
+  childUniqCode?: string;
   partName: string;
   partNumber: string;
   quantityPerUniq: number;
@@ -122,6 +117,7 @@ type PoBudgetRow = {
   id?: string;
   key: string;
   uniq: string;
+  prlRef?: string;
   customer: string;
   productModel: string;
   partName: string;
@@ -136,6 +132,7 @@ type PoBudgetRow = {
   totalPo: number;
   apoPrl: number;
   period: string;
+  detailJson?: ApiPoBudgetRow["detailJson"];
   status: "approved" | "pending";
   approval: "Approved" | "Pending";
 };
@@ -181,35 +178,6 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
-function getBomNodeString(
-  node: Record<string, unknown>,
-  keys: string[],
-) {
-  for (const key of keys) {
-    const value = node[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-    if (typeof value === "number" && Number.isFinite(value)) {
-      return String(value);
-    }
-  }
-  return "";
-}
-
-function getBomNodeNumber(
-  node: Record<string, unknown>,
-  keys: string[],
-) {
-  for (const key of keys) {
-    const value = node[key];
-    if (typeof value === "number" && Number.isFinite(value)) return value;
-    if (typeof value === "string" && value.trim()) {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) return parsed;
-    }
-  }
-  return 0;
-}
-
 function getApiType(tab: BudgetTabId): PoBudgetType {
   if (tab === "raw") return "raw-material";
   if (tab === "subcon") return "subcon";
@@ -243,35 +211,6 @@ function dedupeSupplierOptions(options: SupplierOption[]): SupplierOption[] {
   return result;
 }
 
-function resolveSupplierName(
-  supplierValue: unknown,
-  supplierNameByCode: Map<string, string>,
-) {
-  if (typeof supplierValue === "string") {
-    return supplierNameByCode.get(supplierValue) ?? supplierValue;
-  }
-
-  if (isRecord(supplierValue)) {
-    if (
-      typeof supplierValue.supplier_name === "string" &&
-      supplierValue.supplier_name.trim()
-    ) {
-      return supplierValue.supplier_name;
-    }
-
-    if (
-      typeof supplierValue.supplier_code === "string" &&
-      supplierValue.supplier_code.trim()
-    ) {
-      return (
-        supplierNameByCode.get(supplierValue.supplier_code) ??
-        supplierValue.supplier_code
-      );
-    }
-  }
-
-  return "-";
-}
 
 function normalizeSupplierItemType(value: unknown): BudgetTabId | null {
   const raw = String(value ?? "")
@@ -290,8 +229,30 @@ function normalizeCustomerName(value: unknown) {
     .toLowerCase();
 }
 
+function normalizeLookupValue(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+}
+
 function isIntegerId(value: string) {
   return /^\d+$/.test(value.trim());
+}
+
+function collectMaterialGrades(node: Record<string, any>) {
+  const out: Array<{ id?: number; uniq?: string; material_grade?: string | null }> = [];
+
+  function walk(n: Record<string, any>) {
+    if (!n || typeof n !== "object") return;
+    const ms = (n.material_spec ?? {}) as Record<string, any>;
+    out.push({ id: n.id, uniq: n.uniq ?? n.uniq_code, material_grade: ms.material_grade ?? null });
+    if (Array.isArray(n.children)) {
+      for (const c of n.children) walk(c);
+    }
+  }
+
+  walk(node);
+  return out;
 }
 
 function toIntegerId(value: unknown): number | null {
@@ -387,74 +348,72 @@ export default function PoBudgetPage() {
   const { data: bomTreeRes } = useGetBomTreeQuery();
   const bomTreeNodes = useMemo(() => {
     const items = bomTreeRes?.data?.items;
-    return Array.isArray(items) ? items : [];
-  }, [bomTreeRes?.data?.items]);
+    if (Array.isArray(items)) return items;
+    // some endpoints return a single BOM object in data
+    const rawData = bomTreeRes?.data;
+    if (!rawData) return [];
+    if (Array.isArray(rawData)) return rawData;
+    if (typeof rawData === "object") return [rawData as any];
+    return [];
+  }, [bomTreeRes?.data]);
+  const materialGrades = useMemo(() => {
+    const all: Array<{ id?: number; uniq?: string; material_grade?: string | null }> = [];
+    for (const node of bomTreeNodes) {
+      all.push(...collectMaterialGrades(node as Record<string, any>));
+    }
+    return all;
+  }, [bomTreeNodes]);
+function resolveSupplierName(
+  supplierValue: unknown,
+  supplierNameByCode: Map<string, string>,
+) {
+  if (typeof supplierValue === "string") {
+    return supplierNameByCode.get(supplierValue) ?? supplierValue;
+  }
+
+  if (isRecord(supplierValue)) {
+    if (
+      typeof supplierValue.supplier_name === "string" &&
+      supplierValue.supplier_name.trim()
+    ) {
+      return supplierValue.supplier_name;
+    }
+
+    if (
+      typeof supplierValue.supplier_code === "string" &&
+      supplierValue.supplier_code.trim()
+    ) {
+      return (
+        supplierNameByCode.get(supplierValue.supplier_code) ??
+        supplierValue.supplier_code
+      );
+    }
+  }
+
+  return "-";
+}
+
+  useEffect(() => {
+    if (materialGrades.length > 0) {
+      // temporary: log collected grades for debugging / verification
+      // you can replace this with UI rendering as needed
+      // eslint-disable-next-line no-console
+      console.log("Collected material grades:", materialGrades);
+    }
+  }, [materialGrades]);
+
+  const uniqueMaterialGrades = useMemo(() => {
+    const set = new Set<string>();
+    materialGrades.forEach((m) => {
+      const v = String(m.material_grade ?? "").trim();
+      if (v && v !== "-" && v.toLowerCase() !== "null") set.add(v);
+    });
+    return Array.from(set).sort();
+  }, [materialGrades]);
   const bomIndex = useMemo(
     () => buildBomUniqIndex(bomTreeNodes),
     [bomTreeNodes],
   );
-  const bomChildrenByUniq = useMemo(() => {
-    const result: Record<string, BomChildDetailRow[]> = {};
-    const norm = (s: unknown) => String(s ?? "").trim().toLowerCase();
-
-    const collectChildren = (nodes: unknown[], level: number) => {
-      const rows: BomChildDetailRow[] = [];
-
-      nodes.forEach((node, index) => {
-        if (!isRecord(node)) return;
-
-        const uniq = getBomNodeString(node, ["uniq", "uniq_code"]);
-        const childRows = Array.isArray(node.children)
-          ? collectChildren(node.children, level + 1)
-          : [];
-
-        if (uniq) {
-          rows.push({
-            key: `${uniq}-${level}-${index}`,
-            uniq,
-            partName: getBomNodeString(node, ["part_name"]) || "-",
-            partNumber: getBomNodeString(node, ["part_number"]) || "-",
-            quantityPerUniq: getBomNodeNumber(node, [
-              "qpu",
-              "quantity",
-              "qty_per_uniq",
-            ]),
-            uom:
-              getBomNodeString(node, ["uom", "unit_measurement", "unit"]) ||
-              "-",
-            weightKg: getBomNodeNumber(node, [
-              "stock_weight_kg",
-              "weight_kg",
-              "weightKg",
-              "weight",
-            ]),
-            level,
-          });
-        }
-
-        rows.push(...childRows);
-      });
-
-      return rows;
-    };
-
-    const visit = (node: unknown) => {
-      if (!isRecord(node)) return;
-
-      const uniq = getBomNodeString(node, ["uniq", "uniq_code"]);
-      if (uniq && Array.isArray(node.children) && node.children.length > 0) {
-        result[norm(uniq)] = collectChildren(node.children, 1);
-      }
-
-      if (Array.isArray(node.children)) {
-        node.children.forEach(visit);
-      }
-    };
-
-    const source = bomTreeNodes;
-    source.forEach(visit);
-    return result;
-  }, [bomTreeNodes]);
 
   const [activeTab, setActiveTab] = useState<BudgetTabId>("raw");
   const [paginationByTab, setPaginationByTab] = useState<TabPaginationState>({
@@ -612,11 +571,14 @@ export default function PoBudgetPage() {
 
   const [addEntry] = useAddPoBudgetEntryMutation();
   const [addBulk] = useAddPoBudgetBulkMutation();
+  const [loadPoBudgetPrlDetail] = useLazyGetPoBudgetPrlDetailQuery();
   const [updateEntry] = useUpdatePoBudgetEntryMutation();
 
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkPrlIds, setBulkPrlIds] = useState<string[]>([]);
+  const [bulkPoIds, setBulkPoIds] = useState<string[]>([]);
+  const [bulkSource, setBulkSource] = useState<"prl" | "po">("prl");
   const [bulkPrlSearch, setBulkPrlSearch] = useState("");
   const [bulkPrlPage, setBulkPrlPage] = useState(1);
   const [prlCache, setPrlCache] = useState<PrlRecord[]>([]);
@@ -624,8 +586,19 @@ export default function PoBudgetPage() {
   const [bulkPeriod, setBulkPeriod] = useState<string | undefined>(undefined);
   const [bulkPo1Pct, setBulkPo1Pct] = useState<number>(60);
   const [bulkPo2Pct, setBulkPo2Pct] = useState<number>(40);
+  const [selectedSinglePrlId, setSelectedSinglePrlId] = useState<string | undefined>(undefined);
+  const [singleChildRows, setSingleChildRows] = useState<BulkItemRow[]>([]);
+  const [bulkPrlDetailCache, setBulkPrlDetailCache] = useState<Record<string, PoBudgetPrlDetail>>({});
   const [expandedBudgetRowKeys, setExpandedBudgetRowKeys] = useState<string[]>([]);
-  const [expandedBulkRowKeys, setExpandedBulkRowKeys] = useState<string[]>([]);
+  const [, setExpandedBulkRowKeys] = useState<string[]>([]);
+  // Material tree in the list: tracks EXPANDED keys (default = collapsed).
+  const [expandedStoredParentKeys, setExpandedStoredParentKeys] = useState<
+    string[]
+  >([]);
+  // Bulk modal groups: tracks COLLAPSED keys (default = expanded).
+  const [collapsedBulkGroupKeys, setCollapsedBulkGroupKeys] = useState<
+    string[]
+  >([]);
 
   const { data: customers = [] } = useListCustomersQuery(undefined, {
     skip: !useApi,
@@ -1013,13 +986,18 @@ export default function PoBudgetPage() {
 
   const addSupplierOptions = useMemo<SupplierOption[]>(() => {
     const selectedUniq = String(addForm.uniq ?? "").trim();
-    if (!selectedUniq) return supplierOptions;
+    const selectedSebango = String(addForm.partNumber ?? "").trim();
+    if (!selectedUniq && !selectedSebango) return supplierOptions;
 
-    // supplierItemsByUniq is declared later in the file; use raw supplierItems here to avoid TDZ
-    const related = supplierItems.filter(
-      (it) =>
-        String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === selectedUniq,
-    );
+    const related = supplierItems.filter((it) => {
+      const uniqMatch =
+        normalizeLookupValue(it.uniq_code ?? it.item_uniq_code) ===
+        normalizeLookupValue(selectedUniq);
+      const sebangoMatch =
+        normalizeLookupValue(it.sebango_code) ===
+        normalizeLookupValue(selectedSebango);
+      return uniqMatch || sebangoMatch;
+    });
     const relatedNames = new Set(
       related
         .map((r) => String(r.supplier_name ?? r.supplier ?? "").trim())
@@ -1033,7 +1011,7 @@ export default function PoBudgetPage() {
     return dedupeSupplierOptions(
       filtered.length > 0 ? filtered : supplierOptions,
     );
-  }, [addForm.uniq, supplierOptions]);
+  }, [addForm.partNumber, addForm.uniq, supplierItems, supplierOptions]);
 
   const approvedPrls = useMemo(
     () =>
@@ -1070,6 +1048,66 @@ export default function PoBudgetPage() {
 
     return grouped;
   }, [activeTab, supplierItems]);
+
+  const supplierItemsByLookupKey = useMemo(() => {
+    const grouped = new Map<string, SupplierItemRecord[]>();
+
+    supplierItems.forEach((item) => {
+      const status = String(item.status ?? "active").toLowerCase();
+      const itemTab = normalizeSupplierItemType(
+        item.type ?? item.material_type,
+      );
+      if ((status && status !== "active") || (itemTab && itemTab !== activeTab)) {
+        return;
+      }
+
+      const lookupKeys = [
+        normalizeLookupValue(item.uniq_code),
+        normalizeLookupValue(item.sebango_code),
+      ].filter(Boolean);
+
+      lookupKeys.forEach((lookupKey) => {
+        const current = grouped.get(lookupKey) ?? [];
+        current.push(item);
+        grouped.set(lookupKey, current);
+      });
+    });
+
+    return grouped;
+  }, [activeTab, supplierItems]);
+
+  const findSupplierItemsForProduct = (
+    uniqCode?: string,
+    sebangoCode?: string,
+  ) => {
+    const matches = [
+      ...(supplierItemsByLookupKey.get(normalizeLookupValue(uniqCode)) ?? []),
+      ...(supplierItemsByLookupKey.get(normalizeLookupValue(sebangoCode)) ?? []),
+    ];
+
+    const deduped = new Map<string, SupplierItemRecord>();
+    matches.forEach((item, index) => {
+      const key = String(
+        item.id ?? item.supplier_item_uuid ?? item.row_id ?? `${uniqCode ?? ""}-${sebangoCode ?? ""}-${index}`,
+      );
+      if (!deduped.has(key)) deduped.set(key, item);
+    });
+
+    return Array.from(deduped.values()).sort(
+      (left, right) => Number(left.row_id ?? 0) - Number(right.row_id ?? 0),
+    );
+  };
+
+  const getBomDefaultsForUniq = (uniqCode?: string) => {
+    const uniq = String(uniqCode ?? "").trim();
+    return {
+      uom: uniq ? String(bomIndex.uomByUniq[uniq] ?? "") : "",
+      weightKg:
+        uniq && bomIndex.weightKgByUniq[uniq] != null
+          ? String(bomIndex.weightKgByUniq[uniq])
+          : "",
+    };
+  };
 
   const supplierOptionsByUniq = useMemo(() => {
     const map = new Map<string, SupplierOption[]>();
@@ -1268,18 +1306,28 @@ export default function PoBudgetPage() {
   const defaultUom = uomOptions[0]?.value ?? "";
 
   const prlOptions = useMemo(() => {
-    const fromPrl = approvedPrls.map((item, index) => {
+    // Group by prl_id so one PRL ID that covers multiple UNIQ codes appears as a single option.
+    // The downstream parsePrlSelection already handles an empty prlItemId (parts[2] ?? ""),
+    // and selectedBulkPrl has a fallback that matches by prlId alone when prlItemId is empty.
+    const prlGroups = new Map<string, { customerName: string; uniqs: string[] }>();
+    for (const item of approvedPrls) {
       const prlId = String(item.prl_id ?? item.id ?? "");
-      const prlItemId = String(
-        getPrlRowId(item as Record<string, unknown>) ?? item.id ?? index,
-      );
-      const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "-");
+      if (!prlId) continue;
       const customerName = String(
         item.customer?.customer_name ?? item.customer_name ?? "-",
       );
+      const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "").trim();
+      if (!prlGroups.has(prlId)) {
+        prlGroups.set(prlId, { customerName, uniqs: [] });
+      }
+      const group = prlGroups.get(prlId)!;
+      if (uniqCode && !group.uniqs.includes(uniqCode)) group.uniqs.push(uniqCode);
+    }
+    const fromPrl = Array.from(prlGroups.entries()).map(([prlId, group]) => {
+      const uniqSummary = group.uniqs.length > 0 ? group.uniqs.join(", ") : "-";
       return {
-        label: `${prlId} - ${customerName} - ${uniqCode}`,
-        value: `prl::${encodeURIComponent(prlId)}::${encodeURIComponent(prlItemId)}`,
+        label: `${prlId} — ${uniqSummary} (${group.customerName})`,
+        value: `prl::${encodeURIComponent(prlId)}`,
       };
     });
 
@@ -1370,6 +1418,76 @@ export default function PoBudgetPage() {
     );
   }, [approvedPrls, bulkPrlIds]);
 
+  useEffect(() => {
+    if (!useApi || !selectedSinglePrlId || !isChildBudgetType(getApiType(activeTab))) {
+      setSingleChildRows([]);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await loadPoBudgetPrlDetail(
+          { id: selectedSinglePrlId, budgetType: getApiType(activeTab) },
+          true,
+        ).unwrap();
+        if (cancelled) return;
+        setSingleChildRows(buildSingleChildRowsFromPrlDetail(result.data));
+      } catch (error) {
+        if (cancelled) return;
+        setSingleChildRows([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, loadPoBudgetPrlDetail, selectedSinglePrlId]);
+
+  useEffect(() => {
+    if (!useApi || !bulkOpen || !isChildBudgetType(getApiType(activeTab)) || bulkPrlIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const prlIds = Array.from(
+      new Set(
+        bulkPrlIds
+          .map((value) => parsePrlSelection(String(value))?.prlId ?? "")
+          .filter(Boolean),
+      ),
+    );
+
+    (async () => {
+      for (const prlId of prlIds) {
+        if (cancelled || bulkPrlDetailCache[prlId]) continue;
+        try {
+          const result = await loadPoBudgetPrlDetail(
+            { id: prlId, budgetType: getApiType(activeTab) },
+            true,
+          ).unwrap();
+          if (cancelled) return;
+          setBulkPrlDetailCache((prev) => ({
+            ...prev,
+            [prlId]: result.data,
+          }));
+        } catch (error) {
+          if (cancelled) return;
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeTab,
+    bulkOpen,
+    bulkPrlDetailCache,
+    bulkPrlIds,
+    loadPoBudgetPrlDetail,
+  ]);
+
   const buildAutoSuppliers = (
     uniqCode: string,
     totalQty: number,
@@ -1377,6 +1495,21 @@ export default function PoBudgetPage() {
     const items = (supplierItemsByUniq.get(uniqCode) ?? [])
       .slice()
       .sort((a, b) => (a.row_id ?? 0) - (b.row_id ?? 0));
+
+    if (items.length === 0) {
+      // No supplier-items registered for this uniq — show a single fallback entry
+      // indicating missing data. This aligns with the UI requirement to show
+      // "tidak ada data" when a uniq has no registered suppliers.
+      return [
+        {
+          id: `auto-1`,
+          supplier: "Tidak ada data",
+          qty: totalQty,
+          percentage: 100,
+        },
+      ];
+    }
+
     return items
       .filter((si) => Boolean(si.supplier_name || si.supplier_uuid))
       .map((si, idx) => {
@@ -1404,6 +1537,9 @@ export default function PoBudgetPage() {
     if (selectedValues.length === 0) return [];
 
     const rows: BulkItemRow[] = [];
+    const activeBudgetType = getApiType(activeTab);
+    const childBudget = isChildBudgetType(activeBudgetType);
+    const usedChildPrlIds = new Set<string>();
 
     for (const selectedValue of selectedValues) {
       // support selecting a customer PO via `po:<id>` value
@@ -1416,13 +1552,21 @@ export default function PoBudgetPage() {
         rows.push(
           ...(po.items as any[]).map((it: any, index: number) => {
             const uniqCode = String(it.uniq_code ?? it.item_uniq_code ?? it.item_uniq ?? "");
-            const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ??
-              [])[0];
+            const partNumber = String(
+              it.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "",
+            );
+            const supplierItemMatch = findSupplierItemsForProduct(
+              uniqCode,
+              partNumber,
+            )[0];
+            const bomDefaults = getBomDefaultsForUniq(uniqCode);
             return {
               key: `po-${poId}-${index}`,
               prlId: `po:${poId}`,
               prlItemId: null,
               uniq: uniqCode,
+              childUniqCode: uniqCode,
+              parentUniqCode: uniqCode,
               productModel: String(
                 it.product_model ??
                   bomIndex.assemblyCodeByUniq[uniqCode] ??
@@ -1434,8 +1578,12 @@ export default function PoBudgetPage() {
               partNumber: String(
                 it.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "-",
               ),
-              weightKg: Number(supplierItemMatch?.weight ?? 0),
-              uom: String(supplierItemMatch?.uom ?? defaultUom),
+              weightKg: Number(
+                bomDefaults.weightKg || supplierItemMatch?.weight || 0,
+              ),
+              uom: String(
+                bomDefaults.uom || supplierItemMatch?.uom || defaultUom,
+              ),
               quantity: Number(it.quantity ?? 0),
               existingRawMaterial: String(
                 supplierItemMatch?.description ?? "-",
@@ -1447,7 +1595,23 @@ export default function PoBudgetPage() {
         continue;
       }
 
-      const parsed = parsePrlSelection(selectedValue);
+      const parsed = parsePrlSelection(String(selectedValue));
+      if (childBudget && parsed?.prlId) {
+        if (usedChildPrlIds.has(parsed.prlId)) continue;
+        usedChildPrlIds.add(parsed.prlId);
+        const detail = bulkPrlDetailCache[parsed.prlId];
+        if (!detail) continue;
+        const childRows = buildBulkChildRowsFromPrlDetail(detail).map((row) => ({
+          ...row,
+          suppliers: buildAutoSuppliers(
+            getChildSupplierLookupUniq(row),
+            Number(row.quantity || 0),
+          ),
+        }));
+        rows.push(...childRows);
+        continue;
+      }
+
       const matchedRows = parsed
         ? approvedPrls.filter((item) => {
             const itemPrlId = String(item.prl_id ?? item.id ?? "");
@@ -1465,23 +1629,29 @@ export default function PoBudgetPage() {
       rows.push(
         ...matchedRows.map((item, index) => {
           const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "");
-          const supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ??
-            [])[0];
+          const partNumber = String(
+            item.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "",
+          );
+          const supplierItemMatch = findSupplierItemsForProduct(
+            uniqCode,
+            partNumber,
+          )[0];
+          const bomDefaults = getBomDefaultsForUniq(uniqCode);
           const prlRowId = getPrlRowId(item as Record<string, unknown>);
-              if (prlRowId == null) {
-                try {
-                  // eslint-disable-next-line no-console
-                  console.debug("po-budget: unresolved PRL row_id", {
-                    uniqCode,
-                    prlSnippet: {
-                      prl_id: (item as any).prl_id ?? (item as any).id,
-                      row_id: (item as any).row_id,
-                    },
-                  });
-                } catch (e) {
-                  /* ignore */
-                }
-              }
+          if (prlRowId == null) {
+            try {
+              // eslint-disable-next-line no-console
+              console.debug("po-budget: unresolved PRL row_id", {
+                uniqCode,
+                prlSnippet: {
+                  prl_id: (item as any).prl_id ?? (item as any).id,
+                  row_id: (item as any).row_id,
+                },
+              });
+            } catch (e) {
+              /* ignore */
+            }
+          }
 
           return {
             key: String(
@@ -1490,6 +1660,8 @@ export default function PoBudgetPage() {
             prlId: String(item.prl_id ?? item.id ?? ""),
             prlItemId: prlRowId,
             uniq: uniqCode,
+            childUniqCode: uniqCode,
+            parentUniqCode: uniqCode,
             productModel: String(
               item.product_model ??
                 bomIndex.assemblyCodeByUniq[uniqCode] ??
@@ -1501,8 +1673,12 @@ export default function PoBudgetPage() {
             partNumber: String(
               item.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "-",
             ),
-            weightKg: Number(supplierItemMatch?.weight ?? 0),
-            uom: String(supplierItemMatch?.uom ?? defaultUom),
+            weightKg: Number(
+              bomDefaults.weightKg || supplierItemMatch?.weight || 0,
+            ),
+            uom: String(
+              bomDefaults.uom || supplierItemMatch?.uom || defaultUom,
+            ),
             quantity: Number(item.quantity ?? 0),
             existingRawMaterial: String(supplierItemMatch?.description ?? "-"),
             suppliers: buildAutoSuppliers(uniqCode, Number(item.quantity ?? 0)),
@@ -1516,11 +1692,91 @@ export default function PoBudgetPage() {
     return Array.from(deduped.values());
   };
 
-  const hasBomChildren = (uniqCode: string) =>
-    (bomChildrenByUniq[String(uniqCode ?? "").trim().toLowerCase()]?.length ?? 0) > 0;
+  const flattenStoredChildTree = (
+    children: PoBudgetPrlDetail["items"][number]["children"] | undefined,
+    level = 1,
+    parentKey = "child",
+  ): BomChildDetailRow[] => {
+    const source = Array.isArray(children) ? children : [];
+    return source.flatMap((child, index) => {
+      const row: BomChildDetailRow = {
+        key: `${parentKey}-${String(child.uniq_code ?? child.uniq ?? index)}`,
+        uniq: String(
+          child.uniq ?? child.material_spec?.material_grade ?? "",
+        ).trim(),
+        childUniqCode: String(child.uniq_code ?? "").trim(),
+        partName: String(child.part_name ?? "-"),
+        partNumber: String(child.part_number ?? "-"),
+        quantityPerUniq: Number(child.quantity ?? child.qty_per_uniq ?? 0),
+        uom: String(child.uom ?? ""),
+        weightKg: Number(child.weight_kg ?? child.material_spec?.weight_kg ?? 0),
+        level,
+      };
+      const descendants = flattenStoredChildTree(
+        child.children as PoBudgetPrlDetail["items"][number]["children"],
+        level + 1,
+        row.key,
+      );
+      return [row, ...descendants];
+    });
+  };
 
-  const getAutoExpandedBulkKeys = (items: BulkItemRow[]) =>
-    items.filter((item) => hasBomChildren(item.uniq)).map((item) => item.key);
+  const uniqueTextValues = (values: string[]) => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const value of values.map((v) => String(v || "").trim()).filter(Boolean)) {
+      const key = value.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(value);
+    }
+    return result;
+  };
+
+  const formatChildSummary = (labels: string[]) => {
+    const visible = uniqueTextValues(labels);
+    if (visible.length === 0) return "";
+    const shown = visible.slice(0, 4).join(", ");
+    const rest = visible.length - 4;
+    return rest > 0 ? `${shown} +${rest} more` : shown;
+  };
+
+  const buildParentChildSummary = (
+    children: PoBudgetPrlDetail["items"][number]["children"] | undefined,
+  ) => {
+    const source = Array.isArray(children) ? children : [];
+    if (source.length === 0) return "";
+
+    const gradeLabels = uniqueTextValues(
+      source.map((child) =>
+        String(
+          child.uniq ??
+            child.material_spec?.material_grade ??
+            child.uniq_code ??
+            "",
+        ).trim(),
+      ),
+    );
+
+    if (gradeLabels.length > 1) {
+      return formatChildSummary(gradeLabels);
+    }
+
+    const uniqCodes = uniqueTextValues(
+      source.map((child) => String(child.uniq_code ?? "").trim()),
+    );
+
+    if (uniqCodes.length > 0) {
+      return formatChildSummary(uniqCodes);
+    }
+
+    return formatChildSummary(gradeLabels);
+  };
+
+  const hasStoredChildren = (row: PoBudgetRow) =>
+    getStoredParents(row.detailJson).length > 0;
+
+  const getAutoExpandedBulkKeys = (_items: BulkItemRow[]) => [];
 
   const initialBulkItems = useMemo<BulkItemRow[]>(
     () => buildBulkItemsFromPrl(prlOptions[0]?.value),
@@ -1539,9 +1795,97 @@ export default function PoBudgetPage() {
   const syncBulkItemsFromPrl = (selection?: string | string[]) => {
     const nextItems = buildBulkItemsFromPrl(selection);
     setBulkItems(nextItems);
-    // Auto-expand any bulk rows that have BOM children so user sees details immediately
     setExpandedBulkRowKeys(getAutoExpandedBulkKeys(nextItems));
   };
+
+  const bulkParentGroups = useMemo(() => {
+    const order: string[] = [];
+    const groups = new Map<
+      string,
+      {
+        key: string;
+        prlId: string;
+        parentUniqCode: string;
+        partName: string;
+        partNumber: string;
+        budgetQty: number;
+        rows: BulkItemRow[];
+      }
+    >();
+
+    for (const row of bulkItems) {
+      const groupKey = `${row.prlId}::${row.parentUniqCode || row.prlItemId || row.key}`;
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          key: groupKey,
+          prlId: row.prlId,
+          parentUniqCode: row.parentUniqCode || row.uniq,
+          partName: row.isHeader ? row.partName : "",
+          partNumber: row.isHeader ? row.partNumber : "",
+          budgetQty: row.isHeader ? Number(row.quantity || 0) : 0,
+          rows: [],
+        });
+        order.push(groupKey);
+      }
+
+      const group = groups.get(groupKey)!;
+      if (row.isHeader) {
+        group.parentUniqCode = row.parentUniqCode || group.parentUniqCode;
+        group.partName = row.partName || group.partName;
+        group.partNumber = row.partNumber || group.partNumber;
+        group.budgetQty = Number(row.quantity || group.budgetQty || 0);
+      } else {
+        group.rows.push(row);
+        if (!group.partName) group.partName = row.partName;
+        if (!group.partNumber) group.partNumber = row.partNumber;
+        if (!group.budgetQty) group.budgetQty = Number(row.quantity || 0);
+      }
+    }
+
+    return order
+      .map((key) => groups.get(key))
+      .filter(Boolean)
+      .map((group) => ({
+        ...group!,
+        childLabels: group!.rows.map((row) => row.uniq || row.childUniqCode).filter(Boolean),
+        totalChildQty: group!.rows.reduce(
+          (sum, row) => sum + Number(row.quantity || 0),
+          0,
+        ),
+      }));
+  }, [bulkItems]);
+
+  const bulkPrlGroups = useMemo(() => {
+    const order: string[] = [];
+    const groups = new Map<
+      string,
+      {
+        prlId: string;
+        prlNumber: string;
+        customerName: string;
+        period: string;
+        parents: typeof bulkParentGroups;
+      }
+    >();
+
+    for (const group of bulkParentGroups) {
+      const prlId = group.prlId;
+      if (!groups.has(prlId)) {
+        const detail = bulkPrlDetailCache[prlId];
+        groups.set(prlId, {
+          prlId,
+          prlNumber: detail?.prl_number || prlId,
+          customerName: detail?.customer_name || "-",
+          period: detail?.period || "",
+          parents: [],
+        });
+        order.push(prlId);
+      }
+      groups.get(prlId)!.parents.push(group);
+    }
+
+    return order.map((prlId) => groups.get(prlId)!);
+  }, [bulkParentGroups, bulkPrlDetailCache]);
 
   useEffect(() => {
     if (!addForm.period && periodOptions[0]?.value) {
@@ -1602,7 +1946,13 @@ export default function PoBudgetPage() {
 
   useEffect(() => {
     syncBulkItemsFromPrl(bulkPrlIds);
-  }, [bulkPrlIds, approvedPrls.length, defaultUom]);
+  }, [
+    activeTab,
+    bulkPrlIds,
+    approvedPrls.length,
+    defaultUom,
+    bulkPrlDetailCache,
+  ]);
 
   useEffect(() => {
     const selectedPeriod = getPrlPeriodValue(selectedBulkPrl);
@@ -1628,7 +1978,11 @@ export default function PoBudgetPage() {
   const addSupplierModalOptions = useMemo(() => {
     if (!activeAddSupplierItem) return dedupeSupplierOptions(supplierOptions);
 
-    const uniq = String(activeAddSupplierItem.uniq ?? "").trim();
+    const uniq = String(
+      isChildBudgetType(getApiType(activeTab))
+        ? getChildSupplierLookupUniq(activeAddSupplierItem)
+        : activeAddSupplierItem.uniq ?? "",
+    ).trim();
     let related = supplierItemsByUniq.get(uniq) ?? [];
     if (!related.length) {
       related = supplierItems.filter(
@@ -1640,17 +1994,14 @@ export default function PoBudgetPage() {
         .map((r) => String(r.supplier_name ?? r.supplier ?? "").trim())
         .filter(Boolean),
     );
-    const existingSuppliers = new Set(
-      activeAddSupplierItem.suppliers.map((s) => s.supplier),
-    );
-
     const baseOptions = supplierOptions.filter((opt) =>
       relatedNames.has(String(opt.label ?? opt.value ?? "").trim()),
     );
     const finalBase = baseOptions.length ? baseOptions : supplierOptions;
-    return dedupeSupplierOptions(
-      finalBase.filter((option) => !existingSuppliers.has(option.value)),
-    );
+    // NOTE: we intentionally do NOT filter out suppliers already assigned to
+    // this item here.  confirmAddSupplier() handles the duplicate check with a
+    // clearer warning instead of silently hiding options.
+    return dedupeSupplierOptions(finalBase);
   }, [activeAddSupplierItem, supplierOptions]);
 
   const addSupplierBudget = activeAddSupplierItem?.quantity ?? 0;
@@ -1671,14 +2022,23 @@ export default function PoBudgetPage() {
     setBulkPrlSearch("");
     setBulkPrlPage(1);
     setPrlCache([]);
+    setBulkPrlDetailCache({});
     setBulkItems([]);
     setExpandedBulkRowKeys([]);
+    setCollapsedBulkGroupKeys([]);
     setBulkPeriod(periodOptions[0]?.value);
     setBulkPrlIds([]);
+    setBulkPoIds([]);
     setBulkBudgetType("adhoc");
     setBulkPo1Pct(60);
     setBulkPo2Pct(40);
     setBulkOpen(true);
+  };
+
+  const openAddBudget = () => {
+    setSelectedSinglePrlId(undefined);
+    setSingleChildRows([]);
+    setAddOpen(true);
   };
 
   const toggleExpandedRowKey = (
@@ -1695,23 +2055,20 @@ export default function PoBudgetPage() {
   const bomChildColumns = useMemo<ColumnsType<BomChildDetailRow>>(
     () => [
       {
-        title: "Level",
-        dataIndex: "level",
-        key: "level",
-        width: 72,
-        align: "center",
-        render: (value: number) => (
-          <span className="text-xs text-gray-500">L{value}</span>
-        ),
-      },
-      {
-        title: "UNIQ Child",
+        title: "Material Grade",
         dataIndex: "uniq",
         key: "uniq",
-        width: 140,
+        width: 200,
         render: (value: string, record) => (
-          <div style={{ paddingLeft: `${Math.max(record.level - 1, 0) * 16}px` }}>
-            <span className="text-sm font-medium text-gray-800">{value}</span>
+          <div className="flex items-center gap-2">
+            <Tag color="blue" className="!m-0">
+              {value || "-"}
+            </Tag>
+            {record.childUniqCode ? (
+              <span className="text-xs text-gray-500">
+                {record.childUniqCode}
+              </span>
+            ) : null}
           </div>
         ),
       },
@@ -1719,10 +2076,16 @@ export default function PoBudgetPage() {
         title: "Part Name",
         dataIndex: "partName",
         key: "partName",
-        render: (value: string) => (
-          <span className="text-sm text-gray-700">{value}</span>
+        render: (value: string, record) => (
+          <div
+            className="text-sm text-gray-700"
+            style={{ paddingLeft: `${Math.max(0, (record.level - 1) * 16)}px` }}>
+            {record.level > 1 ? <span className="text-gray-400 mr-1">↳</span> : null}
+            {value}
+          </div>
         ),
       },
+       
       {
         title: "Part Number",
         dataIndex: "partNumber",
@@ -1733,7 +2096,7 @@ export default function PoBudgetPage() {
         ),
       },
       {
-        title: "Qty / UNIQ",
+        title: "Quantity",
         dataIndex: "quantityPerUniq",
         key: "quantityPerUniq",
         width: 110,
@@ -1748,7 +2111,7 @@ export default function PoBudgetPage() {
         key: "uom",
         width: 100,
         render: (value: string) => (
-          <span className="text-sm text-gray-700">{value}</span>
+          <span className="text-sm text-gray-700">{value || "-"}</span>
         ),
       },
       {
@@ -1765,48 +2128,106 @@ export default function PoBudgetPage() {
     [],
   );
 
-  const renderBomChildren = (uniqCode: string) => {
-    const key = String(uniqCode ?? "").trim().toLowerCase();
-    const childRows = bomChildrenByUniq[key] ?? [];
-    if (childRows.length === 0) return null;
-    // Card-like layout similar to screenshot: header with uniq badge, model, part number,
-    // and a right-aligned Total Qty box. Below it, render the child table.
-    const totalQty = childRows.reduce(
-      (sum, r) => sum + Number(r.quantityPerUniq || 0),
+  const renderStoredChildren = (row: PoBudgetRow) => {
+    const parents = getStoredParents(row.detailJson);
+    if (parents.length === 0) return null;
+
+    const allChildren = parents.flatMap((p) =>
+      Array.isArray(p.children) ? p.children : [],
+    );
+    const totalQty = allChildren.reduce(
+      (sum, r) => sum + Number(r.quantity ?? r.qty_per_uniq ?? 0),
       0,
     );
 
     return (
-      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-3">
-            <div className="px-3 py-1 rounded-full bg-blue-600 text-white text-sm font-semibold">{uniqCode}</div>
-            <div>
-              <div className="text-sm font-semibold text-gray-800">
-                {bomIndex.assemblyCodeByUniq[uniqCode] || "-"}
+      <div className="rounded-lg border border-gray-200 bg-white overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+          <div className="text-[13px] font-semibold text-gray-700">
+            Material Tree
+          </div>
+          <div className="text-xs text-gray-500">
+            {parents.length} parent{parents.length !== 1 ? "s" : ""} ·{" "}
+            {allChildren.length} material{allChildren.length !== 1 ? "s" : ""} ·
+            qty {formatNumber(totalQty)}
+          </div>
+        </div>
+
+        {parents.map((parent, pIdx) => {
+          const parentChildren = Array.isArray(parent.children)
+            ? parent.children
+            : [];
+          const parentRows: BomChildDetailRow[] = flattenStoredChildTree(
+            parentChildren as PoBudgetPrlDetail["items"][number]["children"],
+            1,
+            `parent-${pIdx}`,
+          );
+          const parentTotal = parentRows.reduce(
+            (sum, r) => sum + r.quantityPerUniq,
+            0,
+          );
+
+          const collapseKey = `${row.key}::parent-${pIdx}`;
+          const isCollapsed = !expandedStoredParentKeys.includes(collapseKey);
+
+          return (
+            <div
+              key={`stored-parent-${pIdx}`}
+              className="border-b border-gray-100 last:border-b-0">
+              <div
+                className="flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50/40 cursor-pointer select-none"
+                onClick={() =>
+                  toggleExpandedRowKey(
+                    collapseKey,
+                    setExpandedStoredParentKeys,
+                  )
+                }>
+                <div className="flex items-center gap-2 min-w-0">
+                  <Tag color="blue" className="!m-0">
+                    {parent.uniq_code || "-"}
+                  </Tag>
+                  <span className="text-sm font-medium text-gray-800 truncate">
+                    {parent.part_name || "-"}
+                  </span>
+                  {parent.part_number ? (
+                    <span className="text-xs text-gray-400 shrink-0">
+                      {parent.part_number}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-xs text-gray-500">
+                    {parentRows.length} item
+                    {parentRows.length !== 1 ? "s" : ""} · qty{" "}
+                    <span className="font-medium text-gray-700">
+                      {formatNumber(parentTotal)}
+                    </span>
+                  </span>
+                  <DownOutlined
+                    className={`!text-[10px] !text-gray-400 transition-transform ${
+                      isCollapsed ? "-rotate-90" : ""
+                    }`}
+                  />
+                </div>
               </div>
-              <div className="text-xs text-gray-500">
-                {bomIndex.partNameByUniq[uniqCode] || bomIndex.partNumberByUniq[uniqCode] || "-"}
-              </div>
+
+              {isCollapsed ? null : parentRows.length > 0 ? (
+                <Table<BomChildDetailRow>
+                  dataSource={parentRows}
+                  columns={bomChildColumns}
+                  rowKey="key"
+                  size="small"
+                  pagination={false}
+                  bordered={false}
+                />
+              ) : (
+                <div className="px-4 py-3 text-xs text-gray-400">
+                  No child material found for this parent.
+                </div>
+              )}
             </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div className="text-xs text-gray-500">Total Qty:</div>
-            <div className="bg-blue-50 text-blue-700 px-3 py-1 rounded-md font-semibold">{formatNumber(totalQty)}</div>
-          </div>
-        </div>
-
-        <div className="bg-gray-50 rounded-md p-2">
-          <Table<BomChildDetailRow>
-            dataSource={childRows}
-            columns={bomChildColumns}
-            rowKey="key"
-            size="small"
-            pagination={false}
-            bordered={false}
-          />
-        </div>
+          );
+        })}
       </div>
     );
   };
@@ -1883,14 +2304,15 @@ export default function PoBudgetPage() {
     );
     const remaining = Math.max(0, target.quantity - allocated);
     setAddSupplierItemKey(itemKey);
-    setAddSupplierForm({ supplier: undefined, qty: remaining });
+    // Kalau remaining=0 (semua ter-alokasi), set qty undefined agar user input sendiri
+    setAddSupplierForm({ supplier: undefined, qty: remaining > 0 ? remaining : undefined });
     setAddSupplierOpen(true);
   };
 
   const confirmAddSupplier = () => {
     if (!addSupplierItemKey) return;
     const supplier = addSupplierForm.supplier;
-    const qty = Number(addSupplierForm.qty || 0);
+    const qty = addSupplierForm.qty != null ? Number(addSupplierForm.qty) : 0;
     if (!supplier) {
       message.warning("Please select supplier");
       return;
@@ -1914,7 +2336,10 @@ export default function PoBudgetPage() {
       0,
     );
     if (allocated + qty > target.quantity) {
-      message.warning("Total quantity cannot exceed budget");
+      const remaining = Math.max(0, target.quantity - allocated);
+      message.warning(
+        `Total quantity cannot exceed budget${remaining > 0 ? ` (remaining: ${remaining})` : ""}`,
+      );
       return;
     }
 
@@ -1958,6 +2383,33 @@ export default function PoBudgetPage() {
   const bulkUpdateItem = (itemKey: string, patch: Partial<BulkItemRow>) => {
     setBulkItems((prev) =>
       prev.map((item) => (item.key === itemKey ? { ...item, ...patch } : item)),
+    );
+  };
+
+  // Update total qty of one UNIQ group: header keeps the total, children get an
+  // equal split, and each supplier line with a percentage is rescaled from it.
+  const bulkUpdateGroupQty = (
+    group: (typeof bulkParentGroups)[number],
+    nextQty: number,
+  ) => {
+    const qty = Math.max(0, Number(nextQty || 0));
+    const childKeys = new Set(group.rows.map((row) => row.key));
+    const perChildQty = Math.round(qty / Math.max(1, group.rows.length));
+
+    setBulkItems((prev) =>
+      prev.map((it) => {
+        const itemGroupKey = `${it.prlId}::${it.parentUniqCode || it.prlItemId || it.key}`;
+        if (itemGroupKey !== group.key) return it;
+        if (it.isHeader) return { ...it, quantity: qty };
+        if (!childKeys.has(it.key)) return it;
+
+        const suppliers = it.suppliers.map((s) =>
+          s.percentage && s.percentage > 0
+            ? { ...s, qty: Math.round((perChildQty * s.percentage) / 100) }
+            : s,
+        );
+        return { ...it, quantity: perChildQty, suppliers };
+      }),
     );
   };
 
@@ -2052,6 +2504,18 @@ export default function PoBudgetPage() {
       po1_pct: Number(addForm.po1Pct || 0),
       po2_pct: Number(addForm.po2Pct || 0),
       prl: Number(derivedPrlAmount || addForm.prl || 0),
+      detail_jsonb: isChildBudgetType(getApiType(activeTab))
+        ? buildSingleStoredDetailPayload({
+            prlId: selectedSinglePrlId,
+            parentUniqCode: addForm.uniq,
+            parentPartName: addForm.partName,
+            parentPartNumber: addForm.partNumber,
+            purchaseRequest: Number(addForm.purchaseRequest || 0),
+            supplierId: effectiveSupplierId,
+            supplierName: addForm.supplier,
+            rows: singleChildRows,
+          })
+        : undefined,
     };
 
     try {
@@ -2060,6 +2524,8 @@ export default function PoBudgetPage() {
       }
       message.success("Budget entry saved");
       setAddOpen(false);
+      setSelectedSinglePrlId(undefined);
+      setSingleChildRows([]);
       setAddForm({
         customer: "",
         customerId: null,
@@ -2093,7 +2559,10 @@ export default function PoBudgetPage() {
 
     const selectedPrl = selectedBulkPrl;
 
-    const missingSupplierItems = bulkItems.filter(
+    // Only consider non-header (child) rows for validation and payload
+    const nonHeaderItems = bulkItems.filter((item) => !item.isHeader);
+
+    const missingSupplierItems = nonHeaderItems.filter(
       (item) => item.suppliers.length === 0,
     );
     if (missingSupplierItems.length > 0) {
@@ -2114,11 +2583,11 @@ export default function PoBudgetPage() {
       ).trim();
     };
 
-    const unresolvedSupplier = bulkItems.find((item) =>
+    const unresolvedSupplier = nonHeaderItems.find((item) =>
       item.suppliers.some((supplier) => !supplierDisplayName(supplier.supplier)),
     );
 
-    const unresolvedPrlItem = bulkItems.find((item) => item.prlItemId == null);
+    const unresolvedPrlItem = nonHeaderItems.find((item) => item.prlItemId == null);
 
     if (unresolvedSupplier) {
       message.warning(
@@ -2136,20 +2605,28 @@ export default function PoBudgetPage() {
 
     const body = {
       prl_id: String(
-        bulkItems[0]?.prlId || selectedPrl?.prl_id || selectedPrl?.id || "",
+        nonHeaderItems[0]?.prlId || selectedPrl?.prl_id || selectedPrl?.id || "",
       ),
       budget_subtype: bulkBudgetType === "adhoc" ? "adhoc" : "regular",
       period: normalizePeriodForApi(bulkPeriod),
       po1_pct: Number(bulkPo1Pct || 0),
       po2_pct: Number(bulkPo2Pct || 0),
-      items: bulkItems.map((item) => ({
+      items: nonHeaderItems.map((item) => ({
         prl_item_id: Number(item.prlItemId),
         uniq_code: item.uniq,
+        child_uniq_code: item.childUniqCode,
+        product_model: item.productModel,
+        model: item.productModel,
+        part_name: item.partName,
+        part_number: item.partNumber,
+        qty_per_uniq: Number(item.qtyPerUniq || 0),
         sales_plan: Number(item.quantity || 0),
         po1_pct: Number(bulkPo1Pct || 0),
         po2_pct: Number(bulkPo2Pct || 0),
         weight_kg: Number(item.weightKg || 0),
         uom: item.uom,
+        existing_raw_material: item.existingRawMaterial,
+        material_spec: item.materialSpec,
         suppliers: item.suppliers.map((supplier) => {
           const option = supplierOptions.find(
             (opt) => opt.value === supplier.supplier,
@@ -2170,6 +2647,7 @@ export default function PoBudgetPage() {
     };
 
     try {
+      let created = bulkItems.length > 0 ? 1 : 0;
       if (useApi) {
         const token = getCookiesFromBrowser("Authorization");
         if (!token) {
@@ -2179,7 +2657,7 @@ export default function PoBudgetPage() {
           return;
         }
         const result = await addBulk({ type: getApiType(activeTab), body }).unwrap();
-        const created = Number(result.data?.created ?? 0);
+        created = Number(result.data?.created ?? 0);
         const errors = Array.isArray(result.data?.errors) ? result.data.errors.filter(Boolean) : [];
 
         if (errors.length > 0) {
@@ -2193,7 +2671,7 @@ export default function PoBudgetPage() {
         }
       }
       message.success(
-        `Bulk ${getBudgetTypeLabel(activeTab)} PO Budget with ${bulkItems.length} UNIQ saved successfully`,
+        `Bulk ${getBudgetTypeLabel(activeTab)} PO Budget saved successfully (${created} entr${created === 1 ? "y" : "ies"} created)`,
       );
       setBulkOpen(false);
     } catch (error) {
@@ -2264,30 +2742,39 @@ export default function PoBudgetPage() {
   const columns = useMemo<ColumnsType<PoBudgetRow>>(
     () => [
       {
-        title: "Uniq",
+        title: activeTab === "subcon" ? "Uniq" : "PRL ID",
         dataIndex: "uniq",
         key: "uniq",
         render: (value: string, record) => {
-          const childCount =
-            bomChildrenByUniq[String(value ?? "").trim().toLowerCase()]
-              ?.length ?? 0;
-          if (childCount === 0) {
-            return <span className="text-sm text-gray-700">{value}</span>;
+          const parentCount = getStoredParents(record.detailJson).length;
+          const childCount = getStoredParents(record.detailJson).reduce(
+            (sum, p) => sum + (Array.isArray(p.children) ? p.children.length : 0),
+            0,
+          );
+          const displayValue =
+            activeTab !== "subcon" && record.prlRef ? record.prlRef : value;
+
+          if (activeTab === "subcon" || childCount === 0) {
+            return (
+              <span className="text-sm font-medium text-gray-700">
+                {displayValue}
+              </span>
+            );
           }
 
           const expanded = expandedBudgetRowKeys.includes(record.key);
           return (
             <button
               type="button"
-              className="text-left"
+              className="text-left group"
               onClick={() =>
                 toggleExpandedRowKey(record.key, setExpandedBudgetRowKeys)
               }>
-              <div className="text-sm font-medium text-blue-700 hover:text-blue-800">
-                {value}
+              <div className="text-sm font-semibold text-blue-700 group-hover:text-blue-800">
+                {displayValue}
               </div>
-              <div className="text-[11px] text-blue-500">
-                {expanded ? "Hide" : "Show"} {childCount} child part{childCount > 1 ? "s" : ""}
+              <div className="text-[11px] text-blue-500 mt-0.5">
+                {expanded ? "Hide" : "Show"} {parentCount} parent group{parentCount > 1 ? "s" : ""}
               </div>
             </button>
           );
@@ -2478,7 +2965,7 @@ export default function PoBudgetPage() {
         ),
       },
     ],
-    [bomChildrenByUniq, expandedBudgetRowKeys, openDetail, openEdit],
+    [activeTab, expandedBudgetRowKeys, openDetail, openEdit],
   );
 
   const tabOptions = useMemo(
@@ -2492,35 +2979,39 @@ export default function PoBudgetPage() {
 
   const bulkColumns = useMemo<ColumnsType<BulkItemRow>>(
     () => [
-      { title: "PRL ID", dataIndex: "prlId", key: "prlId", width: 120 },
       {
-        title: "UNIQ",
+        title: "#",
+        key: "index",
+        width: 48,
+        align: "center",
+        render: (_value, _record, index) => (
+          <span className="text-xs text-gray-400">{index + 1}</span>
+        ),
+      },
+      {
+        title: "Child UNIQ",
         dataIndex: "uniq",
         key: "uniq",
-        width: 140,
-        render: (value: string, record) => {
-          const childCount =
-            bomChildrenByUniq[String(value ?? "").trim().toLowerCase()]
-              ?.length ?? 0;
-          if (childCount === 0) {
-            return <span className="text-sm text-gray-700">{value}</span>;
-          }
-
-          const expanded = expandedBulkRowKeys.includes(record.key);
-          return (
-            <button
-              type="button"
-              className="text-left rounded-lg px-2 py-1 -mx-2 transition-colors hover:bg-blue-50"
-              onClick={() => toggleExpandedRowKey(record.key, setExpandedBulkRowKeys)}>
-              <div className="text-sm font-semibold text-blue-700 hover:text-blue-800">
-                {value}
+        width: 160,
+        render: (value: string, record) => (
+          <div>
+            {isChildBudgetType(getApiType(activeTab)) ? (
+              <Tag
+                color="blue"
+                className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+                {value || "-"}
+              </Tag>
+            ) : (
+              <span className="text-sm text-gray-700">{value}</span>
+            )}
+            {isChildBudgetType(getApiType(activeTab)) &&
+            record.childUniqCode ? (
+              <div className="text-[11px] text-gray-500 mt-1">
+                {record.childUniqCode}
               </div>
-              <div className="text-[11px] text-blue-500">
-                {expanded ? "Hide" : "Click to show"} {childCount} child part{childCount > 1 ? "s" : ""}
-              </div>
-            </button>
-          );
-        },
+            ) : null}
+          </div>
+        ),
       },
       {
         title: "Part Name",
@@ -2570,7 +3061,7 @@ export default function PoBudgetPage() {
         ),
       },
       {
-        title: "Quantity (Editable)",
+        title: "Quantity",
         dataIndex: "quantity",
         key: "quantity",
         width: 140,
@@ -2584,7 +3075,7 @@ export default function PoBudgetPage() {
         ),
       },
       {
-        title: "Existing Raw Material",
+        title: "Existing RM",
         dataIndex: "existingRawMaterial",
         key: "existingRawMaterial",
         width: 140,
@@ -2597,6 +3088,7 @@ export default function PoBudgetPage() {
         key: "suppliers",
         width: 320,
         render: (_, r) => {
+          if (r.isHeader) return null;
           const total = r.suppliers.reduce(
             (sum, s) => sum + Number(s.qty || 0),
             0,
@@ -2609,7 +3101,14 @@ export default function PoBudgetPage() {
                   <Select
                     value={s.supplier}
                     onChange={(v) => {
-                      const opts = supplierOptionsByUniq.get(r.uniq) ?? supplierOptions;
+                      const supplierLookupUniq = isChildBudgetType(
+                        getApiType(activeTab),
+                      )
+                        ? getChildSupplierLookupUniq(r)
+                        : r.uniq;
+                      const opts =
+                        supplierOptionsByUniq.get(supplierLookupUniq) ??
+                        supplierOptions;
                       const opt = opts.find((o) => o.value === v);
                       const pct = opt?.percentage;
                       const autoQty =
@@ -2623,14 +3122,19 @@ export default function PoBudgetPage() {
                       });
                     }}
                     options={dedupeSupplierOptions(
-                      supplierOptionsByUniq.get(r.uniq) ?? supplierOptions,
+                      supplierOptionsByUniq.get(
+                        isChildBudgetType(getApiType(activeTab))
+                          ? getChildSupplierLookupUniq(r)
+                          : r.uniq,
+                      ) ?? supplierOptions,
                     )
                       .filter(
                         (opt) =>
                           opt.value === s.supplier ||
                           !r.suppliers.some(
                             (other) =>
-                              other.id !== s.id && other.supplier === opt.value,
+                              other.id !== s.id &&
+                              other.supplier === opt.value,
                           ),
                       )
                       .map((opt) => ({
@@ -2652,7 +3156,9 @@ export default function PoBudgetPage() {
                     }
                     value={s.qty}
                     onChange={(v) =>
-                      bulkUpdateSupplier(r.key, s.id, { qty: Number(v || 0) })
+                      bulkUpdateSupplier(r.key, s.id, {
+                        qty: Number(v || 0),
+                      })
                     }
                     className="w-[90px]"
                     size="small"
@@ -2691,12 +3197,12 @@ export default function PoBudgetPage() {
             size="small"
             className="!rounded-lg"
             onClick={() => bulkAddSupplierLine(r.key)}>
-            + Add Supplier
+            + Supplier
           </Button>
         ),
       },
     ],
-    [bomChildrenByUniq, expandedBulkRowKeys, supplierOptions, uomOptions],
+    [activeTab, supplierOptions, supplierOptionsByUniq, uomOptions, bulkItems],
   );
 
   return (
@@ -2725,7 +3231,7 @@ export default function PoBudgetPage() {
               type="primary"
               className="!rounded-lg"
               icon={<PlusOutlined />}
-              onClick={() => setAddOpen(true)}>
+              onClick={openAddBudget}>
               Add Budget Entry
             </Button>
           </div>
@@ -2757,8 +3263,25 @@ export default function PoBudgetPage() {
           icon={<MdQueryStats size={18} />}
           accent="bg-purple-50 text-purple-600"
         />
-        <StatCard
-          label="APO - PRL"
+      {/* <div className="mb-6"> */}
+        {/* <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+          <div className="text-sm text-gray-600 mb-2">Material Grades</div>
+          <div className="text-xs text-gray-400 mb-2">Found {uniqueMaterialGrades.length} grades from {bomTreeNodes.length} BOM nodes</div>
+          <div className="flex flex-wrap gap-2">
+            {uniqueMaterialGrades.length === 0 ? (
+              <div className="text-sm text-gray-400">No material grades found</div>
+            ) : (
+              uniqueMaterialGrades.map((g) => (
+                <Tag key={g} color="blue">
+                  {g}
+                </Tag>
+              ))
+            )}
+          </div>
+        </div> */}
+      {/* </div> */}
+          <StatCard
+            label="APO - PRL"
           value={formatNumber(summary.delta_apo_prl)}
           icon={<MdInventory2 size={18} />}
           accent="bg-orange-50 text-orange-600"
@@ -2792,8 +3315,9 @@ export default function PoBudgetPage() {
               expandedRowKeys: expandedBudgetRowKeys,
               onExpandedRowsChange: (keys) =>
                 setExpandedBudgetRowKeys(keys.map((key) => String(key))),
-              expandedRowRender: (record) => renderBomChildren(record.uniq),
-              rowExpandable: (record) => hasBomChildren(record.uniq),
+              expandedRowRender: (record) => renderStoredChildren(record),
+              rowExpandable: (record) =>
+                activeTab !== "subcon" && hasStoredChildren(record),
               showExpandColumn: false,
             }}
             pagination={{
@@ -2838,7 +3362,7 @@ export default function PoBudgetPage() {
         title={
           <div>
             <div className="text-sm font-semibold text-gray-900">
-              Add New PO Budget Entry
+              Add New PR Budget Entry
             </div>
             <div className="text-xs text-gray-500 mt-1">{addSubtitle}</div>
           </div>
@@ -2887,6 +3411,8 @@ export default function PoBudgetPage() {
                   );
                 }
                 if (!matched) {
+                  setSelectedSinglePrlId(undefined);
+                  setSingleChildRows([]);
                   setAddForm((p) => ({ ...p, prl: "" }));
                   return;
                 }
@@ -2902,6 +3428,14 @@ export default function PoBudgetPage() {
                       uniqCode,
                   ) as any;
                 }
+                if (activeTab !== "subcon" && parsed?.prlId) {
+                  setSelectedSinglePrlId(parsed.prlId);
+                } else {
+                  setSelectedSinglePrlId(undefined);
+                  setSingleChildRows([]);
+                }
+                const bomDefaults = getBomDefaultsForUniq(uniqCode);
+
                 setAddForm((prev) => ({
                   ...prev,
                   prl: raw,
@@ -2913,8 +3447,12 @@ export default function PoBudgetPage() {
                   partNumber: matched.part_number ?? "",
                   period: getPrlPeriodValue(matched) || "",
                   salesPlan: Number(matched.quantity ?? 0),
-                  uom: String(supplierItemMatch?.uom ?? ""),
-                  weightKg: supplierItemMatch?.weight == null ? "" : String(supplierItemMatch.weight),
+                  uom: bomDefaults.uom || String(supplierItemMatch?.uom ?? ""),
+                  weightKg:
+                    bomDefaults.weightKg ||
+                    (supplierItemMatch?.weight == null
+                      ? ""
+                      : String(supplierItemMatch.weight)),
                   supplier: String(supplierItemMatch?.supplier_name ?? ""),
                   supplierId: resolveSupplierRowId({
                     supplierUuid: supplierItemMatch?.supplier_uuid,
@@ -2924,6 +3462,20 @@ export default function PoBudgetPage() {
                 }));
               }}
             />
+            {activeTab !== "subcon" && singleChildRows.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {singleChildRows.map((child) => (
+                  <Tag
+                    key={child.key}
+                    color="blue"
+                    className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+                  >
+                    {child.uniq || "-"}
+                    {child.childUniqCode ? ` • ${child.childUniqCode}` : ""}
+                  </Tag>
+                ))}
+              </div>
+            ) : null}
           </div>
           <div>
             <div className="text-xs text-gray-600 mb-1">Customer Name</div>
@@ -2949,37 +3501,46 @@ export default function PoBudgetPage() {
                   String(selected?.label ?? ""),
                   addForm.uniq,
                 );
-                  // determine uniq from matched PRL if available, otherwise use current addForm.uniq
-                  const resolvedUniq = String(matchedPrl ? (matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "") : (addForm.uniq ?? "")).trim();
-                  let supplierItemMatch = (supplierItemsByUniq.get(resolvedUniq) ?? [])[0];
-                  if (!supplierItemMatch) {
-                    supplierItemMatch = supplierItems.find((it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === resolvedUniq) as any;
-                  }
-                  setAddForm((prev) => ({
-                    ...prev,
-                    customerId: selectedCustomerId,
-                    customer: String(selected?.label ?? ""),
-                    // If we found a matched PRL, prefer its uniq and PRL-derived fields
-                    uniq: matchedPrl
-                      ? String(matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "")
-                      : prev.uniq,
-                    productModel: matchedPrl?.product_model ?? prev.productModel,
-                    partName: matchedPrl?.part_name ?? prev.partName,
-                    partNumber: matchedPrl?.part_number ?? prev.partNumber,
-                    period: getPrlPeriodValue(matchedPrl) || prev.period,
-                    salesPlan: Number(matchedPrl?.quantity ?? prev.salesPlan ?? 0),
-                    // Supplier info: prefer explicit supplierItemMatch when available, otherwise keep previous
-                    supplier: supplierItemMatch?.supplier_name ?? prev.supplier ?? "",
-                    supplierId:
-                      resolveSupplierRowId({
-                        supplierUuid: supplierItemMatch?.supplier_uuid,
-                        supplierCode: supplierItemMatch?.supplier_code,
-                        supplierName: supplierItemMatch?.supplier_name,
-                      }) ?? prev.supplierId,
-                    uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
-                    weightKg: supplierItemMatch?.weight == null ? prev.weightKg : String(supplierItemMatch.weight),
-                    description: supplierItemMatch?.description ?? prev.description,
-                  }));
+                const resolvedUniq = String(
+                  matchedPrl
+                    ? (matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "")
+                    : (addForm.uniq ?? ""),
+                ).trim();
+                const resolvedPartNumber = String(
+                  matchedPrl?.part_number ?? addForm.partNumber ?? "",
+                ).trim();
+                const supplierItemMatch = findSupplierItemsForProduct(
+                  resolvedUniq,
+                  resolvedPartNumber,
+                )[0];
+                const bomDefaults = getBomDefaultsForUniq(resolvedUniq);
+                setAddForm((prev) => ({
+                  ...prev,
+                  customerId: selectedCustomerId,
+                  customer: String(selected?.label ?? ""),
+                  uniq: matchedPrl
+                    ? String(matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "")
+                    : prev.uniq,
+                  productModel: matchedPrl?.product_model ?? prev.productModel,
+                  partName: matchedPrl?.part_name ?? prev.partName,
+                  partNumber: matchedPrl?.part_number ?? prev.partNumber,
+                  period: getPrlPeriodValue(matchedPrl) || prev.period,
+                  salesPlan: Number(matchedPrl?.quantity ?? prev.salesPlan ?? 0),
+                  supplier: String(supplierItemMatch?.supplier_name ?? prev.supplier ?? ""),
+                  supplierId:
+                    resolveSupplierRowId({
+                      supplierUuid: supplierItemMatch?.supplier_uuid,
+                      supplierCode: supplierItemMatch?.supplier_code,
+                      supplierName: supplierItemMatch?.supplier_name,
+                    }) ?? prev.supplierId,
+                  uom: bomDefaults.uom || String(supplierItemMatch?.uom ?? prev.uom ?? ""),
+                  weightKg:
+                    bomDefaults.weightKg ||
+                    (supplierItemMatch?.weight == null
+                      ? prev.weightKg
+                      : String(supplierItemMatch.weight)),
+                  description: supplierItemMatch?.description ?? prev.description,
+                }));
               }}
             />
           </div>
@@ -3019,27 +3580,6 @@ export default function PoBudgetPage() {
                       item.uniq_code ?? item.item_uniq_code ?? "",
                     ).trim() === uniqCode,
                 );
-                let supplierItemMatch = (supplierItemsByUniq.get(uniqCode) ??
-                  [])[0];
-                const supplierItemMatchFromMap = supplierItemMatch;
-                if (!supplierItemMatch) {
-                  supplierItemMatch = supplierItems.find(
-                    (it) =>
-                      String(it.uniq_code ?? it.item_uniq_code ?? "").trim() ===
-                      uniqCode,
-                  ) as any;
-                }
-                // Debug logging to help trace missing mappings (remove after verification)
-                try {
-                  // eslint-disable-next-line no-console
-                  console.debug("po-budget: uniq lookup", {
-                    uniqCode,
-                    fromMap: supplierItemMatchFromMap,
-                    fromFallback: supplierItemMatch,
-                  });
-                } catch (e) {
-                  /* ignore */
-                }
                 const partName =
                   matchedPrl?.part_name ??
                   bomIndex.partNameByUniq[uniqCode] ??
@@ -3058,6 +3598,12 @@ export default function PoBudgetPage() {
                   "";
                 const customerId =
                   matchedPrl?.customer_id ?? matchedPrl?.customer?.code ?? null;
+                const relatedSupplierItems = findSupplierItemsForProduct(
+                  uniqCode,
+                  partNumber,
+                );
+                const supplierItemMatch = relatedSupplierItems[0];
+                const bomDefaults = getBomDefaultsForUniq(uniqCode);
 
                 setAddForm((prev) => ({
                   ...prev,
@@ -3067,19 +3613,18 @@ export default function PoBudgetPage() {
                   productModel,
                   partName,
                   partNumber,
-                  uom: String(supplierItemMatch?.uom ?? prev.uom ?? ""),
+                  uom: bomDefaults.uom || String(supplierItemMatch?.uom ?? prev.uom ?? ""),
                   weightKg:
-                    supplierItemMatch?.weight == null
+                    bomDefaults.weightKg ||
+                    (supplierItemMatch?.weight == null
                       ? prev.weightKg
-                      : String(supplierItemMatch.weight),
+                      : String(supplierItemMatch.weight)),
                   salesPlan: Number(
                     matchedPrl?.quantity ?? prev.salesPlan ?? 0,
                   ),
                   description:
                     supplierItemMatch?.description ?? prev.description,
-                  supplier:
-                    String(supplierItemMatch?.supplier_name ?? "") ||
-                    prev.supplier,
+                  supplier: String(supplierItemMatch?.supplier_name ?? prev.supplier ?? ""),
                   supplierId:
                     resolveSupplierRowId({
                       supplierUuid: supplierItemMatch?.supplier_uuid,
@@ -3294,6 +3839,7 @@ export default function PoBudgetPage() {
               format={(value) => (value ? value.format("MMMM YYYY") : "")}
             />
           </div>
+
         </div>
       </Modal>
 
@@ -3331,10 +3877,10 @@ export default function PoBudgetPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-gray-900">
-                  Step 1: Choose PRL
+                  Step 1: Choose Source
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
-                  Select Production Requirement List to generate PO Budget
+                  Select source for generating PO Budget (PRL or PO)
                 </div>
               </div>
               <Tag className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
@@ -3344,28 +3890,60 @@ export default function PoBudgetPage() {
 
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <div className="text-xs text-gray-600 mb-1">
-                  Select PRL UNIQ
-                </div>
+                <div className="text-xs text-gray-600 mb-1">Source</div>
                 <Select
-                  mode="multiple"
-                  allowClear
-                  showSearch
-                  value={bulkPrlIds}
-                  onChange={(values) => {
-                    setBulkPrlIds(values);
-                    syncBulkItemsFromPrl(values);
-                  }}
-                  onSearch={handleBulkPrlSearch}
-                  onPopupScroll={handleBulkPrlPopupScroll}
-                  options={prlOptions}
-                  className="w-full"
-                  placeholder="Search and select one or more PRL UNIQ"
-                  optionFilterProp="label"
-                  filterOption={false}
-                  loading={prlsFetching}
-                  maxTagCount="responsive"
+                  value={bulkSource}
+                  onChange={(v) => setBulkSource(v as "prl" | "po")}
+                  options={[{ label: "PRL", value: "prl" }, { label: "Customer PO", value: "po" }]}
+                  className="w-full mb-3"
                 />
+
+                {bulkSource === "prl" ? (
+                  <>
+                    <div className="text-xs text-gray-600 mb-1">Select PRL</div>
+                    <Select
+                      mode="multiple"
+                      allowClear
+                      showSearch
+                      value={bulkPrlIds}
+                      onChange={(values) => {
+                        setBulkPrlIds(values);
+                        syncBulkItemsFromPrl(values);
+                      }}
+                      onSearch={handleBulkPrlSearch}
+                      onPopupScroll={handleBulkPrlPopupScroll}
+                      options={prlOptions}
+                      className="w-full"
+                      placeholder="Search and select one or more PRL UNIQ"
+                      optionFilterProp="label"
+                      filterOption={false}
+                      loading={prlsFetching}
+                      maxTagCount="responsive"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <div className="text-xs text-gray-600 mb-1">Select Customer PO</div>
+                    <Select
+                      mode="multiple"
+                      showSearch
+                      allowClear
+                      options={(customerPos || []).map((p) => ({ label: `${p.po_number} — ${p.customer?.customer_name ?? ""}`, value: String(p.id) }))}
+                      className="w-full"
+                      placeholder="Search and select one or more Customer PO"
+                      optionFilterProp="label"
+                      filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+                      value={bulkPoIds}
+                      onChange={(value) => {
+                        const values = value ? (Array.isArray(value) ? value : [value]) : [];
+                        setBulkPoIds(values as string[]);
+                        // call sync with po:<id> tokens so existing builder handles PO items
+                        const mapped = (values as string[]).map((v) => `po:${v}`);
+                        syncBulkItemsFromPrl(mapped);
+                      }}
+                    />
+                  </>
+                )}
               </div>
               <div>
                 <div className="text-xs text-gray-600 mb-1">
@@ -3391,39 +3969,133 @@ export default function PoBudgetPage() {
                   Step 2: Configure Items & Suppliers
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
-                  Edit quantities and add multiple suppliers for each item
+                  Expand a UNIQ to edit quantities and suppliers.
                 </div>
               </div>
-              <Tag
-                color="green"
-                className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
-                {bulkItems.length} Items
-              </Tag>
+              <div className="text-xs text-gray-500 shrink-0 text-right">
+                {bulkPrlGroups.length} PRL · {bulkParentGroups.length} UNIQ ·{" "}
+                {bulkItems.filter((it) => !it.isHeader).length} material
+                {bulkItems.filter((it) => !it.isHeader).length !== 1 ? "s" : ""}
+              </div>
             </div>
 
-            <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50/50 p-3 text-xs text-blue-700">
-              <b>Note:</b> You can edit quantity for each item and add multiple
-              suppliers. Total supplier quantities cannot exceed item quantity.
-            </div>
+            {bulkParentGroups.length === 0 ? (
+              <div className="mt-4 rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
+                Select a PRL in Step 1 to see its items here.
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {bulkPrlGroups.map((prlGroup) => (
+                  <div
+                    key={prlGroup.prlId}
+                    className="rounded-lg border border-gray-200 overflow-hidden">
+                    <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-gray-50 border-b border-gray-100">
+                      <div className="min-w-0 truncate">
+                        <span className="text-sm font-semibold text-gray-800">
+                          {prlGroup.prlNumber}
+                        </span>
+                        <span className="text-xs text-gray-500 ml-2">
+                          {prlGroup.customerName}
+                          {prlGroup.period ? ` · ${prlGroup.period}` : ""}
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-500 shrink-0">
+                        {prlGroup.parents.length} UNIQ
+                      </div>
+                    </div>
 
-            <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
-              <Table<BulkItemRow>
-                dataSource={bulkItems}
-                columns={bulkColumns}
-                rowKey="key"
-                expandable={{
-                  expandedRowKeys: expandedBulkRowKeys,
-                  onExpandedRowsChange: (keys) =>
-                    setExpandedBulkRowKeys(keys.map((key) => String(key))),
-                  expandedRowRender: (record) => renderBomChildren(record.uniq),
-                  rowExpandable: (record) => hasBomChildren(record.uniq),
-                  showExpandColumn: false,
-                }}
-                pagination={false}
-                size="small"
-                scroll={{ x: 1200 }}
-              />
-            </div>
+                    {prlGroup.parents.map((group) => {
+                      const isCollapsed = collapsedBulkGroupKeys.includes(
+                        group.key,
+                      );
+                      return (
+                        <div
+                          key={group.key}
+                          className="border-b border-gray-100 last:border-b-0">
+                          <div
+                            className="flex items-center justify-between gap-3 px-4 py-2 bg-blue-50/40 cursor-pointer select-none"
+                            onClick={() =>
+                              toggleExpandedRowKey(
+                                group.key,
+                                setCollapsedBulkGroupKeys,
+                              )
+                            }>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <Tag color="blue" className="!m-0">
+                                {group.parentUniqCode || "-"}
+                              </Tag>
+                              <span className="text-sm font-semibold text-gray-800 truncate">
+                                {group.partName || "-"}
+                              </span>
+                              {group.partNumber ? (
+                                <span className="text-xs text-gray-400 shrink-0">
+                                  {group.partNumber}
+                                </span>
+                              ) : null}
+                              {group.childLabels?.length ? (
+                                <span className="text-xs text-gray-500 truncate hidden md:inline">
+                                  · {formatChildSummary(group.childLabels)}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div
+                              className="flex items-center gap-2 shrink-0"
+                              onClick={(e) => e.stopPropagation()}>
+                              <span className="text-xs text-gray-500">
+                                Total Qty:
+                              </span>
+                              <InputNumber
+                                min={0}
+                                size="small"
+                                value={group.budgetQty}
+                                onChange={(v) =>
+                                  bulkUpdateGroupQty(group, Number(v || 0))
+                                }
+                                className="w-[100px]"
+                              />
+                              <DownOutlined
+                                className={`!text-[10px] !text-gray-400 transition-transform cursor-pointer ${
+                                  isCollapsed ? "-rotate-90" : ""
+                                }`}
+                                onClick={() =>
+                                  toggleExpandedRowKey(
+                                    group.key,
+                                    setCollapsedBulkGroupKeys,
+                                  )
+                                }
+                              />
+                            </div>
+                          </div>
+
+                          {isCollapsed ? null : (
+                            <>
+                              <Table<BulkItemRow>
+                                dataSource={group.rows}
+                                columns={bulkColumns}
+                                rowKey="key"
+                                pagination={false}
+                                size="small"
+                                scroll={{ x: 1000 }}
+                              />
+                              <div className="flex items-center justify-end gap-1.5 bg-blue-50/40 border-t border-gray-100 px-4 py-2 text-xs text-gray-600">
+                                Total material to procure for{" "}
+                                {group.parentUniqCode || "-"}:
+                                <span className="text-sm font-semibold text-blue-700">
+                                  {formatNumber(group.totalChildQty)}
+                                </span>
+                                <span className="text-gray-400">
+                                  {group.rows[0]?.uom || ""}
+                                </span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="rounded-xl border border-purple-200 bg-white p-4">
@@ -4012,11 +4684,14 @@ export default function PoBudgetPage() {
                 const autoQty =
                   pct != null && pct > 0 && addSupplierBudget > 0
                     ? Math.round((addSupplierBudget * pct) / 100)
-                    : addSupplierRemaining;
+                    : addSupplierRemaining > 0
+                    ? addSupplierRemaining
+                    : undefined; // remaining=0 → biarkan user input sendiri
                 setAddSupplierForm((p) => ({
                   ...p,
                   supplier: v,
-                  qty: autoQty,
+                  // Hanya set qty otomatis jika ada nilai; jangan timpa 0 ke qty
+                  ...(autoQty !== undefined ? { qty: autoQty } : {}),
                   percentage: pct,
                 }));
               }}
@@ -4032,7 +4707,9 @@ export default function PoBudgetPage() {
             />
             {activeAddSupplierItem ? (
               <div className="text-[11px] text-gray-500 mt-1">
-                Showing suppliers for UNIQ {activeAddSupplierItem.uniq}
+                Showing suppliers for UNIQ {isChildBudgetType(getApiType(activeTab))
+                  ? getChildSupplierLookupUniq(activeAddSupplierItem)
+                  : activeAddSupplierItem.uniq}
               </div>
             ) : null}
           </div>
@@ -4048,10 +4725,10 @@ export default function PoBudgetPage() {
             </div>
             <InputNumber
               min={0}
-              max={addSupplierRemaining}
+              max={addSupplierBudget || undefined}
               value={addSupplierForm.qty}
               onChange={(v) =>
-                setAddSupplierForm((p) => ({ ...p, qty: Number(v || 0) }))
+                setAddSupplierForm((p) => ({ ...p, qty: v != null ? Number(v) : undefined }))
               }
               placeholder="Enter quantity"
               className="w-full"

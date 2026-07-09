@@ -12,6 +12,67 @@ export type PoBudgetSummary = {
   pending_approvals: number;
 };
 
+export type PoBudgetChildMaterialSpec = {
+  material_grade?: string;
+  grade?: string;
+  type_material?: string;
+  form?: string;
+  width_mm?: number;
+  diameter_mm?: number;
+  thickness_mm?: number;
+  length_mm?: number;
+  weight_kg?: number;
+  supplier_name?: string;
+  cycle_time_sec?: number;
+  setup_time_min?: number;
+  customer_cycle?: string;
+};
+
+export type PoBudgetChildSupplier = {
+  supplier_id?: number | string | null;
+  supplier_name: string;
+  quantity: number;
+};
+
+export type PoBudgetPrlChild = {
+  uniq: string;
+  uniq_code: string;
+  part_name?: string;
+  part_number?: string;
+  model?: string;
+  qty_per_uniq?: number;
+  weight_kg?: number;
+  quantity?: number;
+  existing_raw_material?: string | null;
+  uom?: string | null;
+  material_spec?: PoBudgetChildMaterialSpec;
+  suppliers?: PoBudgetChildSupplier[];
+  children?: PoBudgetPrlChild[];
+};
+
+export type PoBudgetStoredDetailParent = {
+  prl_row_id?: number | string;
+  uniq_code?: string;
+  part_name?: string;
+  part_number?: string;
+  quantity?: number;
+  children?: PoBudgetPrlChild[];
+};
+
+export type PoBudgetStoredDetail = {
+  prl_id?: string;
+  period?: string;
+  parent?: {
+    prl_id?: string;
+    prl_row_id?: number | string;
+    uniq_code?: string;
+    part_name?: string;
+    part_number?: string;
+  };
+  children?: PoBudgetPrlChild[];
+  parents?: PoBudgetStoredDetailParent[];
+};
+
 export interface PoBudgetEntryRequest {
   customer_id: number | string;
   customer_name: string;
@@ -31,6 +92,7 @@ export interface PoBudgetEntryRequest {
   po2_pct: number;
   prl: number;
   budget_subtype?: string;
+  detail_jsonb?: PoBudgetStoredDetail;
 }
 
 export interface PoBudgetBulkItemSupplierRequest {
@@ -44,11 +106,19 @@ export interface PoBudgetBulkItemSupplierRequest {
 export interface PoBudgetBulkItemRequest {
   prl_item_id: number | string;
   uniq_code: string;
+  child_uniq_code?: string;
+  product_model?: string;
+  model?: string;
+  part_name?: string;
+  part_number?: string;
+  qty_per_uniq?: number;
   sales_plan: number;
   po1_pct: number;
   po2_pct: number;
   weight_kg: number;
   uom: string;
+  existing_raw_material?: string;
+  material_spec?: PoBudgetChildMaterialSpec;
   suppliers: PoBudgetBulkItemSupplierRequest[];
 }
 
@@ -58,6 +128,31 @@ export interface PoBudgetBulkRequest {
   period: string;
   items: PoBudgetBulkItemRequest[];
 }
+
+export type PoBudgetPrlItem = {
+  id: number;
+  uniq_code: string;
+  product_model?: string;
+  part_name?: string;
+  part_number?: string;
+  weight_kg?: number | null;
+  quantity: number;
+  allocated_qty: number;
+  remaining_qty: number;
+  existing_raw_material?: string | null;
+  uom?: string | null;
+  children?: PoBudgetPrlChild[];
+};
+
+export type PoBudgetPrlDetail = {
+  id: string;
+  prl_number: string;
+  customer_id?: number | null;
+  customer_name?: string | null;
+  period?: string;
+  status?: string;
+  items: PoBudgetPrlItem[];
+};
 
 export type PoBudgetBulkResult = {
   created?: number;
@@ -77,6 +172,7 @@ export type PoBudgetRow = {
   id?: string;
   poBudgetRef?: string;
   uniq: string;
+  prlRef?: string;
   customer: string;
   customerId?: string;
   contactPerson?: string;
@@ -97,6 +193,7 @@ export type PoBudgetRow = {
   uom?: string;
   weightKg?: number;
   description?: string;
+  detailJson?: PoBudgetStoredDetail;
   status: "approved" | "pending";
   approval: "Approved" | "Pending";
 };
@@ -227,6 +324,67 @@ const toPoBudgetSummary = (payload: unknown): PoBudgetSummary => {
   };
 };
 
+const toPoBudgetStoredDetail = (value: unknown): PoBudgetStoredDetail | undefined => {
+  if (!isRecord(value)) return undefined;
+
+  // New format: {prl_id, period, parents: [...]}
+  if (Array.isArray(value.parents)) {
+    const parents: PoBudgetStoredDetailParent[] = (value.parents as unknown[]).map((p) => {
+      if (!isRecord(p)) return { children: [] as PoBudgetPrlChild[] };
+      return {
+        prl_row_id: getString(p, ["prl_row_id"]),
+        uniq_code: getString(p, ["uniq_code"]),
+        part_name: getString(p, ["part_name"]),
+        part_number: getString(p, ["part_number"]),
+        quantity: getNumber(p, ["quantity"]),
+        children: Array.isArray(p.children)
+          ? (p.children as PoBudgetPrlChild[])
+          : [],
+      };
+    });
+    return {
+      prl_id: getString(value, ["prl_id"]),
+      period: getString(value, ["period"]),
+      parents,
+    };
+  }
+
+  // Old format: {parent: {...}, children: [...]}
+  const parent = isRecord(value.parent) ? value.parent : undefined;
+  const children = Array.isArray(value.children)
+    ? (value.children as PoBudgetPrlChild[])
+    : undefined;
+
+  if (!parent && (!children || children.length === 0)) return undefined;
+
+  // Auto-normalize to new format
+  const normalizedParents: PoBudgetStoredDetailParent[] = parent
+    ? [
+        {
+          prl_row_id: getString(parent, ["prl_row_id"]),
+          uniq_code: getString(parent, ["uniq_code"]),
+          part_name: getString(parent, ["part_name"]),
+          part_number: getString(parent, ["part_number"]),
+          children: children ?? [],
+        },
+      ]
+    : [];
+
+  return {
+    parent: parent
+      ? {
+          prl_id: getString(parent, ["prl_id"]),
+          prl_row_id: getString(parent, ["prl_row_id"]),
+          uniq_code: getString(parent, ["uniq_code"]),
+          part_name: getString(parent, ["part_name"]),
+          part_number: getString(parent, ["part_number"]),
+        }
+      : undefined,
+    children,
+    parents: normalizedParents,
+  };
+};
+
 const toPoBudgetRow = (item: unknown, index: number): PoBudgetRow => {
   const record = isRecord(item) ? item : {};
   const salesPlan = getNumber(record, ["sales_plan", "salesPlan"]) ?? 0;
@@ -246,6 +404,7 @@ const toPoBudgetRow = (item: unknown, index: number): PoBudgetRow => {
     id: getString(record, ["id"]),
     poBudgetRef: getString(record, ["po_budget_ref"]),
     uniq: getString(record, ["uniq_code", "uniq", "item_uniq_code"]) ?? `ITEM-${index + 1}`,
+    prlRef: getString(record, ["prl_ref"]),
     customer: getString(record, ["customer_name", "customer"]) ?? "-",
     customerId: getString(record, ["customer_id"]),
     contactPerson: getString(record, ["contact_person", "contactPerson", "pic_name", "pic", "contact_name"]),
@@ -266,6 +425,9 @@ const toPoBudgetRow = (item: unknown, index: number): PoBudgetRow => {
     uom: getString(record, ["uom"]),
     weightKg: getNumber(record, ["weight_kg", "weightKg"]),
     description: getString(record, ["description", "notes"]),
+    detailJson: toPoBudgetStoredDetail(
+      record.detail_jsonb ?? record.detailJson ?? record.detail_json,
+    ),
     status,
     approval: status === "approved" ? "Approved" : "Pending",
   };
@@ -332,6 +494,17 @@ export const poBudgetSlice = apiSlice
         providesTags: (_result, _error, arg) => [{ type: "PoBudget", id: `${arg.type}-${arg.id}` }],
       }),
 
+      getPoBudgetPrlDetail: builder.query<ApiResponse<PoBudgetPrlDetail>, { id: string; budgetType: PoBudgetType }>({
+        query: ({ id, budgetType }) => ({
+          url: `/po-budget/prl/${encodeURIComponent(id)}?budget_type=${encodeURIComponent(budgetType.replaceAll("-", "_"))}`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) =>
+          ok((normalizeObjectResponse(response) ?? {}) as PoBudgetPrlDetail),
+        providesTags: (_result, _error, arg) => [{ type: "PoBudget", id: `PRL-${arg.id}-${arg.budgetType}` }],
+      }),
+
       updatePoBudgetEntry: builder.mutation<ApiResponse<PoBudgetRow>, { type: PoBudgetType; id: string | number; body: PoBudgetUpdateRequest }>({
         query: ({ type, id, body }) => ({
           url: `/po-budget/${type}/budget/${encodeURIComponent(String(id))}`,
@@ -355,5 +528,7 @@ export const {
   useAddPoBudgetEntryMutation,
   useAddPoBudgetBulkMutation,
   useGetPoBudgetDetailQuery,
+  useGetPoBudgetPrlDetailQuery,
+  useLazyGetPoBudgetPrlDetailQuery,
   useUpdatePoBudgetEntryMutation,
 } = poBudgetSlice;

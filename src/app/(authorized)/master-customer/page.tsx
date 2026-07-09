@@ -312,7 +312,7 @@ export default function MasterCustomerPage() {
                     <div className="text-gray-900">{bankNumber || "-"}</div>
                   </div>
                   <div className="md:col-span-2">
-                    <div className="text-gray-500">BOM Codes</div>
+                    <div className="text-gray-500">Parent Codes/ Sebango</div>
                     {bomCodes.length > 0 ? (
                       <div className="mt-1 flex flex-wrap gap-1">
                         {bomCodes.map((code) => (

@@ -14,6 +14,7 @@ import {
   Tag,
   Upload,
   message,
+  Tooltip,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -27,7 +28,7 @@ import {
   Pie,
   PieChart,
   ResponsiveContainer,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   XAxis,
   YAxis,
 } from "recharts";
@@ -111,6 +112,11 @@ const getPrlStatusColor = (value: PrlStatus) => {
   if (["urgent", "overdue", "failed", "error", "action needed"].includes(normalized)) return "red";
 
   return "default";
+};
+
+const canDeletePrlStatus = (value: PrlStatus) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized === "pending" || normalized === "rejected";
 };
 
 type ForecastRow = {
@@ -233,6 +239,8 @@ export default function PrlManagementPage() {
   const [search, setSearch] = useState<string>("");
   const [periodFilter, setPeriodFilter] = useState<string>("current");
   const [customerFilter, setCustomerFilter] = useState<string>("");
+  const [prlIdFilter, setPrlIdFilter] = useState<string | undefined>(undefined);
+  const [uniqFilter, setUniqFilter] = useState<string | undefined>(undefined);
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [excelModalOpen, setExcelModalOpen] = useState(false);
@@ -375,6 +383,45 @@ export default function PrlManagementPage() {
       };
     });
   }, [apiEnabled, bomIndex.assemblyCodeByUniq, bomIndex.modelByUniq, bomIndex.partNameByUniq, bomIndex.partNumberByUniq, prlListQuery.data]);
+
+  const filteredForecastRows = useMemo(() => {
+    let rows = resolvedForecastRows;
+    if (prlIdFilter) rows = rows.filter((r) => String(r.prlId) === String(prlIdFilter));
+    if (uniqFilter) rows = rows.filter((r) => String(r.uniq) === String(uniqFilter));
+    if (search) {
+      const s = search.trim().toLowerCase();
+      rows = rows.filter((r) => (r.uniq ?? "").toLowerCase().includes(s) || (r.partName ?? "").toLowerCase().includes(s));
+    }
+    return rows;
+  }, [resolvedForecastRows, prlIdFilter, uniqFilter, search]);
+
+  // PRL grouping: map prlId -> uniq codes
+  const prlGroups = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    const list = prlListQuery.data?.items ?? [];
+    for (const r of list) {
+      const prlId = String(r.prl_id ?? r.id ?? "").trim();
+      const uniq = String(r.uniq_code ?? r.item_uniq_code ?? "").trim();
+      if (!prlId) continue;
+      const s = map.get(prlId) ?? new Set<string>();
+      if (uniq) s.add(uniq);
+      map.set(prlId, s);
+    }
+    return map;
+  }, [prlListQuery.data]);
+
+  const prlIdOptions = useMemo(() => Array.from(prlGroups.keys()).map((id) => ({ label: id, value: id })), [prlGroups]);
+
+  const uniqOptionsForSelectedPrl = useMemo(() => {
+    if (prlIdFilter) {
+      const set = prlGroups.get(prlIdFilter) ?? new Set();
+      return Array.from(set).map((u) => ({ label: u, value: u }));
+    }
+    // all uniqs
+    const all = new Set<string>();
+    for (const s of prlGroups.values()) for (const u of s) all.add(u);
+    return Array.from(all).map((u) => ({ label: u, value: u }));
+  }, [prlGroups, prlIdFilter]);
 
   const selectedUniqRows = useMemo(() => {
     if (!forecastDetail.record) return [] as ForecastRow[];
@@ -616,7 +663,7 @@ export default function PrlManagementPage() {
     const q = search.trim().toLowerCase();
     const customerQ = customerFilter.trim().toLowerCase();
 
-    return resolvedForecastRows.filter((r) => {
+    return filteredForecastRows.filter((r) => {
       const matchesQuery =
         !q ||
         r.uniq.toLowerCase().includes(q) ||
@@ -630,7 +677,55 @@ export default function PrlManagementPage() {
 
       return matchesQuery && matchesCustomer && matchesPeriod && matchesType;
     });
-  }, [resolvedForecastRows, search, customerFilter, periodFilter, typeFilter]);
+  }, [filteredForecastRows, search, customerFilter, periodFilter, typeFilter]);
+
+  // Group rows by PRL ID so table shows one row per PRL with uniq list
+  const groupedRows = useMemo(() => {
+    const map = new Map<string, {
+      key: string;
+      prlId: string;
+      customer: string;
+      uniqs: string[];
+      productModel: string;
+      partName: string;
+      partNumber: string;
+      quantity: number;
+      period: string;
+      status: PrlStatus;
+    }>();
+
+    for (const r of rows) {
+      const id = String(r.prlId ?? r.key ?? "");
+      const entry = map.get(id) ?? {
+        key: id,
+        prlId: id,
+        customer: r.customer,
+        uniqs: [],
+        productModel: r.productModel,
+        partName: r.partName,
+        partNumber: r.partNumber,
+        quantity: 0,
+        period: r.period,
+        status: r.status,
+      };
+      if (r.uniq && !entry.uniqs.includes(r.uniq)) entry.uniqs.push(r.uniq);
+      entry.quantity += Number(r.quantity || 0);
+      map.set(id, entry);
+    }
+
+    return Array.from(map.values()).map((e) => ({
+      key: e.key,
+      prlId: e.prlId,
+      customer: e.customer,
+      uniq: e.uniqs.join(", ") as any,
+      productModel: e.productModel,
+      partName: e.partName,
+      partNumber: e.partNumber,
+      quantity: e.quantity,
+      period: e.period,
+      status: e.status,
+    }));
+  }, [rows]);
 
   const forecastPaginationTotal = useMemo(() => {
     if (!apiEnabled) return rows.length;
@@ -715,11 +810,61 @@ export default function PrlManagementPage() {
       dataIndex: "uniq",
       key: "uniq",
       width: 120,
-      render: (v: string) => (
-        <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
-          {v}
-        </span>
-      ),
+      render: (v: string | string[], record) => {
+        const vals = Array.isArray(v) ? v : String(v ?? "").split(/,\s*/).filter(Boolean);
+        if (vals.length === 0) return <span className="text-sm text-gray-500">-</span>;
+        if (vals.length === 1) {
+          return (
+            <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
+              {vals[0]}
+            </span>
+          );
+        }
+
+        const maxShow = 3;
+        const visible = vals.slice(0, maxShow);
+        const extra = vals.slice(maxShow);
+        const extraCount = extra.length;
+
+        return (
+          <div className="flex items-center gap-2">
+            <div className="flex flex-wrap gap-1">
+              {visible.map((u, i) => (
+                <span key={u + i} className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
+                  {u}
+                </span>
+              ))}
+            </div>
+            {extraCount > 0 && (
+              <Tooltip
+                placement="top"
+                title={
+                  <div className="flex flex-row flex-wrap gap-2 max-w-xs" style={{ maxWidth: 320 }}>
+                    {vals.slice(0, 10).map((u) => (
+                      <Tag
+                        key={u}
+                        className="cursor-pointer inline-flex"
+                        onClick={() => {
+                          const match = resolvedForecastRows.find((rr) => String(rr.prlId) === String(record.prlId) && rr.uniq === u);
+                          if (match) setForecastDetail({ open: true, record: match });
+                        }}
+                      >
+                        {u}
+                      </Tag>
+                    ))}
+                    {vals.length > 10 && (
+                      <div className="text-xs text-gray-500 mt-1">and {vals.length - 10} more</div>
+                    )}
+                  </div>
+                }
+                overlayClassName="max-w-xs"
+              >
+                <Tag className="cursor-pointer">+{extraCount}</Tag>
+              </Tooltip>
+            )}
+          </div>
+        );
+      },
     },
     {
       title: "Product Model",
@@ -806,6 +951,7 @@ export default function PrlManagementPage() {
             size="small"
             type="text"
             danger
+            disabled={!canDeletePrlStatus(record.status)}
             icon={<DeleteOutlined />}
             onClick={() => {
               let confirmModal: any = null;
@@ -1044,6 +1190,30 @@ export default function PrlManagementPage() {
             <div className="flex items-center justify-between mb-3">
               <div>
                 <div className="text-base font-semibold text-gray-900">Production Forecast by Uniq</div>
+                <div className="min-w-[160px]">
+                  <div className="text-xs text-gray-500 mb-1">PRL ID</div>
+                  <Select
+                    allowClear
+                    showSearch
+                    options={prlIdOptions}
+                    value={prlIdFilter}
+                    onChange={(v) => { setPrlIdFilter(v); setUniqFilter(undefined); }}
+                    placeholder="Filter by PRL ID"
+                    className="min-w-[160px]"
+                  />
+                </div>
+                <div className="min-w-[200px]">
+                  <div className="text-xs text-gray-500 mb-1">Uniq</div>
+                  <Select
+                    allowClear
+                    showSearch
+                    options={uniqOptionsForSelectedPrl}
+                    value={uniqFilter}
+                    onChange={(v) => setUniqFilter(v)}
+                    placeholder="Filter by Uniq"
+                    className="min-w-[200px]"
+                  />
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <Badge count={`${forecastPaginationTotal} forecasts`} style={{ backgroundColor: "#EEF2FF", color: "#3730A3" }} />
@@ -1055,7 +1225,7 @@ export default function PrlManagementPage() {
 
             <Table<ForecastRow>
               columns={columns}
-              dataSource={rows}
+              dataSource={groupedRows}
               rowKey="key"
               size="middle"
               scroll={{ x: "max-content" }}

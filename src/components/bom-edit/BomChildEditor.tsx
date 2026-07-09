@@ -59,7 +59,15 @@ export default function BomChildEditor({
             <Input disabled={disabled} />
           </Form.Item>
           <Form.Item name={[...fieldPath, "category"]} label="Category">
-            <Select disabled={disabled} allowClear options={[{ label: "Raw Material", value: "raw" }, { label: "Indirect", value: "indirect" }]} />
+            <Select
+              disabled={disabled}
+              allowClear
+              options={[
+                { label: "Raw Material", value: "raw" },
+                { label: "Indirect", value: "indirect" },
+                { label: "Subcon", value: "subcon" },
+              ]}
+            />
           </Form.Item>
           <Form.Item name={[...fieldPath, "uom"]} label="UOM" rules={[{ required: true, message: "UOM is required" }]}>
             <Select showSearch disabled={disabled} loading={isUomsLoading} options={uomOptions} optionFilterProp="label" />

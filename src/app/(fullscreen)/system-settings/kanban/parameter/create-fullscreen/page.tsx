@@ -44,8 +44,15 @@ export default function KanbanParameterCreateFullscreenPage() {
       }
     };
 
-    const nodes = (bomTreeApiData as any)?.data;
-    if (Array.isArray(nodes)) walk(nodes);
+    const raw = (bomTreeApiData as any)?.data;
+    // support API that returns { data: { items: [...] } } or { data: [...] } or single object
+    const candidate = Array.isArray(raw?.items) ? raw.items : raw;
+    if (Array.isArray(candidate)) {
+      walk(candidate);
+    } else if (candidate && typeof candidate === "object") {
+      // single BOM object
+      walk([candidate]);
+    }
 
     return Array.from(uniqMap.values())
       .sort((a, b) => a.uniq.localeCompare(b.uniq))

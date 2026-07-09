@@ -2343,8 +2343,9 @@ export default function SystemSettingsPage() {
     processForm.setFieldsValue({
       processCode: row.processCode,
       processName: row.processName,
-      category: row.category,
-      sequence: row.sequence,
+      // do not set category/sequence when editing to avoid showing them
+      // category: row.category,
+      // sequence: row.sequence,
       isAssembly: row.isAssembly,
       subCon: row.subCon,
       status: row.status,
@@ -3079,7 +3080,7 @@ const handleImportKanban = async (file: File) => {
             id: processEditingRow.id,
             body: {
               process_name: createPayload.process_name,
-              sequence: createPayload.sequence,
+              // Do not update sequence or category on edit per requirement
               is_assembly: createPayload.is_assembly,
               sub_con: createPayload.sub_con,
               status: createPayload.status,
@@ -4631,23 +4632,23 @@ const handleImportKanban = async (file: File) => {
       key: "processName",
       width: 200,
     },
-    {
-      title: "Category",
-      dataIndex: "category",
-      key: "category",
-      width: 160,
-    },
-    {
-      title: "Sequence",
-      dataIndex: "sequence",
-      key: "sequence",
-      width: 120,
-      render: (v: number) => (
-        <span className="inline-flex items-center justify-center min-w-7 px-2 py-0.5 text-xs border border-gray-200 rounded-md bg-white text-gray-700">
-          {v}
-        </span>
-      ),
-    },
+    // {
+    //   title: "Category",
+    //   dataIndex: "category",
+    //   key: "category",
+    //   width: 160,
+    // },
+    // {
+    //   title: "Sequence",
+    //   dataIndex: "sequence",
+    //   key: "sequence",
+    //   width: 120,
+    //   render: (v: number) => (
+    //     <span className="inline-flex items-center justify-center min-w-7 px-2 py-0.5 text-xs border border-gray-200 rounded-md bg-white text-gray-700">
+    //       {v}
+    //     </span>
+    //   ),
+    // },
     {
       title: "Status",
       dataIndex: "status",
@@ -6739,7 +6740,7 @@ const handleImportKanban = async (file: File) => {
       </Drawer>
 
       <Drawer
-        title={processEditMode === "create" ? "Add Process" : "Edit Process"}
+        title={(processEditMode as string) === "create" ? "Add Process" : "Edit Process"}
         placement="right"
         open={processEditOpen}
         onClose={closeProcessEdit}
@@ -6763,16 +6764,18 @@ const handleImportKanban = async (file: File) => {
             >
               <Input
                 placeholder="PRC001"
-                disabled={processEditMode === "edit" && apiEnabled}
+                disabled={(processEditMode as string) === "edit" && apiEnabled}
               />
             </Form.Item>
-            <Form.Item
-              label="Sequence"
-              name="sequence"
-              rules={[{ required: true }]}
-            >
-              <InputNumber className="w-full" min={1} placeholder="1" />
-            </Form.Item>
+            {(processEditMode as string) === "create" ? (
+              <Form.Item
+                label="Sequence"
+                name="sequence"
+                rules={[{ required: true }]}
+              >
+                <InputNumber className="w-full" min={1} placeholder="1" />
+              </Form.Item>
+            ) : null}
           </div>
 
           <Form.Item
@@ -6796,16 +6799,18 @@ const handleImportKanban = async (file: File) => {
             </Form.Item>
           </div>
 
-          <Form.Item
-            label="Category"
-            name="category"
-            rules={[{ required: true }]}
-          >
-            <Input
-              placeholder="purchase"
-              disabled={processEditMode === "edit" && apiEnabled}
-            />
-          </Form.Item>
+          {(processEditMode as string) === "create" ? (
+            <Form.Item
+              label="Category"
+              name="category"
+              rules={[{ required: true }]}
+            >
+              <Input
+                placeholder="purchase"
+                disabled={(processEditMode as string) === "edit" && apiEnabled}
+              />
+            </Form.Item>
+          ) : null}
 
           <Form.Item label="Status" name="status" rules={[{ required: true }]}>
             <Select
