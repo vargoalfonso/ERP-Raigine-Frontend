@@ -13,6 +13,7 @@ type DetailTabId = "details";
 type DnDetailItem = {
   key: string;
   uniq: string;
+  materialgrade: string;
   itemId: string;
   materialInfo: {
     code: string;
@@ -117,6 +118,7 @@ function mockItems(): DnDetailItem[] {
     {
       key: "LV-001",
       itemId: "LV-001",
+      materialgrade: "SWM-B",
       uniq: "LV-001",
       materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
       totalQty: 120,
@@ -136,6 +138,7 @@ function mockItems(): DnDetailItem[] {
     {
       key: "LV-002",
       itemId: "LV-002",
+      materialgrade: "SWM-B",
       uniq: "LV-002",
       materialInfo: { code: "SP-001-A", name: "Steel Plate", model: "Camry 2024" },
       totalQty: 100,
@@ -221,6 +224,7 @@ function DnRawMaterialDetailPageContent() {
         key: String(item.id ?? item.packing_number ?? index),
         itemId: String(item.id ?? index),
         uniq: item.item_uniq_code ?? "-",
+        materialgrade: detail.material_grade ?? "-",
         materialInfo: {
           code: item.kanban?.kanban_number ?? "-",
           name: item.item_uniq_code ?? "-",
@@ -272,7 +276,7 @@ function DnRawMaterialDetailPageContent() {
   }, [items]);
 
   const incomingLogs = useMemo(() => {
-    if (!detail) return [] as Array<{ packing: string; uniq: string; qty: number; quality: string; receivedAt: string }>; 
+    if (!detail) return [] as Array<{ packing: string; uniq: string; qty: number; quality: string; receivedAt: string }>;
     return (detail.items ?? [])
       .map((it) => {
         const qty = Number(it.qty_received ?? 0);
@@ -354,8 +358,8 @@ function DnRawMaterialDetailPageContent() {
                     <div className="text-xl font-semibold text-gray-900">{header.poNumber}</div>
                   </div>
                   <div>
-                    <div className="text-xs text-gray-500">Material UNIQ</div>
-                    <div className="text-xl font-semibold text-gray-900">{firstItem?.uniq ?? "-"}</div>
+                    <div className="text-xs text-gray-500">Material Grade</div>
+                    <div className="text-xl font-semibold text-gray-900">  {detail?.material_grade ?? "-"} - {firstItem?.uniq ?? "-"}</div>
                   </div>
                   <div>
                     <div className="text-xs text-gray-500">Month</div>
@@ -394,7 +398,7 @@ function DnRawMaterialDetailPageContent() {
                 <div className="text-sm font-semibold text-gray-900">Material Specifications</div>
                 <div className="mt-4">
                   <div className="text-xs text-gray-500">Material Description</div>
-                  <div className="text-xl font-medium text-gray-900">{firstItem?.uniq ?? "-"} {header.type ? `• ${header.type}` : ""}</div>
+                  <div className="text-xl font-medium text-gray-900">{detail?.material_grade ?? "-"} - {firstItem?.uniq ?? "-"} {header.type ? `• ${header.type}` : ""}</div>
                 </div>
                 <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
                   <div className="rounded-xl bg-gray-50 p-4">
@@ -493,9 +497,8 @@ function DnRawMaterialDetailPageContent() {
                   <button
                     type="button"
                     onClick={() => setActiveTab("details")}
-                    className={`pb-3 text-sm font-medium ${
-                      activeTab === "details" ? "text-blue-600 border-b-2 border-blue-600" : "text-gray-500"
-                    }`}
+                    className={`pb-3 text-sm font-medium ${activeTab === "details" ? "text-blue-600 border-b-2 border-blue-600" : "text-gray-500"
+                      }`}
                   >
                     Details
                   </button>
@@ -509,7 +512,7 @@ function DnRawMaterialDetailPageContent() {
                           <th className="text-left font-medium px-4 py-3">
                             <input type="checkbox" checked={allChecked} onChange={(event) => toggleAll(event.target.checked)} />
                           </th>
-                          <th className="text-left font-medium px-4 py-3">Uniq</th>
+                          <th className="text-left font-medium px-4 py-3">Material Grade</th>
                           <th className="text-left font-medium px-4 py-3">Material Info</th>
                           <th className="text-left font-medium px-4 py-3">Total Qty</th>
                           <th className="text-left font-medium px-4 py-3">Remaining Qty</th>
@@ -528,7 +531,14 @@ function DnRawMaterialDetailPageContent() {
                               <td className="px-4 py-4">
                                 <input type="checkbox" checked={checked} onChange={(event) => toggleOne(item.key, event.target.checked)} />
                               </td>
-                              <td className="px-4 py-4 whitespace-nowrap">{item.uniq}</td>
+                              <td className="px-4 py-4 whitespace-nowrap">
+                                <div className="text-sm font-medium text-blue-600">
+                                  {item.materialgrade}
+                                </div>
+                                <div className="font-medium text-gray-900">
+                                  {item.uniq}
+                                </div>
+                              </td>
                               <td className="px-4 py-4 min-w-[220px]">
                                 <div className="text-[11px] text-gray-500">{item.materialInfo.code}</div>
                                 <div className="text-sm font-medium text-gray-900">{item.materialInfo.name}</div>
@@ -586,56 +596,56 @@ function DnRawMaterialDetailPageContent() {
               </div>
 
               <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4">
-                    <div className="text-sm font-semibold text-gray-900">Scan Packing</div>
-                    <div className="mt-2 flex flex-col gap-3">
-                      <Input
-                        placeholder="Input packing number"
-                        value={scanPacking}
-                        onChange={(event) => setScanPacking(event.target.value)}
-                        onPressEnter={() => {
-                          const packing = scanPacking.trim();
-                          if (!packing) return;
-                          void runScan({ packing, qty: 1 });
-                        }}
-                      />
-                      <Button
-                        type="primary"
-                        onClick={() => {
-                          const packing = scanPacking.trim();
-                          if (!packing) {
-                            message.warning("Packing number is required");
-                            return;
-                          }
-                          void runScan({ packing, qty: 1 });
-                        }}
-                        loading={scanState.isFetching}
-                      >
-                        Scan
-                      </Button>
+                <div className="text-sm font-semibold text-gray-900">Scan Packing</div>
+                <div className="mt-2 flex flex-col gap-3">
+                  <Input
+                    placeholder="Input packing number"
+                    value={scanPacking}
+                    onChange={(event) => setScanPacking(event.target.value)}
+                    onPressEnter={() => {
+                      const packing = scanPacking.trim();
+                      if (!packing) return;
+                      void runScan({ packing, qty: 1 });
+                    }}
+                  />
+                  <Button
+                    type="primary"
+                    onClick={() => {
+                      const packing = scanPacking.trim();
+                      if (!packing) {
+                        message.warning("Packing number is required");
+                        return;
+                      }
+                      void runScan({ packing, qty: 1 });
+                    }}
+                    loading={scanState.isFetching}
+                  >
+                    Scan
+                  </Button>
+                </div>
+                {scanState.data?.data ? (
+                  <div className="mt-4 grid grid-cols-1 gap-3 text-sm text-gray-700">
+                    <div className="rounded-xl border border-gray-100 bg-white p-3">
+                      <div className="text-xs text-gray-500">Packing</div>
+                      <div className="font-medium text-gray-900">{scanState.data.data.packing_number ?? "-"}</div>
                     </div>
-                    {scanState.data?.data ? (
-                      <div className="mt-4 grid grid-cols-1 gap-3 text-sm text-gray-700">
-                        <div className="rounded-xl border border-gray-100 bg-white p-3">
-                          <div className="text-xs text-gray-500">Packing</div>
-                          <div className="font-medium text-gray-900">{scanState.data.data.packing_number ?? "-"}</div>
-                        </div>
-                        <div className="rounded-xl border border-gray-100 bg-white p-3">
-                          <div className="text-xs text-gray-500">Uniq</div>
-                          <div className="font-medium text-gray-900">{scanState.data.data.item_uniq_code ?? "-"}</div>
-                        </div>
-                        <div className="rounded-xl border border-gray-100 bg-white p-3">
-                          <div className="text-xs text-gray-500">Qty Stated / Received</div>
-                          <div className="font-medium text-gray-900">
-                            {formatNumber(scanState.data.data.qty_stated)} / {formatNumber(scanState.data.data.qty_received)}
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-gray-100 bg-white p-3">
-                          <div className="text-xs text-gray-500">Check</div>
-                          <div className="font-medium text-gray-900">{scanState.data.data.check ?? "-"}</div>
-                        </div>
+                    <div className="rounded-xl border border-gray-100 bg-white p-3">
+                      <div className="text-xs text-gray-500">Uniq</div>
+                      <div className="font-medium text-gray-900">{scanState.data.data.item_uniq_code ?? "-"}</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-100 bg-white p-3">
+                      <div className="text-xs text-gray-500">Qty Stated / Received</div>
+                      <div className="font-medium text-gray-900">
+                        {formatNumber(scanState.data.data.qty_stated)} / {formatNumber(scanState.data.data.qty_received)}
                       </div>
-                    ) : null}
+                    </div>
+                    <div className="rounded-xl border border-gray-100 bg-white p-3">
+                      <div className="text-xs text-gray-500">Check</div>
+                      <div className="font-medium text-gray-900">{scanState.data.data.check ?? "-"}</div>
+                    </div>
                   </div>
+                ) : null}
+              </div>
             </div>
 
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-white">
