@@ -5,7 +5,7 @@ type UnknownRecord = Record<string, unknown>;
 
 const TAG = "DeliverySchedule" as const;
 
-const ok = <T,>(data: T, message = "OK"): ApiResponse<T> => ({
+const ok = <T>(data: T, message = "OK"): ApiResponse<T> => ({
   message,
   status: "success",
   data,
@@ -14,16 +14,23 @@ const ok = <T,>(data: T, message = "OK"): ApiResponse<T> => ({
 const isRecord = (value: unknown): value is UnknownRecord =>
   typeof value === "object" && value !== null;
 
-const getString = (record: UnknownRecord, keys: string[]): string | undefined => {
+const getString = (
+  record: UnknownRecord,
+  keys: string[],
+): string | undefined => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) return value.trim();
-    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    if (typeof value === "number" && Number.isFinite(value))
+      return String(value);
   }
   return undefined;
 };
 
-const getNumber = (record: UnknownRecord, keys: string[]): number | undefined => {
+const getNumber = (
+  record: UnknownRecord,
+  keys: string[],
+): number | undefined => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -56,17 +63,98 @@ const normalizePaginatedItems = (response: unknown): unknown[] => {
   if (!isRecord(data)) return [];
   const items = (data as UnknownRecord).items;
   if (Array.isArray(items)) return items;
-  if (isRecord((data as UnknownRecord).data) && Array.isArray(((data as UnknownRecord).data as UnknownRecord).items)) {
-    return (((data as UnknownRecord).data as UnknownRecord).items as unknown[]) ?? [];
+  if (
+    isRecord((data as UnknownRecord).data) &&
+    Array.isArray(((data as UnknownRecord).data as UnknownRecord).items)
+  ) {
+    return (
+      (((data as UnknownRecord).data as UnknownRecord).items as unknown[]) ?? []
+    );
   }
   return [];
+};
+
+const normalizeScheduleGroups = (
+  response: unknown,
+): DeliveryScheduleRecord[] => {
+  if (!isRecord(response)) return [];
+
+  let data: unknown = response.data;
+  if (isRecord(data) && isRecord((data as UnknownRecord).data)) {
+    data = (data as UnknownRecord).data;
+  }
+  if (!isRecord(data)) return [];
+
+  const groups = (data as UnknownRecord).groups;
+  if (!Array.isArray(groups)) return [];
+
+  const records: DeliveryScheduleRecord[] = [];
+
+  groups.forEach((group) => {
+    if (!isRecord(group)) return;
+    const deliveryDate =
+      getString(group, ["delivery_date", "deliveryDate"]) ?? "";
+    const rows = Array.isArray((group as UnknownRecord).items)
+      ? ((group as UnknownRecord).items as unknown[])
+      : [];
+
+    rows.forEach((raw) => {
+      if (!isRecord(raw)) return;
+      const row = raw as UnknownRecord;
+
+      records.push({
+        id: getString(row, ["schedule_id", "scheduleId", "id"]) ?? "",
+        deliveryDate,
+        customerId: getNumber(row, ["customer_id", "customerId"]),
+        customerName:
+          getString(row, ["customer_name", "customerName", "customer"]) ?? "",
+        poDnName:
+          getString(row, [
+            "po_dn_name",
+            "poDnName",
+            "customer_order_reference",
+          ]) ?? "",
+        cycle: getString(row, ["cycle"]) ?? "",
+        priority: getString(row, ["priority"]) ?? undefined,
+        // Prefer the schedule status; fall back to approval_status.
+        status:
+          getString(row, ["status", "approval_status", "approvalStatus"]) ??
+          "pending",
+        approvedBy: getString(row, ["approved_by", "approvedBy"]) ?? "",
+        approvedAt: getString(row, ["approved_at", "approvedAt"]) ?? "",
+        createdAt: getString(row, ["created_at", "createdAt"]) ?? "",
+        updatedAt: getString(row, ["updated_at", "updatedAt"]) ?? "",
+        items: [
+          {
+            uniq:
+              getString(row, ["item_uniq_code", "uniq", "itemUniqCode"]) ?? "-",
+            model: getString(row, ["model", "product_model"]) ?? "",
+            partNo: getString(row, ["part_no", "partNo", "part_number"]) ?? "",
+            partName: getString(row, ["part_name", "partName"]) ?? "",
+            totalOrder: getNumber(row, ["total_order", "totalOrder"]) ?? 0,
+            totalDelivery:
+              getNumber(row, [
+                "quantity",
+                "total_delivery",
+                "totalDelivery",
+                "qty",
+              ]) ?? 0,
+            uom: getString(row, ["uom", "unit"]) ?? "",
+          },
+        ],
+      });
+    });
+  });
+
+  return records;
 };
 
 const normalizeInnerData = (response: unknown): unknown => {
   if (!isRecord(response)) return response;
   const data = response.data;
   if (!isRecord(data)) return response;
-  if (isRecord((data as UnknownRecord).data)) return (data as UnknownRecord).data;
+  if (isRecord((data as UnknownRecord).data))
+    return (data as UnknownRecord).data;
   return data;
 };
 
@@ -211,9 +299,12 @@ const toItem = (raw: unknown): DeliveryScheduleItemRecord => {
   return {
     uniq: getString(record, ["item_uniq_code", "uniq", "itemUniqCode"]) ?? "-",
     model: getString(record, ["model", "product_model", "productModel"]) ?? "",
-    partNo: getString(record, ["part_no", "partNo", "part_number", "partNumber"]) ?? "",
+    partNo:
+      getString(record, ["part_no", "partNo", "part_number", "partNumber"]) ??
+      "",
     partName: getString(record, ["part_name", "partName"]) ?? "",
-    totalOrder: getNumber(record, ["total_order", "totalOrder", "quantity", "qty"]) ?? 0,
+    totalOrder:
+      getNumber(record, ["total_order", "totalOrder", "quantity", "qty"]) ?? 0,
     totalDelivery: getNumber(record, ["total_delivery", "totalDelivery"]) ?? 0,
     uom: getString(record, ["uom", "unit"]) ?? "",
   };
@@ -227,12 +318,23 @@ const toRecord = (raw: unknown): DeliveryScheduleRecord => {
     id: getString(record, ["id", "schedule_id", "uuid"]) ?? "",
     deliveryDate: getString(record, ["delivery_date", "deliveryDate"]) ?? "",
     customerId: getNumber(record, ["customer_id", "customerId"]),
-    customerName: getString(record, ["customer_name", "customerName", "customer"]) ?? "",
-    poDnName: getString(record, ["customer_order_reference", "po_dn_name", "poDnName", "po_number", "poNumber"]) ?? "",
+    customerName:
+      getString(record, ["customer_name", "customerName", "customer"]) ?? "",
+    poDnName:
+      getString(record, [
+        "customer_order_reference",
+        "po_dn_name",
+        "poDnName",
+        "po_number",
+        "poNumber",
+      ]) ?? "",
     cycle: getString(record, ["cycle"]) ?? "",
     priority: getString(record, ["priority"]) ?? undefined,
-    status: getString(record, ["status", "approval_status", "approvalStatus"]) ?? "pending",
-    approvedBy: getString(record, ["approved_by", "approvedBy", "admin_name"]) ?? "",
+    status:
+      getString(record, ["status", "approval_status", "approvalStatus"]) ??
+      "pending",
+    approvedBy:
+      getString(record, ["approved_by", "approvedBy", "admin_name"]) ?? "",
     approvedAt: getString(record, ["approved_at", "approvedAt"]) ?? "",
     createdAt: getString(record, ["created_at", "createdAt"]) ?? "",
     updatedAt: getString(record, ["updated_at", "updatedAt"]) ?? "",
@@ -246,7 +348,13 @@ const toDnCreationRecord = (raw: unknown): DeliveryScheduleDnCreationRecord => {
   return {
     id: getString(record, ["dn_id", "id", "uuid"]) ?? "",
     dnNumber: getString(record, ["dn_number", "dnNumber"]) ?? "",
-    dnDate: getString(record, ["delivery_date", "dn_date", "dnDate", "deliveryDate"]) ?? "",
+    dnDate:
+      getString(record, [
+        "delivery_date",
+        "dn_date",
+        "dnDate",
+        "deliveryDate",
+      ]) ?? "",
     customerName: getString(record, ["customer_name", "customerName"]) ?? "",
     customerPo: getString(record, ["po_number", "poNumber"]) ?? "",
     poDnName: getString(record, ["po_dn_name", "poDnName"]) ?? "",
@@ -259,7 +367,12 @@ const toDnCreationRecord = (raw: unknown): DeliveryScheduleDnCreationRecord => {
     uom: getString(record, ["uom", "unit"]) ?? "",
     fgLocation: getString(record, ["fg_location", "fgLocation"]) ?? "",
     qrCode: getString(record, ["qr_code", "qrCode"]) ?? "",
-    packingList: getString(record, ["packing_list_number", "packing_list", "packingList"]) ?? "",
+    packingList:
+      getString(record, [
+        "packing_list_number",
+        "packing_list",
+        "packingList",
+      ]) ?? "",
     status: getString(record, ["status"]) ?? "",
     statusHint: getString(record, ["approval_status", "notes"]) ?? "",
     createdAt: getString(record, ["created_at", "createdAt"]) ?? "",
@@ -274,7 +387,13 @@ const toScanDnRobotResponse = (raw: unknown): ScanDnRobotResponse => {
     dnNumber: getString(record, ["dn_number", "dnNumber"]) ?? "",
     status: getString(record, ["status"]) ?? "success",
     message: getString(record, ["message"]) ?? "OK",
-    processedAt: getString(record, ["processed_at", "processedAt", "updated_at", "updatedAt"]) ?? "",
+    processedAt:
+      getString(record, [
+        "processed_at",
+        "processedAt",
+        "updated_at",
+        "updatedAt",
+      ]) ?? "",
     data: record.data,
   };
 };
@@ -302,7 +421,7 @@ export const deliveryScheduleSlice = apiSlice
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) =>
-          ok(normalizePaginatedItems(response).map((item) => toRecord(item))),
+          ok(normalizeScheduleGroups(response)),
         providesTags: (result) => [
           { type: TAG, id: "LIST" },
           ...(result?.data ?? [])
@@ -311,7 +430,10 @@ export const deliveryScheduleSlice = apiSlice
         ],
       }),
 
-      getDeliverySchedulesSummary: builder.query<ApiResponse<DeliveryScheduleSummary>, void>({
+      getDeliverySchedulesSummary: builder.query<
+        ApiResponse<DeliveryScheduleSummary>,
+        void
+      >({
         query: () => ({
           url: "/delivery-schedules/summary",
           method: "GET",
@@ -321,9 +443,11 @@ export const deliveryScheduleSlice = apiSlice
           const data = normalizeInnerData(response);
           const r = isRecord(data) ? (data as UnknownRecord) : {};
           return ok({
-            total_deliveries: getNumber(r, ["total_deliveries", "totalDeliveries"]) ?? 0,
+            total_deliveries:
+              getNumber(r, ["total_deliveries", "totalDeliveries"]) ?? 0,
             in_transit: getNumber(r, ["in_transit", "inTransit"]) ?? 0,
-            pending_approval: getNumber(r, ["pending_approval", "pendingApproval"]) ?? 0,
+            pending_approval:
+              getNumber(r, ["pending_approval", "pendingApproval"]) ?? 0,
             dn_created: getNumber(r, ["dn_created", "dnCreated"]) ?? 0,
           });
         },
@@ -346,7 +470,11 @@ export const deliveryScheduleSlice = apiSlice
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) =>
-          ok(normalizePaginatedItems(response).map((item) => toDnCreationRecord(item))),
+          ok(
+            normalizePaginatedItems(response).map((item) =>
+              toDnCreationRecord(item),
+            ),
+          ),
         providesTags: (result) => [
           { type: TAG, id: "DN-CREATION-LIST" },
           ...(result?.data ?? [])
@@ -365,7 +493,8 @@ export const deliveryScheduleSlice = apiSlice
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => ok(toRecord(normalizeObjectResponse(response))),
+        transformResponse: (response: unknown) =>
+          ok(toRecord(normalizeObjectResponse(response))),
         invalidatesTags: [{ type: TAG, id: "LIST" }],
       }),
 
@@ -375,11 +504,12 @@ export const deliveryScheduleSlice = apiSlice
       >({
         query: ({ id, body }) => ({
           url: `/delivery-schedules/${encodeURIComponent(id)}`,
-          method: "PUT",
+          method: "PATCH",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => ok(toRecord(normalizeObjectResponse(response))),
+        transformResponse: (response: unknown) =>
+          ok(toRecord(normalizeObjectResponse(response))),
         invalidatesTags: (_result, _error, { id }) => [
           { type: TAG, id: "LIST" },
           { type: TAG, id },
@@ -396,7 +526,8 @@ export const deliveryScheduleSlice = apiSlice
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => ok(toRecord(normalizeObjectResponse(response))),
+        transformResponse: (response: unknown) =>
+          ok(toRecord(normalizeObjectResponse(response))),
         invalidatesTags: (_result, _error, { schedule_id }) => [
           { type: TAG, id: "LIST" },
           { type: TAG, id: schedule_id },
@@ -426,7 +557,7 @@ export const deliveryScheduleSlice = apiSlice
         ScanDnRobotRequest
       >({
         query: (body) => ({
-          url: "/api/delivery-schedule/scan-mode/process",
+          url: "/customer-delivery/scans",
           method: "POST",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
@@ -453,7 +584,10 @@ export const deliveryScheduleSlice = apiSlice
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        invalidatesTags: [{ type: TAG, id: "DN-CREATION-LIST" }, { type: TAG, id: "SUMMARY" }],
+        invalidatesTags: [
+          { type: TAG, id: "DN-CREATION-LIST" },
+          { type: TAG, id: "SUMMARY" },
+        ],
       }),
     }),
   });

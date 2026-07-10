@@ -80,7 +80,13 @@ function StatCard(props: {
         <div className="text-xs text-gray-500">{label}</div>
         <div className="text-xl font-bold text-gray-900 mt-1">{value}</div>
       </div>
-      <div className={"h-10 w-10 rounded-lg flex items-center justify-center " + accent}>{icon}</div>
+      <div
+        className={
+          "h-10 w-10 rounded-lg flex items-center justify-center " + accent
+        }
+      >
+        {icon}
+      </div>
     </div>
   );
 }
@@ -133,7 +139,7 @@ export default function CustomerPoDnSoPage() {
         status: "Draft",
       },
     ],
-    []
+    [],
   );
 
   const poRows = useMemo<PoRow[]>(
@@ -172,7 +178,7 @@ export default function CustomerPoDnSoPage() {
         status: "Draft",
       },
     ],
-    []
+    [],
   );
 
   const soRows = useMemo<SoRow[]>(
@@ -211,7 +217,7 @@ export default function CustomerPoDnSoPage() {
         status: "Draft",
       },
     ],
-    []
+    [],
   );
 
   const resolvedDnRows = useMemo<DnRow[]>(() => {
@@ -225,7 +231,9 @@ export default function CustomerPoDnSoPage() {
         key: dn.id,
         dnDate: dn.delivery_date ?? "-",
         dnNumber: dn.dn_number ?? dn.id,
-        customer: dn.customer?.customer_name ?? (dn.customer_id ? `Customer #${dn.customer_id}` : "-"),
+        customer:
+          dn.customer?.customer_name ??
+          (dn.customer_id ? `Customer #${dn.customer_id}` : "-"),
         quantity: Number(firstItem?.quantity ?? 0),
         uom: firstItem?.uom ?? "Pcs",
         deliveryDate: dn.delivery_date ?? "-",
@@ -246,7 +254,9 @@ export default function CustomerPoDnSoPage() {
         key: po.id,
         poDate: firstItem?.delivery_date ?? "-",
         poNumber: po.po_number ?? po.id,
-        customer: po.customer?.customer_name ?? (po.customer_id ? `Customer #${po.customer_id}` : "-"),
+        customer:
+          po.customer?.customer_name ??
+          (po.customer_id ? `Customer #${po.customer_id}` : "-"),
         quantity: Number(firstItem?.quantity ?? 0),
         uom: firstItem?.uom ?? "Pcs",
         deliveryDate: firstItem?.delivery_date ?? "-",
@@ -267,7 +277,9 @@ export default function CustomerPoDnSoPage() {
         key: so.id,
         soDate: so.order_date ?? "-",
         soNumber: so.so_number ?? so.id,
-        customer: so.customer?.customer_name ?? (so.customer_id ? `Customer #${so.customer_id}` : "-"),
+        customer:
+          so.customer?.customer_name ??
+          (so.customer_id ? `Customer #${so.customer_id}` : "-"),
         quantity: Number(firstItem?.quantity ?? 0),
         uom: firstItem?.uom ?? "Pcs",
         deliveryDate: firstItem?.target_date ?? "-",
@@ -279,18 +291,21 @@ export default function CustomerPoDnSoPage() {
 
   const kpis = useMemo(
     () => ({
-      activeDns: resolvedDnRows.filter((r) => String(r.status).toLowerCase() === "active").length,
+      activeDns: resolvedDnRows.filter(
+        (r) => String(r.status).toLowerCase() === "active",
+      ).length,
       customerPos: resolvedPoRows.length,
       specialOrders: resolvedSoRows.length,
     }),
-    [resolvedDnRows, resolvedPoRows, resolvedSoRows]
+    [resolvedDnRows, resolvedPoRows, resolvedSoRows],
   );
 
   const filteredDnRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     const customerQ = customerFilter.trim().toLowerCase();
     return resolvedDnRows.filter((r) => {
-      const passCustomer = !customerQ || r.customer.toLowerCase().includes(customerQ);
+      const passCustomer =
+        !customerQ || r.customer.toLowerCase().includes(customerQ);
       const passSearch =
         !q ||
         r.dnNumber.toLowerCase().includes(q) ||
@@ -304,8 +319,12 @@ export default function CustomerPoDnSoPage() {
     const q = search.trim().toLowerCase();
     const customerQ = customerFilter.trim().toLowerCase();
     return resolvedPoRows.filter((r) => {
-      const passCustomer = !customerQ || r.customer.toLowerCase().includes(customerQ);
-      const passSearch = !q || r.poNumber.toLowerCase().includes(q) || r.customer.toLowerCase().includes(q);
+      const passCustomer =
+        !customerQ || r.customer.toLowerCase().includes(customerQ);
+      const passSearch =
+        !q ||
+        r.poNumber.toLowerCase().includes(q) ||
+        r.customer.toLowerCase().includes(q);
       return passCustomer && passSearch;
     });
   }, [resolvedPoRows, search, customerFilter]);
@@ -314,17 +333,28 @@ export default function CustomerPoDnSoPage() {
     const q = search.trim().toLowerCase();
     const customerQ = customerFilter.trim().toLowerCase();
     return resolvedSoRows.filter((r) => {
-      const passCustomer = !customerQ || r.customer.toLowerCase().includes(customerQ);
-      const passSearch = !q || r.soNumber.toLowerCase().includes(q) || r.customer.toLowerCase().includes(q);
+      const passCustomer =
+        !customerQ || r.customer.toLowerCase().includes(customerQ);
+      const passSearch =
+        !q ||
+        r.soNumber.toLowerCase().includes(q) ||
+        r.customer.toLowerCase().includes(q);
       return passCustomer && passSearch;
     });
   }, [resolvedSoRows, search, customerFilter]);
 
   useEffect(() => {
     if (!apiEnabled) return;
-    const activeError = tab === "dn" ? dnQuery.error : tab === "po" ? poQuery.error : soQuery.error;
+    const activeError =
+      tab === "dn"
+        ? dnQuery.error
+        : tab === "po"
+          ? poQuery.error
+          : soQuery.error;
     if (!activeError) return;
-    message.error(getApiErrorMessage(activeError, "Failed to load customer orders"));
+    message.error(
+      getApiErrorMessage(activeError, "Failed to load customer orders"),
+    );
   }, [apiEnabled, tab, dnQuery.error, poQuery.error, soQuery.error]);
 
   const dnColumns = useMemo<ColumnsType<DnRow>>(
@@ -335,7 +365,11 @@ export default function CustomerPoDnSoPage() {
         dataIndex: "dnNumber",
         key: "dnNumber",
         render: (v: string) => (
-          <button type="button" className="text-sm font-semibold text-blue-600 hover:underline" onClick={() => message.info(v)}>
+          <button
+            type="button"
+            className="text-sm font-semibold text-blue-600 hover:underline"
+            onClick={() => message.info(v)}
+          >
             {v}
           </button>
         ),
@@ -346,21 +380,32 @@ export default function CustomerPoDnSoPage() {
         dataIndex: "quantity",
         key: "quantity",
         align: "right",
-        render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
+        render: (v: number) => (
+          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+        ),
       },
       {
         title: "UoM",
         dataIndex: "uom",
         key: "uom",
-        render: (v: string) => <span className="text-sm font-semibold text-orange-600">{v}</span>,
+        render: (v: string) => (
+          <span className="text-sm font-semibold text-orange-600">{v}</span>
+        ),
       },
-      { title: "Tanggal Delivery", dataIndex: "deliveryDate", key: "deliveryDate", width: 130 },
+      {
+        title: "Tanggal Delivery",
+        dataIndex: "deliveryDate",
+        key: "deliveryDate",
+        width: 130,
+      },
       {
         title: "Cycle",
         dataIndex: "cycle",
         key: "cycle",
         render: (v: DnRow["cycle"]) => (
-          <Tag className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold !text-gray-700">{v}</Tag>
+          <Tag className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold !text-gray-700">
+            {v}
+          </Tag>
         ),
       },
       // {
@@ -387,19 +432,25 @@ export default function CustomerPoDnSoPage() {
               size="small"
               icon={<EyeOutlined />}
               className="!rounded-lg"
-              onClick={() => router.push(`/customer-po/detail/${encodeURIComponent(r.key)}`)}
+              onClick={() =>
+                router.push(`/customer-po/detail/${encodeURIComponent(r.key)}`)
+              }
             />
             <Button
               size="small"
               icon={<EditOutlined />}
               className="!rounded-lg"
-              onClick={() => router.push("/customer-po/create")}
+              onClick={() =>
+                router.push(
+                  `/customer-po/create?id=${encodeURIComponent(r.key)}&type=dn`,
+                )
+              }
             />
           </div>
         ),
       },
     ],
-    [router]
+    [router],
   );
 
   const poColumns = useMemo<ColumnsType<PoRow>>(
@@ -410,7 +461,11 @@ export default function CustomerPoDnSoPage() {
         dataIndex: "poNumber",
         key: "poNumber",
         render: (v: string) => (
-          <button type="button" className="text-sm font-semibold text-blue-600 hover:underline" onClick={() => message.info(v)}>
+          <button
+            type="button"
+            className="text-sm font-semibold text-blue-600 hover:underline"
+            onClick={() => message.info(v)}
+          >
             {v}
           </button>
         ),
@@ -421,16 +476,25 @@ export default function CustomerPoDnSoPage() {
         dataIndex: "quantity",
         key: "quantity",
         align: "right",
-        render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
+        render: (v: number) => (
+          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+        ),
       },
       { title: "UoM", dataIndex: "uom", key: "uom" },
-      { title: "Tanggal Delivery", dataIndex: "deliveryDate", key: "deliveryDate", width: 130 },
+      {
+        title: "Tanggal Delivery",
+        dataIndex: "deliveryDate",
+        key: "deliveryDate",
+        width: 130,
+      },
       {
         title: "Cycle",
         dataIndex: "cycle",
         key: "cycle",
         render: (v: PoRow["cycle"]) => (
-          <Tag className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold !text-gray-700">{v}</Tag>
+          <Tag className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold !text-gray-700">
+            {v}
+          </Tag>
         ),
       },
       // {
@@ -457,19 +521,25 @@ export default function CustomerPoDnSoPage() {
               size="small"
               icon={<EyeOutlined />}
               className="!rounded-lg"
-              onClick={() => router.push(`/customer-po/detail/${encodeURIComponent(r.key)}`)}
+              onClick={() =>
+                router.push(`/customer-po/detail/${encodeURIComponent(r.key)}`)
+              }
             />
             <Button
               size="small"
               icon={<EditOutlined />}
               className="!rounded-lg"
-              onClick={() => router.push("/customer-po/create")}
+              onClick={() =>
+                router.push(
+                  `/customer-po/create?id=${encodeURIComponent(r.key)}&type=po`,
+                )
+              }
             />
           </div>
         ),
       },
     ],
-    [router]
+    [router],
   );
 
   const soColumns = useMemo<ColumnsType<SoRow>>(
@@ -480,7 +550,11 @@ export default function CustomerPoDnSoPage() {
         dataIndex: "soNumber",
         key: "soNumber",
         render: (v: string) => (
-          <button type="button" className="text-sm font-semibold text-blue-600 hover:underline" onClick={() => message.info(v)}>
+          <button
+            type="button"
+            className="text-sm font-semibold text-blue-600 hover:underline"
+            onClick={() => message.info(v)}
+          >
             {v}
           </button>
         ),
@@ -491,21 +565,32 @@ export default function CustomerPoDnSoPage() {
         dataIndex: "quantity",
         key: "quantity",
         align: "right",
-        render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
+        render: (v: number) => (
+          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+        ),
       },
       {
         title: "UoM",
         dataIndex: "uom",
         key: "uom",
-        render: (v: string) => <span className="text-sm font-semibold text-orange-600">{v}</span>,
+        render: (v: string) => (
+          <span className="text-sm font-semibold text-orange-600">{v}</span>
+        ),
       },
-      { title: "Tanggal Delivery", dataIndex: "deliveryDate", key: "deliveryDate", width: 130 },
+      {
+        title: "Tanggal Delivery",
+        dataIndex: "deliveryDate",
+        key: "deliveryDate",
+        width: 130,
+      },
       {
         title: "Cycle",
         dataIndex: "cycle",
         key: "cycle",
         render: (v: SoRow["cycle"]) => (
-          <Tag className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold !text-gray-700">{v}</Tag>
+          <Tag className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold !text-gray-700">
+            {v}
+          </Tag>
         ),
       },
       // {
@@ -532,19 +617,25 @@ export default function CustomerPoDnSoPage() {
               size="small"
               icon={<EyeOutlined />}
               className="!rounded-lg"
-              onClick={() => router.push(`/customer-po/detail/${encodeURIComponent(r.key)}`)}
+              onClick={() =>
+                router.push(`/customer-po/detail/${encodeURIComponent(r.key)}`)
+              }
             />
             <Button
               size="small"
               icon={<EditOutlined />}
               className="!rounded-lg"
-              onClick={() => router.push("/customer-po/create")}
+              onClick={() =>
+                router.push(
+                  `/customer-po/create?id=${encodeURIComponent(r.key)}&type=so`,
+                )
+              }
             />
           </div>
         ),
       },
     ],
-    [router]
+    [router],
   );
 
   const tabs = useMemo(
@@ -553,7 +644,7 @@ export default function CustomerPoDnSoPage() {
       { id: "po" as const, label: "Purchase Order" },
       { id: "so" as const, label: "Special Order" },
     ],
-    []
+    [],
   );
 
   return (
@@ -561,14 +652,20 @@ export default function CustomerPoDnSoPage() {
       <div className="mb-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">Customer PO & DN Management</h1>
+            <h1 className="text-2xl font-bold text-gray-900 mb-1">
+              Customer PO & DN Management
+            </h1>
             <p className="text-sm text-gray-500">
-              Centralize customer Purchase Orders and Delivery Notes for production planning and delivery coordination
+              Centralize customer Purchase Orders and Delivery Notes for
+              production planning and delivery coordination
             </p>
           </div>
 
           <div className="flex items-center gap-2">
-            <Button className="!rounded-lg" icon={<FileTextOutlined />} onClick={() => message.info("Generate Report")}
+            <Button
+              className="!rounded-lg"
+              icon={<FileTextOutlined />}
+              onClick={() => message.info("Generate Report")}
             >
               Generate Report
             </Button>
@@ -585,9 +682,24 @@ export default function CustomerPoDnSoPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
-        <StatCard label="Active DNs" value={kpis.activeDns} icon={<MdOutlineLocalShipping size={18} />} accent="bg-blue-50 text-blue-600" />
-        <StatCard label="Customer POs" value={kpis.customerPos} icon={<MdInventory2 size={18} />} accent="bg-green-50 text-green-600" />
-        <StatCard label="Special Orders" value={kpis.specialOrders} icon={<MdDescription size={18} />} accent="bg-purple-50 text-purple-600" />
+        <StatCard
+          label="Active DNs"
+          value={kpis.activeDns}
+          icon={<MdOutlineLocalShipping size={18} />}
+          accent="bg-blue-50 text-blue-600"
+        />
+        <StatCard
+          label="Customer POs"
+          value={kpis.customerPos}
+          icon={<MdInventory2 size={18} />}
+          accent="bg-green-50 text-green-600"
+        />
+        <StatCard
+          label="Special Orders"
+          value={kpis.specialOrders}
+          icon={<MdDescription size={18} />}
+          accent="bg-purple-50 text-purple-600"
+        />
         {/*<StatCard label="Total Value" value={"$351,700"} icon={<MdPaid size={18} />} accent="bg-orange-50 text-orange-600" /> */}
       </div>
 
@@ -604,7 +716,9 @@ export default function CustomerPoDnSoPage() {
                   onClick={() => setTab(t.id)}
                   className={
                     "px-4 py-2 text-sm font-medium rounded-lg transition-colors " +
-                    (isActive ? "bg-white shadow-sm text-gray-900" : "text-gray-600 hover:text-gray-900")
+                    (isActive
+                      ? "bg-white shadow-sm text-gray-900"
+                      : "text-gray-600 hover:text-gray-900")
                   }
                 >
                   {t.label}
@@ -634,7 +748,10 @@ export default function CustomerPoDnSoPage() {
               placeholder="Customer Name"
               className="!rounded-lg min-w-[180px]"
             />
-            <Button className="!rounded-lg" icon={<DownloadOutlined />} onClick={() => message.info("Export")}
+            <Button
+              className="!rounded-lg"
+              icon={<DownloadOutlined />}
+              onClick={() => message.info("Export")}
             >
               Export
             </Button>

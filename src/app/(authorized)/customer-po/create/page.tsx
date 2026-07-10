@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import {
   Button,
   Card,
@@ -16,8 +16,8 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import type { Dayjs } from "dayjs";
-import { useRouter } from "next/navigation";
+import dayjs, { type Dayjs } from "dayjs";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeftOutlined,
   DeleteOutlined,
@@ -30,6 +30,8 @@ import {
   useCreateCustomerPoMutation,
   useCreateDeliveryNoteMutation,
   useCreateSpecialOrderMutation,
+  useGetCustomerOrderByIdQuery,
+  useUpdateCustomerOrderMutation,
 } from "@/lib/api/customer-orders/api";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { useGetUomsQuery } from "@/lib/api/system-settings/api";
@@ -90,7 +92,20 @@ export default function CreateCustomerOrderPage() {
   const [createSpecialOrder, createSpecialOrderState] =
     useCreateSpecialOrderMutation();
 
-  const [orderType, setOrderType] = useState<OrderType>("dn");
+  const searchParams = useSearchParams();
+  const editId = searchParams.get("id") ?? undefined;
+  const editTypeParam = searchParams.get("type") as OrderType | null;
+  const isEditMode = Boolean(editId);
+
+  const [updateCustomerOrder, updateCustomerOrderState] =
+    useUpdateCustomerOrderMutation();
+
+  const existingOrderQuery = useGetCustomerOrderByIdQuery(editId ?? "", {
+    skip: !editId,
+  });
+  // ───────────────────────────────────────────────────────────
+
+  const [orderType, setOrderType] = useState<OrderType>(editTypeParam ?? "dn");
   const [deliveryDate, setDeliveryDate] = useState<Dayjs | null>(null);
 
   const [entryUniq, setEntryUniq] = useState<string | undefined>(undefined);
@@ -98,6 +113,46 @@ export default function CreateCustomerOrderPage() {
   const [entryUom, setEntryUom] = useState<string | undefined>(undefined);
 
   const [rows, setRows] = useState<EntryRow[]>([]);
+
+  // Prefill saat mode edit: isi form + rows dari data existing
+  useEffect(() => {
+    const order = existingOrderQuery.data;
+    if (!order) return;
+
+    const nextType: OrderType =
+      order.document_type === "PO"
+        ? "po"
+        : order.document_type === "SO"
+          ? "so"
+          : "dn";
+    setOrderType(nextType);
+
+    form.setFieldsValue({
+      orderType: nextType,
+      customerId: String(order.customer_id),
+      customerName: order.customer_name,
+      contactPerson: order.contact_person ?? undefined,
+      deliveryAddress: order.delivery_address ?? undefined,
+      specialInstructions: order.notes ?? undefined,
+      externalOrderNumber: order.document_number ?? undefined,
+    });
+
+    const firstDate =
+      order.document_date || order.items?.[0]?.delivery_date || "";
+    setDeliveryDate(firstDate ? dayjs(firstDate) : null);
+
+    setRows(
+      (order.items ?? []).map((it, idx) => ({
+        key: `row-${it.id || idx}`,
+        uniq: it.item_uniq_code,
+        partNumber: it.part_number,
+        partName: it.part_name,
+        model: it.model ?? "",
+        qty: it.quantity,
+        uom: "Pcs", // NOTE: item record backend tidak mengembalikan uom, default "Pcs"
+      })),
+    );
+  }, [existingOrderQuery.data, form]);
 
   const customersQuery = useListCustomersQuery(undefined, {
     skip: !apiEnabled,
@@ -338,6 +393,32 @@ export default function CreateCustomerOrderPage() {
       const externalNumber =
         String(values.externalOrderNumber ?? "").trim() || undefined;
 
+      // ── EDIT MODE: update order yang sudah ada, lalu keluar ──
+      if (isEditMode && editId) {
+        await updateCustomerOrder({
+          uuid: editId,
+          body: {
+            customer_id: customerId,
+            contact_person: values.contactPerson,
+            delivery_address: values.deliveryAddress,
+            notes: values.specialInstructions ?? "",
+            delivery_date: dateStr,
+            items: rows.map((r) => ({
+              item_uniq_code: r.uniq,
+              quantity: r.qty,
+              delivery_date: dateStr,
+            })),
+          },
+        }).unwrap();
+
+        message.success(
+          `Updated ${orderType.toUpperCase()} for ${values.customerName || `Customer #${customerId}`}`,
+        );
+        router.push("/customer-po");
+        return;
+      }
+      // ────────────────────────────────────────────────────────
+
       if (orderType === "po") {
         await createCustomerPo({
           po_number: externalNumber ?? orderNumber,
@@ -422,10 +503,11 @@ export default function CreateCustomerOrderPage() {
             loading={
               createCustomerPoState.isLoading ||
               createDeliveryNoteState.isLoading ||
-              createSpecialOrderState.isLoading
+              createSpecialOrderState.isLoading ||
+              updateCustomerOrderState.isLoading
             }
           >
-            Create Order
+            {isEditMode ? "Update Order" : "Create Order"}
           </Button>
         </div>
       </div>
@@ -433,7 +515,7 @@ export default function CreateCustomerOrderPage() {
       <div className="mb-5">
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6">
           <h1 className="text-xl font-bold text-gray-900">
-            Create New Customer Order
+            {isEditMode ? "Edit Customer Order" : "Create New Customer Order"}
           </h1>
           <p className="text-sm text-gray-500">
             Create Purchase Orders, Delivery Notes, or Special Orders

@@ -21,7 +21,10 @@ import { useListCustomersQuery } from "@/lib/api/customers/api";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import { useCreateDeliveryScheduleMutation } from "@/lib/api/delivery-schedule/api";
-import { useGetCustomerOrderByIdQuery, useListCustomerOrdersQuery } from "@/lib/api/customer-orders/api";
+import {
+  useGetCustomerOrderByIdQuery,
+  useListCustomerOrdersQuery,
+} from "@/lib/api/customer-orders/api";
 
 type ReviewRow = {
   key: string;
@@ -47,7 +50,8 @@ type UniqOption = {
 };
 
 const toPositiveInt = (value: unknown): number | null => {
-  if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.trunc(value);
+  if (typeof value === "number" && Number.isFinite(value) && value > 0)
+    return Math.trunc(value);
   if (typeof value === "string" && value.trim()) {
     const parsed = Number(value);
     if (Number.isFinite(parsed) && parsed > 0) return Math.trunc(parsed);
@@ -55,22 +59,29 @@ const toPositiveInt = (value: unknown): number | null => {
   return null;
 };
 
-const formatOffsetDateTime = (value: Dayjs): string => value.format("YYYY-MM-DDTHH:mm:ssZ");
+const formatOffsetDateTime = (value: Dayjs): string =>
+  value.format("YYYY-MM-DDTHH:mm:ssZ");
 
 export default function AddNewDeliverySchedulePage() {
   const router = useRouter();
 
   const apiEnabled = Boolean(apiBaseUrl);
-  const customersQuery = useListCustomersQuery(undefined, { skip: !apiEnabled });
+  const customersQuery = useListCustomersQuery(undefined, {
+    skip: !apiEnabled,
+  });
   const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
-  const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeQuery.data?.data ?? []), [bomTreeQuery.data]);
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomTreeQuery.data?.data ?? []),
+    [bomTreeQuery.data],
+  );
 
   const dnListQuery = useListCustomerOrdersQuery(
     { document_type: "DN", page: 1, limit: 200 },
-    { skip: !apiEnabled }
+    { skip: !apiEnabled },
   );
 
-  const [createDeliverySchedule, createState] = useCreateDeliveryScheduleMutation();
+  const [createDeliverySchedule, createState] =
+    useCreateDeliveryScheduleMutation();
 
   const [customerOrderUuid, setCustomerOrderUuid] = useState<string>("");
   const dnDetailQuery = useGetCustomerOrderByIdQuery(customerOrderUuid, {
@@ -81,7 +92,10 @@ export default function AddNewDeliverySchedulePage() {
     if (!apiEnabled) {
       return [
         { label: "Select DN Number", value: "" },
-        { label: "DN-2026-0001", value: "2f057f77-9006-4ffe-afd6-942133012bb3" },
+        {
+          label: "DN-2026-0001",
+          value: "2f057f77-9006-4ffe-afd6-942133012bb3",
+        },
       ];
     }
     const items = dnListQuery.data?.items ?? [];
@@ -117,6 +131,16 @@ export default function AddNewDeliverySchedulePage() {
 
   const [customerId, setCustomerId] = useState<number | null>(null);
   const [customerName, setCustomerName] = useState<string>("");
+
+  const customerSelectOptions = useMemo(() => {
+    if (!customerId) return customerOptions;
+    if (customerOptions.some((o) => o.value === customerId))
+      return customerOptions;
+    return [
+      { value: customerId, label: customerName || `Customer #${customerId}` },
+      ...customerOptions,
+    ];
+  }, [customerOptions, customerId, customerName]);
 
   const [deliveryDate, setDeliveryDate] = useState<Dayjs | null>(dayjs());
   const [cycle, setCycle] = useState<string>("daily");
@@ -156,9 +180,15 @@ export default function AddNewDeliverySchedulePage() {
       .map((item, idx) => {
         const uniq = String(item.item_uniq_code ?? "").trim();
         if (!uniq) return null;
-        const partNo = String(item.part_number ?? bomIndex.partNumberByUniq[uniq] ?? "").trim();
-        const partName = String(item.part_name ?? bomIndex.partNameByUniq[uniq] ?? "").trim();
-        const model = String(item.model ?? bomIndex.modelByUniq[uniq] ?? "").trim();
+        const partNo = String(
+          item.part_number ?? bomIndex.partNumberByUniq[uniq] ?? "",
+        ).trim();
+        const partName = String(
+          item.part_name ?? bomIndex.partNameByUniq[uniq] ?? "",
+        ).trim();
+        const model = String(
+          item.model ?? bomIndex.modelByUniq[uniq] ?? "",
+        ).trim();
         const uom = String(bomIndex.uomByUniq[uniq] ?? "pcs").trim() || "pcs";
         const totalOrder = Number(item.quantity ?? 0);
         const itemUuid = String(item.id ?? `item-${idx}`);
@@ -185,7 +215,7 @@ export default function AddNewDeliverySchedulePage() {
 
   const selectedUniq = useMemo(
     () => uniqOptions.find((o) => o.value === draftUniq) ?? null,
-    [draftUniq, uniqOptions]
+    [draftUniq, uniqOptions],
   );
 
   const addDraftItem = () => {
@@ -204,7 +234,9 @@ export default function AddNewDeliverySchedulePage() {
     }
 
     setRows((prev) => {
-      const exists = prev.some((r) => r.itemUuid === option.itemUuid || r.uniq === option.value);
+      const exists = prev.some(
+        (r) => r.itemUuid === option.itemUuid || r.uniq === option.value,
+      );
       if (exists) {
         message.warning("This UNIQ already exists in the review list");
         return prev;
@@ -233,22 +265,29 @@ export default function AddNewDeliverySchedulePage() {
     if (!apiEnabled) {
       if (!customerId) setCustomerId(1);
       if (!customerName) setCustomerName("PT Endpoint Check Customer");
-      if (!customerOrderUuid) setCustomerOrderUuid("2f057f77-9006-4ffe-afd6-942133012bb3");
+      if (!customerOrderUuid)
+        setCustomerOrderUuid("2f057f77-9006-4ffe-afd6-942133012bb3");
       return;
     }
 
     const order = dnDetailQuery.data;
     if (!order || !order.id) return;
 
-    setCustomerId(order.customer_id);
+    setCustomerId(toPositiveInt(order.customer_id) ?? null);
     setCustomerName(order.customer_name ?? "");
 
     if (!deliveryDate && order.document_date) {
       const parsed = dayjs(order.document_date);
       if (parsed.isValid()) setDeliveryDate(parsed);
     }
-
-  }, [apiEnabled, customerId, customerName, deliveryDate, dnDetailQuery.data, customerOrderUuid]);
+  }, [
+    apiEnabled,
+    customerId,
+    customerName,
+    deliveryDate,
+    dnDetailQuery.data,
+    customerOrderUuid,
+  ]);
 
   const cycleLabel = useMemo(() => {
     if (!cycle) return "-";
@@ -264,15 +303,47 @@ export default function AddNewDeliverySchedulePage() {
   }, [deliveryDate]);
 
   const selectedOrderReference = useMemo(() => {
-    return String(dnRefOptions.find((o) => o.value === customerOrderUuid)?.label ?? "").trim();
+    return String(
+      dnRefOptions.find((o) => o.value === customerOrderUuid)?.label ?? "",
+    ).trim();
   }, [dnRefOptions, customerOrderUuid]);
 
   const columns: ColumnsType<ReviewRow> = [
-    { title: "Uniq", dataIndex: "uniq", key: "uniq", width: 120, render: (v: string) => <span className="text-sm text-gray-800">{v}</span> },
-    { title: "Part No", dataIndex: "partNo", key: "partNo", width: 140, render: (v: string) => <span className="text-sm text-gray-800">{v}</span> },
-    { title: "Part Name", dataIndex: "partName", key: "partName", width: 180, render: (v: string) => <span className="text-sm text-gray-800">{v}</span> },
-    { title: "Model", dataIndex: "model", key: "model", width: 160, render: (v: string) => <span className="text-sm text-gray-800">{v}</span> },
-    { title: "Total Order", dataIndex: "totalOrder", key: "totalOrder", width: 120, render: (v: number) => <span className="text-sm text-gray-800">{v}</span> },
+    {
+      title: "Uniq",
+      dataIndex: "uniq",
+      key: "uniq",
+      width: 120,
+      render: (v: string) => <span className="text-sm text-gray-800">{v}</span>,
+    },
+    {
+      title: "Part No",
+      dataIndex: "partNo",
+      key: "partNo",
+      width: 140,
+      render: (v: string) => <span className="text-sm text-gray-800">{v}</span>,
+    },
+    {
+      title: "Part Name",
+      dataIndex: "partName",
+      key: "partName",
+      width: 180,
+      render: (v: string) => <span className="text-sm text-gray-800">{v}</span>,
+    },
+    {
+      title: "Model",
+      dataIndex: "model",
+      key: "model",
+      width: 160,
+      render: (v: string) => <span className="text-sm text-gray-800">{v}</span>,
+    },
+    {
+      title: "Total Order",
+      dataIndex: "totalOrder",
+      key: "totalOrder",
+      width: 120,
+      render: (v: number) => <span className="text-sm text-gray-800">{v}</span>,
+    },
     {
       title: (
         <div className="flex items-center gap-1">
@@ -290,7 +361,11 @@ export default function AddNewDeliverySchedulePage() {
           value={record.totalDelivery}
           onChange={(v) => {
             if (typeof v !== "number") return;
-            setRows((prev) => prev.map((r) => (r.key === record.key ? { ...r, totalDelivery: v } : r)));
+            setRows((prev) =>
+              prev.map((r) =>
+                r.key === record.key ? { ...r, totalDelivery: v } : r,
+              ),
+            );
           }}
         />
       ),
@@ -312,7 +387,15 @@ export default function AddNewDeliverySchedulePage() {
               setRows((prev) => prev.filter((r) => r.key !== record.key));
             }}
           />
-          <Button size="small" type="text" danger icon={<DeleteOutlined />} onClick={() => setRows((prev) => prev.filter((r) => r.key !== record.key))} />
+          <Button
+            size="small"
+            type="text"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() =>
+              setRows((prev) => prev.filter((r) => r.key !== record.key))
+            }
+          />
         </div>
       ),
     },
@@ -346,7 +429,12 @@ export default function AddNewDeliverySchedulePage() {
           </button>
 
           <div className="flex items-center gap-2">
-            <Button className="!rounded-lg" onClick={() => router.push("/delivery-scheduling")}>Cancel</Button>
+            <Button
+              className="!rounded-lg"
+              onClick={() => router.push("/delivery-scheduling")}
+            >
+              Cancel
+            </Button>
             <Button
               type="primary"
               className="!rounded-lg"
@@ -377,7 +465,9 @@ export default function AddNewDeliverySchedulePage() {
                   vehicle_number: vehicleNumber,
                   driver_name: driverName,
                   driver_contact: driverContact,
-                  departure_at: departureAt ? formatOffsetDateTime(departureAt) : "",
+                  departure_at: departureAt
+                    ? formatOffsetDateTime(departureAt)
+                    : "",
                   arrival_at: arrivalAt ? formatOffsetDateTime(arrivalAt) : "",
                   delivery_instructions: deliveryInstructions,
                   items: rows.map((r) => ({
@@ -404,7 +494,14 @@ export default function AddNewDeliverySchedulePage() {
                     message.success("Saved delivery schedule");
                     router.push("/delivery-scheduling");
                   })
-                  .catch((error) => message.error(getApiErrorMessage(error, "Failed to save delivery schedule")));
+                  .catch((error) =>
+                    message.error(
+                      getApiErrorMessage(
+                        error,
+                        "Failed to save delivery schedule",
+                      ),
+                    ),
+                  );
               }}
               loading={createState.isLoading}
             >
@@ -414,8 +511,12 @@ export default function AddNewDeliverySchedulePage() {
         </div>
 
         <div className="mt-4">
-          <div className="text-2xl font-bold text-gray-900">Add New Delivery Schedule</div>
-          <div className="text-sm text-gray-500">Create DN for incoming raw material receipt and tracking • 1 entry</div>
+          <div className="text-2xl font-bold text-gray-900">
+            Add New Delivery Schedule
+          </div>
+          <div className="text-sm text-gray-500">
+            Create DN for incoming raw material receipt and tracking • 1 entry
+          </div>
         </div>
       </div>
 
@@ -423,15 +524,26 @@ export default function AddNewDeliverySchedulePage() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-base font-semibold text-gray-900">Step 1: Input Delivery Date</div>
-              <div className="text-sm text-gray-500">Select Delivery Note Number as Reference</div>
+              <div className="text-base font-semibold text-gray-900">
+                Step 1: Input Delivery Date
+              </div>
+              <div className="text-sm text-gray-500">
+                Select Delivery Note Number as Reference
+              </div>
             </div>
-            <Tag color="blue" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">Required</Tag>
+            <Tag
+              color="blue"
+              className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+            >
+              Required
+            </Tag>
           </div>
 
           <div className="mt-5 grid grid-cols-1 md:grid-cols-4 gap-6">
             <div>
-              <div className="text-xs font-semibold text-gray-500">PO/DN Reference</div>
+              <div className="text-xs font-semibold text-gray-500">
+                PO/DN Reference
+              </div>
               <Select
                 value={customerOrderUuid}
                 onChange={(v) => {
@@ -452,7 +564,9 @@ export default function AddNewDeliverySchedulePage() {
               />
             </div>
             <div>
-              <div className="text-xs font-semibold text-gray-500">Customer</div>
+              <div className="text-xs font-semibold text-gray-500">
+                Customer
+              </div>
               <Select
                 value={customerId ?? undefined}
                 onChange={(v, option) => {
@@ -463,9 +577,13 @@ export default function AddNewDeliverySchedulePage() {
                     return;
                   }
                   setCustomerId(id);
-                  setCustomerName(String((option as { label?: string } | undefined)?.label ?? "").trim());
+                  setCustomerName(
+                    String(
+                      (option as { label?: string } | undefined)?.label ?? "",
+                    ).trim(),
+                  );
                 }}
-                options={customerOptions}
+                options={customerSelectOptions}
                 className="w-full !rounded-lg mt-1"
                 loading={customersQuery.isFetching}
                 showSearch
@@ -486,9 +604,17 @@ export default function AddNewDeliverySchedulePage() {
                   const nextUniq = String(v ?? "");
                   setDraftUniq(nextUniq);
                   const matched = uniqOptions.find((o) => o.value === nextUniq);
-                  setDraftQty(matched?.totalOrder ? Math.max(0, matched.totalOrder) : 0);
+                  setDraftQty(
+                    matched?.totalOrder ? Math.max(0, matched.totalOrder) : 0,
+                  );
                 }}
-                options={[{ label: "Select Uniq", value: "" }, ...uniqOptions.map((u) => ({ label: u.label, value: u.value }))]}
+                options={[
+                  { label: "Select Uniq", value: "" },
+                  ...uniqOptions.map((u) => ({
+                    label: u.label,
+                    value: u.value,
+                  })),
+                ]}
                 className="w-full !rounded-lg mt-1"
                 showSearch
                 filterOption={(input, option) =>
@@ -501,22 +627,43 @@ export default function AddNewDeliverySchedulePage() {
 
             <div>
               <div className="text-xs font-semibold text-gray-500">Model</div>
-              <Input className="!rounded-lg mt-1" value={selectedUniq?.model ?? ""} disabled placeholder="Auto-filled" />
+              <Input
+                className="!rounded-lg mt-1"
+                value={selectedUniq?.model ?? ""}
+                disabled
+                placeholder="Auto-filled"
+              />
             </div>
           </div>
 
           <div className="mt-5 grid grid-cols-1 md:grid-cols-4 gap-6">
             <div>
-              <div className="text-xs font-semibold text-gray-500">Part Name</div>
-              <Input className="!rounded-lg mt-1" value={selectedUniq?.partName ?? ""} disabled placeholder="Auto-filled" />
+              <div className="text-xs font-semibold text-gray-500">
+                Part Name
+              </div>
+              <Input
+                className="!rounded-lg mt-1"
+                value={selectedUniq?.partName ?? ""}
+                disabled
+                placeholder="Auto-filled"
+              />
             </div>
             <div>
-              <div className="text-xs font-semibold text-gray-500">Part Number</div>
-              <Input className="!rounded-lg mt-1" value={selectedUniq?.partNo ?? ""} disabled placeholder="Auto-filled" />
+              <div className="text-xs font-semibold text-gray-500">
+                Part Number
+              </div>
+              <Input
+                className="!rounded-lg mt-1"
+                value={selectedUniq?.partNo ?? ""}
+                disabled
+                placeholder="Auto-filled"
+              />
             </div>
 
             <div className="ds-highlight">
-              <div className="text-xs font-semibold text-gray-500">Quantity to Deliver</div>
+              <div className="text-xs font-semibold text-gray-500">
+                Quantity to Deliver
+              </div>
               <InputNumber
                 className="w-full !rounded-lg mt-1"
                 min={0}
@@ -527,7 +674,9 @@ export default function AddNewDeliverySchedulePage() {
             </div>
 
             <div>
-              <div className="text-xs font-semibold text-gray-500">Cycle Pengiriman</div>
+              <div className="text-xs font-semibold text-gray-500">
+                Cycle Pengiriman
+              </div>
               <Select
                 className="w-full !rounded-lg mt-1"
                 value={cycle}
@@ -540,7 +689,12 @@ export default function AddNewDeliverySchedulePage() {
               />
 
               <div className="mt-3 flex justify-end">
-                <Button type="primary" className="!rounded-lg" icon={<PlusOutlined />} onClick={addDraftItem}>
+                <Button
+                  type="primary"
+                  className="!rounded-lg"
+                  icon={<PlusOutlined />}
+                  onClick={addDraftItem}
+                >
                   + Add Item
                 </Button>
               </div>
@@ -551,20 +705,37 @@ export default function AddNewDeliverySchedulePage() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-base font-semibold text-gray-900">Step 2: Review Items</div>
-              <div className="text-sm text-gray-500">Review Items for Delivery</div>
+              <div className="text-base font-semibold text-gray-900">
+                Step 2: Review Items
+              </div>
+              <div className="text-sm text-gray-500">
+                Review Items for Delivery
+              </div>
             </div>
-            <Tag color="blue" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">Required</Tag>
+            <Tag
+              color="blue"
+              className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+            >
+              Required
+            </Tag>
           </div>
 
           <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-6">
             <div>
-              <div className="text-xs font-semibold text-gray-500">Customer</div>
-              <div className="text-sm text-gray-900 mt-1">{customerName || "-"}</div>
+              <div className="text-xs font-semibold text-gray-500">
+                Customer
+              </div>
+              <div className="text-sm text-gray-900 mt-1">
+                {customerName || "-"}
+              </div>
             </div>
             <div>
-              <div className="text-xs font-semibold text-gray-500">Delivery Schedule</div>
-              <div className="text-sm text-gray-900 mt-1">{deliveryDateLabel}</div>
+              <div className="text-xs font-semibold text-gray-500">
+                Delivery Schedule
+              </div>
+              <div className="text-sm text-gray-900 mt-1">
+                {deliveryDateLabel}
+              </div>
             </div>
             <div>
               <div className="text-xs font-semibold text-gray-500">Cycle</div>
