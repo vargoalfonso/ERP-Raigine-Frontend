@@ -1306,9 +1306,6 @@ function resolveSupplierName(
   const defaultUom = uomOptions[0]?.value ?? "";
 
   const prlOptions = useMemo(() => {
-    // Group by prl_id so one PRL ID that covers multiple UNIQ codes appears as a single option.
-    // The downstream parsePrlSelection already handles an empty prlItemId (parts[2] ?? ""),
-    // and selectedBulkPrl has a fallback that matches by prlId alone when prlItemId is empty.
     const prlGroups = new Map<string, { customerName: string; uniqs: string[] }>();
     for (const item of approvedPrls) {
       const prlId = String(item.prl_id ?? item.id ?? "");
