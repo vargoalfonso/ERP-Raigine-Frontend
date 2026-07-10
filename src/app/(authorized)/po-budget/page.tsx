@@ -1404,10 +1404,12 @@ function resolveSupplierName(
     if (parsed) {
       return approvedPrls.find((item) => {
         const itemPrlId = String(item.prl_id ?? item.id ?? "");
+        if (itemPrlId !== parsed.prlId) return false;
+        if (!parsed.prlItemId) return true;
         const itemRowId = String(
           getPrlRowId(item as Record<string, unknown>) ?? item.id ?? "",
         );
-        return itemPrlId === parsed.prlId && itemRowId === parsed.prlItemId;
+        return itemRowId === parsed.prlItemId;
       });
     }
     return approvedPrls.find(
@@ -1612,10 +1614,14 @@ function resolveSupplierName(
       const matchedRows = parsed
         ? approvedPrls.filter((item) => {
             const itemPrlId = String(item.prl_id ?? item.id ?? "");
+            if (itemPrlId !== parsed.prlId) return false;
+            // prlOptions groups by PRL only (no row segment), so an empty
+            // prlItemId means "match every row under this PRL".
+            if (!parsed.prlItemId) return true;
             const itemRowId = String(
               getPrlRowId(item as Record<string, unknown>) ?? item.id ?? "",
             );
-            return itemPrlId === parsed.prlId && itemRowId === parsed.prlItemId;
+            return itemRowId === parsed.prlItemId;
           })
         : approvedPrls.filter(
             (item) =>
@@ -3394,10 +3400,12 @@ function resolveSupplierName(
                 if (parsed) {
                   matched = approvedPrls.find((p) => {
                     const itemPrlId = String(p.prl_id ?? p.id ?? "");
+                    if (itemPrlId !== parsed.prlId) return false;
+                    if (!parsed.prlItemId) return true;
                     const itemRowId = String(
                       getPrlRowId(p as Record<string, unknown>) ?? p.id ?? "",
                     );
-                    return itemPrlId === parsed.prlId && itemRowId === parsed.prlItemId;
+                    return itemRowId === parsed.prlItemId;
                   });
                 } else {
                   const prlId = raw;
