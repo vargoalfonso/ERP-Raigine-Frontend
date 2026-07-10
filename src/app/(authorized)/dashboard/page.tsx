@@ -124,7 +124,8 @@ export default function Dashboard() {
       {/* Header & Filters Card */}
       <Card
         className="mb-8 rounded-2xl shadow-sm border-gray-100 p-0 overflow-hidden"
-        styles={{ body: { padding: "24px" } }}>
+        styles={{ body: { padding: "24px" } }}
+      >
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
           <div>
             <h1 className="text-2xl font-bold text-gray-900 mb-1">
@@ -147,12 +148,14 @@ export default function Dashboard() {
                 <FiRefreshCw className={isMainLoading ? "animate-spin" : ""} />
               }
               className="rounded-xl border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-200 flex items-center justify-center h-10 font-medium"
-              onClick={() => mainSummaryQuery.refetch()}>
+              onClick={() => mainSummaryQuery.refetch()}
+            >
               Refresh
             </Button>
             <Button
               icon={<FiDownload />}
-              className="rounded-xl border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-200 flex items-center justify-center h-10 font-medium">
+              className="rounded-xl border-gray-200 text-gray-600 hover:text-blue-600 hover:border-blue-200 flex items-center justify-center h-10 font-medium"
+            >
               Export
             </Button>
           </div>
@@ -168,7 +171,8 @@ export default function Dashboard() {
               className="w-full custom-select"
               variant="filled"
               style={{ backgroundColor: "#F9FAFB", borderRadius: "12px" }}
-              suffixIcon={<FiChevronDown className="w-4 h-4 text-gray-400" />}>
+              suffixIcon={<FiChevronDown className="w-4 h-4 text-gray-400" />}
+            >
               <Select.Option value="current_period">
                 Current Period
               </Select.Option>
@@ -183,7 +187,8 @@ export default function Dashboard() {
               className="w-full custom-select"
               variant="filled"
               style={{ backgroundColor: "#F9FAFB", borderRadius: "12px" }}
-              suffixIcon={<FiChevronDown className="w-4 h-4 text-gray-400" />}>
+              suffixIcon={<FiChevronDown className="w-4 h-4 text-gray-400" />}
+            >
               <Select.Option value="all_summaries">All Summaries</Select.Option>
             </Select>
           </div>
@@ -196,7 +201,8 @@ export default function Dashboard() {
               className="w-full custom-select"
               variant="filled"
               style={{ backgroundColor: "#F9FAFB", borderRadius: "12px" }}
-              suffixIcon={<FiChevronDown className="w-4 h-4 text-gray-400" />}>
+              suffixIcon={<FiChevronDown className="w-4 h-4 text-gray-400" />}
+            >
               <Select.Option value="all_deliveries">
                 All Deliveries
               </Select.Option>
@@ -211,7 +217,8 @@ export default function Dashboard() {
               className="w-full custom-select"
               variant="filled"
               style={{ backgroundColor: "#F9FAFB", borderRadius: "12px" }}
-              suffixIcon={<FiChevronDown className="w-4 h-4 text-gray-400" />}>
+              suffixIcon={<FiChevronDown className="w-4 h-4 text-gray-400" />}
+            >
               <Select.Option value="all_production">
                 All Production
               </Select.Option>
@@ -408,7 +415,8 @@ export default function Dashboard() {
               {mainData?.top_customers.map((customer, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-50 rounded-md transition-colors">
+                  className="flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-50 rounded-md transition-colors"
+                >
                   <div className="flex items-center gap-3">
                     <div>
                       <p className="text-sm font-bold text-gray-900">
@@ -534,8 +542,19 @@ export default function Dashboard() {
                           {item.uniq_code}
                         </p>
                         <p className="text-xs text-gray-500">
-                          {(item.produced_units ?? item.produced_qty ?? 0).toLocaleString()} /{" "}
-                          {(item.total_units ?? item.target_qty ?? item.total_qty ?? 0).toLocaleString()} units
+                          {(
+                            item.produced_units ??
+                            item.produced_qty ??
+                            0
+                          ).toLocaleString()}{" "}
+                          /{" "}
+                          {(
+                            item.total_units ??
+                            item.target_qty ??
+                            item.total_qty ??
+                            0
+                          ).toLocaleString()}{" "}
+                          units
                         </p>
                       </div>
                       <div className="text-right">
@@ -552,7 +571,7 @@ export default function Dashboard() {
                       showInfo={false}
                       strokeColor="#00C950"
                       trailColor="#E2E8F0"
-                      strokeWidth={8}
+                      size={{ height: 8 }}
                       className="m-0"
                     />
                   </div>
@@ -663,7 +682,8 @@ export default function Dashboard() {
                     outerRadius={80}
                     paddingAngle={5}
                     dataKey="share_percent"
-                    nameKey="category">
+                    nameKey="category"
+                  >
                     {(rawData?.category_distribution ?? []).map(
                       (entry, index) => (
                         <Cell
@@ -681,7 +701,8 @@ export default function Dashboard() {
               {(rawData?.category_distribution ?? []).map((item, index) => (
                 <div
                   key={index}
-                  className="flex items-center justify-between text-sm">
+                  className="flex items-center justify-between text-sm"
+                >
                   <div className="flex items-center gap-2">
                     <div
                       className="w-3 h-3 rounded-full"
@@ -707,7 +728,8 @@ export default function Dashboard() {
               {(rawData?.top_suppliers ?? []).map((supplier, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-50 rounded-md transition-colors">
+                  className="flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-50 rounded-md transition-colors"
+                >
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-500 font-bold text-sm">
                       {supplier.supplier_code.slice(-2)}
