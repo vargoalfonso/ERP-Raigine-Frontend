@@ -361,7 +361,7 @@ export const customerOrdersApiSlice = apiSlice.injectEndpoints({
     updateCustomerOrder: builder.mutation<unknown, { uuid: string; body: UpdateCustomerOrderRequest }>({
       query: ({ uuid, body }) => ({
         url: `/customer-orders/${encodeURIComponent(uuid)}`,
-        method: "PUT",
+        method: "PATCH",
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),

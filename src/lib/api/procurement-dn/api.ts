@@ -143,6 +143,7 @@ export type ProcurementDnRecord = {
     updated_at?: string;
   };
   items: ProcurementDnItem[];
+  material_grade?: string; 
 };
 
 export type ProcurementDnPreview = {
