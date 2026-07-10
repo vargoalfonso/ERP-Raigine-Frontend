@@ -92,9 +92,11 @@ export default function CreateCustomerOrderPage() {
   const [createSpecialOrder, createSpecialOrderState] =
     useCreateSpecialOrderMutation();
 
-  const searchParams = useSearchParams();
-  const editId = searchParams.get("id") ?? undefined;
-  const editTypeParam = searchParams.get("type") as OrderType | null;
+  // `useSearchParams()` must be used inside a client-only suspense boundary
+  // to avoid CSR bailout during prerender. We read params via a small
+  // bridge component which sets state when available.
+  const [editId, setEditId] = useState<string | undefined>(undefined);
+  const [editTypeParam, setEditTypeParam] = useState<OrderType | null>(null);
   const isEditMode = Boolean(editId);
 
   const [updateCustomerOrder, updateCustomerOrderState] =
@@ -476,8 +478,23 @@ export default function CreateCustomerOrderPage() {
     }
   }
 
+  // Bridge component to read search params inside a client Suspense boundary
+  function SearchParamsBridge() {
+    const searchParams = useSearchParams();
+    useEffect(() => {
+      const id = searchParams.get("id") ?? undefined;
+      const type = (searchParams.get("type") as OrderType) ?? null;
+      setEditId(id);
+      setEditTypeParam(type);
+    }, [searchParams]);
+    return null;
+  }
+
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
+      <React.Suspense fallback={null}>
+        <SearchParamsBridge />
+      </React.Suspense>
       {/* Top bar */}
       <div className="flex items-center justify-between mb-4">
         <button
