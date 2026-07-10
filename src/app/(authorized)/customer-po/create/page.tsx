@@ -92,11 +92,9 @@ export default function CreateCustomerOrderPage() {
   const [createSpecialOrder, createSpecialOrderState] =
     useCreateSpecialOrderMutation();
 
-  // `useSearchParams()` must be used inside a client-only suspense boundary
-  // to avoid CSR bailout during prerender. We read params via a small
-  // bridge component which sets state when available.
-  const [editId, setEditId] = useState<string | undefined>(undefined);
-  const [editTypeParam, setEditTypeParam] = useState<OrderType | null>(null);
+  const searchParams = useSearchParams();
+  const editId = searchParams.get("id") ?? undefined;
+  const editTypeParam = searchParams.get("type") as OrderType | null;
   const isEditMode = Boolean(editId);
 
   const [updateCustomerOrder, updateCustomerOrderState] =
@@ -167,6 +165,10 @@ export default function CreateCustomerOrderPage() {
     [bomTreeQuery.data],
   );
 
+  const selectedCustomerId = Form.useWatch("customerId", form) as
+    | string
+    | undefined;
+
   const uniqOptions = useMemo(() => {
     if (!apiEnabled) {
       return [
@@ -177,14 +179,60 @@ export default function CreateCustomerOrderPage() {
       ];
     }
 
-    return (bomIndex.uniqs ?? []).map((uniq) => {
+    // Full uniq catalog from the BOM tree, keyed by uniq code.
+    const allOptions = (bomIndex.uniqs ?? []).map((uniq) => {
       const partName = bomIndex.partNameByUniq[uniq];
       return {
         value: uniq,
         label: partName ? `${uniq} — ${partName}` : uniq,
       };
     });
-  }, [apiEnabled, bomIndex.partNameByUniq, bomIndex.uniqs]);
+
+    // Only expose uniqs that are registered to the selected customer
+    // (customer master "Parent Codes / Sebango" -> bom_codes).
+    if (!selectedCustomerId) {
+      return [
+        { label: "Pilih customer terlebih dahulu", value: "", disabled: true },
+      ];
+    }
+
+    const customers = customersQuery.data ?? [];
+    const selectedCustomer = customers.find((c) => {
+      const idStr =
+        toPositiveIntString(c.id) ??
+        toPositiveIntString(c.row_id) ??
+        toPositiveIntString(c.customer_id) ??
+        toPositiveIntString(c.customer_code);
+      return idStr === selectedCustomerId;
+    });
+
+    const registeredCodes = Array.isArray(selectedCustomer?.bom_codes)
+      ? selectedCustomer!.bom_codes
+          .map((code) => String(code).trim())
+          .filter(Boolean)
+      : [];
+
+    if (registeredCodes.length === 0) {
+      return [
+        {
+          label: "Belum ada uniq terdaftar untuk customer ini",
+          value: "",
+          disabled: true,
+        },
+      ];
+    }
+
+    const optionByUniq = new Map(allOptions.map((o) => [o.value, o]));
+    return registeredCodes.map(
+      (code) => optionByUniq.get(code) ?? { label: code, value: code },
+    );
+  }, [
+    apiEnabled,
+    bomIndex.partNameByUniq,
+    bomIndex.uniqs,
+    selectedCustomerId,
+    customersQuery.data,
+  ]);
 
   const customerOptions = useMemo(() => {
     if (!apiEnabled) {
@@ -478,23 +526,8 @@ export default function CreateCustomerOrderPage() {
     }
   }
 
-  // Bridge component to read search params inside a client Suspense boundary
-  function SearchParamsBridge() {
-    const searchParams = useSearchParams();
-    useEffect(() => {
-      const id = searchParams.get("id") ?? undefined;
-      const type = (searchParams.get("type") as OrderType) ?? null;
-      setEditId(id);
-      setEditTypeParam(type);
-    }, [searchParams]);
-    return null;
-  }
-
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
-      <React.Suspense fallback={null}>
-        <SearchParamsBridge />
-      </React.Suspense>
       {/* Top bar */}
       <div className="flex items-center justify-between mb-4">
         <button
@@ -614,6 +647,9 @@ export default function CreateCustomerOrderPage() {
                     .includes(input.trim().toLowerCase())
                 }
                 onChange={(value, option) => {
+                  // Reset the chosen uniq whenever the customer changes so the
+                  // Uniq dropdown only offers codes registered to that customer.
+                  setEntryUniq(undefined);
                   const nextCustomerId = toPositiveIntString(value);
                   if (!nextCustomerId) {
                     form.setFieldValue("customerName", undefined);
