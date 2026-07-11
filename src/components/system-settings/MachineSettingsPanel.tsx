@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -22,7 +22,7 @@ import {
   SearchOutlined,
 } from "@ant-design/icons";
 import { getApiErrorMessage } from "@/lib/api/error";
-import { apiBaseUrl } from "@/lib/api/instance";
+import { apiBaseUrl, generateHeaders } from "@/lib/api/instance";
 import { useGetRolesQuery } from "@/lib/api/system-settings/api";
 import {
   getLoginPermissions,
@@ -41,6 +41,7 @@ import {
 import {
   useDeleteMachinePatternMutation,
   useGetMachinePatternsQuery,
+  type MachinePatternRecord,
 } from "@/lib/api/machine-patterns/api";
 
 type StatusType = "Active" | "Inactive";
@@ -74,8 +75,67 @@ type MachineMasterFormValues = {
   status: StatusType;
 };
 
+type UnknownRecord = Record<string, unknown>;
+
 const normalizeStatus = (value: unknown): StatusType =>
   String(value ?? "Active").trim().toLowerCase().includes("inact") ? "Inactive" : "Active";
+
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
+
+const getString = (record: UnknownRecord, keys: string[]) => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return undefined;
+};
+
+const getNumber = (record: UnknownRecord, keys: string[]) => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return undefined;
+};
+
+const toMachinePatternRecord = (value: unknown): MachinePatternRecord => {
+  const record = isRecord(value) ? value : {};
+  return {
+    id: String(record.id ?? record.uuid ?? ""),
+    uniq_code: getString(record, ["uniq_code", "uniqCode"]) ?? "",
+    machine_id: getNumber(record, ["machine_id", "machineId"]) ?? 0,
+    cycle_time: getNumber(record, ["cycle_time", "cycleTime"]) ?? 0,
+    pattern_value: getNumber(record, ["pattern_value", "patternValue"]) ?? 0,
+    working_days: getNumber(record, ["working_days", "workingDays"]) ?? 0,
+    moving_type: getString(record, ["moving_type", "movingType"]) ?? "Normal",
+    min_output: getNumber(record, ["min_output", "minOutput"]) ?? 0,
+    prl_reference: getNumber(record, ["prl_reference", "prlReference"]) ?? 0,
+    status: getString(record, ["status"]) ?? "Active",
+    created_by: getString(record, ["created_by", "createdBy"]),
+    created_at: getString(record, ["created_at", "createdAt"]),
+    updated_at: getString(record, ["updated_at", "updatedAt"]),
+  };
+};
+
+const toMachinePatternRecords = (response: unknown): MachinePatternRecord[] => {
+  const root = isRecord(response) ? response : {};
+  const data = isRecord(root.data) ? root.data : root;
+  const rawItems = Array.isArray(data.items)
+    ? data.items
+    : Array.isArray(data.data)
+      ? data.data
+      : Array.isArray(root.items)
+        ? root.items
+        : [];
+
+  return rawItems.map(toMachinePatternRecord);
+};
 
 const toMachineMasterRow = (record: MachineParameterRecord): MachineMasterRow => ({
   id: String(record.id),
@@ -85,6 +145,25 @@ const toMachineMasterRow = (record: MachineParameterRecord): MachineMasterRow =>
   status: normalizeStatus(record.status),
   createdAt: record.updated_at || record.created_at || "-",
 });
+
+const toMachinePatternRow = (
+  record: MachinePatternRecord,
+  machineNameById: Map<number, string>
+): MachinePatternRow => {
+  const machineId = Number(record.machine_id ?? 0);
+
+  return {
+    id: String(record.id),
+    uniqCode: String(record.uniq_code ?? "-"),
+    machineName: machineNameById.get(machineId) ?? `Machine #${String(machineId || "-")}`,
+    cycleTime: Number(record.cycle_time ?? 0),
+    patternValue: Number(record.pattern_value ?? 0),
+    workingDays: Number(record.working_days ?? 0),
+    minOutput: Number(record.min_output ?? 0),
+    prlReference: Number(record.prl_reference ?? 0),
+    status: normalizeStatus(record.status),
+  };
+};
 
 export default function MachineSettingsPanel() {
   const router = useRouter();
@@ -100,6 +179,8 @@ export default function MachineSettingsPanel() {
   const [editOpen, setEditOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [patternViewOpen, setPatternViewOpen] = useState(false);
+  const [fallbackPatternItems, setFallbackPatternItems] = useState<MachinePatternRecord[]>([]);
+  const [fallbackPatternLoading, setFallbackPatternLoading] = useState(false);
   const [form] = Form.useForm<MachineMasterFormValues>();
 
   const jwtPermissions = useMemo(() => getLoginPermissions(), []);
@@ -119,8 +200,14 @@ export default function MachineSettingsPanel() {
   const machineMasterAccess = useMemo(() => getModuleAccess(permissions, ["machine_parameter", "machine"]), [permissions]);
   const machinePatternAccess = useMemo(() => getModuleAccess(permissions, ["machine_pattern", "machine"]), [permissions]);
 
-  const machineParametersQuery = useGetMachineParametersQuery({ page: 1, limit: 20 }, { skip: !apiEnabled });
-  const machinePatternsQuery = useGetMachinePatternsQuery({ page: 1, limit: 20 }, { skip: !apiEnabled });
+  const machineParametersQuery = useGetMachineParametersQuery(
+    { page: 1, limit: 20 },
+    { skip: !apiEnabled, refetchOnMountOrArgChange: true }
+  );
+  const machinePatternsQuery = useGetMachinePatternsQuery(
+    { page: 1, limit: 20 },
+    { skip: !apiEnabled, refetchOnMountOrArgChange: true }
+  );
   const [createMachineParameter, createState] = useCreateMachineParameterMutation();
   const [updateMachineParameter, updateState] = useUpdateMachineParameterMutation();
   const [deleteMachineParameter, deleteState] = useDeleteMachineParameterMutation();
@@ -139,20 +226,51 @@ export default function MachineSettingsPanel() {
     [machineParametersQuery.data?.items]
   );
 
+  useEffect(() => {
+    if (!apiEnabled || machineTab !== "pattern" || machinePatternsQuery.isFetching) return;
+    if ((machinePatternsQuery.data?.items ?? []).length > 0) {
+      setFallbackPatternItems([]);
+      return;
+    }
+
+    let ignore = false;
+
+    const fetchPatternItems = async () => {
+      setFallbackPatternLoading(true);
+      try {
+        const headers = await generateHeaders({
+          useAuthorization: true,
+          contentType: "application/json",
+        });
+        const response = await fetch(`${apiBaseUrl}/machine-patterns?page=1&limit=20`, {
+          method: "GET",
+          headers,
+        });
+        const payload = await response.json().catch(() => null);
+        if (!ignore) setFallbackPatternItems(response.ok ? toMachinePatternRecords(payload) : []);
+      } catch {
+        if (!ignore) setFallbackPatternItems([]);
+      } finally {
+        if (!ignore) setFallbackPatternLoading(false);
+      }
+    };
+
+    fetchPatternItems();
+
+    return () => {
+      ignore = true;
+    };
+  }, [apiEnabled, machinePatternsQuery.data?.items, machinePatternsQuery.isFetching, machineTab]);
+
   const machinePatternRows = useMemo<MachinePatternRow[]>(
     () =>
-      (machinePatternsQuery.data?.items ?? []).map((item) => ({
-        id: String(item.id),
-        uniqCode: String(item.uniq_code ?? "-"),
-        machineName: machineNameById.get(Number(item.machine_id ?? 0)) ?? `Machine #${String(item.machine_id ?? "-")}`,
-        cycleTime: Number(item.cycle_time ?? 0),
-        patternValue: Number(item.pattern_value ?? 0),
-        workingDays: Number(item.working_days ?? 0),
-        minOutput: Number(item.min_output ?? 0),
-        prlReference: Number(item.prl_reference ?? 0),
-        status: normalizeStatus(item.status),
-      })),
-    [machineNameById, machinePatternsQuery.data?.items]
+      ((machinePatternsQuery.data?.items ?? []).length > 0
+        ? machinePatternsQuery.data?.items ?? []
+        : fallbackPatternItems
+      ).map((item) =>
+        toMachinePatternRow(item, machineNameById)
+      ),
+    [fallbackPatternItems, machineNameById, machinePatternsQuery.data?.items]
   );
 
   const filteredMachineMasterRows = useMemo(() => {
@@ -400,7 +518,7 @@ export default function MachineSettingsPanel() {
               columns={machinePatternColumns}
               dataSource={apiEnabled ? filteredMachinePatternRows : []}
               rowKey="id"
-              loading={apiEnabled && machinePatternsQuery.isLoading}
+              loading={apiEnabled && (machinePatternsQuery.isLoading || fallbackPatternLoading)}
               pagination={false}
               scroll={{ x: "max-content" }}
             />
