@@ -14,6 +14,7 @@ export type MachinePatternMovingType = "Fast Moving" | "Slow Moving" | "Normal";
 export type MachinePatternRecord = {
   id: string;
   uniq_code: string;
+  material_grade: string;
   machine_id: number;
   cycle_time: number;
   pattern_value: number;
@@ -29,6 +30,7 @@ export type MachinePatternRecord = {
 
 export type CreateMachinePatternRequest = {
   uniq_code: string;
+  material_grade: string;
   machine_id: number;
   cycle_time: number;
   pattern_value: number;
@@ -94,6 +96,7 @@ const toMachinePatternRecord = (raw: unknown): MachinePatternRecord => {
   return {
     id: String(record.id ?? record.uuid ?? ""),
     uniq_code: getString(record, ["uniq_code", "uniqCode"]) ?? "",
+    material_grade: getString(record, ["material_grade", "materialGrade"]) ?? "",
     machine_id: getNumber(record, ["machine_id", "machineId"]) ?? 0,
     cycle_time: getNumber(record, ["cycle_time", "cycleTime"]) ?? 0,
     pattern_value: getNumber(record, ["pattern_value", "patternValue"]) ?? 0,

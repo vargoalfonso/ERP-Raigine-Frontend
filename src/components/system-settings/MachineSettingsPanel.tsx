@@ -58,6 +58,7 @@ type MachineMasterRow = {
 
 type MachinePatternRow = {
   id: string;
+  materialGrade: string;
   uniqCode: string;
   machineName: string;
   cycleTime: number;
@@ -109,6 +110,7 @@ const toMachinePatternRecord = (value: unknown): MachinePatternRecord => {
   return {
     id: String(record.id ?? record.uuid ?? ""),
     uniq_code: getString(record, ["uniq_code", "uniqCode"]) ?? "",
+    material_grade: getString(record, ["material_grade", "materialGrade"]) ?? "",
     machine_id: getNumber(record, ["machine_id", "machineId"]) ?? 0,
     cycle_time: getNumber(record, ["cycle_time", "cycleTime"]) ?? 0,
     pattern_value: getNumber(record, ["pattern_value", "patternValue"]) ?? 0,
@@ -155,6 +157,7 @@ const toMachinePatternRow = (
   return {
     id: String(record.id),
     uniqCode: String(record.uniq_code ?? "-"),
+    materialGrade: String(record.material_grade ?? "-"),
     machineName: machineNameById.get(machineId) ?? `Machine #${String(machineId || "-")}`,
     cycleTime: Number(record.cycle_time ?? 0),
     patternValue: Number(record.pattern_value ?? 0),
@@ -292,7 +295,10 @@ export default function MachineSettingsPanel() {
       .filter((row) => (statusFilter === "All Types" ? true : row.status === statusFilter))
       .filter((row) => {
         if (!lowered) return true;
-        return [row.uniqCode, row.machineName].join(" ").toLowerCase().includes(lowered);
+        return [row.uniqCode, row.materialGrade, row.machineName]
+          .join(" ")
+          .toLowerCase()
+          .includes(lowered);
       });
   }, [machinePatternRows, query, statusFilter]);
 
@@ -352,7 +358,15 @@ export default function MachineSettingsPanel() {
   ];
 
   const machinePatternColumns: ColumnsType<MachinePatternRow> = [
-    { title: "Uniq Code", dataIndex: "uniqCode", key: "uniqCode", width: 140 },
+    {
+      title: "UNIQ / Material Grade",
+      key: "displayLabel",
+      width: 220,
+      render: (_value, row) => {
+        const label = row.materialGrade && row.uniqCode ? `${row.materialGrade} - ${row.uniqCode}` : row.uniqCode || row.materialGrade || "-";
+        return <span className="font-medium text-gray-900">{label}</span>;
+      },
+    },
     { title: "Machine Name", dataIndex: "machineName", key: "machineName", width: 220 },
     { title: "Cycle Time", dataIndex: "cycleTime", key: "cycleTime", width: 120 },
     { title: "Pattern Value", dataIndex: "patternValue", key: "patternValue", width: 120 },
@@ -636,7 +650,7 @@ export default function MachineSettingsPanel() {
       >
         {viewingPattern ? (
           <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-            <div><div className="text-gray-500">Uniq Code</div><div className="font-semibold text-gray-900">{viewingPattern.uniqCode}</div></div>
+            <div><div className="text-gray-500">UNIQ / Material Grade</div><div className="font-semibold text-gray-900">{viewingPattern.materialGrade && viewingPattern.uniqCode ? `${viewingPattern.materialGrade} - ${viewingPattern.uniqCode}` : viewingPattern.uniqCode || viewingPattern.materialGrade || "-"}</div></div>
             <div><div className="text-gray-500">Machine Name</div><div className="font-semibold text-gray-900">{viewingPattern.machineName}</div></div>
             <div><div className="text-gray-500">Cycle Time</div><div className="text-gray-900">{viewingPattern.cycleTime}</div></div>
             <div><div className="text-gray-500">Pattern Value</div><div className="text-gray-900">{viewingPattern.patternValue}</div></div>
@@ -674,7 +688,7 @@ export default function MachineSettingsPanel() {
           }
         }}
       >
-        Delete <span className="font-semibold">{deletingPattern?.uniqCode}</span> from machine pattern?
+        Delete <span className="font-semibold">{deletingPattern?.materialGrade && deletingPattern?.uniqCode ? `${deletingPattern.materialGrade} - ${deletingPattern.uniqCode}` : deletingPattern?.uniqCode || deletingPattern?.materialGrade || "this pattern"}</span> from machine pattern?
       </Modal>
     </CardShell>
   );
