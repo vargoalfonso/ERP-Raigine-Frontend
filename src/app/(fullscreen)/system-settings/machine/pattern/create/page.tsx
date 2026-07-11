@@ -255,6 +255,7 @@ export default function MachinePatternCreatePage() {
             pattern_value: Number(entry.patternValue),
             working_days: Number(entry.workingDays),
             moving_type: entry.movingType ?? "Normal",
+            material_grade: "",
             min_output: Number(entry.minOutput),
             prl_reference: Number(entry.prlReference),
             status: entry.status ?? "Active",

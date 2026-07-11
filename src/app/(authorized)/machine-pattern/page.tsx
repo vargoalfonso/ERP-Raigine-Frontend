@@ -369,6 +369,7 @@ export default function MachinePatternPage() {
         pattern_value: Number(values.patternValue),
         working_days: Number(values.workingDays),
         moving_type: values.movingType,
+        material_grade: "",
         min_output: Number(values.minOutput),
         prl_reference: Number(values.prlReference),
         status: toApiStatus(values.status),
