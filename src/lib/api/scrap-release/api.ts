@@ -5,7 +5,10 @@ type UnknownRecord = Record<string, unknown>;
 const isRecord = (value: unknown): value is UnknownRecord =>
   typeof value === "object" && value !== null;
 
-const getString = (record: UnknownRecord, keys: string[]): string | undefined => {
+const getString = (
+  record: UnknownRecord,
+  keys: string[],
+): string | undefined => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) return value.trim();
@@ -13,7 +16,10 @@ const getString = (record: UnknownRecord, keys: string[]): string | undefined =>
   return undefined;
 };
 
-const getNumber = (record: UnknownRecord, keys: string[]): number | undefined => {
+const getNumber = (
+  record: UnknownRecord,
+  keys: string[],
+): number | undefined => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -25,7 +31,10 @@ const getNumber = (record: UnknownRecord, keys: string[]): number | undefined =>
   return undefined;
 };
 
-const getNullableNumber = (record: UnknownRecord, keys: string[]): number | null => {
+const getNullableNumber = (
+  record: UnknownRecord,
+  keys: string[],
+): number | null => {
   const v = getNumber(record, keys);
   return v == null ? null : v;
 };
@@ -42,14 +51,14 @@ export type Paginated<T> = {
   pagination: Pagination;
 };
 
-const normalizeObjectResponse = <T,>(response: unknown): T | null => {
+const normalizeObjectResponse = <T>(response: unknown): T | null => {
   if (!isRecord(response)) return null;
   const data = response.data;
   if (isRecord(data)) return data as T;
   return null;
 };
 
-const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
+const normalizePaginatedResponse = <T>(response: unknown): Paginated<T> => {
   const empty: Paginated<T> = {
     items: [],
     pagination: { total: 0, page: 1, limit: 20, total_pages: 1 },
@@ -63,7 +72,9 @@ const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
   const paginationRaw = (data as UnknownRecord).pagination;
 
   const items = Array.isArray(itemsRaw) ? (itemsRaw as T[]) : [];
-  const paginationRecord = isRecord(paginationRaw) ? (paginationRaw as UnknownRecord) : {};
+  const paginationRecord = isRecord(paginationRaw)
+    ? (paginationRaw as UnknownRecord)
+    : {};
 
   return {
     items,
@@ -72,7 +83,8 @@ const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
       page: getNumber(paginationRecord, ["page"]) ?? empty.pagination.page,
       limit: getNumber(paginationRecord, ["limit"]) ?? empty.pagination.limit,
       total_pages:
-        getNumber(paginationRecord, ["total_pages", "totalPages"]) ?? empty.pagination.total_pages,
+        getNumber(paginationRecord, ["total_pages", "totalPages"]) ??
+        empty.pagination.total_pages,
     },
   };
 };
@@ -119,17 +131,26 @@ const toScrapReleaseRecord = (raw: unknown): ScrapReleaseRecord => {
   return {
     id: getNumber(record, ["id"]) ?? 0,
     uuid: getString(record, ["uuid"]) ?? "",
-    release_number: getString(record, ["release_number", "releaseNumber"]) ?? "",
+    release_number:
+      getString(record, ["release_number", "releaseNumber"]) ?? "",
     scrap_stock_id: getNumber(record, ["scrap_stock_id", "scrapStockId"]) ?? 0,
     release_date: getString(record, ["release_date", "releaseDate"]) ?? "",
     release_type: getString(record, ["release_type", "releaseType"]) ?? "",
     release_qty: getNumber(record, ["release_qty", "releaseQty"]) ?? 0,
-    weight_released: getNullableNumber(record, ["weight_released", "weightReleased"]),
+    weight_released: getNullableNumber(record, [
+      "weight_released",
+      "weightReleased",
+    ]),
     customer_name: getString(record, ["customer_name", "customerName"]) ?? null,
-    price_per_unit: getNullableNumber(record, ["price_per_unit", "pricePerUnit"]),
+    price_per_unit: getNullableNumber(record, [
+      "price_per_unit",
+      "pricePerUnit",
+    ]),
     total_value: getNullableNumber(record, ["total_value", "totalValue"]),
-    disposal_reason: getString(record, ["disposal_reason", "scrap_reason"]) ?? null,
-    approval_status: getString(record, ["approval_status", "approvalStatus", "status"]) ?? "",
+    disposal_reason:
+      getString(record, ["disposal_reason", "scrap_reason"]) ?? null,
+    approval_status:
+      getString(record, ["approval_status", "approvalStatus", "status"]) ?? "",
     validator: getString(record, ["validator"]) ?? null,
     approver: getString(record, ["approver"]) ?? null,
     approved_by: getString(record, ["approved_by", "approvedBy"]) ?? null,
@@ -143,7 +164,10 @@ const toScrapReleaseRecord = (raw: unknown): ScrapReleaseRecord => {
 
 export const scrapReleaseSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
-    getScrapReleases: builder.query<Paginated<ScrapReleaseRecord>, { page: number; limit: number }>({
+    getScrapReleases: builder.query<
+      Paginated<ScrapReleaseRecord>,
+      { page: number; limit: number }
+    >({
       query: ({ page, limit }) => ({
         url: "/scrap-releases",
         method: "GET",
@@ -160,7 +184,10 @@ export const scrapReleaseSlice = apiSlice.injectEndpoints({
     }),
 
     // Some environments expose list under singular path (/scrap-release). Keep as a fallback.
-    getScrapReleasesLegacy: builder.query<Paginated<ScrapReleaseRecord>, { page: number; limit: number }>({
+    getScrapReleasesLegacy: builder.query<
+      Paginated<ScrapReleaseRecord>,
+      { page: number; limit: number }
+    >({
       query: ({ page, limit }) => ({
         url: "/scrap-release",
         method: "GET",
@@ -183,10 +210,15 @@ export const scrapReleaseSlice = apiSlice.injectEndpoints({
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) =>
-        toScrapReleaseRecord(normalizeObjectResponse<unknown>(response) ?? response),
+        toScrapReleaseRecord(
+          normalizeObjectResponse<unknown>(response) ?? response,
+        ),
     }),
 
-    createScrapRelease: builder.mutation<ScrapReleaseRecord, ScrapReleaseCreateRequest>({
+    createScrapRelease: builder.mutation<
+      ScrapReleaseRecord,
+      ScrapReleaseCreateRequest
+    >({
       query: (body) => ({
         url: "/scrap-releases",
         method: "POST",
@@ -194,7 +226,24 @@ export const scrapReleaseSlice = apiSlice.injectEndpoints({
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) =>
-        toScrapReleaseRecord(normalizeObjectResponse<unknown>(response) ?? response),
+        toScrapReleaseRecord(
+          normalizeObjectResponse<unknown>(response) ?? response,
+        ),
+    }),
+    approveScrapRelease: builder.mutation<
+      { success?: boolean } | unknown,
+      {
+        id: number | string;
+        action: "Completed" | "Rejected";
+        remarks?: string | null;
+      }
+    >({
+      query: ({ id, action, remarks }) => ({
+        url: `/scrap-releases/${encodeURIComponent(String(id))}/approve`,
+        method: "PUT",
+        body: { action, remarks: remarks ?? null },
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
     }),
   }),
 });
@@ -204,4 +253,5 @@ export const {
   useGetScrapReleasesLegacyQuery,
   useGetScrapReleaseByIdQuery,
   useCreateScrapReleaseMutation,
+  useApproveScrapReleaseMutation
 } = scrapReleaseSlice;
