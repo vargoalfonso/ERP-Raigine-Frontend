@@ -5,24 +5,30 @@ import {
   Button,
   Drawer,
   Input,
+  Modal,
   Progress,
   Table,
   Tag,
+  Upload,
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import type { UploadChangeParam, UploadFile } from "antd/es/upload/interface";
 import {
   AppstoreOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
+  DownloadOutlined,
   EyeOutlined,
+  FileExcelOutlined,
   PlusOutlined,
   PrinterOutlined,
   PlayCircleOutlined,
   SearchOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
-import { apiBaseUrl } from "@/lib/api/instance";
+import { apiBaseUrl, generateHeaders } from "@/lib/api/instance";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex, type BomUniqIndex } from "@/lib/utils/bomUniq";
 import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
@@ -457,6 +463,9 @@ export default function WorkOrdersPage() {
   const [selectedRows, setSelectedRows] = useState<WorkOrderRow[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkNote, setBulkNote] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<UploadFile | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const [bulkApproveWorkOrders, bulkApproveState] = useBulkApproveWorkOrdersMutation();
 
@@ -538,6 +547,104 @@ export default function WorkOrdersPage() {
 
   const openPrintDetail = (url: string) => {
     window.open(withQuery(url, { autoPrint: 1 }), "_blank", "noopener,noreferrer");
+  };
+
+  const handleDownloadTemplate = async () => {
+    if (!apiEnabled) {
+      message.error("API base URL is not configured");
+      return;
+    }
+
+    try {
+      const headers = await generateHeaders({ useAuthorization: true, contentType: "application/json" });
+      const response = await fetch(`${apiBaseUrl}/template/wo`, {
+        method: "GET",
+        headers,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        throw new Error(errorText || `Download failed with status ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "work-order-template.xlsx";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      message.success("Template downloaded successfully");
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Failed to download template");
+    }
+  };
+
+  const handleImportWorkOrders = async () => {
+    if (!apiEnabled) {
+      message.error("API base URL is not configured");
+      return;
+    }
+
+    const file = (importFile?.originFileObj ?? (importFile as UploadFile & { file?: File })?.file) as File | undefined;
+    if (!file) {
+      message.error("Please select an Excel file to import");
+      return;
+    }
+
+    try {
+      setImporting(true);
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const headers = await generateHeaders({ useAuthorization: true, contentType: "multipart/form-data" });
+      const response = await fetch(`${apiBaseUrl}/import/wo`, {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        throw new Error(errorText || `Import failed with status ${response.status}`);
+      }
+
+      message.success("Work orders imported successfully");
+      setImportOpen(false);
+      setImportFile(null);
+      void workOrdersPagedQuery.refetch();
+      void workOrdersSummaryQuery.refetch();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Failed to import work orders");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const importUploadProps = {
+    beforeUpload: (file: UploadFile) => {
+      const isExcelLike = /\.(xlsx|xls|csv)$/i.test(file.name ?? "");
+      if (!isExcelLike) {
+        message.error("Only Excel/CSV files are supported");
+        return Upload.LIST_IGNORE;
+      }
+      setImportFile(file);
+      return false;
+    },
+    maxCount: 1,
+    fileList: importFile ? [importFile] : [],
+    onRemove: () => setImportFile(null),
+    onChange: (info: UploadChangeParam<UploadFile>) => {
+      const latest = info.fileList[info.fileList.length - 1];
+      setImportFile(latest ?? null);
+    },
+  };
+
+  const closeImportModal = () => {
+    setImportOpen(false);
+    setImportFile(null);
   };
 
   const buildBulkWoDetailUrl = (row: BulkWoRow) =>
@@ -1215,9 +1322,17 @@ export default function WorkOrdersPage() {
               </div>
             ) : null}
           </div>
-          <Button className="!rounded-lg" icon={<PrinterOutlined />} onClick={() => message.info("Print Kanban (mock)")}> 
-            Print Kanban
-          </Button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button className="!rounded-lg" icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>
+              Download Template
+            </Button>
+            <Button className="!rounded-lg" icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
+              Import WO
+            </Button>
+            <Button className="!rounded-lg" icon={<PrinterOutlined />} onClick={() => message.info("Print Kanban (mock)")}>
+              Print Kanban
+            </Button>
+          </div>
         </div>
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -1602,6 +1717,44 @@ export default function WorkOrdersPage() {
           </div>
         )}
       </div>
+
+      <Modal
+        title={<div className="text-sm font-semibold">Import Work Orders</div>}
+        open={importOpen}
+        onCancel={closeImportModal}
+        maskClosable={false}
+        destroyOnClose
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button onClick={closeImportModal}>Cancel</Button>
+            <Button type="primary" onClick={handleImportWorkOrders} loading={importing}>
+              Import
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50 px-4 py-4 text-sm text-blue-700">
+            <div className="flex items-center gap-2 font-semibold">
+              <FileExcelOutlined />
+              Upload .xlsx file for work order import
+            </div>
+            <div className="mt-1 text-xs text-blue-600">The file will be sent to /import/wo using POST. Excel (.xlsx/.xls) and CSV are supported.</div>
+          </div>
+
+          <Upload {...importUploadProps}>
+            <Button icon={<UploadOutlined />} className="!rounded-lg">
+              Select .xlsx File
+            </Button>
+          </Upload>
+
+          {importFile ? (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+              Selected file: <span className="font-semibold">{importFile.name}</span>
+            </div>
+          ) : null}
+        </div>
+      </Modal>
 
       <Drawer
         title={<div className="text-sm font-semibold">Bulk Approval</div>}

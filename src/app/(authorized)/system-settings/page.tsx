@@ -36,7 +36,7 @@ import {
 } from "@ant-design/icons";
 
 import { getApiErrorMessage } from "@/lib/api/error";
-import { apiBaseUrl } from "@/lib/api/instance";
+import { apiBaseUrl, generateHeaders } from "@/lib/api/instance";
 import {
   rememberSystemSettingsModule,
   readSystemSettingsModule,
@@ -2402,39 +2402,45 @@ export default function SystemSettingsPage() {
   );
 };
 
-const handleImportKanban = async (file: File) => {
+const handleImportKanban = async (file: File): Promise<boolean> => {
   const formData = new FormData();
   formData.append("file", file);
 
   try {
-    const res = await fetch(
-      `${apiBaseUrl}/import/kanban`,
-      {
-        method: "POST",
-        body: formData,
-      },
-    );
+    const headers = await generateHeaders({
+      useAuthorization: true,
+      contentType: "multipart/form-data",
+    });
 
-    const json = await res.json();
+    const res = await fetch(`${apiBaseUrl}/import/kanban`, {
+      method: "POST",
+      headers,
+      body: formData,
+    });
+
+    const text = await res.text();
+    let payload: any = null;
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch {
+      payload = null;
+    }
 
     if (!res.ok) {
-      throw new Error(json.message);
+      throw new Error(payload?.message || payload?.detail || `Import failed with status ${res.status}`);
     }
 
-    message.success(
-      `Import selesai. Success ${json.data.success}, Failed ${json.data.failed}`,
-    );
+    const successCount = payload?.data?.success ?? 0;
+    const failedCount = payload?.data?.failed ?? 0;
+    message.success(`Import selesai. Success ${successCount}, Failed ${failedCount}`);
 
-    if (json.data.failed_file) {
-      window.open(
-        `${apiBaseUrl}/import/kanban/failed/${json.data.failed_file}`,
-        "_blank",
-      );
+    if (payload?.data?.failed_file) {
+      window.open(`${apiBaseUrl}/import/kanban/failed/${payload.data.failed_file}`, "_blank");
     }
 
-    return false;
-  } catch (err: any) {
-    message.error(err.message);
+    return true;
+  } catch (err: unknown) {
+    message.error(err instanceof Error ? err.message : "Failed to import kanban data");
     return false;
   }
 };
@@ -6888,7 +6894,7 @@ const handleImportKanban = async (file: File) => {
               Configuration Modules
             </div>
           </div>
-          <div className="p-2 max-h-[620px] overflow-y-auto">
+          <div className="p-2 max-h-[calc(100vh-16rem)] overflow-y-auto">
             {visibleModules.map((m) => {
               const selected = m.id === selectedModuleId;
               return (
@@ -7015,9 +7021,17 @@ const handleImportKanban = async (file: File) => {
                   </Button>
 
                   <Upload
-                    accept=".xlsx"
+                    accept=".xlsx,.xls,.csv"
                     showUploadList={false}
-                    beforeUpload={handleImportKanban}
+                    beforeUpload={async (file) => {
+                      const isExcelLike = /\.(xlsx|xls|csv)$/i.test(file.name ?? "");
+                      if (!isExcelLike) {
+                        message.error("Only Excel/CSV files are supported");
+                        return Upload.LIST_IGNORE;
+                      }
+                      await handleImportKanban(file as File);
+                      return false;
+                    }}
                   >
                     <Button icon={<UploadOutlined />}>Import</Button>
                   </Upload>
