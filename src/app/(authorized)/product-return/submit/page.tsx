@@ -12,6 +12,10 @@ type SubmitReturnValues = {
   scrapQty: number;
   reworkQty: number;
   status?: string;
+  dateReceived?: string;
+  scrapType?: string;
+  weight?: number;
+  uom?: string;
 };
 
 export default function SubmitProductReturnPage() {
@@ -27,19 +31,32 @@ export default function SubmitProductReturnPage() {
       scrapQty: 0,
       reworkQty: 0,
       status: "PENDING",
+      dateReceived: new Date().toISOString().slice(0, 10),
+      scrapType: "Product Return",
+      weight: 0,
+      uom: "KG",
     }),
-    []
+    [],
   );
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <div className="text-2xl font-bold text-gray-900">Submit Product Return</div>
-          <div className="text-sm text-gray-500 mt-1">Create a new product return request for QC validation</div>
+          <div className="text-2xl font-bold text-gray-900">
+            Submit Product Return
+          </div>
+          <div className="text-sm text-gray-500 mt-1">
+            Create a new product return request for QC validation
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button className="!rounded-lg" onClick={() => router.push("/product-return")}>Cancel</Button>
+          <Button
+            className="!rounded-lg"
+            onClick={() => router.push("/product-return")}
+          >
+            Cancel
+          </Button>
           <Button
             type="primary"
             className="!rounded-lg"
@@ -54,6 +71,10 @@ export default function SubmitProductReturnPage() {
                   quantity_scrap: Number(values.scrapQty ?? 0),
                   quantity_rework: Number(values.reworkQty ?? 0),
                   status: values.status || "PENDING",
+                  date_received: values.dateReceived || undefined,
+                  scrap_type: values.scrapType || "Product Return",
+                  weight: Number(values.weight ?? 0),
+                  uom: values.uom || undefined,
                 }).unwrap();
 
                 message.success("Product return submitted");
@@ -83,17 +104,66 @@ export default function SubmitProductReturnPage() {
                 ]}
               />
             </Form.Item>
-            <Form.Item label="Uniq ID" name="uniq" rules={[{ required: true, message: "Uniq is required" }]}>
+            <Form.Item
+              label="Uniq ID"
+              name="uniq"
+              rules={[{ required: true, message: "Uniq is required" }]}
+            >
               <Input className="!rounded-lg" />
             </Form.Item>
-            <Form.Item label="DN Number" name="dnNumber" rules={[{ required: true, message: "DN number is required" }]}>
+            <Form.Item
+              label="DN Number"
+              name="dnNumber"
+              rules={[{ required: true, message: "DN number is required" }]}
+            >
               <Input className="!rounded-lg" placeholder="DN-0001" />
             </Form.Item>
-            <Form.Item label="Scrap Qty" name="scrapQty" rules={[{ required: true }]}>
-              <InputNumber min={0} className="!w-full !rounded-lg" addonAfter="Pcs" />
+            <Form.Item
+              label="Scrap Qty"
+              name="scrapQty"
+              rules={[{ required: true }]}
+            >
+              <InputNumber
+                min={0}
+                className="!w-full !rounded-lg"
+                addonAfter="Pcs"
+              />
             </Form.Item>
-            <Form.Item label="Rework Qty" name="reworkQty" rules={[{ required: true }]}>
-              <InputNumber min={0} className="!w-full !rounded-lg" addonAfter="Pcs" />
+            <Form.Item
+              label="Rework Qty"
+              name="reworkQty"
+              rules={[{ required: true }]}
+            >
+              <InputNumber
+                min={0}
+                className="!w-full !rounded-lg"
+                addonAfter="Pcs"
+              />
+            </Form.Item>
+            <Form.Item label="Date Received" name="dateReceived">
+              <Input type="date" className="!rounded-lg" />
+            </Form.Item>
+            <Form.Item label="Scrap Type" name="scrapType">
+              <Input className="!rounded-lg" readOnly />
+            </Form.Item>
+            <Form.Item label="Weight" name="weight">
+              <InputNumber
+                min={0}
+                step={0.1}
+                className="!w-full !rounded-lg"
+                placeholder="Enter weight"
+              />
+            </Form.Item>
+            <Form.Item label="UOM" name="uom">
+              <Select
+                className="!rounded-lg"
+                options={[
+                  { label: "KG", value: "KG" },
+                  { label: "G", value: "G" },
+                  { label: "PCS", value: "PCS" },
+                  { label: "BOX", value: "BOX" },
+                ]}
+              />
             </Form.Item>
           </div>
         </Form>
