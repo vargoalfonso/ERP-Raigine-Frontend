@@ -204,7 +204,7 @@ export default function MachineSettingsPanel() {
   const machinePatternAccess = useMemo(() => getModuleAccess(permissions, ["machine_pattern", "machine"]), [permissions]);
 
   const machineParametersQuery = useGetMachineParametersQuery(
-    { page: 1, limit: 20 },
+    { page: 1, limit: 1000 },
     { skip: !apiEnabled, refetchOnMountOrArgChange: true }
   );
   const machinePatternsQuery = useGetMachinePatternsQuery(
@@ -525,7 +525,7 @@ export default function MachineSettingsPanel() {
               rowKey="id"
               loading={apiEnabled && machineParametersQuery.isLoading}
               pagination={false}
-              scroll={{ x: "max-content" }}
+              scroll={{ x: "max-content", y: 600 }}
             />
           ) : (
             <Table<MachinePatternRow>
@@ -534,7 +534,7 @@ export default function MachineSettingsPanel() {
               rowKey="id"
               loading={apiEnabled && (machinePatternsQuery.isLoading || fallbackPatternLoading)}
               pagination={false}
-              scroll={{ x: "max-content" }}
+              scroll={{ x: "max-content", y: 600 }}
             />
           )}
         </div>

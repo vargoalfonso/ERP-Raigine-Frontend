@@ -1057,7 +1057,7 @@ export default function SystemSettingsPage() {
     { skip: !shouldLoadMachinePatterns },
   );
   const [deleteMachinePattern] = useDeleteMachinePatternMutation();
-  const { data: machinesApiData = [] } = useGetMachinesQuery(undefined, {
+  const { data: machinesApiData = [] } = useGetMachinesQuery({ page: 1, limit: 1000 }, {
     skip: !shouldLoadMachineMaster,
   });
 
