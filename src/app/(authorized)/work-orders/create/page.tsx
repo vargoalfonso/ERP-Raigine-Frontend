@@ -287,13 +287,20 @@ export default function CreateWorkOrderPage() {
     };
 
     const found = uniqOptions.find((u) => u.uniq === uniq);
+    // Auto-fill parent process(es) from BOM routes (real routes only, not the
+    // full process catalog fallback) as a baseline; refined below if the BOM
+    // node is found.
+    const baselineProcesses = Array.isArray(bomProcessMap[uniq])
+      ? bomProcessMap[uniq]
+      : [];
     updateLine(id, {
       uniq,
       partName: found?.partName,
       partNumber: found?.partNumber,
       model: found?.model,
       uom: found?.uom ?? bomIndex.uomByUniq[uniq] ?? "pcs",
-      process: undefined,
+      process: baselineProcesses[0],
+      processes: baselineProcesses,
     });
 
     const findNode = (nodes: any[] | undefined): any | null => {
@@ -338,10 +345,25 @@ export default function CreateWorkOrderPage() {
         }
       }
 
+      // Parent: collect ALL process names from the BOM node (like child rows),
+      // falling back to the precomputed process map.
+      const parentProcessesDirect = getAllProcessNames(bomNode);
       const mapped = bomProcessMap[uniq];
+      const parentAllProcesses =
+        parentProcessesDirect.length > 0
+          ? parentProcessesDirect
+          : Array.isArray(mapped)
+          ? mapped
+          : [];
       const firstFromMap = Array.isArray(mapped) && mapped.length ? mapped[0] : null;
-      if (firstProcessName) updateLine(id, { process: firstProcessName });
-      else if (firstFromMap) updateLine(id, { process: firstFromMap });
+      const resolvedFirstProcess =
+        firstProcessName ?? parentAllProcesses[0] ?? firstFromMap ?? undefined;
+      if (resolvedFirstProcess || parentAllProcesses.length) {
+        updateLine(id, {
+          process: resolvedFirstProcess,
+          processes: parentAllProcesses,
+        });
+      }
 
       const nodeUom = String(bomNode.unit_measurement ?? bomNode.unitMeasurement ?? bomNode.uom ?? bomNode.unit ?? "").trim();
       if (nodeUom) updateLine(id, { uom: nodeUom });
@@ -388,12 +410,22 @@ export default function CreateWorkOrderPage() {
       });
 
     // --- Helper: apply child lines ke state ---
-    const applyChildLines = (detailChildren: any[]) => {
+    const applyChildLines = (detailChildren: any[], detailRoot?: any) => {
       if (!detailChildren.length) return;
       setLines((prev) => {
         const baseLines = prev.filter((l) => l.id !== id && l.parentId !== id);
         // QPU untuk parent: ambil dari qty_per_uniq di BOM node jika ada
         const parentQpu = bomNode?.qty_per_uniq ?? bomNode?.qpu ?? bomNode?.qty ?? null;
+        // Parent process(es): utamakan routes dari root node detail (/full),
+        // lalu node tree, terakhir fallback ke map.
+        const parentProcessesFromDetail = getAllProcessNames(detailRoot);
+        const parentProcessesFromNode = getAllProcessNames(bomNode);
+        const parentProcesses =
+          parentProcessesFromDetail.length > 0
+            ? parentProcessesFromDetail
+            : parentProcessesFromNode.length > 0
+            ? parentProcessesFromNode
+            : bomProcessMap[uniq] ?? [];
         const parentLine: UniqLine = {
           id,
           uniq,
@@ -403,7 +435,8 @@ export default function CreateWorkOrderPage() {
           qty: undefined,
           qpu: typeof parentQpu === "number" ? parentQpu : null,
           uom: found?.uom ?? bomIndex.uomByUniq[uniq] ?? "pcs",
-          process: bomProcessMap[uniq]?.[0] ?? undefined,
+          process: parentProcesses[0] ?? bomProcessMap[uniq]?.[0] ?? undefined,
+          processes: parentProcesses,
           kanbanNumber: nextKanbanNumber(0),
         };
         const childLines = buildChildLines(detailChildren);
@@ -425,17 +458,29 @@ export default function CreateWorkOrderPage() {
           let detail: any = null;
           try {
             const headers = await generateHeaders({ useAuthorization: true });
-            const res = await fetch(`${apiBaseUrl}/products/bom/${encodeURIComponent(bomId)}`, { method: "GET", headers });
+            // Pakai endpoint /full agar process_routes milik node PARENT (root) ikut
+            // terbawa, sama seperti halaman BOM Detail. Endpoint non-full tidak
+            // mengembalikan process_routes milik parent.
+            const res = await fetch(`${apiBaseUrl}/products/bom/${encodeURIComponent(bomId)}/full`, { method: "GET", headers });
             if (res.ok) detail = await res.json();
           } catch (e) {
             detail = null;
           }
           const detailData = detail?.data ?? detail;
+          // Auto-fill process milik PARENT dari root node detail
+          // (mis. "Spot Welding" untuk BT333).
+          const parentProcessesFromDetail = getAllProcessNames(detailData);
+          if (parentProcessesFromDetail.length) {
+            updateLine(id, {
+              process: parentProcessesFromDetail[0],
+              processes: parentProcessesFromDetail,
+            });
+          }
           const detailChildren =
             Array.isArray(detailData?.children) && (detailData.children as any[]).length > 0
               ? (detailData.children as any[])
               : shallowChildren;
-          applyChildLines(detailChildren);
+          applyChildLines(detailChildren, detailData);
         } catch {
           // fallback ke shallow jika fetch gagal
           if (shallowChildren.length) applyChildLines(shallowChildren);
@@ -799,6 +844,19 @@ export default function CreateWorkOrderPage() {
                               ? <Tag color="blue" className="text-[11px] m-0">{l.process}</Tag>
                               : <span className="text-xs text-gray-400">-</span>
                             }
+                          </div>
+                        ) : l.processes && l.processes.length > 1 ? (
+                          // Parent with multiple processes from BOM: show all as tags
+                          <div className="flex flex-wrap gap-1">
+                            {l.processes.map((p, pi) => (
+                              <Tag
+                                key={pi}
+                                color="geekblue"
+                                className="text-[11px] m-0"
+                              >
+                                {p}
+                              </Tag>
+                            ))}
                           </div>
                         ) : (
                           <Select
