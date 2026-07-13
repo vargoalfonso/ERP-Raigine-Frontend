@@ -5,7 +5,10 @@ type UnknownRecord = Record<string, unknown>;
 const isRecord = (value: unknown): value is UnknownRecord =>
   typeof value === "object" && value !== null;
 
-const getString = (record: UnknownRecord, keys: string[]): string | undefined => {
+const getString = (
+  record: UnknownRecord,
+  keys: string[],
+): string | undefined => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) return value.trim();
@@ -13,7 +16,10 @@ const getString = (record: UnknownRecord, keys: string[]): string | undefined =>
   return undefined;
 };
 
-const getNumber = (record: UnknownRecord, keys: string[]): number | undefined => {
+const getNumber = (
+  record: UnknownRecord,
+  keys: string[],
+): number | undefined => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -37,14 +43,14 @@ export type Paginated<T> = {
   pagination: Pagination;
 };
 
-const normalizeObjectResponse = <T,>(response: unknown): T | null => {
+const normalizeObjectResponse = <T>(response: unknown): T | null => {
   if (!isRecord(response)) return null;
   const data = response.data;
   if (isRecord(data)) return data as T;
   return null;
 };
 
-const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
+const normalizePaginatedResponse = <T>(response: unknown): Paginated<T> => {
   const empty: Paginated<T> = {
     items: [],
     pagination: { total: 0, page: 1, limit: 20, total_pages: 1 },
@@ -58,7 +64,9 @@ const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
   const paginationRaw = (data as UnknownRecord).pagination;
 
   const items = Array.isArray(itemsRaw) ? (itemsRaw as T[]) : [];
-  const paginationRecord = isRecord(paginationRaw) ? (paginationRaw as UnknownRecord) : {};
+  const paginationRecord = isRecord(paginationRaw)
+    ? (paginationRaw as UnknownRecord)
+    : {};
 
   return {
     items,
@@ -140,7 +148,11 @@ const toFinishedGoodListItem = (raw: unknown): FinishedGoodListItem => {
     model: getString(record, ["model"]) ?? "",
     wo_number: getString(record, ["wo_number", "woNumber"]) ?? "",
     warehouse_location:
-      getString(record, ["warehouse_location", "warehouseLocation", "warehouse"]) ?? "",
+      getString(record, [
+        "warehouse_location",
+        "warehouseLocation",
+        "warehouse",
+      ]) ?? "",
     uom: getString(record, ["uom", "unit"]) ?? "",
     created_at: getString(record, ["created_at", "createdAt"]) ?? "",
     updated_at: getString(record, ["updated_at", "updatedAt"]) ?? "",
@@ -157,7 +169,9 @@ const toFinishedGoodsSummary = (raw: unknown): FinishedGoodsSummary => {
   };
 };
 
-const toFinishedGoodParameterizedSummary = (raw: unknown): FinishedGoodParameterizedSummary => {
+const toFinishedGoodParameterizedSummary = (
+  raw: unknown,
+): FinishedGoodParameterizedSummary => {
   const record = isRecord(raw) ? raw : {};
   return {
     uniq_code: getString(record, ["uniq_code", "uniqCode"]) ?? "",
@@ -166,26 +180,61 @@ const toFinishedGoodParameterizedSummary = (raw: unknown): FinishedGoodParameter
     model: getString(record, ["model"]) ?? "",
     wo_number: getString(record, ["wo_number", "woNumber"]) ?? "",
     warehouse_location:
-      getString(record, ["warehouse_location", "warehouseLocation", "warehouse"]) ?? "",
+      getString(record, [
+        "warehouse_location",
+        "warehouseLocation",
+        "warehouse",
+      ]) ?? "",
     stock_qty: getNumber(record, ["stock_qty", "stockQty"]) ?? 0,
     uom: getString(record, ["uom", "unit"]) ?? "",
-    kanban_standard_qty: getNumber(record, ["kanban_standard_qty", "kanbanStandardQty"]) ?? 0,
+    kanban_standard_qty:
+      getNumber(record, ["kanban_standard_qty", "kanbanStandardQty"]) ?? 0,
     min_threshold: getNumber(record, ["min_threshold", "minThreshold"]) ?? 0,
     max_threshold: getNumber(record, ["max_threshold", "maxThreshold"]) ?? 0,
-    target_stock_qty: getNumber(record, ["target_stock_qty", "targetStockQty"]) ?? 0,
+    target_stock_qty:
+      getNumber(record, ["target_stock_qty", "targetStockQty"]) ?? 0,
     current_kanban: getNumber(record, ["current_kanban", "currentKanban"]) ?? 0,
-    stock_gap_to_target: getNumber(record, ["stock_gap_to_target", "stockGapToTarget"]) ?? 0,
+    stock_gap_to_target:
+      getNumber(record, ["stock_gap_to_target", "stockGapToTarget"]) ?? 0,
     kanban_need: getNumber(record, ["kanban_need", "kanbanNeed"]) ?? 0,
-    stock_to_kanban_pcs: getNumber(record, ["stock_to_kanban_pcs", "stockToKanbanPcs"]) ?? 0,
-    stock_after_replenish: getNumber(record, ["stock_after_replenish", "stockAfterReplenish"]) ?? 0,
+    stock_to_kanban_pcs:
+      getNumber(record, ["stock_to_kanban_pcs", "stockToKanbanPcs"]) ?? 0,
+    stock_after_replenish:
+      getNumber(record, ["stock_after_replenish", "stockAfterReplenish"]) ?? 0,
     status: getString(record, ["status"]) ?? "",
-    parameter_source: getString(record, ["parameter_source", "parameterSource"]) ?? "",
+    parameter_source:
+      getString(record, ["parameter_source", "parameterSource"]) ?? "",
+  };
+};
+
+export type FinishedGoodUniqOption = {
+  uniq_code: string;
+  part_number: string;
+  part_name: string;
+  model: string;
+  last_wo_number: string;
+};
+
+export type GetFinishedGoodUniqOptionsParams = { q?: string; limit?: number };
+
+const toFinishedGoodUniqOption = (raw: unknown): FinishedGoodUniqOption => {
+  const record = isRecord(raw) ? raw : {};
+  return {
+    uniq_code: getString(record, ["uniq_code", "uniqCode"]) ?? "",
+    part_number: getString(record, ["part_number", "partNumber"]) ?? "",
+    part_name: getString(record, ["part_name", "partName"]) ?? "",
+    model: getString(record, ["model"]) ?? "",
+    last_wo_number:
+      getString(record, ["last_wo_number", "lastWoNumber", "wo_number"]) ?? "",
   };
 };
 
 export const finishedGoodsSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
-    getFinishedGoods: builder.query<Paginated<FinishedGoodListItem>, GetFinishedGoodsParams>({
+    getFinishedGoods: builder.query<
+      Paginated<FinishedGoodListItem>,
+      GetFinishedGoodsParams
+    >({
       query: ({ page, limit }) => ({
         url: "/finished-goods",
         method: "GET",
@@ -196,7 +245,10 @@ export const finishedGoodsSlice = apiSlice.injectEndpoints({
         const items = result?.items ?? [];
         return [
           { type: "FinishedGoods" as const, id: "LIST" },
-          ...items.map((it) => ({ type: "FinishedGoods" as const, id: it.id || it.uuid || it.uniq_code })),
+          ...items.map((it) => ({
+            type: "FinishedGoods" as const,
+            id: it.id || it.uuid || it.uniq_code,
+          })),
         ];
       },
       transformResponse: (response: unknown) => {
@@ -215,10 +267,15 @@ export const finishedGoodsSlice = apiSlice.injectEndpoints({
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) =>
-        toFinishedGoodsSummary(normalizeObjectResponse<unknown>(response) ?? response),
+        toFinishedGoodsSummary(
+          normalizeObjectResponse<unknown>(response) ?? response,
+        ),
     }),
 
-    getFinishedGoodParameterizedSummary: builder.query<FinishedGoodParameterizedSummary, { uniq_code: string }>({
+    getFinishedGoodParameterizedSummary: builder.query<
+      FinishedGoodParameterizedSummary,
+      { uniq_code: string }
+    >({
       query: ({ uniq_code }) => ({
         url: "/finished-goods/parameterized-summary",
         method: "GET",
@@ -226,10 +283,40 @@ export const finishedGoodsSlice = apiSlice.injectEndpoints({
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) =>
-        toFinishedGoodParameterizedSummary(normalizeObjectResponse<unknown>(response) ?? response),
+        toFinishedGoodParameterizedSummary(
+          normalizeObjectResponse<unknown>(response) ?? response,
+        ),
     }),
 
-    createFinishedGood: builder.mutation<FinishedGoodListItem, CreateFinishedGoodRequest>({
+    getFinishedGoodUniqOptions: builder.query<
+      { items: FinishedGoodUniqOption[] },
+      GetFinishedGoodUniqOptionsParams | void
+    >({
+      query: (params) => ({
+        url: "/finished-goods/form-options/uniq",
+        method: "GET",
+        params: { q: params?.q ?? "", limit: params?.limit ?? 200 },
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => {
+        const obj =
+          normalizeObjectResponse<UnknownRecord>(response) ??
+          (isRecord(response) ? (response as UnknownRecord) : {});
+        const rawItems = Array.isArray((obj as UnknownRecord).items)
+          ? ((obj as UnknownRecord).items as unknown[])
+          : [];
+        return {
+          items: rawItems
+            .map(toFinishedGoodUniqOption)
+            .filter((it) => it.uniq_code),
+        };
+      },
+    }),
+
+    createFinishedGood: builder.mutation<
+      FinishedGoodListItem,
+      CreateFinishedGoodRequest
+    >({
       query: (body) => ({
         url: "/finished-goods",
         method: "POST",
@@ -238,10 +325,15 @@ export const finishedGoodsSlice = apiSlice.injectEndpoints({
       }),
       invalidatesTags: [{ type: "FinishedGoods", id: "LIST" }],
       transformResponse: (response: unknown) =>
-        toFinishedGoodListItem(normalizeObjectResponse<unknown>(response) ?? response),
+        toFinishedGoodListItem(
+          normalizeObjectResponse<unknown>(response) ?? response,
+        ),
     }),
 
-    updateFinishedGood: builder.mutation<FinishedGoodListItem, { id: number; body: UpdateFinishedGoodRequest }>({
+    updateFinishedGood: builder.mutation<
+      FinishedGoodListItem,
+      { id: number; body: UpdateFinishedGoodRequest }
+    >({
       query: ({ id, body }) => ({
         url: `/finished-goods/${id}`,
         method: "PATCH",
@@ -253,7 +345,9 @@ export const finishedGoodsSlice = apiSlice.injectEndpoints({
         { type: "FinishedGoods", id: arg.id },
       ],
       transformResponse: (response: unknown) =>
-        toFinishedGoodListItem(normalizeObjectResponse<unknown>(response) ?? response),
+        toFinishedGoodListItem(
+          normalizeObjectResponse<unknown>(response) ?? response,
+        ),
     }),
 
     deleteFinishedGood: builder.mutation<{ id: number }, { id: number }>({
@@ -266,7 +360,9 @@ export const finishedGoodsSlice = apiSlice.injectEndpoints({
         { type: "FinishedGoods", id: "LIST" },
         { type: "FinishedGoods", id: arg.id },
       ],
-      transformResponse: (_response: unknown, _meta: unknown, arg) => ({ id: arg.id }),
+      transformResponse: (_response: unknown, _meta: unknown, arg) => ({
+        id: arg.id,
+      }),
     }),
   }),
 });
@@ -275,6 +371,7 @@ export const {
   useGetFinishedGoodsQuery,
   useGetFinishedGoodsSummaryQuery,
   useGetFinishedGoodParameterizedSummaryQuery,
+  useGetFinishedGoodUniqOptionsQuery,
   useCreateFinishedGoodMutation,
   useUpdateFinishedGoodMutation,
   useDeleteFinishedGoodMutation,

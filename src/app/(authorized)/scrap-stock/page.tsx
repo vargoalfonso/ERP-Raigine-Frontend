@@ -37,8 +37,11 @@ import {
   type ScrapStockRecord,
   useGetScrapStocksQuery,
   useGetScrapStocksStatsQuery,
+  useUpdateScrapStockMutation,
+  useDeleteScrapStockMutation,
 } from "@/lib/api/scrap-stock/api";
 import { useGetEmployeesQuery } from "@/lib/api/system-settings/api";
+import { getApiErrorMessage } from "@/lib/api/error";
 import {
   type ScrapReleaseRecord,
   useGetScrapReleasesLegacyQuery,
@@ -62,7 +65,9 @@ const makeScrapColumns = (actions: {
     width: 260,
     render: (_: unknown, record: ScrapRecord) => (
       <div>
-        <div className="font-semibold text-gray-900">{record.part_name || "-"}</div>
+        <div className="font-semibold text-gray-900">
+          {record.part_name || "-"}
+        </div>
         <div className="text-sm text-gray-500">{record.wo_number ?? "-"}</div>
       </div>
     ),
@@ -93,7 +98,11 @@ const makeScrapColumns = (actions: {
     render: (_: unknown, record: ScrapRecord) => {
       const v = String(record.scrap_type || "-");
       const lowered = v.toLowerCase();
-      const color = lowered.includes("return") ? "blue" : lowered.includes("process") ? "geekblue" : "purple";
+      const color = lowered.includes("return")
+        ? "blue"
+        : lowered.includes("process")
+          ? "geekblue"
+          : "purple";
       return <Tag color={color}>{v}</Tag>;
     },
   },
@@ -110,7 +119,9 @@ const makeScrapColumns = (actions: {
     key: "quantity",
     width: 90,
     render: (_: unknown, record: ScrapRecord) => (
-      <div className="text-sm font-semibold text-gray-900">{record.quantity ?? 0}</div>
+      <div className="text-sm font-semibold text-gray-900">
+        {record.quantity ?? 0}
+      </div>
     ),
   },
   {
@@ -118,7 +129,9 @@ const makeScrapColumns = (actions: {
     key: "weightKg",
     width: 110,
     render: (_: unknown, record: ScrapRecord) => (
-      <div className="text-sm text-gray-700">{Number(record.weight_kg ?? 0)}</div>
+      <div className="text-sm text-gray-700">
+        {Number(record.weight_kg ?? 0)}
+      </div>
     ),
   },
   {
@@ -127,7 +140,9 @@ const makeScrapColumns = (actions: {
     width: 140,
     render: (_: unknown, record: ScrapRecord) => (
       <div className="text-sm text-gray-600">
-        {record.date_received ? dayjs(record.date_received).format("YYYY-MM-DD") : "-"}
+        {record.date_received
+          ? dayjs(record.date_received).format("YYYY-MM-DD")
+          : "-"}
       </div>
     ),
   },
@@ -136,7 +151,9 @@ const makeScrapColumns = (actions: {
     key: "packingNumber",
     width: 210,
     render: (_: unknown, record: ScrapRecord) => (
-      <div className="text-sm text-gray-700">{record.packing_number || "-"}</div>
+      <div className="text-sm text-gray-700">
+        {record.packing_number || "-"}
+      </div>
     ),
   },
   {
@@ -154,7 +171,11 @@ const makeScrapColumns = (actions: {
     render: (_: unknown, record: ScrapRecord) => {
       const v = String(record.status || "-");
       const lowered = v.toLowerCase();
-      const color = lowered.includes("active") ? "green" : lowered.includes("close") ? "default" : "blue";
+      const color = lowered.includes("active")
+        ? "green"
+        : lowered.includes("close")
+          ? "default"
+          : "blue";
       return <Tag color={color}>{v}</Tag>;
     },
   },
@@ -249,7 +270,9 @@ const makeReleaseColumns = (actions: {
     key: "releaseNumber",
     width: 150,
     render: (_: unknown, record: ReleaseRecord) => (
-      <div className="text-sm font-semibold text-gray-900">{record.release_number || "-"}</div>
+      <div className="text-sm font-semibold text-gray-900">
+        {record.release_number || "-"}
+      </div>
     ),
   },
   {
@@ -258,7 +281,9 @@ const makeReleaseColumns = (actions: {
     width: 140,
     render: (_: unknown, record: ReleaseRecord) => (
       <div className="text-sm text-gray-600">
-        {record.release_date ? dayjs(record.release_date).format("YYYY-MM-DD") : "-"}
+        {record.release_date
+          ? dayjs(record.release_date).format("YYYY-MM-DD")
+          : "-"}
       </div>
     ),
   },
@@ -269,7 +294,11 @@ const makeReleaseColumns = (actions: {
     render: (_: unknown, record: ReleaseRecord) => {
       const v = String(record.release_type || "-");
       const lowered = v.toLowerCase();
-      const color = lowered.includes("sell") ? "blue" : lowered.includes("dump") ? "red" : "default";
+      const color = lowered.includes("sell")
+        ? "blue"
+        : lowered.includes("dump")
+          ? "red"
+          : "default";
       return <Tag color={color}>{v}</Tag>;
     },
   },
@@ -278,11 +307,16 @@ const makeReleaseColumns = (actions: {
     key: "partInfo",
     width: 220,
     render: (_: unknown, record: ReleaseRecord) => {
-      const display = actions.getScrapStockDisplay?.(record.scrap_stock_id) ?? null;
+      const display =
+        actions.getScrapStockDisplay?.(record.scrap_stock_id) ?? null;
       return (
         <div>
-          <div className="font-semibold text-gray-900">{display?.part_name || `#${record.scrap_stock_id}`}</div>
-          <div className="text-sm text-gray-500">{display?.wo_number ?? "-"}</div>
+          <div className="font-semibold text-gray-900">
+            {display?.part_name || `#${record.scrap_stock_id}`}
+          </div>
+          <div className="text-sm text-gray-500">
+            {display?.wo_number ?? "-"}
+          </div>
         </div>
       );
     },
@@ -292,11 +326,16 @@ const makeReleaseColumns = (actions: {
     key: "uniqPart",
     width: 200,
     render: (_: unknown, record: ReleaseRecord) => {
-      const display = actions.getScrapStockDisplay?.(record.scrap_stock_id) ?? null;
+      const display =
+        actions.getScrapStockDisplay?.(record.scrap_stock_id) ?? null;
       return (
         <div>
-          <div className="font-semibold text-gray-900">{display?.uniq || "-"}</div>
-          <div className="text-sm text-gray-500">{display?.part_number || "-"}</div>
+          <div className="font-semibold text-gray-900">
+            {display?.uniq || "-"}
+          </div>
+          <div className="text-sm text-gray-500">
+            {display?.part_number || "-"}
+          </div>
         </div>
       );
     },
@@ -306,8 +345,11 @@ const makeReleaseColumns = (actions: {
     key: "model",
     width: 110,
     render: (_: unknown, record: ReleaseRecord) => {
-      const display = actions.getScrapStockDisplay?.(record.scrap_stock_id) ?? null;
-      return <div className="text-sm text-gray-700">{display?.model || "-"}</div>;
+      const display =
+        actions.getScrapStockDisplay?.(record.scrap_stock_id) ?? null;
+      return (
+        <div className="text-sm text-gray-700">{display?.model || "-"}</div>
+      );
     },
   },
   {
@@ -315,7 +357,8 @@ const makeReleaseColumns = (actions: {
     key: "qty",
     width: 120,
     render: (_: unknown, record: ReleaseRecord) => {
-      const display = actions.getScrapStockDisplay?.(record.scrap_stock_id) ?? null;
+      const display =
+        actions.getScrapStockDisplay?.(record.scrap_stock_id) ?? null;
       return (
         <div className="text-sm font-semibold text-gray-900">
           {record.release_qty ?? 0} {display?.uom || ""}
@@ -328,7 +371,9 @@ const makeReleaseColumns = (actions: {
     key: "weight",
     width: 110,
     render: (_: unknown, record: ReleaseRecord) => (
-      <div className="text-sm text-gray-700">{record.weight_released ?? "-"}</div>
+      <div className="text-sm text-gray-700">
+        {record.weight_released ?? "-"}
+      </div>
     ),
   },
   {
@@ -337,8 +382,12 @@ const makeReleaseColumns = (actions: {
     width: 210,
     render: (_: unknown, record: ReleaseRecord) => (
       <div>
-        <div className="text-sm text-gray-900">{record.customer_name || "-"}</div>
-        <div className="text-xs text-gray-500">{record.disposal_reason || "-"}</div>
+        <div className="text-sm text-gray-900">
+          {record.customer_name || "-"}
+        </div>
+        <div className="text-xs text-gray-500">
+          {record.disposal_reason || "-"}
+        </div>
       </div>
     ),
   },
@@ -365,7 +414,11 @@ const makeReleaseColumns = (actions: {
     render: (_: unknown, record: ReleaseRecord) => {
       const v = String(record.approval_status || "-");
       const lowered = v.toLowerCase();
-      const color = lowered.includes("pending") ? "orange" : lowered.includes("approve") ? "green" : "blue";
+      const color = lowered.includes("pending")
+        ? "orange"
+        : lowered.includes("approve")
+          ? "green"
+          : "blue";
       return <Tag color={color}>{v}</Tag>;
     },
   },
@@ -397,7 +450,7 @@ export default function ScrapStockPage() {
 
   const scrapStocksQuery = useGetScrapStocksQuery(
     { page: currentPage, limit: pageSize },
-    { skip: !apiEnabled || tab !== "scrap" }
+    { skip: !apiEnabled || tab !== "scrap" },
   );
   const scrapStatsQuery = useGetScrapStocksStatsQuery(undefined, {
     skip: !apiEnabled,
@@ -405,19 +458,24 @@ export default function ScrapStockPage() {
 
   const releasesQueryPlural = useGetScrapReleasesQuery(
     { page: currentPage, limit: pageSize },
-    { skip: !apiEnabled || tab !== "release" }
+    { skip: !apiEnabled || tab !== "release" },
   );
-  const useLegacyReleases = apiEnabled && tab === "release" && isNotFoundError(releasesQueryPlural.error);
+  const useLegacyReleases =
+    apiEnabled &&
+    tab === "release" &&
+    isNotFoundError(releasesQueryPlural.error);
   const releasesQueryLegacy = useGetScrapReleasesLegacyQuery(
     { page: currentPage, limit: pageSize },
-    { skip: !useLegacyReleases }
+    { skip: !useLegacyReleases },
   );
 
-  const releasesQuery = useLegacyReleases ? releasesQueryLegacy : releasesQueryPlural;
+  const releasesQuery = useLegacyReleases
+    ? releasesQueryLegacy
+    : releasesQueryPlural;
 
   const scrapStockMapQuery = useGetScrapStocksQuery(
     { page: 1, limit: 500 },
-    { skip: !apiEnabled || tab !== "release" }
+    { skip: !apiEnabled || tab !== "release" },
   );
   const scrapStockById = useMemo(() => {
     const map = new Map<number, ScrapRecord>();
@@ -438,15 +496,28 @@ export default function ScrapStockPage() {
 
   const employeesQuery = useGetEmployeesQuery(undefined, { skip: !apiEnabled });
   const employeeOptions = useMemo(() => {
-    return (employeesQuery.data ?? [])
-      .map((e) => ({ label: e.full_name ?? e.email ?? String(e.id), value: e.full_name ?? e.employee_id ?? e.id }));
+    return (employeesQuery.data ?? []).map((e) => ({
+      label: e.full_name ?? e.email ?? String(e.id),
+      value: e.full_name ?? e.employee_id ?? e.id,
+    }));
   }, [employeesQuery.data]);
+
+  const [updateScrapStock, updateScrapState] = useUpdateScrapStockMutation();
+  const [deleteScrapStock, deleteScrapState] = useDeleteScrapStockMutation();
+
+  const scrapTypeOptions = [
+    { label: "Setting Machine Scrap", value: "Setting Machine Scrap" },
+    { label: "Process Scrap", value: "Process Scrap" },
+    { label: "Product Return Scrap", value: "Product Return Scrap" },
+  ];
 
   const openEditDrawer = (record: ScrapRecord) => {
     setEditingScrap(record);
     editForm.setFieldsValue({
       uniq: record.uniq,
-      date_received: record.date_received ? dayjs(record.date_received) : undefined,
+      date_received: record.date_received
+        ? dayjs(record.date_received)
+        : undefined,
       packing_number: record.packing_number,
       scrap_quantity: record.quantity,
       scrap_type: record.scrap_type,
@@ -463,19 +534,41 @@ export default function ScrapStockPage() {
   };
 
   const handleSaveEdit = async () => {
+    if (!editingScrap) return;
+    let values: ScrapEditFormValues;
     try {
-      const values = await editForm.validateFields();
-      console.log("Save scrap edit:", { id: editingScrap?.id, ...values });
-      messageApi.success("Saved");
-      closeEditDrawer();
+      values = await editForm.validateFields();
     } catch {
-      // validation errors shown by antd
+      return; // antd menampilkan error field
+    }
+
+    try {
+      await updateScrapStock({
+        id: editingScrap.id,
+        body: {
+          packing_number: values.packing_number,
+          scrap_type: values.scrap_type,
+          quantity: Number(values.quantity ?? values.scrap_quantity ?? 0),
+          validator: values.validator,
+          date_received: values.date_received
+            ? dayjs(values.date_received).format("YYYY-MM-DD")
+            : undefined,
+        },
+      }).unwrap();
+
+      messageApi.success("Scrap stock updated");
+      closeEditDrawer();
+      scrapStocksQuery.refetch();
+      scrapStatsQuery.refetch();
+    } catch (err) {
+      messageApi.error(getApiErrorMessage(err, "Failed to update scrap stock"));
     }
   };
 
   const openScrapDetail = (record: ScrapRecord) => {
-    const id = record.uuid || String(record.id);
-    router.push(`/scrap-stock/detail?id=${encodeURIComponent(id)}`);
+    router.push(
+      `/scrap-stock/detail?id=${encodeURIComponent(String(record.id))}`,
+    );
   };
 
   const openDeleteModal = (record: ScrapRecord) => {
@@ -488,15 +581,21 @@ export default function ScrapStockPage() {
     setDeletingScrap(null);
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deletingScrap) return;
 
-    setScrapData((prev) => prev.filter((item) => item.id !== deletingScrap.id));
-    if (editingScrap?.id === deletingScrap.id) {
-      closeEditDrawer();
+    try {
+      await deleteScrapStock(deletingScrap.id).unwrap();
+      if (editingScrap?.id === deletingScrap.id) {
+        closeEditDrawer();
+      }
+      messageApi.success("Scrap stock deleted");
+      closeDeleteModal();
+      scrapStocksQuery.refetch();
+      scrapStatsQuery.refetch();
+    } catch (err) {
+      messageApi.error(getApiErrorMessage(err, "Failed to delete scrap stock"));
     }
-    messageApi.success("Deleted");
-    closeDeleteModal();
   };
 
   const scrapColumns = makeScrapColumns({
@@ -506,23 +605,26 @@ export default function ScrapStockPage() {
   });
 
   const openReleaseDetail = (record: ReleaseRecord) => {
-    router.push(`/scrap-stock/release/detail?id=${encodeURIComponent(String(record.id))}`);
+    router.push(
+      `/scrap-stock/release/detail?id=${encodeURIComponent(String(record.id))}`,
+    );
   };
 
   const releaseColumns = makeReleaseColumns({
     onView: openReleaseDetail,
-    getScrapStockDisplay: (scrapStockId) => scrapStockById.get(scrapStockId) ?? null,
+    getScrapStockDisplay: (scrapStockId) =>
+      scrapStockById.get(scrapStockId) ?? null,
   });
 
   const liveScrapRows = scrapStocksQuery.data?.items ?? [];
   const scrapRows = apiEnabled ? liveScrapRows : scrapData;
   const scrapTotal = apiEnabled
-    ? scrapStocksQuery.data?.pagination?.total ?? liveScrapRows.length
+    ? (scrapStocksQuery.data?.pagination?.total ?? liveScrapRows.length)
     : scrapData.length;
 
-  const releaseRows = apiEnabled ? releasesQuery.data?.items ?? [] : [];
+  const releaseRows = apiEnabled ? (releasesQuery.data?.items ?? []) : [];
   const releaseTotal = apiEnabled
-    ? releasesQuery.data?.pagination?.total ?? releaseRows.length
+    ? (releasesQuery.data?.pagination?.total ?? releaseRows.length)
     : releaseRows.length;
   const columnsStatus: ColumnType<FinishedGoodsRecord>[] = [
     {
@@ -646,13 +748,18 @@ export default function ScrapStockPage() {
         title="Delete scrap item?"
         open={deleteOpen}
         okText="Delete"
-        okButtonProps={{ danger: true }}
+        okButtonProps={{
+          danger: true,
+          loading: deleteScrapState.isLoading,
+        }}
         cancelText="Cancel"
         onOk={handleConfirmDelete}
         onCancel={closeDeleteModal}
       >
         <p>
-          This will remove <span className="font-semibold">{deletingScrap?.uniq}</span> from the list.
+          This will remove{" "}
+          <span className="font-semibold">{deletingScrap?.uniq}</span> from the
+          list.
         </p>
       </Modal>
 
@@ -666,26 +773,19 @@ export default function ScrapStockPage() {
         footer={
           <div className="flex items-center justify-end gap-3">
             <Button onClick={closeEditDrawer}>Cancel</Button>
-            <Button type="primary" onClick={handleSaveEdit}>
+            <Button
+              type="primary"
+              onClick={handleSaveEdit}
+              loading={updateScrapState.isLoading}
+            >
               Save
             </Button>
           </div>
         }
       >
         <Form form={editForm} layout="vertical" requiredMark={false}>
-          <Form.Item
-            label="Uniq"
-            name="uniq"
-            rules={[{ required: true, message: "Uniq is required" }]}
-          >
-            <Select
-              placeholder="Select Uniq"
-              options={[
-                { label: "LV-001", value: "LV-001" },
-                { label: "LV-002", value: "LV-002" },
-                { label: "LV-003", value: "LV-003" },
-              ]}
-            />
+          <Form.Item label="Uniq" name="uniq">
+            <Input disabled />
           </Form.Item>
 
           <Form.Item
@@ -724,17 +824,9 @@ export default function ScrapStockPage() {
           >
             <Select
               placeholder="Select Scrap Type"
-              options={[
-                {
-                  label: "Setting Machine Scrap",
-                  value: "Setting Machine Scrap",
-                },
-                { label: "Process Scrap", value: "Process Scrap" },
-                {
-                  label: "Product Return Scrap",
-                  value: "Product Return Scrap",
-                },
-              ]}
+              options={scrapTypeOptions}
+              showSearch
+              optionFilterProp="label"
             />
           </Form.Item>
 
@@ -745,11 +837,15 @@ export default function ScrapStockPage() {
           >
             <Select
               placeholder="Select Validator"
-              options={employeeOptions.length ? employeeOptions : [
-                { label: "John Mejer", value: "John Mejer" },
-                { label: "QC Inspector A", value: "QC Inspector A" },
-                { label: "Operator John", value: "Operator John" },
-              ]}
+              options={
+                employeeOptions.length
+                  ? employeeOptions
+                  : [
+                      { label: "John Mejer", value: "John Mejer" },
+                      { label: "QC Inspector A", value: "QC Inspector A" },
+                      { label: "Operator John", value: "Operator John" },
+                    ]
+              }
             />
           </Form.Item>
 
@@ -799,28 +895,42 @@ export default function ScrapStockPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatsCard
           title="Total Scrap Items"
-          value={apiEnabled ? scrapStatsQuery.data?.total_items ?? 0 : scrapTotal}
+          value={
+            apiEnabled ? (scrapStatsQuery.data?.total_items ?? 0) : scrapTotal
+          }
           icon={<BsBoxSeam size={30} />}
           bgColor=""
           textColor="text-blue-600"
         />
         <StatsCard
           title="Total Scrap Qty"
-          value={apiEnabled ? scrapStatsQuery.data?.total_qty ?? 0 : scrapRows.reduce((acc, r) => acc + (r.quantity ?? 0), 0)}
+          value={
+            apiEnabled
+              ? (scrapStatsQuery.data?.total_qty ?? 0)
+              : scrapRows.reduce((acc, r) => acc + (r.quantity ?? 0), 0)
+          }
           icon={<FiAlertTriangle size={30} />}
           bgColor=""
           textColor="text-red-600"
         />
         <StatsCard
           title="Total Weight (kg)"
-          value={apiEnabled ? scrapStatsQuery.data?.total_weight_kg ?? 0 : scrapRows.reduce((acc, r) => acc + Number(r.weight_kg ?? 0), 0)}
+          value={
+            apiEnabled
+              ? (scrapStatsQuery.data?.total_weight_kg ?? 0)
+              : scrapRows.reduce((acc, r) => acc + Number(r.weight_kg ?? 0), 0)
+          }
           icon={<HiOutlineArchiveBox size={30} />}
           bgColor=""
           textColor="text-green-600"
         />
         <StatsCard
           title="Scrap Types"
-          value={apiEnabled ? scrapStatsQuery.data?.scrap_types ?? 0 : new Set(scrapRows.map((r) => r.scrap_type)).size}
+          value={
+            apiEnabled
+              ? (scrapStatsQuery.data?.scrap_types ?? 0)
+              : new Set(scrapRows.map((r) => r.scrap_type)).size
+          }
           icon={<LuChartColumn size={30} />}
           bgColor=""
           textColor="text-orange-600"
@@ -853,7 +963,11 @@ export default function ScrapStockPage() {
         <div className="p-6">
           {tab === "scrap" ? (
             <TableTemplate<ScrapRecord>
-              columns={scrapColumns as (ColumnType<ScrapRecord> & { sortFieldKey?: string })[]}
+              columns={
+                scrapColumns as (ColumnType<ScrapRecord> & {
+                  sortFieldKey?: string;
+                })[]
+              }
               data={scrapRows.filter((r) => {
                 const q = searchValue.trim().toLowerCase();
                 if (!q) return true;
@@ -885,7 +999,11 @@ export default function ScrapStockPage() {
             />
           ) : (
             <TableTemplate<ReleaseRecord>
-              columns={releaseColumns as (ColumnType<ReleaseRecord> & { sortFieldKey?: string })[]}
+              columns={
+                releaseColumns as (ColumnType<ReleaseRecord> & {
+                  sortFieldKey?: string;
+                })[]
+              }
               data={releaseRows.filter((r) => {
                 const q = searchValue.trim().toLowerCase();
                 if (!q) return true;
@@ -916,7 +1034,11 @@ export default function ScrapStockPage() {
               total={releaseTotal}
               onPageChange={setCurrentPage}
               onPageSizeChange={setPageSize}
-              loading={loading || releasesQuery.isFetching || scrapStockMapQuery.isFetching}
+              loading={
+                loading ||
+                releasesQuery.isFetching ||
+                scrapStockMapQuery.isFetching
+              }
             />
           )}
         </div>

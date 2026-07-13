@@ -28,7 +28,7 @@ function ScrapStockDetailPageContent() {
 
   const historyLogsQuery = useGetScrapStockHistoryLogsQuery(
     { id: String(id), page: historyPage, limit: historyLimit },
-    { skip: !apiEnabled || !id }
+    { skip: !apiEnabled || !id },
   );
 
   const detailInfo = useMemo(() => {
@@ -42,7 +42,10 @@ function ScrapStockDetailPageContent() {
     <div className="w-full min-h-screen bg-gray-50">
       <div className="flex items-center justify-between bg-white px-8 py-4 border-b">
         <div className="flex items-center gap-4">
-          <ArrowLeftOutlined className="cursor-pointer" onClick={() => router.back()} />
+          <ArrowLeftOutlined
+            className="cursor-pointer"
+            onClick={() => router.back()}
+          />
           <h1 className="text-2xl font-semibold m-0">Scrap Stock Details</h1>
         </div>
 
@@ -55,7 +58,9 @@ function ScrapStockDetailPageContent() {
         <Card className="rounded-2xl shadow">
           <h2 className="text-xl font-bold">Details & History Log</h2>
           <p className="text-gray-400">
-            {id ? `Complete Scrap Stock Detail for ${id}` : "Missing scrap stock id"}
+            {id
+              ? `Complete Scrap Stock Detail for ${id}`
+              : "Missing scrap stock id"}
           </p>
 
           <Tabs
@@ -73,64 +78,103 @@ function ScrapStockDetailPageContent() {
                       <div className="text-sm text-gray-500">No data.</div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div>
-                        <p className="text-gray-400">Uniq</p>
-                        <p className="font-semibold">{detailInfo.uniq || "-"}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Date Received</p>
-                        <p className="font-semibold">
-                          {detailInfo.date_received
-                            ? dayjs(detailInfo.date_received).format("YYYY-MM-DD")
-                            : "-"}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Part Name</p>
-                        <p className="font-semibold">{detailInfo.part_name || "-"}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Model</p>
-                        <p className="font-semibold">{detailInfo.model || "-"}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Packing Number</p>
-                        <p className="font-semibold">{detailInfo.packing_number || "-"}</p>
-                      </div>
-
-                      {["dump", "disposal"].includes(
-                        String(detailInfo.scrap_type ?? "").toLowerCase()
-                      ) && (
                         <div>
-                          <p className="text-gray-400">Disposal Reason</p>
-                          <p className="font-semibold">{detailInfo.disposal_reason || "-"}</p>
+                          <p className="text-gray-400">Uniq</p>
+                          <p className="font-semibold">
+                            {detailInfo.uniq || "-"}
+                          </p>
                         </div>
-                      )}
 
-                      <div>
-                        <p className="text-gray-400">Scrap Type</p>
-                        <Tag className="bg-blue-100 text-blue-600">{detailInfo.scrap_type || "-"}</Tag>
-                      </div>
+                        <div>
+                          <p className="text-gray-400">Date Received</p>
+                          <p className="font-semibold">
+                            {detailInfo.date_received
+                              ? dayjs(detailInfo.date_received).format(
+                                  "YYYY-MM-DD",
+                                )
+                              : "-"}
+                          </p>
+                        </div>
 
-                      <div>
-                        <p className="text-gray-400">Quantity</p>
-                        <Tag className="bg-blue-100 text-blue-600">{detailInfo.quantity ?? 0}</Tag>
-                      </div>
+                        <div>
+                          <p className="text-gray-400">Part Name</p>
+                          <p className="font-semibold">
+                            {detailInfo.part_name || "-"}
+                          </p>
+                        </div>
 
-                      <div>
-                        <p className="text-gray-400">Validator</p>
-                        <p className="font-semibold">{detailInfo.validator || "-"}</p>
-                      </div>
+                        <div>
+                          <p className="text-gray-400">Model</p>
+                          <p className="font-semibold">
+                            {detailInfo.model || "-"}
+                          </p>
+                        </div>
 
-                      <div>
-                        <p className="text-gray-400">Status</p>
-                        <Tag className="bg-green-100 text-green-600">{detailInfo.status || "-"}</Tag>
-                      </div>
+                        <div>
+                          <p className="text-gray-400">Packing Number</p>
+                          <p className="font-semibold">
+                            {detailInfo.packing_number ||  "-"}
+                          </p>
+                        </div>
 
+                        <div>
+                          <p className="text-gray-400">WO Number</p>
+                          <p className="font-semibold">
+                            {detailInfo.wo_number || "-"}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-gray-400">QC Cause (Trace)</p>
+                          <p className="font-semibold">
+                            {detailInfo.source_qc_log_id
+                              ? `QC Log #${detailInfo.source_qc_log_id}${
+                                  detailInfo.source_defect_id
+                                    ? ` • Defect #${detailInfo.source_defect_id}`
+                                    : ""
+                                }`
+                              : "Manual entry"}
+                          </p>
+                        </div>
+
+                        {["dump", "disposal"].includes(
+                          String(detailInfo.scrap_type ?? "").toLowerCase(),
+                        ) && (
+                          <div>
+                            <p className="text-gray-400">Disposal Reason</p>
+                            <p className="font-semibold">
+                              {detailInfo.disposal_reason || "-"}
+                            </p>
+                          </div>
+                        )}
+
+                        <div>
+                          <p className="text-gray-400">Scrap Type</p>
+                          <Tag className="bg-blue-100 text-blue-600">
+                            {detailInfo.scrap_type || "-"}
+                          </Tag>
+                        </div>
+
+                        <div>
+                          <p className="text-gray-400">Quantity</p>
+                          <Tag className="bg-blue-100 text-blue-600">
+                            {detailInfo.quantity ?? 0}
+                          </Tag>
+                        </div>
+
+                        <div>
+                          <p className="text-gray-400">Validator</p>
+                          <p className="font-semibold">
+                            {detailInfo.validator || "-"}
+                          </p>
+                        </div>
+
+                        <div>
+                          <p className="text-gray-400">Status</p>
+                          <Tag className="bg-green-100 text-green-600">
+                            {detailInfo.status || "-"}
+                          </Tag>
+                        </div>
                       </div>
                     )}
                   </Card>
@@ -138,12 +182,19 @@ function ScrapStockDetailPageContent() {
               },
               {
                 key: "2",
-                label: <span className="flex items-center gap-2">History Logs</span>,
+                label: (
+                  <span className="flex items-center gap-2">History Logs</span>
+                ),
                 children: (
                   <div className="mt-6">
                     <div className="bg-white rounded-2xl border border-gray-200 p-4">
                       <Table<ScrapStockHistoryLogRecord>
-                        rowKey={(r) => String(r.id || `${r.action}-${r.created_at ?? ""}-${r.message}`)}
+                        rowKey={(r) =>
+                          String(
+                            r.id ||
+                              `${r.action}-${r.created_at ?? ""}-${r.message}`,
+                          )
+                        }
                         loading={historyLogsQuery.isFetching}
                         dataSource={historyLogsQuery.data?.items ?? []}
                         pagination={false}
@@ -152,10 +203,15 @@ function ScrapStockDetailPageContent() {
                             title: "Timestamp",
                             key: "created_at",
                             width: 200,
-                            render: (_: unknown, record: ScrapStockHistoryLogRecord) => (
+                            render: (
+                              _: unknown,
+                              record: ScrapStockHistoryLogRecord,
+                            ) => (
                               <div className="text-sm text-gray-700">
                                 {record.created_at
-                                  ? dayjs(record.created_at).format("YYYY-MM-DD HH:mm:ss")
+                                  ? dayjs(record.created_at).format(
+                                      "YYYY-MM-DD HH:mm:ss",
+                                    )
                                   : "-"}
                               </div>
                             ),
@@ -165,14 +221,18 @@ function ScrapStockDetailPageContent() {
                             dataIndex: "action",
                             key: "action",
                             width: 180,
-                            render: (v: unknown) => <Tag>{String(v ?? "-")}</Tag>,
+                            render: (v: unknown) => (
+                              <Tag>{String(v ?? "-")}</Tag>
+                            ),
                           },
                           {
                             title: "Message",
                             dataIndex: "message",
                             key: "message",
                             render: (v: unknown) => (
-                              <div className="text-sm text-gray-800">{String(v ?? "-")}</div>
+                              <div className="text-sm text-gray-800">
+                                {String(v ?? "-")}
+                              </div>
                             ),
                           },
                           {
@@ -181,7 +241,9 @@ function ScrapStockDetailPageContent() {
                             key: "created_by",
                             width: 180,
                             render: (v: unknown) => (
-                              <div className="text-sm text-gray-700">{String(v ?? "-")}</div>
+                              <div className="text-sm text-gray-700">
+                                {String(v ?? "-")}
+                              </div>
                             ),
                           },
                         ]}
@@ -209,7 +271,9 @@ function ScrapStockDetailPageContent() {
       </div>
 
       <div className="flex justify-end px-8 pb-8">
-        <Button className="bg-blue-600 text-white rounded-xl" onClick={() => router.push("/scrap-stock")}
+        <Button
+          className="bg-blue-600 text-white rounded-xl"
+          onClick={() => router.push("/scrap-stock")}
         >
           Back
         </Button>

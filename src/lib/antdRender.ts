@@ -5,13 +5,12 @@ import { createRoot } from "react-dom/client";
 import type { ReactElement } from "react";
 
 unstableSetRender(
-  (
-    node: ReactElement,
-    container: Element | DocumentFragment
-  ) => {
+  (node: ReactElement, container: Element | DocumentFragment) => {
     // reuse existing root if createRoot was already called for this container
     const key = "__rc_root__";
-    let root = (container as any)[key] as ReturnType<typeof createRoot> | undefined;
+    let root = (container as any)[key] as
+      | ReturnType<typeof createRoot>
+      | undefined;
     if (!root) {
       root = createRoot(container as Element);
       (container as any)[key] = root;
@@ -20,6 +19,7 @@ unstableSetRender(
 
     // return async unmount function
     return async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
       try {
         root!.unmount();
       } finally {
@@ -28,5 +28,5 @@ unstableSetRender(
         } catch {}
       }
     };
-  }
+  },
 );

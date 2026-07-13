@@ -28,6 +28,7 @@ import {
   useGetScrapStocksQuery,
 } from "@/lib/api/scrap-stock/api";
 import { useCreateScrapReleaseMutation } from "@/lib/api/scrap-release/api";
+import { useListCustomersQuery } from "@/lib/api/customers/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 
 type FormValues = {
@@ -74,6 +75,19 @@ export default function ScrapReleaseCreatePage() {
         value: i.id,
       }));
   }, [scrapStocksQuery.data?.items]);
+
+  const customersQuery = useListCustomersQuery(undefined, {
+    skip: !apiEnabled,
+  });
+
+  const customerOptions = useMemo(
+    () =>
+      (customersQuery.data ?? [])
+        .map((c) => c.customer_name)
+        .filter((n): n is string => Boolean(n && n.trim()))
+        .map((n) => ({ label: n, value: n })),
+    [customersQuery.data],
+  );
 
   const stockById = useMemo(() => {
     const map = new Map<number, ScrapStockRecord>();
@@ -133,7 +147,8 @@ export default function ScrapReleaseCreatePage() {
           initialValues={{
             release_date: dayjs(),
             release_type: "Sell",
-          }}>
+          }}
+        >
           {/* Hidden field to keep release_type in form state */}
           <Form.Item name="release_type" hidden>
             <Input />
@@ -151,7 +166,8 @@ export default function ScrapReleaseCreatePage() {
             <Form.Item
               name="scrap_stock_id"
               rules={[{ required: true, message: "Scrap stock is required" }]}
-              className="mb-0">
+              className="mb-0"
+            >
               <Select
                 showSearch
                 placeholder="Search and select scrap stock..."
@@ -266,7 +282,8 @@ export default function ScrapReleaseCreatePage() {
                       selected
                         ? opt.activeCard
                         : "border-gray-200 bg-white hover:border-gray-300"
-                    }`}>
+                    }`}
+                  >
                     {opt.iconEl(selected)}
                     <div className="font-semibold text-sm">{opt.label}</div>
                     <div className="text-xs text-gray-400 text-center">
@@ -298,7 +315,8 @@ export default function ScrapReleaseCreatePage() {
                 name="release_date"
                 rules={[
                   { required: true, message: "Release date is required" },
-                ]}>
+                ]}
+              >
                 <DatePicker className="w-full" />
               </Form.Item>
 
@@ -310,7 +328,8 @@ export default function ScrapReleaseCreatePage() {
                   selectedStock
                     ? `Maximum: ${selectedStock.quantity} units`
                     : undefined
-                }>
+                }
+              >
                 <InputNumber
                   className="w-full"
                   min={0}
@@ -326,8 +345,21 @@ export default function ScrapReleaseCreatePage() {
                   isDump
                     ? []
                     : [{ required: true, message: "Customer name is required" }]
-                }>
-                <Input placeholder="Customer/buyer" />
+                }
+              >
+                <Select
+                  showSearch
+                  placeholder="Select customer / buyer"
+                  loading={customersQuery.isFetching}
+                  options={customerOptions}
+                  optionFilterProp="label"
+                  notFoundContent={
+                    customersQuery.isFetching
+                      ? "Loading..."
+                      : "No customer found"
+                  }
+                  allowClear
+                />
               </Form.Item>
 
               <Form.Item
@@ -343,7 +375,8 @@ export default function ScrapReleaseCreatePage() {
                           message: "Price per unit is required",
                         },
                       ]
-                }>
+                }
+              >
                 <InputNumber className="w-full" min={0} />
               </Form.Item>
             </div>
@@ -372,7 +405,8 @@ export default function ScrapReleaseCreatePage() {
                 name="disposal_reason"
                 rules={[
                   { required: true, message: "Disposal reason is required" },
-                ]}>
+                ]}
+              >
                 <Input placeholder="Enter disposal reason" />
               </Form.Item>
             )}
@@ -380,7 +414,8 @@ export default function ScrapReleaseCreatePage() {
             <Form.Item
               label="Remarks / Reference Number"
               name="remarks"
-              className="mb-4">
+              className="mb-4"
+            >
               <TextArea
                 rows={3}
                 placeholder="Additional notes, reference documents, or special instructions..."
@@ -497,7 +532,8 @@ export default function ScrapReleaseCreatePage() {
               type="primary"
               htmlType="submit"
               loading={createState.isLoading}
-              disabled={!scrapStockId || !releaseQty || releaseQty <= 0}>
+              disabled={!scrapStockId || !releaseQty || releaseQty <= 0}
+            >
               Create Release
             </Button>
           </div>
