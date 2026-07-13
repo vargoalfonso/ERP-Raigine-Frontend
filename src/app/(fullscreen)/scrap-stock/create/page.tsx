@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Button,
   Card,
@@ -20,11 +20,9 @@ import { getApiErrorMessage } from "@/lib/api/error";
 import {
   useCreateScrapStockMutation,
   useGetScrapPackingOptionsQuery,
+  useGetScrapItemOptionsQuery,
+  type ScrapItemOption,
 } from "@/lib/api/scrap-stock/api";
-import {
-  useGetFinishedGoodUniqOptionsQuery,
-  type FinishedGoodUniqOption,
-} from "@/lib/api/finished-goods/api";
 import { useGetUomsQuery } from "@/lib/api/system-settings/api";
 
 const { Title } = Typography;
@@ -58,35 +56,42 @@ const scrapTypeOptions = [
 
 export default function CreateScrapStockPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [messageApi, contextHolder] = message.useMessage();
   const [form] = Form.useForm<ScrapStockCreateForm>();
   const apiEnabled = Boolean(apiBaseUrl);
 
-  // UNIQ diambil dari Inventory Finished Goods (barang jadi), bukan BOM (perencanaan).
-  const fgUniqQuery = useGetFinishedGoodUniqOptionsQuery(
-    { q: "", limit: 500 },
+  const [searchUniq, setSearchUniq] = useState("");
+
+  // UNIQ source-agnostic: items table mencakup FG / Raw Material / Indirect / subcon,
+  // karena scrap kini bisa berasal dari semua sumber inventory (bukan hanya finished goods).
+  const itemOptionsQuery = useGetScrapItemOptionsQuery(
+    { q: searchUniq, limit: 100 },
     { skip: !apiEnabled },
   );
-  const fgUniqItems = fgUniqQuery.data?.items ?? [];
-  const fgUniqByCode = useMemo(() => {
-    const map: Record<string, FinishedGoodUniqOption> = {};
-    for (const it of fgUniqItems) map[it.uniq_code] = it;
+  const itemOptions = itemOptionsQuery.data?.items ?? [];
+  const itemByCode = useMemo(() => {
+    const map: Record<string, ScrapItemOption> = {};
+    for (const it of itemOptions) map[it.uniq_code] = it;
     return map;
-  }, [fgUniqItems]);
+  }, [itemOptions]);
 
   // Packing number = daftar package finished dari scan produksi untuk UNIQ terpilih.
   const selectedUniq = Form.useWatch("uniq", form);
-  const packingQuery = useGetScrapPackingOptionsQuery(selectedUniq ?? "", {
-    skip: !apiEnabled || !selectedUniq,
+  const pureSelectedUniq = selectedUniq ? selectedUniq.split("___")[0] : "";
+  const packingQuery = useGetScrapPackingOptionsQuery(pureSelectedUniq, {
+    skip: !apiEnabled || !pureSelectedUniq,
   });
-  const packingOptions = useMemo(
-    () =>
-      (packingQuery.data ?? [])
-        .map((p) => String(p ?? "").trim())
-        .filter(Boolean)
-        .map((p) => ({ label: p, value: p })),
-    [packingQuery.data],
-  );
+  const prefillPacking = searchParams.get("packing_number") ?? "";
+  const packingOptions = useMemo(() => {
+    const base = (packingQuery.data ?? [])
+      .map((p) => String(p ?? "").trim())
+      .filter(Boolean);
+    if (prefillPacking && !base.includes(prefillPacking)) {
+      base.unshift(prefillPacking);
+    }
+    return base.map((p) => ({ label: p, value: p }));
+  }, [packingQuery.data, prefillPacking]);
 
   const { data: uomsData, isFetching: isFetchingUoms } = useGetUomsQuery(
     undefined,
@@ -107,30 +112,69 @@ export default function CreateScrapStockPage() {
       .filter(Boolean) as { label: string; value: string }[];
   }, [uomsData]);
 
-  const uniqOptions = useMemo(
-    () =>
-      fgUniqItems.map((it) => ({
-        label: it.part_name
-          ? `${it.uniq_code} - ${it.part_name}`
-          : it.uniq_code,
-        value: it.uniq_code,
-      })),
-    [fgUniqItems],
-  );
+  const uniqOptions = useMemo(() => {
+    const opts = itemOptions.map((it, i) => {
+      const uniqPart = it.part_name ? `${it.uniq_code} - ${it.part_name}` : it.uniq_code;
+      const sourcePart = it.material_type ? it.material_type : "Item Master";
+      return {
+        label: `${uniqPart} - ${sourcePart}`,
+        // Use composite value to prevent duplicate keys in Ant Design Select
+        value: `${it.uniq_code}___${sourcePart}___${i}`,
+      };
+    });
+    // Jika navigasi dari Product Return dengan uniq yang tak ada di daftar
+    const prefillUniq = (searchParams.get("uniq") ?? "").trim();
+    if (prefillUniq && !opts.some((o) => o.value.startsWith(`${prefillUniq}___`))) {
+      const partName = (searchParams.get("part_name") ?? "").trim();
+      opts.unshift({
+        label: partName ? `${prefillUniq} - ${partName}` : prefillUniq,
+        value: prefillUniq, // pure prefill value
+      });
+    }
+    return opts;
+  }, [itemOptions, searchParams]);
 
   const [createScrapStock, createState] = useCreateScrapStockMutation();
 
-const onSelectUniq = (uniq: string) => {
-  const fg = fgUniqByCode[uniq];
-  const orDash = (v?: string) => (v && v.trim() ? v : "-");
-  form.setFieldsValue({
-    uniq,
-    part_name: orDash(fg?.part_name),
-    part_number: orDash(fg?.part_number),
-    model: orDash(fg?.model),
-    packing_number: undefined,
-  });
-};
+  useEffect(() => {
+    const get = (k: string) => {
+      const v = searchParams.get(k);
+      return v && v.trim() ? v.trim() : undefined;
+    };
+    const uniq = get("uniq");
+    if (!uniq) return;
+
+    form.setFieldsValue({
+      uniq,
+      part_name: get("part_name") ?? "-",
+      part_number: get("part_number") ?? "-",
+      model: get("model") ?? "-",
+      packing_number: get("packing_number"),
+      scrap_type: get("scrap_type") ?? "Product Return Scrap",
+      quantity: get("quantity") ? Number(get("quantity")) : undefined,
+      uom: get("uom"),
+      date_received: get("date_received")
+        ? dayjs(get("date_received"))
+        : undefined,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  const onSelectUniq = (val: string) => {
+    const uniq = val.split("___")[0];
+    const it = itemByCode[uniq];
+    const orDash = (v?: string) => (v && v.trim() ? v : "-");
+    form.setFieldsValue({
+      uniq: val, // keep composite in form state so Select displays it properly
+      part_name: orDash(it?.part_name),
+      part_number: orDash(it?.part_number),
+      model: orDash(it?.model),
+      packing_number: undefined,
+    });
+    if (it?.uom && it.uom.trim()) {
+      form.setFieldsValue({ uom: it.uom });
+    }
+  };
 
   const handleSave = async () => {
     try {
@@ -143,8 +187,10 @@ const onSelectUniq = (uniq: string) => {
         return;
       }
 
+      const pureUniq = values.uniq.split("___")[0];
+
       await createScrapStock({
-        uniq: values.uniq,
+        uniq: pureUniq,
         part_number: values.part_number,
         part_name: values.part_name,
         model: values.model,
@@ -224,11 +270,12 @@ const onSelectUniq = (uniq: string) => {
                 rules={[{ required: true, message: "Select UNIQ" }]}
               >
                 <Select
-                  placeholder="Select UNIQ from Finished Goods"
+                  placeholder="Select UNIQ (Finished Goods / Raw Material / Indirect)"
                   options={uniqOptions}
-                  loading={apiEnabled && fgUniqQuery.isFetching}
+                  loading={apiEnabled && itemOptionsQuery.isFetching}
                   showSearch
-                  optionFilterProp="label"
+                  onSearch={setSearchUniq}
+                  filterOption={false}
                   onChange={onSelectUniq}
                 />
               </Form.Item>

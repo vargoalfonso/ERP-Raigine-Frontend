@@ -126,6 +126,15 @@ export type ScrapStockCreateRequest = {
   wo_number?: string | null;
 };
 
+export type ScrapItemOption = {
+  uniq_code: string;
+  part_number: string;
+  part_name: string;
+  model: string;
+  uom: string;
+  material_type: string;
+};
+
 export type ScrapStocksStats = {
   total_items: number;
   total_qty: number;
@@ -170,6 +179,18 @@ const toScrapStockRecord = (raw: unknown): ScrapStockRecord => {
     status: getString(record, ["status"]) ?? "",
     created_at: getString(record, ["created_at", "createdAt"]),
     updated_at: getString(record, ["updated_at", "updatedAt"]),
+  };
+};
+
+const toScrapItemOption = (raw: unknown): ScrapItemOption => {
+  const record = isRecord(raw) ? raw : {};
+  return {
+    uniq_code: getString(record, ["uniq_code", "uniqCode"]) ?? "",
+    part_number: getString(record, ["part_number", "partNumber"]) ?? "",
+    part_name: getString(record, ["part_name", "partName"]) ?? "",
+    model: getString(record, ["model"]) ?? "",
+    uom: getString(record, ["uom", "unit"]) ?? "",
+    material_type: getString(record, ["material_type", "materialType"]) ?? "",
   };
 };
 
@@ -276,6 +297,31 @@ export const scrapStockSlice = apiSlice.injectEndpoints({
       },
     }),
 
+    getScrapItemOptions: builder.query<
+      { items: ScrapItemOption[] },
+      { q?: string; limit?: number } | void
+    >({
+      query: (params) => ({
+        url: "/scrap-stocks/item-options",
+        method: "GET",
+        params: { q: params?.q ?? "", limit: params?.limit ?? 200 },
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => {
+        const obj =
+          normalizeObjectResponse<UnknownRecord>(response) ??
+          (isRecord(response) ? (response as UnknownRecord) : {});
+        const rawItems = Array.isArray((obj as UnknownRecord).items)
+          ? ((obj as UnknownRecord).items as unknown[])
+          : [];
+        return {
+          items: rawItems
+            .map(toScrapItemOption)
+            .filter((it) => it.uniq_code),
+        };
+      },
+    }),
+
     getScrapPackingOptions: builder.query<string[], string>({
       query: (uniq) => ({
         url: "/scrap-stocks/packing-options",
@@ -336,6 +382,7 @@ export const {
   useCreateScrapStockMutation,
   useGetScrapStockHistoryLogsQuery,
   useGetScrapPackingOptionsQuery,
+  useGetScrapItemOptionsQuery,
   useUpdateScrapStockMutation,
   useDeleteScrapStockMutation,
 } = scrapStockSlice;

@@ -134,7 +134,7 @@ export default function ProductReturnPage() {
     () => [
       // { id: "pending" as const, label: "Pending Validation" },
       { id: "qc" as const, label: "QC Validation" },
-      { id: "history" as const, label: "Return History" },
+      { id: "history" as const, label: "History Scrap Type" },
     ],
     [],
   );
@@ -508,7 +508,7 @@ export default function ProductReturnPage() {
     }
 
     if (tab === "history") {
-      return [...base.slice(0, 6)];
+      return [...base.slice(0, 9)];
     }
 
     // Pending Validation
@@ -738,6 +738,8 @@ export default function ProductReturnPage() {
             setIsSubmitOpen(false);
             message.success("Submitted to QC");
             listQuery.refetch();
+          } catch (error) {
+            message.error(getApiErrorMessage(error, "Failed to submit return"));
           } finally {
             setSubmitLoading(false);
           }

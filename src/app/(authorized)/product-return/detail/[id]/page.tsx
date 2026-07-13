@@ -266,6 +266,35 @@ export default function ProductReturnDetailPage() {
             </>
           ) : null}
 
+          {status === "APPROVED" ? (
+            <Button
+              type="primary"
+              className="!rounded-lg"
+              onClick={() => {
+                const params = new URLSearchParams({
+                  uniq: pickStr(record?.uniq),
+                  packing_number: pickStr(
+                    record?.packing_number,
+                    record?.dn_number,
+                  ),
+                  part_name: pickStr(record?.part_name),
+                  part_number: pickStr(record?.part_number),
+                  model: pickStr(record?.model),
+                  scrap_type: "Product Return Scrap",
+                  quantity: String(
+                    pickNum(record?.quantity_scrap, record?.scrap_quantity) ||
+                      pickNum(record?.quantity_rework),
+                  ),
+                  uom: pickStr(record?.uom, record?.unit),
+                  date_received: summary.date !== "-" ? summary.date : "",
+                });
+                router.push(`/scrap-stock/create?${params.toString()}`);
+              }}
+            >
+              + Create Scrap Database
+            </Button>
+          ) : null}
+
           <Button
             danger
             className="!rounded-lg"
@@ -316,7 +345,7 @@ export default function ProductReturnDetailPage() {
         </div>
       ) : null}
 
-      <Card className="!rounded-xl" bordered>
+      <Card className="!rounded-xl">
         <Table<LineRow>
           dataSource={rows}
           columns={columns}
