@@ -121,10 +121,11 @@ export const machinesApiSlice = apiSlice
   .enhanceEndpoints({ addTagTypes: [TAG] })
   .injectEndpoints({
     endpoints: (builder) => ({
-      getMachines: builder.query<MachineRecord[], void>({
-        query: () => ({
+      getMachines: builder.query<MachineRecord[], { page?: number; limit?: number } | void>({
+        query: (params) => ({
           url: "/machines",
           method: "GET",
+          params,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) =>

@@ -1364,10 +1364,10 @@ function MasterSupplierCreatePageContent() {
                                   ) => ({
                                     ...option,
                                     label: [
-                                      option.value,
                                       option.materialCode
-                                        ? `MG: ${option.materialCode}`
+                                        ? `${option.materialCode}`
                                         : "",
+                                      option.value,
                                       option.partName,
                                       option.productModel,
                                     ]
@@ -1610,10 +1610,10 @@ function MasterSupplierCreatePageContent() {
                                             .filter(Boolean)
                                             .join(" — ")
                                         : [
-                                            option.value,
                                             option.materialCode
-                                              ? `MG: ${option.materialCode}`
+                                              ? `${option.materialCode}`
                                               : "",
+                                            option.value,
                                             option.partName,
                                             option.productModel,
                                           ]

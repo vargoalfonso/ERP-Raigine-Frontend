@@ -72,7 +72,7 @@ function CreatePoProcurementPageContent() {
     return `/po-procurement?tab=${encodeURIComponent(tab)}`;
   }, [searchParams]);
 
-  const [period, setPeriod] = useState<Dayjs | null>(dayjs("2024-01-01"));
+ const [period, setPeriod] = useState<Dayjs | null>(dayjs(new Date()));
   const [totalIncoming, setTotalIncoming] = useState<number>(0);
   const [dnCreated, setDnCreated] = useState<number>(0);
   const [dnIncoming, setDnIncoming] = useState<number>(0);
