@@ -14,7 +14,6 @@ export type MachinePatternMovingType = "Fast Moving" | "Slow Moving" | "Normal";
 export type MachinePatternRecord = {
   id: string;
   uniq_code: string;
-  material_grade: string;
   machine_id: number;
   cycle_time: number;
   pattern_value: number;
@@ -30,7 +29,6 @@ export type MachinePatternRecord = {
 
 export type CreateMachinePatternRequest = {
   uniq_code: string;
-  material_grade: string;
   machine_id: number;
   cycle_time: number;
   pattern_value: number;
@@ -56,6 +54,51 @@ export type MachinePatternSummary = {
 export type MachinePatternListResponse = {
   items: MachinePatternRecord[];
   pagination: Pagination;
+};
+
+export type MachinePatternListParams = {
+  page?: number;
+  limit?: number;
+  uniq_code?: string;
+  moving_type?: MachinePatternMovingType | string;
+  status?: string;
+};
+
+export type CreateMachinePatternBulkRequest = {
+  items: CreateMachinePatternRequest[];
+};
+
+export type CalculateMachinePatternParams = {
+  cycle_time_sec: number;
+  prl_reference: number;
+  working_days: number;
+};
+
+export type MachinePatternCalculation = {
+  moving_type: MachinePatternMovingType | string;
+  pattern_value: number;
+  min_output: number;
+  daily_requirement: number;
+  cycle_time_min: number;
+};
+
+export type MachinePatternParams = {
+  fast_moving_threshold: number;
+  slow_cycle_minutes: number;
+  default_working_days: number;
+};
+
+export type UpdateMachinePatternParamsRequest = Partial<MachinePatternParams>;
+
+export type MachinePatternSafetyStockItem = {
+  uniq_code: string;
+  safety_stock: number;
+  calculation_type?: string;
+  constanta?: number;
+};
+
+export type MachinePatternSafetyStockResponse = {
+  items: MachinePatternSafetyStockItem[];
 };
 
 const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
@@ -96,7 +139,6 @@ const toMachinePatternRecord = (raw: unknown): MachinePatternRecord => {
   return {
     id: String(record.id ?? record.uuid ?? ""),
     uniq_code: getString(record, ["uniq_code", "uniqCode"]) ?? "",
-    material_grade: getString(record, ["material_grade", "materialGrade"]) ?? "",
     machine_id: getNumber(record, ["machine_id", "machineId"]) ?? 0,
     cycle_time: getNumber(record, ["cycle_time", "cycleTime"]) ?? 0,
     pattern_value: getNumber(record, ["pattern_value", "patternValue"]) ?? 0,
@@ -156,19 +198,70 @@ const normalizeSummary = (response: unknown): MachinePatternSummary => {
   };
 };
 
+const normalizeRecordList = (response: unknown): MachinePatternRecord[] => normalizeListResponse(response).items;
+
+const normalizeCalculation = (response: unknown): MachinePatternCalculation => {
+  const source = isRecord(response) && isRecord(response.data) ? response.data : isRecord(response) ? response : {};
+  return {
+    moving_type: (getString(source, ["moving_type", "movingType"]) ?? "Normal") as MachinePatternMovingType,
+    pattern_value: getNumber(source, ["pattern_value", "patternValue"]) ?? 0,
+    min_output: getNumber(source, ["min_output", "minOutput"]) ?? 0,
+    daily_requirement: getNumber(source, ["daily_requirement", "dailyRequirement"]) ?? 0,
+    cycle_time_min: getNumber(source, ["cycle_time_min", "cycleTimeMin"]) ?? 0,
+  };
+};
+
+const normalizeParams = (response: unknown): MachinePatternParams => {
+  const source = isRecord(response) && isRecord(response.data) ? response.data : isRecord(response) ? response : {};
+  return {
+    fast_moving_threshold: getNumber(source, ["fast_moving_threshold", "fastMovingThreshold"]) ?? 0,
+    slow_cycle_minutes: getNumber(source, ["slow_cycle_minutes", "slowCycleMinutes"]) ?? 0,
+    default_working_days: getNumber(source, ["default_working_days", "defaultWorkingDays"]) ?? 0,
+  };
+};
+
+const toSafetyStockItem = (raw: unknown): MachinePatternSafetyStockItem => {
+  const record = isRecord(raw) ? raw : {};
+  return {
+    uniq_code: getString(record, ["uniq_code", "uniqCode", "item_uniq_code"]) ?? "",
+    safety_stock: getNumber(record, ["safety_stock", "safetyStock"]) ?? 0,
+    calculation_type: getString(record, ["calculation_type", "calculationType"]),
+    constanta: getNumber(record, ["constanta"]),
+  };
+};
+
+const normalizeSafetyStock = (response: unknown): MachinePatternSafetyStockResponse => {
+  if (!isRecord(response)) return { items: [] };
+  const data = isRecord(response.data) ? response.data : response;
+  let rawItems: unknown[] = [];
+  if (Array.isArray(data)) {
+    rawItems = data;
+  } else if (Array.isArray((data as UnknownRecord).items)) {
+    rawItems = (data as UnknownRecord).items as unknown[];
+  } else if (Array.isArray((data as UnknownRecord).data)) {
+    rawItems = (data as UnknownRecord).data as unknown[];
+  } else if (Array.isArray((response as UnknownRecord).items)) {
+    rawItems = (response as UnknownRecord).items as unknown[];
+  }
+  return { items: rawItems.map(toSafetyStockItem) };
+};
+
 const TAG = "MachinePatterns" as const;
 
 export const machinePatternsApiSlice = apiSlice
   .enhanceEndpoints({ addTagTypes: [TAG] })
   .injectEndpoints({
     endpoints: (builder) => ({
-      getMachinePatterns: builder.query<MachinePatternListResponse, { page?: number; limit?: number } | void>({
+      getMachinePatterns: builder.query<MachinePatternListResponse, MachinePatternListParams | void>({
         query: (params) => ({
           url: "/machine-patterns",
           method: "GET",
           params: {
             page: params?.page ?? 1,
             limit: params?.limit ?? 20,
+            ...(params?.uniq_code ? { uniq_code: params.uniq_code } : {}),
+            ...(params?.moving_type ? { moving_type: params.moving_type } : {}),
+            ...(params?.status ? { status: params.status } : {}),
           },
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
@@ -233,15 +326,71 @@ export const machinePatternsApiSlice = apiSlice
           { type: TAG, id: String(id) },
         ],
       }),
+      createMachinePatternBulk: builder.mutation<MachinePatternRecord[], CreateMachinePatternBulkRequest>({
+        query: (body) => ({
+          url: "/machine-patterns/bulk",
+          method: "POST",
+          body,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => normalizeRecordList(response),
+        invalidatesTags: [
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: "SUMMARY" },
+        ],
+      }),
+      calculateMachinePattern: builder.query<MachinePatternCalculation, CalculateMachinePatternParams>({
+        query: ({ cycle_time_sec, prl_reference, working_days }) => ({
+          url: "/machine-patterns/calculate",
+          method: "GET",
+          params: { cycle_time_sec, prl_reference, working_days },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => normalizeCalculation(response),
+      }),
+      getMachinePatternParams: builder.query<MachinePatternParams, void>({
+        query: () => ({
+          url: "/machine-patterns/params",
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => normalizeParams(response),
+        providesTags: [{ type: TAG, id: "PARAMS" }],
+      }),
+      updateMachinePatternParams: builder.mutation<MachinePatternParams, UpdateMachinePatternParamsRequest>({
+        query: (body) => ({
+          url: "/machine-patterns/params",
+          method: "PUT",
+          body,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => normalizeParams(response),
+        invalidatesTags: [{ type: TAG, id: "PARAMS" }],
+      }),
+      getMachinePatternSafetyStock: builder.query<MachinePatternSafetyStockResponse, void>({
+        query: () => ({
+          url: "/machine-patterns/safety-stock",
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => normalizeSafetyStock(response),
+        providesTags: [{ type: TAG, id: "SAFETY_STOCK" }],
+      }),
     }),
+    overrideExisting: true,
   });
 
 export const {
   useGetMachinePatternsQuery,
   useGetMachinePatternByIdQuery,
   useGetMachinePatternSummaryQuery,
-  
   useCreateMachinePatternMutation,
+  useCreateMachinePatternBulkMutation,
   useUpdateMachinePatternMutation,
   useDeleteMachinePatternMutation,
+  useCalculateMachinePatternQuery,
+  useLazyCalculateMachinePatternQuery,
+  useGetMachinePatternParamsQuery,
+  useUpdateMachinePatternParamsMutation,
+  useGetMachinePatternSafetyStockQuery,
 } = machinePatternsApiSlice;

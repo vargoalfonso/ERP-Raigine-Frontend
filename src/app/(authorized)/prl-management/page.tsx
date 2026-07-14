@@ -448,6 +448,14 @@ export default function PrlManagementPage() {
     };
   }, [forecastDetail.record, selectedUniqRows]);
 
+  // All uniq rows that belong to the same PRL ID as the opened detail record.
+  // These share ONE prl_id but each keeps its own quantity.
+  const detailUniqRows = useMemo(() => {
+    if (!forecastDetail.record) return [] as ForecastRow[];
+    const pid = String(forecastDetail.record.prlId ?? "");
+    return resolvedForecastRows.filter((row) => String(row.prlId) === pid);
+  }, [forecastDetail.record, resolvedForecastRows]);
+
   const resolvedDemandGapRows = useMemo<DemandGapRow[]>(() => {
     if (!apiEnabled) return demandGapRows;
     const list = gapQuery.data;
@@ -996,6 +1004,46 @@ export default function PrlManagementPage() {
     },
   ];
 
+  const detailUniqColumns: ColumnsType<ForecastRow> = [
+    {
+      title: "UNIQ",
+      dataIndex: "uniq",
+      key: "uniq",
+      render: (v: string) => (
+        <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
+          {v}
+        </span>
+      ),
+    },
+    {
+      title: "Product Model",
+      dataIndex: "productModel",
+      key: "productModel",
+      render: (v: string) => <span className="text-sm text-gray-700">{v}</span>,
+    },
+    {
+      title: "Part Name",
+      dataIndex: "partName",
+      key: "partName",
+      render: (v: string) => <span className="text-sm text-gray-700">{v}</span>,
+    },
+    {
+      title: "Part Number",
+      dataIndex: "partNumber",
+      key: "partNumber",
+      render: (v: string) => <span className="text-sm text-gray-700">{v}</span>,
+    },
+    {
+      title: "Quantity",
+      dataIndex: "quantity",
+      key: "quantity",
+      align: "right",
+      render: (v: number) => (
+        <span className="text-sm font-semibold text-gray-900">{formatNumber(v)}</span>
+      ),
+    },
+  ];
+
   const demandGapColumns: ColumnsType<DemandGapRow> = [
     {
       title: "Uniq",
@@ -1386,7 +1434,7 @@ export default function PrlManagementPage() {
               </div>
               <div className="rounded-xl border border-gray-100 bg-white p-4">
                 <div className="text-xs text-gray-500">UNIQ</div>
-                <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.uniq_code ?? forecastDetail.record.uniq}</div>
+                <div className="mt-1 text-sm font-semibold text-gray-900">{detailUniqRows.length > 1 ? forecastDetail.record.uniq : (prlDetailQuery.data?.uniq_code ?? forecastDetail.record.uniq)}</div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-white p-4">
                 <div className="text-xs text-gray-500">Forecast Period</div>
@@ -1409,8 +1457,8 @@ export default function PrlManagementPage() {
                   <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.part_number ?? prlDetailQuery.data?.product_details?.part_number ?? forecastDetail.record.partNumber}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500">Quantity</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900">{formatNumber(Number(prlDetailQuery.data?.quantity ?? forecastDetail.record.quantity ?? 0))}</div>
+                  <div className="text-xs text-gray-500">{detailUniqRows.length > 1 ? "Quantity (Total)" : "Quantity"}</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">{formatNumber(detailUniqRows.length > 1 ? Number(forecastDetail.record.quantity ?? 0) : Number(prlDetailQuery.data?.quantity ?? forecastDetail.record.quantity ?? 0))}</div>
                 </div>
                 <div>
                   <div className="text-xs text-gray-500">Status</div>
@@ -1426,6 +1474,22 @@ export default function PrlManagementPage() {
                 </div>
               </div>
             </div>
+
+            {detailUniqRows.length > 1 ? (
+              <div className="rounded-xl border border-gray-100 bg-white p-4">
+                <div className="text-sm font-semibold text-gray-900 mb-1">Detail per UNIQ</div>
+                <div className="text-xs text-gray-500 mb-3">
+                  This PRL groups {detailUniqRows.length} UNIQ codes under one PRL ID. Each UNIQ keeps its own quantity.
+                </div>
+                <Table<ForecastRow>
+                  columns={detailUniqColumns}
+                  dataSource={detailUniqRows}
+                  rowKey="key"
+                  size="small"
+                  pagination={false}
+                />
+              </div>
+            ) : null}
           </div>
         ) : null}
       </Modal>

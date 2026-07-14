@@ -17,6 +17,7 @@ import {
   MdOutlineTrendingDown,
   MdOutlineWarningAmber,
 } from "react-icons/md";
+import * as XLSX from "xlsx";
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
   type StockInventoryType,
@@ -37,6 +38,7 @@ type StockOpnameRow = {
   status: "Completed" | "Pending Verification" | "In Progress";
   approval: "Approved" | "Waiting for Approval" | "-";
   costImpact: number;
+  uom?: string;
   itemName?: string;
   itemCode?: string;
   countedBy?: string;
@@ -86,6 +88,7 @@ function mapRecordToRow(record: StockOpnameSessionListRecord): StockOpnameRow {
     status: normalizeStatus(statusSource),
     approval: normalizeApproval(approvalSource),
     costImpact: record.cost_impact ?? 0,
+    uom: record.uom ?? undefined,
     itemName: record.session_number,
     itemCode: String(record.inventory_type ?? "-"),
     countedBy: record.submitted_by ?? record.created_by ?? undefined,
@@ -423,6 +426,15 @@ export default function StockOpnamePage() {
             width: 160,
           },
           {
+            title: "UOM",
+            dataIndex: "uom",
+            key: "uom",
+            width: 100,
+            render: (v: string | undefined) => (
+              <span className="text-sm font-medium text-slate-700">{v && v.trim() ? v : "-"}</span>
+            ),
+          },
+          {
             title: "Count Comparison",
             key: "comparison",
             render: (_, r) => (
@@ -505,6 +517,15 @@ export default function StockOpnamePage() {
         },
         { title: "Period", dataIndex: "period", key: "period", width: 110 },
         {
+          title: "UOM",
+          dataIndex: "uom",
+          key: "uom",
+          width: 100,
+          render: (v: string | undefined) => (
+            <span className="text-sm font-medium text-slate-700">{v && v.trim() ? v : "-"}</span>
+          ),
+        },
+        {
           title: "Location",
           dataIndex: "location",
           key: "location",
@@ -566,6 +587,47 @@ export default function StockOpnamePage() {
   );
 
   const itemsCounted = useMemo(() => filteredRows.length, [filteredRows.length]);
+
+  const handleExportExcel = () => {
+    if (!filteredRows.length) {
+      message.warning("Tidak ada data untuk diexport");
+      return;
+    }
+
+    const tabLabel = tabs.find((t) => t.id === tab)?.label ?? "Stock Opname";
+    const exportData = filteredRows.map((r) => {
+      const v = variance(r.systemQty, r.physicalQty);
+      return {
+        "Stock Opname ID": r.opnameId,
+        "Item Name": r.itemName ?? "-",
+        "Item Code": r.itemCode ?? "-",
+        Period: r.period,
+        UOM: r.uom && r.uom.trim() ? r.uom : "-",
+        Location: r.location,
+        "System Qty": r.systemQty,
+        "Physical Qty": r.physicalQty,
+        "Variance Qty": v.diff,
+        "Variance %": `${v.pct.toFixed(1)}%`,
+        Status: r.status,
+        Approval: r.approval,
+        Impact: r.impact ?? "-",
+        "Counted By": r.countedBy ?? "-",
+        "Counted At": r.countedAt ?? "-",
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    worksheet["!cols"] = [
+      { wch: 18 }, { wch: 22 }, { wch: 16 }, { wch: 10 }, { wch: 10 },
+      { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
+      { wch: 20 }, { wch: 20 }, { wch: 12 }, { wch: 18 }, { wch: 14 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, tabLabel.slice(0, 31));
+    const dateStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(workbook, `stock-opname-${tab}-${dateStr}.xlsx`);
+    message.success(`${exportData.length} baris berhasil diexport ke Excel`);
+  };
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
@@ -655,9 +717,8 @@ export default function StockOpnamePage() {
               ]}
               className="min-w-[180px]"
             />
-            <Button className="!rounded-lg" icon={<ExportOutlined />} onClick={() => message.info("Export")}
-            >
-              Export
+            <Button className="!rounded-lg" icon={<ExportOutlined />} onClick={handleExportExcel}>
+              Download Excel
             </Button>
           </div>
         </div>

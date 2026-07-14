@@ -377,6 +377,7 @@ export const machinePatternsApiSlice = apiSlice
         providesTags: [{ type: TAG, id: "SAFETY_STOCK" }],
       }),
     }),
+    overrideExisting: true,
   });
 
 export const {
