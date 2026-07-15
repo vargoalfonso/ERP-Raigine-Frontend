@@ -196,6 +196,12 @@ export type WorkOrderItemRecord = {
   process_flow_json?: unknown;
 };
 
+export type WorkOrderItemQRResponse = {
+  kanban_number: string;
+  qr_payload: string;
+  data_url: string;
+};
+
 export type WorkOrderRecord = {
   id: string;
   wo_number: string;
@@ -264,6 +270,15 @@ const toWorkOrderItem = (raw: unknown): WorkOrderItemRecord => {
     model: getString(record, ["model", "product_model", "assembly_code"]),
     qr_data_url: getString(record, ["qr_data_url", "qrDataUrl"]),
     process_flow_json: (record as UnknownRecord)["process_flow_json"],
+  };
+};
+
+const toWorkOrderItemQRResponse = (raw: unknown): WorkOrderItemQRResponse => {
+  const record = isRecord(raw) ? raw : {};
+  return {
+    kanban_number: getString(record, ["kanban_number", "kanbanNumber"]) ?? "",
+    qr_payload: getString(record, ["qr_payload", "qrPayload"]) ?? "",
+    data_url: getString(record, ["data_url", "dataUrl", "qr_data_url", "qrDataUrl"]) ?? "",
   };
 };
 
@@ -394,6 +409,17 @@ export const workOrdersApiSlice = apiSlice
           toWorkOrderRecord(normalizeObjectResponse<unknown>(response) ?? response),
         providesTags: (_result, _error, id) => [{ type: TAG, id }],
       }),
+      getWorkOrderItemQR: builder.query<WorkOrderItemQRResponse, string>({
+        query: (id) => ({
+          url: `/working-order/work-order-items/${encodeURIComponent(id)}/qr?refresh=1`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) =>
+          toWorkOrderItemQRResponse(
+            normalizeObjectResponse<unknown>(response) ?? response,
+          ),
+      }),
       createWorkOrder: builder.mutation<WorkOrderRecord, CreateWorkOrderRequest>({
         query: (body) => ({
           url: "/working-order/work-orders",
@@ -507,6 +533,7 @@ export const workOrdersApiSlice = apiSlice
 export const {
   useGetWorkOrdersQuery,
   useGetWorkOrderByIdQuery,
+  useGetWorkOrderItemQRQuery,
   useCreateWorkOrderMutation,
   useGenerateBulkWorkOrderMutation,
   useGetWorkOrdersSummaryQuery,
