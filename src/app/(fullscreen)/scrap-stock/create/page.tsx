@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Button,
@@ -54,7 +54,7 @@ const scrapTypeOptions = [
   { label: "Product Return Scrap", value: "Product Return Scrap" },
 ];
 
-export default function CreateScrapStockPage() {
+function CreateScrapStockContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [messageApi, contextHolder] = message.useMessage();
@@ -398,5 +398,13 @@ export default function CreateScrapStockPage() {
         </Form>
       </div>
     </div>
+  );
+}
+
+export default function CreateScrapStockPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center p-6 text-gray-500">Loading...</div>}>
+      <CreateScrapStockContent />
+    </Suspense>
   );
 }

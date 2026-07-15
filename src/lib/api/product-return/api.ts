@@ -290,6 +290,20 @@ export const productReturnSlice = apiSlice.injectEndpoints({
         { type: "ProductReturns", id: String(id) },
       ],
     }),
+
+    scanProductReturn: builder.mutation<
+      ApiResponse<any>,
+      string
+    >({
+      query: (qrCodeValue) => ({
+        url: "/action-ui/qc-return/scan",
+        method: "POST",
+        body: { qr_code_value: qrCodeValue },
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) =>
+        ok((parseObjectResponse<any>(response) ?? {}) as any, "Scanned"),
+    }),
   }),
 });
 
@@ -299,4 +313,5 @@ export const {
   useCreateProductReturnMutation,
   useUpdateProductReturnMutation,
   useDeleteProductReturnMutation,
+  useScanProductReturnMutation,
 } = productReturnSlice;
