@@ -140,6 +140,7 @@ export type StockOpnameSessionListRecord = {
   schedule_date?: string;
   counted_date?: string;
   remarks?: string;
+  uom?: string | null;
   total_entries?: number;
   total_variance_qty?: number;
   system_qty_total?: number;
@@ -215,6 +216,7 @@ const toSessionListRecord = (raw: unknown): StockOpnameSessionListRecord => {
     schedule_date: getString(r, ["schedule_date"]) ?? undefined,
     counted_date: getString(r, ["counted_date"]) ?? undefined,
     remarks: getString(r, ["remarks"]) ?? undefined,
+    uom: getString(r, ["uom", "unit", "unit_measurement"]) ?? null,
     total_entries: getNumber(r, ["total_entries"]) ?? undefined,
     total_variance_qty: getNumber(r, ["total_variance_qty"]) ?? undefined,
     system_qty_total: getNumber(r, ["system_qty_total"]) ?? undefined,

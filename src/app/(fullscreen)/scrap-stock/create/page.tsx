@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   Button,
   Card,
@@ -56,7 +56,20 @@ const scrapTypeOptions = [
 
 function CreateScrapStockContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const [searchParams, setSearchParams] = useState<URLSearchParams>(() => {
+    if (typeof window === "undefined") return new URLSearchParams("");
+    return new URLSearchParams(window.location.search);
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handler = () => setSearchParams(new URLSearchParams(window.location.search));
+    // update on mount
+    handler();
+    // listen to popstate/navigation changes
+    window.addEventListener("popstate", handler);
+    return () => window.removeEventListener("popstate", handler);
+  }, []);
   const [messageApi, contextHolder] = message.useMessage();
   const [form] = Form.useForm<ScrapStockCreateForm>();
   const apiEnabled = Boolean(apiBaseUrl);

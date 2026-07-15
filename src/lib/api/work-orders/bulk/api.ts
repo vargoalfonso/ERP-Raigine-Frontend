@@ -147,6 +147,12 @@ export type BulkWorkOrderRecord = {
   source_document_type?: string;
   notes?: string;
   total_items?: number;
+  customer_name?: string;
+  model?: string;
+  uniq_count?: number;
+  kanban_count?: number;
+  total_qty?: number;
+  source_uniqs?: string[];
 };
 
 export type BulkWorkOrderSummary = Record<string, unknown> & {
@@ -173,6 +179,10 @@ const toBulkDocumentItemOption = (raw: unknown): BulkDocumentItemOption => {
 
 const toBulkWorkOrderRecord = (raw: unknown): BulkWorkOrderRecord => {
   const r = isRecord(raw) ? raw : {};
+  const itemsRaw = Array.isArray((r as UnknownRecord).items) ? ((r as UnknownRecord).items as unknown[]) : [];
+  const items = itemsRaw.filter(isRecord) as UnknownRecord[];
+  const firstModel = items.map((it) => getString(it, ["model", "product_model"])).find(Boolean);
+  const totalQtyFromItems = items.reduce((sum, it) => sum + (getNumber(it, ["quantity", "qty"]) ?? 0), 0);
   return {
     id: getString(r, ["id", "uuid", "work_order_id", "wo_id"]) ?? getString(r, ["wo_number"]) ?? "",
     wo_number: getString(r, ["wo_number", "woNumber", "number"]) ?? "-",
@@ -184,7 +194,13 @@ const toBulkWorkOrderRecord = (raw: unknown): BulkWorkOrderRecord => {
     source_document_id: getString(r, ["source_document_id", "sourceDocumentId"]) ?? undefined,
     source_document_type: getString(r, ["source_document_type", "sourceDocumentType"]) ?? undefined,
     notes: getString(r, ["notes", "note"]) ?? undefined,
-    total_items: getNumber(r, ["total_items", "items_count"]) ?? undefined,
+    total_items: getNumber(r, ["total_items", "items_count", "item_count"]) ?? undefined,
+    customer_name: getString(r, ["customer_name", "customerName"]) ?? undefined,
+    model: getString(r, ["model", "product_model"]) ?? firstModel ?? undefined,
+    uniq_count: getNumber(r, ["uniq_count", "uniqCount"]) ?? undefined,
+    kanban_count: getNumber(r, ["kanban_count", "item_count", "itemCount"]) ?? undefined,
+    total_qty: getNumber(r, ["total_qty", "totalQty"]) ?? (totalQtyFromItems > 0 ? totalQtyFromItems : undefined),
+    source_uniqs: items.map((it) => getString(it, ["item_uniq_code", "uniq_code", "uniq"]) ?? "").filter(Boolean),
   };
 };
 

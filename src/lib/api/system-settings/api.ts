@@ -15,7 +15,8 @@ const ROUTES = {
   approvalWorkflow: "/approval-workflows",
   globalWorkingDays: "/global-parameters",
   kanban: "/kanban",
-  machinePattern: "/api/machine-parameters",
+  machinePattern: "/machine-patterns",
+  
   process: "/process",
   uom: "/unit-measurement",
   typeParameter: "/type-parameter",
@@ -319,6 +320,7 @@ export type MachinePatternRecord = {
   operating_hours: number;
   category?: string;
   status: StatusType;
+  material_grade?: string;
 };
 
 export type CreateProcessRequest = {

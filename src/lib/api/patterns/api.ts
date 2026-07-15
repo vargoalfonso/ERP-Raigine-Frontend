@@ -25,6 +25,7 @@ export type MachinePatternRecord = {
   created_by?: string;
   created_at?: string;
   updated_at?: string;
+  material_grade?: string;
 };
 
 export type CreateMachinePatternRequest = {
@@ -37,6 +38,7 @@ export type CreateMachinePatternRequest = {
   min_output: number;
   prl_reference: number;
   status: string;
+  material_grade?: string;
 };
 
 export type UpdateMachinePatternRequest = Partial<Omit<CreateMachinePatternRequest, "uniq_code" | "machine_id">> & {
@@ -377,6 +379,7 @@ export const machinePatternsApiSlice = apiSlice
         providesTags: [{ type: TAG, id: "SAFETY_STOCK" }],
       }),
     }),
+    overrideExisting: true,
   });
 
 export const {
