@@ -725,6 +725,15 @@ export default function AddForecastPage() {
                                 <th className="text-left px-3 py-2 font-semibold text-gray-600">
                                   UNIQ Code
                                 </th>
+                                <th className="text-left px-3 py-2 font-semibold text-gray-600">
+                                  Part Name
+                                </th>
+                                <th className="text-left px-3 py-2 font-semibold text-gray-600">
+                                  Part Number
+                                </th>
+                                <th className="text-left px-3 py-2 font-semibold text-gray-600">
+                                  Product Model
+                                </th>
                                 <th className="text-left px-3 py-2 font-semibold text-gray-600 w-52">
                                   Quantity
                                 </th>
@@ -737,6 +746,17 @@ export default function AddForecastPage() {
                                   className="border-t border-gray-100">
                                   <td className="px-3 py-2 font-medium text-gray-700">
                                     {code}
+                                  </td>
+                                  <td className="px-3 py-2 text-gray-600">
+                                    {bomIndex.partNameByUniq[code] || "-"}
+                                  </td>
+                                  <td className="px-3 py-2 text-gray-600">
+                                    {bomIndex.partNumberByUniq[code] || "-"}
+                                  </td>
+                                  <td className="px-3 py-2 text-gray-600">
+                                    {bomIndex.modelByUniq[code] ||
+                                      bomIndex.assemblyCodeByUniq[code] ||
+                                      "-"}
                                   </td>
                                   <td className="px-3 py-2">
                                     <Input
