@@ -320,6 +320,7 @@ export type MachinePatternRecord = {
   operating_hours: number;
   category?: string;
   status: StatusType;
+  material_grade?: string;
 };
 
 export type CreateProcessRequest = {
