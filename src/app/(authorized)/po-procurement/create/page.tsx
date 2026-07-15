@@ -29,10 +29,11 @@ type PoItemRow = {
   weightKg: number;
 };
 
-type PoStageGroup = {
+type PoSupplierGroup = {
+  key: string;
   stage: 1 | 2;
+  supplier: string;
   label: string;
-  pct: number;
   items: PoItemRow[];
   totalQty: number;
 };
@@ -79,7 +80,8 @@ function CreatePoProcurementPageContent() {
 
   const [selectedBudgetIds, setSelectedBudgetIds] = useState<number[]>([]);
   const [externalSystem, setExternalSystem] = useState<string>("zahir");
-  const [externalPoNumber, setExternalPoNumber] = useState<string>("");
+  // External PO (Zahir) number per PO-stage + supplier group, keyed by group key.
+  const [externalPoNumbers, setExternalPoNumbers] = useState<Record<string, string>>({});
   const [generateMode, setGenerateMode] = useState<string>("both_stages");
 
   const poBudgetQuery = useGetPoBudgetListQuery(
@@ -134,14 +136,15 @@ function CreatePoProcurementPageContent() {
   );
 
   // Split every selected budget entry's detail_jsonb children into PO1 / PO2
-  // preview rows (childQty * pct / 100), iterating all parents and children.
-  const poStageGroups: PoStageGroup[] = useMemo(() => {
+  // preview rows (childQty * pct / 100), then break each stage down per supplier
+  // so mixed suppliers render as separate "PO n (Supplier)" groups.
+  const poSupplierGroups: PoSupplierGroup[] = useMemo(() => {
     const selectedRows = budgetRowsForPeriod.filter((row) =>
       selectedBudgetIds.includes(Number(row.id ?? row.key)),
     );
     if (!selectedRows.length) return [];
 
-    const buildStage = (stage: 1 | 2): PoStageGroup => {
+    const buildStageItems = (stage: 1 | 2): PoItemRow[] => {
       const items: PoItemRow[] = [];
       let seq = 0;
 
@@ -180,13 +183,7 @@ function CreatePoProcurementPageContent() {
         }
       }
 
-      return {
-        stage,
-        label: `PO ${stage}`,
-        pct: 0,
-        items,
-        totalQty: items.reduce((sum, r) => sum + r.qty, 0),
-      };
+      return items;
     };
 
     const stages: (1 | 2)[] =
@@ -196,7 +193,40 @@ function CreatePoProcurementPageContent() {
           ? [2]
           : [1, 2];
 
-    return stages.map(buildStage).filter((g) => g.items.length > 0);
+    // Build per-stage items once, then order by supplier first and stage second
+    // so each supplier's PO1/PO2 stay together:
+    // PO1 (Supplier 1), PO2 (Supplier 1), PO1 (Supplier 2), PO2 (Supplier 2)...
+    const itemsByStage = new Map<1 | 2, Map<string, PoItemRow[]>>();
+    const supplierOrder: string[] = [];
+    for (const stage of stages) {
+      const bySupplier = new Map<string, PoItemRow[]>();
+      for (const item of buildStageItems(stage)) {
+        const supplier = item.supplier || "-";
+        if (!bySupplier.has(supplier)) bySupplier.set(supplier, []);
+        bySupplier.get(supplier)!.push(item);
+        // Track first-seen supplier order across all stages.
+        if (!supplierOrder.includes(supplier)) supplierOrder.push(supplier);
+      }
+      itemsByStage.set(stage, bySupplier);
+    }
+
+    const groups: PoSupplierGroup[] = [];
+    for (const supplier of supplierOrder) {
+      for (const stage of stages) {
+        const items = itemsByStage.get(stage)?.get(supplier) ?? [];
+        if (!items.length) continue;
+        groups.push({
+          key: `s${stage}::${supplier}`,
+          stage,
+          supplier,
+          label: `PO ${stage} (${supplier})`,
+          items,
+          totalQty: items.reduce((sum, r) => sum + r.qty, 0),
+        });
+      }
+    }
+
+    return groups;
   }, [budgetRowsForPeriod, selectedBudgetIds, generateMode]);
 
   const columns: ColumnsType<PoItemRow> = [
@@ -257,12 +287,18 @@ function CreatePoProcurementPageContent() {
     }
 
     try {
+      const combinedExternalPoNumber =
+        Object.values(externalPoNumbers)
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .join(" | ") || undefined;
+
       await generatePo({
         po_type: poType,
         period: period.format("MMMM YYYY"),
         po_budget_entry_ids: selectedBudgetIds,
         external_system: externalSystem,
-        external_po_number: externalPoNumber || undefined,
+        external_po_number: combinedExternalPoNumber,
         generate_mode: generateMode,
       }).unwrap();
 
@@ -411,30 +447,40 @@ function CreatePoProcurementPageContent() {
                 className="w-full"
               />
             </div>
-            <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">External PO Number</div>
-              <Input
-                value={externalPoNumber}
-                onChange={(event) => setExternalPoNumber(event.target.value)}
-                placeholder="e.g. ZH-PO-000123"
-                className="!rounded-lg"
-              />
-            </div>
           </div>
 
           <div className="mt-6 space-y-6">
-            {poStageGroups.length === 0 ? (
+            {poSupplierGroups.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
                 Select PO Budget entries above to preview the PO1 / PO2 child split.
               </div>
             ) : (
-              poStageGroups.map((g) => (
-                <div key={g.stage}>
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-semibold text-gray-900">{g.label}</div>
-                    <div className="text-xs text-gray-500">
-                      {g.items.length} material{g.items.length !== 1 ? "s" : ""} · total qty{" "}
-                      <span className="font-semibold text-gray-800">{formatNumber(g.totalQty)}</span>
+              poSupplierGroups.map((g) => (
+                <div key={g.key}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="text-sm font-semibold text-gray-900">{g.label}</div>
+                      <div className="text-xs text-gray-500">
+                        {g.items.length} material{g.items.length !== 1 ? "s" : ""} · total qty{" "}
+                        <span className="font-semibold text-gray-800">{formatNumber(g.totalQty)}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-xs font-semibold text-gray-700 whitespace-nowrap">
+                        External PO Number (Zahir)
+                      </div>
+                      <Input
+                        value={externalPoNumbers[g.key] ?? ""}
+                        onChange={(event) =>
+                          setExternalPoNumbers((prev) => ({
+                            ...prev,
+                            [g.key]: event.target.value,
+                          }))
+                        }
+                        placeholder="e.g. ZH-PO-000123"
+                        className="!rounded-lg"
+                        style={{ width: 220 }}
+                      />
                     </div>
                   </div>
 
