@@ -23,12 +23,14 @@ import {
   FilterOutlined,
   PlusOutlined,
   ToolOutlined,
+  LoadingOutlined,
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import {
   useCreateProductReturnMutation,
   useGetProductReturnListQuery,
   useUpdateProductReturnMutation,
+  useScanProductReturnMutation,
 } from "@/lib/api/product-return/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
@@ -59,7 +61,12 @@ type ProductReturnRow = {
 };
 
 type SubmitFormValues = {
+  kanban?: string;
   uniqId: string;
+  partNumber?: string;
+  partName?: string;
+  model?: string;
+  packingNumber?: string;
   dnNumber: string;
   scrapQty: number;
   reworkQty: number;
@@ -107,6 +114,7 @@ export default function ProductReturnPage() {
   const [createProductReturn] = useCreateProductReturnMutation();
   const [updateProductReturn, { isLoading: decisionLoading }] =
     useUpdateProductReturnMutation();
+  const [scanProductReturn, { isLoading: scanLoading }] = useScanProductReturnMutation();
 
   const listQuery = useGetProductReturnListQuery(
     { page, limit },
@@ -286,7 +294,7 @@ export default function ProductReturnPage() {
   }, [rows, historyStatusFilter]);
 
   const tableRows = useMemo(() => {
-    if (tab === "pending") return pendingRows;
+    // if (tab === "pending") return pendingRows;
     if (tab === "qc") return qcRows;
     return historyRows;
   }, [historyRows, pendingRows, qcRows, tab]);
@@ -734,7 +742,7 @@ export default function ProductReturnPage() {
               uom: values.uom || undefined,
             }).unwrap();
 
-            setTab("pending");
+            setTab("qc");
             setIsSubmitOpen(false);
             message.success("Submitted to QC");
             listQuery.refetch();
@@ -756,41 +764,174 @@ export default function ProductReturnPage() {
       >
         <Form form={form} layout="vertical" preserve={false}>
           <div className="grid grid-cols-2 gap-3">
+            <Form.Item label="Kanban / Packing List" name="kanban">
+              <Input
+                placeholder="Scan or input Kanban / DN"
+                disabled={scanLoading}
+                suffix={scanLoading ? <LoadingOutlined className="text-blue-500" /> : null}
+                onPressEnter={async (e) => {
+                  e.preventDefault();
+                  const val = (e.target as HTMLInputElement).value;
+                  if (!val.trim()) return;
+                  try {
+                    const res = await scanProductReturn(val.trim()).unwrap();
+                    const d = res.data;
+                    if (!d) return;
+
+                    const partNo = d.part_number || "";
+                    if (!partNo) {
+                      message.warning("Kanban/DN data not found!");
+                      form.setFieldsValue({
+                        uniqId: undefined,
+                        partNumber: undefined,
+                        partName: undefined,
+                        model: undefined,
+                        packingNumber: undefined,
+                        dnNumber: undefined,
+                      });
+                      return;
+                    }
+
+                    const uniq = d.uniq_id || d.uniq || "";
+                    const partNm = d.part_name || "";
+                    const mod = d.model || "";
+                    const packNo = d.packing_number || d.kanban_packing_list || val.trim();
+                    const sType = d.scrap_type || "Product Return";
+                    const uom = d.selected_unit || d.unit_measurement || d.unit || "KG";
+                    const dnNo = d.dn_number || packNo || "-";
+
+                    const uomOptions = ["KG", "G", "PCS", "BOX"];
+                    const matchedUom = uomOptions.find(o => o.toLowerCase() === uom.toLowerCase()) || "KG";
+
+                    form.setFieldsValue({
+                      uniqId: uniq,
+                      partNumber: partNo,
+                      partName: partNm,
+                      model: mod,
+                      packingNumber: packNo,
+                      dnNumber: dnNo,
+                      scrapType: sType,
+                      uom: matchedUom,
+                    });
+                  } catch (err) {
+                    message.error(getApiErrorMessage(err, "Scan failed"));
+                  }
+                }}
+                onBlur={async (e) => {
+                  const val = e.target.value;
+                  if (!val.trim()) return;
+                  try {
+                    const res = await scanProductReturn(val.trim()).unwrap();
+                    const d = res.data;
+                    if (!d) return;
+
+                    const partNo = d.part_number || "";
+                    if (!partNo) {
+                      message.warning("Kanban/DN data not found!");
+                      form.setFieldsValue({
+                        uniqId: undefined,
+                        partNumber: undefined,
+                        partName: undefined,
+                        model: undefined,
+                        packingNumber: undefined,
+                        dnNumber: undefined,
+                      });
+                      return;
+                    }
+
+                    const uniq = d.uniq_id || d.uniq || "";
+                    const partNm = d.part_name || "";
+                    const mod = d.model || "";
+                    const packNo = d.packing_number || d.kanban_packing_list || val.trim();
+                    const sType = d.scrap_type || "Product Return";
+                    const uom = d.selected_unit || d.unit_measurement || d.unit || "KG";
+                    const dnNo = d.dn_number || "-";
+
+                    const uomOptions = ["KG", "G", "PCS", "BOX"];
+                    const matchedUom = uomOptions.find(o => o.toLowerCase() === uom.toLowerCase()) || "KG";
+
+                    form.setFieldsValue({
+                      uniqId: uniq,
+                      partNumber: partNo,
+                      partName: partNm,
+                      model: mod,
+                      packingNumber: packNo,
+                      dnNumber: dnNo,
+                      scrapType: sType,
+                      uom: matchedUom,
+                    });
+                  } catch (err) {
+                    // silently fail on blur to not spam errors if they just tabbed out of an invalid input, 
+                    // or maybe just log it.
+                    console.error("Scan on blur failed", err);
+                  }
+                }}
+              />
+            </Form.Item>
+
             <Form.Item
               label="Uniq ID"
               name="uniqId"
-              rules={[{ required: true, message: "Select uniq" }]}
+              rules={[{ required: true, message: "Input uniq" }]}
             >
-              <Select
-                placeholder="Choose uniq"
-                allowClear
-                options={uniqCatalog.map((u) => ({
-                  label: u.uniqId,
-                  value: u.uniqId,
-                }))}
-                showSearch
-                filterOption={(input, option) =>
-                  String(option?.label ?? "")
-                    .toLowerCase()
-                    .includes(input.toLowerCase())
-                }
-              />
+              <Input placeholder="Input or auto-filled uniq" />
+            </Form.Item>
+
+            <Form.Item label="Part Number" name="partNumber">
+              <Input readOnly placeholder="Auto-filled by uniq chosen" className="bg-gray-50" />
+            </Form.Item>
+
+            <Form.Item label="Part Name" name="partName">
+              <Input readOnly placeholder="Auto-filled by uniq chosen" className="bg-gray-50" />
+            </Form.Item>
+
+            <Form.Item label="Model" name="model">
+              <Input readOnly placeholder="Auto-filled by uniq chosen" className="bg-gray-50" />
+            </Form.Item>
+
+            <Form.Item label="Packing Number" name="packingNumber">
+              <Input readOnly placeholder="Auto-filled by uniq chosen" className="bg-gray-50" />
             </Form.Item>
 
             <Form.Item
               label="DN Number"
               name="dnNumber"
-              rules={[{ required: true, message: "Input DN number" }]}
             >
-              <Select
-                placeholder="Input DN number"
-                options={[
-                  { label: "DN-0001", value: "DN-0001" },
-                  { label: "DN-0002", value: "DN-0002" },
-                ]}
-              />
+              <Input placeholder="Auto-filled or -" className="bg-gray-50" />
             </Form.Item>
           </div>
+
+          <div className="mt-4 mb-2 flex items-center gap-2 text-sm font-bold text-gray-800">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-gray-500"
+            >
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            Return Details
+          </div>
+
+          <Form.Item label="Date Received" name="dateReceived">
+            <Input type="date" />
+          </Form.Item>
+
+          <Form.Item label="Scrap Type" name="scrapType">
+            <Select
+              options={[
+                { label: "Product Return", value: "Product Return" },
+                { label: "Customer Return", value: "Customer Return" },
+              ]}
+            />
+          </Form.Item>
 
           <Form.Item
             label="Quantity of Scrap"
@@ -804,6 +945,27 @@ export default function ProductReturnPage() {
             />
           </Form.Item>
 
+          <div className="grid grid-cols-2 gap-3">
+            <Form.Item label="Weight" name="weight">
+              <InputNumber
+                min={0}
+                step={0.1}
+                className="!w-full"
+                placeholder="Enter weight"
+              />
+            </Form.Item>
+            <Form.Item label="Unit" name="uom">
+              <Select
+                options={[
+                  { label: "KG", value: "KG" },
+                  { label: "G", value: "G" },
+                  { label: "PCS", value: "PCS" },
+                  { label: "BOX", value: "BOX" },
+                ]}
+              />
+            </Form.Item>
+          </div>
+
           <Form.Item
             label="Quantity of Rework"
             name="reworkQty"
@@ -815,33 +977,6 @@ export default function ProductReturnPage() {
               placeholder="Enter items need to rework"
             />
           </Form.Item>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Form.Item label="Date Received" name="dateReceived">
-              <Input type="date" />
-            </Form.Item>
-            <Form.Item label="Scrap Type" name="scrapType">
-              <Input readOnly />
-            </Form.Item>
-            <Form.Item label="Weight" name="weight">
-              <InputNumber
-                min={0}
-                step={0.1}
-                className="!w-full"
-                placeholder="Enter weight"
-              />
-            </Form.Item>
-            <Form.Item label="UOM" name="uom">
-              <Select
-                options={[
-                  { label: "KG", value: "KG" },
-                  { label: "G", value: "G" },
-                  { label: "PCS", value: "PCS" },
-                  { label: "BOX", value: "BOX" },
-                ]}
-              />
-            </Form.Item>
-          </div>
 
           <Alert
             type="warning"
