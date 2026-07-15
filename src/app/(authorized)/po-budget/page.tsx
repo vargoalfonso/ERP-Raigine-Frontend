@@ -2836,7 +2836,7 @@ function resolveSupplierName(
         key: "salesPlan",
         align: "right",
         render: (v: number) => (
-          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+          <span className="text-sm text-gray-700">{formatNumber(Math.ceil(Number(v) || 0))}</span>
         ),
       },
       {
@@ -2845,7 +2845,7 @@ function resolveSupplierName(
         key: "pr",
         align: "right",
         render: (v: number) => (
-          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+          <span className="text-sm text-gray-700">{formatNumber(Math.ceil(Number(v) || 0))}</span>
         ),
       },
       {
@@ -2854,7 +2854,7 @@ function resolveSupplierName(
         key: "po1",
         align: "right",
         render: (v: number) => (
-          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+          <span className="text-sm text-gray-700">{formatNumber(Math.ceil(Number(v) || 0))}</span>
         ),
       },
       {
@@ -2863,7 +2863,7 @@ function resolveSupplierName(
         key: "po2",
         align: "right",
         render: (v: number) => (
-          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+          <span className="text-sm text-gray-700">{formatNumber(Math.ceil(Number(v) || 0))}</span>
         ),
       },
       {
@@ -2872,7 +2872,7 @@ function resolveSupplierName(
         key: "prl",
         align: "right",
         render: (v: number) => (
-          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+          <span className="text-sm text-gray-700">{formatNumber(Math.ceil(Number(v) || 0))}</span>
         ),
       },
       {
@@ -2881,7 +2881,7 @@ function resolveSupplierName(
         key: "totalPo",
         align: "right",
         render: (v: number) => (
-          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+          <span className="text-sm text-gray-700">{formatNumber(Math.ceil(Number(v) || 0))}</span>
         ),
       },
       {
@@ -2891,7 +2891,7 @@ function resolveSupplierName(
         align: "right",
         render: (v: number) => (
           <span className="text-sm font-semibold text-orange-600">
-            {formatNumber(v)}
+            {formatNumber(Math.ceil(Number(v) || 0))}
           </span>
         ),
       },
@@ -4380,10 +4380,12 @@ function resolveSupplierName(
                 <div className="text-xs text-gray-500">PO1 Amount</div>
                 <div className="mt-1 text-2xl font-semibold text-gray-900">
                   {formatNumber(
-                    Number(
-                      groupedDetail?.calculation_results?.po1_amount ??
-                        detailState.row?.po1 ??
-                        0,
+                    Math.ceil(
+                      Number(
+                        groupedDetail?.calculation_results?.po1_amount ??
+                          detailState.row?.po1 ??
+                          0,
+                      ),
                     ),
                   )}
                 </div>
@@ -4393,10 +4395,12 @@ function resolveSupplierName(
                 <div className="text-xs text-gray-500">PO2 Amount</div>
                 <div className="mt-1 text-2xl font-semibold text-gray-900">
                   {formatNumber(
-                    Number(
-                      groupedDetail?.calculation_results?.po2_amount ??
-                        detailState.row?.po2 ??
-                        0,
+                    Math.ceil(
+                      Number(
+                        groupedDetail?.calculation_results?.po2_amount ??
+                          detailState.row?.po2 ??
+                          0,
+                      ),
                     ),
                   )}
                 </div>
@@ -4406,10 +4410,12 @@ function resolveSupplierName(
                 <div className="text-xs text-gray-500">Total PO</div>
                 <div className="mt-1 text-2xl font-semibold text-gray-900">
                   {formatNumber(
-                    Number(
-                      groupedDetail?.calculation_results?.total_po ??
-                        detailState.row?.totalPo ??
-                        0,
+                    Math.ceil(
+                      Number(
+                        groupedDetail?.calculation_results?.total_po ??
+                          detailState.row?.totalPo ??
+                          0,
+                      ),
                     ),
                   )}
                 </div>
@@ -4419,10 +4425,12 @@ function resolveSupplierName(
                 <div className="text-xs text-gray-500">APO - PRL</div>
                 <div className="mt-1 text-2xl font-semibold text-amber-600">
                   {formatNumber(
-                    Number(
-                      groupedDetail?.calculation_results?.apo_prl_abs ??
-                        detailState.row?.apoPrl ??
-                        0,
+                    Math.ceil(
+                      Number(
+                        groupedDetail?.calculation_results?.apo_prl_abs ??
+                          detailState.row?.apoPrl ??
+                          0,
+                      ),
                     ),
                   )}
                 </div>

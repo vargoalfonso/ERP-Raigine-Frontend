@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   Form,
@@ -23,17 +23,21 @@ import {
   SearchOutlined,
 } from "@ant-design/icons";
 import { MdSettings, MdTrendingUp } from "react-icons/md";
-import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { useGetBomTreeQuery, useLazyGetBomFullByIdQuery } from "@/lib/api/bom/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
+import { useGetGlobalWorkingDaysQuery } from "@/lib/api/system-settings/api";
 import {
   useCreateMachinePatternMutation,
   useDeleteMachinePatternMutation,
   useGetMachinePatternsQuery,
   useGetMachinePatternSummaryQuery,
+  useLazyCalculateMachinePatternQuery,
   useUpdateMachinePatternMutation,
 } from "@/lib/api/machine-patterns/api";
 import { useGetMachineParametersQuery } from "@/lib/api/machine-parameters/api";
+import { useGetMachinesQuery } from "@/lib/api/machines/api";
+import { useListPrlsQuery } from "@/lib/api/prl/api";
 
 type MovementType = "Fast Moving" | "Slow Moving" | "Normal";
 type StatusType = "Active" | "Inactive";
@@ -63,6 +67,23 @@ type PatternFormValues = {
   minOutput: number;
   prlReference: number;
   status: StatusType;
+};
+
+type AddPatternFormValues = {
+  uniqCode: string;
+  machineId: number;
+  period: string;
+  cycleTime: number;
+};
+
+type AutoCalcResult = {
+  prlReference: number;
+  workingDays: number;
+  dailyRequirement: number;
+  cycleTimeMin: number;
+  patternValue: number;
+  minOutput: number;
+  movingType: MovementType;
 };
 
 const formatNumber = (value: number) => new Intl.NumberFormat("en-US").format(value);
@@ -125,19 +146,31 @@ export default function MachinePatternPage() {
   const [viewOpen, setViewOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [activeRow, setActiveRow] = useState<MachinePatternRow | null>(null);
+  const [autoCalc, setAutoCalc] = useState<AutoCalcResult | null>(null);
 
-  const [addForm] = Form.useForm<PatternFormValues>();
+  const [addForm] = Form.useForm<AddPatternFormValues>();
   const [editForm] = Form.useForm<PatternFormValues>();
 
   const { data: patternList } = useGetMachinePatternsQuery({ page: 1, limit: 20 }, { skip: !apiEnabled });
+  // debug: log raw response to help trace empty-table issue
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.debug("patternList", patternList);
+  }, [patternList]);
+
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.debug("apiEnabled", apiEnabled, "apiBaseUrl", apiBaseUrl);
+  }, [apiEnabled]);
   const { data: summary } = useGetMachinePatternSummaryQuery(undefined, { skip: !apiEnabled });
-  const { data: machineParameters } = useGetMachineParametersQuery({ page: 1, limit: 100 }, { skip: !apiEnabled });
+  const { data: machineParameters } = useGetMachineParametersQuery({ page: 1, limit: 1000 }, { skip: !apiEnabled });
+  const { data: apiMachines = [] } = useGetMachinesQuery(undefined, { skip: !apiEnabled });
   const { data: bomTreeData } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
   const [createMachinePattern, createState] = useCreateMachinePatternMutation();
   const [updateMachinePattern, updateState] = useUpdateMachinePatternMutation();
   const [deleteMachinePattern, deleteState] = useDeleteMachinePatternMutation();
 
-  const machines = machineParameters?.items ?? [];
+  const machines = (apiMachines && apiMachines.length > 0) ? apiMachines : (machineParameters?.items ?? []);
 
   const machineNameById = useMemo(() => {
     const result = new Map<number, string>();
@@ -179,11 +212,166 @@ export default function MachinePatternPage() {
       }
     };
 
-    const nodes = (bomTreeData as any)?.data;
+    const root = (bomTreeData as any)?.data;
+    const nodes = Array.isArray(root)
+      ? root
+      : Array.isArray(root?.items)
+        ? root.items
+        : Array.isArray(root?.data)
+          ? root.data
+          : [];
     if (Array.isArray(nodes)) walk(nodes);
 
     return options.sort((a, b) => a.value.localeCompare(b.value));
   }, [bomTreeData]);
+
+  const bomMetaByUniq = useMemo(() => {
+    const map = new Map<string, { bomId: string; cycleTime: number }>();
+    const walk = (nodes: any[]) => {
+      for (const node of nodes) {
+        const uniqCode = String(node?.uniq_code ?? node?.uniq ?? "").trim();
+        const bomId = String(node?.bom_id ?? node?.id ?? node?.uuid ?? "").trim();
+        let cycle = 0;
+        const routes = node?.process_routes;
+        if (Array.isArray(routes)) {
+          for (const route of routes) {
+            const value = Number(route?.cycle_time_sec ?? 0);
+            if (Number.isFinite(value) && value > 0) {
+              cycle = value;
+              break;
+            }
+          }
+        }
+        if (uniqCode && !map.has(uniqCode)) map.set(uniqCode, { bomId, cycleTime: cycle });
+        if (Array.isArray(node?.children)) walk(node.children);
+      }
+    };
+    const root = (bomTreeData as any)?.data;
+    const nodes = Array.isArray(root) ? root : Array.isArray(root?.items) ? root.items : [];
+    if (Array.isArray(nodes)) walk(nodes);
+    return map;
+  }, [bomTreeData]);
+
+  const { data: prlData } = useListPrlsQuery({ page: 1, limit: 1000 }, { skip: !apiEnabled });
+  const [triggerBomFull] = useLazyGetBomFullByIdQuery();
+  const [triggerCalc] = useLazyCalculateMachinePatternQuery();
+
+  const watchUniq = Form.useWatch("uniqCode", addForm);
+  const watchPeriod = Form.useWatch("period", addForm);
+  const watchCycle = Form.useWatch("cycleTime", addForm);
+  const periodLabel = useMemo(() => String(watchPeriod ?? "").trim(), [watchPeriod]);
+  const { data: globalWorkingDaysData } = useGetGlobalWorkingDaysQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const settingsWorkingDays = useMemo(() => {
+    const records = globalWorkingDaysData ?? [];
+    if (!records.length) return 0;
+    const target = periodLabel.trim().toLowerCase();
+    const byPeriod = target
+      ? records.find((r) => String(r.period ?? "").trim().toLowerCase() === target)
+      : undefined;
+    const active = records.find((r) => String(r.status ?? "").toLowerCase() === "active");
+    const chosen = byPeriod ?? active ?? records[0];
+    return Number(chosen?.working_days ?? 0);
+  }, [globalWorkingDaysData, periodLabel]);
+const effectiveWorkingDays = settingsWorkingDays > 0 ? settingsWorkingDays : paramWorkingDays;
+  const prlReference = useMemo(() => {
+    if (!watchUniq) return 0;
+    const items = prlData?.items ?? [];
+    const period = String(watchPeriod ?? "").trim().toLowerCase();
+    const matches = items.filter((item) => {
+      const uniq = String(item.uniq_code ?? item.item_uniq_code ?? "").trim();
+      if (uniq !== watchUniq) return false;
+      if (!period) return true;
+      const itemPeriod = String(item.forecast_period ?? item.period ?? "").trim().toLowerCase();
+      return itemPeriod === period;
+    });
+    return matches.reduce((sum, item) => sum + Number(item.quantity ?? 0), 0);
+  }, [prlData?.items, watchUniq, watchPeriod]);
+
+  useEffect(() => {
+    if (!addOpen || !watchUniq) return;
+    const meta = bomMetaByUniq.get(watchUniq);
+    if (meta?.cycleTime && meta.cycleTime > 0) {
+      addForm.setFieldsValue({ cycleTime: meta.cycleTime });
+      return;
+    }
+    if (apiEnabled && meta?.bomId) {
+      triggerBomFull(meta.bomId)
+        .unwrap()
+        .then((response) => {
+          const routes = (((response as any)?.data?.process_routes ?? []) as any[]);
+          let cycle = 0;
+          for (const route of routes) {
+            const value = Number(route?.cycle_time_sec ?? 0);
+            if (value > 0) {
+              cycle = value;
+              break;
+            }
+          }
+          if (cycle > 0) addForm.setFieldsValue({ cycleTime: cycle });
+        })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchUniq, addOpen]);
+
+  useEffect(() => {
+    if (!addOpen) {
+      setAutoCalc(null);
+      return;
+    }
+    const cycle = Number(watchCycle ?? 0);
+    const workingDays = Number(paramWorkingDays ?? 0);
+    if (!watchUniq || cycle <= 0 || workingDays <= 0) {
+      setAutoCalc(null);
+      return;
+    }
+    const reference = prlReference;
+    const dailyRequirement = workingDays > 0 ? reference / workingDays : 0;
+    const cycleTimeMin = cycle / 60;
+    const fallbackMoving: MovementType =
+      dailyRequirement >= paramFastMovingThreshold
+        ? "Fast Moving"
+        : cycleTimeMin >= paramPatternCycleThresholdMinutes
+          ? "Slow Moving"
+          : "Normal";
+    const fallback: AutoCalcResult = {
+      prlReference: reference,
+      workingDays,
+      dailyRequirement,
+      cycleTimeMin,
+      patternValue: Math.max(1, Math.round(cycleTimeMin) || 1),
+      minOutput: Math.round(dailyRequirement),
+      movingType: fallbackMoving,
+    };
+    let cancelled = false;
+    if (apiEnabled) {
+      triggerCalc({ cycle_time_sec: cycle, prl_reference: reference, working_days: workingDays })
+        .unwrap()
+        .then((result) => {
+          if (cancelled) return;
+          setAutoCalc({
+            prlReference: reference,
+            workingDays,
+            dailyRequirement: result.daily_requirement || dailyRequirement,
+            cycleTimeMin: result.cycle_time_min || cycleTimeMin,
+            patternValue: result.pattern_value,
+            minOutput: result.min_output,
+            movingType: toUiMovingType(result.moving_type),
+          });
+        })
+        .catch(() => {
+          if (!cancelled) setAutoCalc(fallback);
+        });
+    } else {
+      setAutoCalc(fallback);
+    }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addOpen, watchUniq, watchCycle, prlReference, paramWorkingDays, paramFastMovingThreshold, paramPatternCycleThresholdMinutes, apiEnabled]);
 
   const rows = useMemo<MachinePatternRow[]>(() => {
     if (!apiEnabled) return mockRows;
@@ -221,7 +409,19 @@ export default function MachinePatternPage() {
         return [row.uniqCode, row.machineName, row.movingType].join(" ").toLowerCase().includes(query);
       });
   }, [movementFilter, rows, search]);
-
+const periodOptions = useMemo(() => {
+    const records = globalWorkingDaysData ?? [];
+    const seen = new Set<string>();
+    const opts: Array<{ label: string; value: string }> = [];
+    for (const record of records) {
+      const period = String(record.period ?? "").trim();
+      if (!period || seen.has(period.toLowerCase())) continue;
+      seen.add(period.toLowerCase());
+      const wd = Number(record.working_days ?? 0);
+      opts.push({ label: wd > 0 ? `${period} (${wd} working days)` : period, value: period });
+    }
+    return opts;
+  }, [globalWorkingDaysData]);
   const movementOptions: Array<{ label: string; value: MovementType }> = [
     { label: "Fast Moving", value: "Fast Moving" },
     { label: "Slow Moving", value: "Slow Moving" },
@@ -352,31 +552,77 @@ export default function MachinePatternPage() {
     message.info("Export coming soon");
   };
 
+  const openPatternDetail = (row: MachinePatternRow) => {
+    setActiveRow(row);
+    setViewOpen(true);
+  };
+
   const handleAddSubmit = async () => {
     try {
       const values = await addForm.validateFields();
+      const cycle = Number(values.cycleTime);
+      const workingDays = Number(paramWorkingDays);
+      const calc = autoCalc;
+      const machineId = Number(values.machineId);
+      const patternValue = Number(calc?.patternValue ?? 0);
+      const minOutput = Number(calc?.minOutput ?? 0);
+      const reference = Number(calc?.prlReference ?? prlReference);
+      const movingType: MovementType = calc?.movingType ?? "Normal";
+
       if (!apiEnabled) {
+        openPatternDetail({
+          key: `mock-${Date.now()}`,
+          id: `mock-${Date.now()}`,
+          uniqCode: values.uniqCode,
+          machineId,
+          machineName: machineNameById.get(machineId) ?? `Machine #${machineId}`,
+          cycleTime: cycle,
+          patternValue,
+          workingDays,
+          movingType,
+          minOutput,
+          prlReference: reference,
+          status: "Active",
+        });
         message.success("Pattern added (mock)");
         setAddOpen(false);
         addForm.resetFields();
+        setAutoCalc(null);
         return;
       }
 
-      await createMachinePattern({
+      const created = await createMachinePattern({
         uniq_code: values.uniqCode.trim(),
-        machine_id: Number(values.machineId),
-        cycle_time: Number(values.cycleTime),
-        pattern_value: Number(values.patternValue),
-        working_days: Number(values.workingDays),
-        moving_type: values.movingType,
-        material_grade: "",
-        min_output: Number(values.minOutput),
-        prl_reference: Number(values.prlReference),
-        status: toApiStatus(values.status),
+        machine_id: machineId,
+        cycle_time: cycle,
+        pattern_value: patternValue,
+        working_days: workingDays,
+        moving_type: movingType,
+     
+        min_output: minOutput,
+        prl_reference: reference,
+        status: "Active",
       }).unwrap();
+
+      const createdMachineId = Number(created.machine_id || machineId);
+      openPatternDetail({
+        key: String(created.id),
+        id: String(created.id),
+        uniqCode: created.uniq_code || values.uniqCode,
+        machineId: createdMachineId,
+        machineName: machineNameById.get(createdMachineId) ?? `Machine #${createdMachineId}`,
+        cycleTime: Number(created.cycle_time || cycle),
+        patternValue: Number(created.pattern_value ?? patternValue),
+        workingDays: Number(created.working_days || workingDays),
+        movingType: toUiMovingType(created.moving_type || movingType),
+        minOutput: Number(created.min_output ?? minOutput),
+        prlReference: Number(created.prl_reference ?? reference),
+        status: toUiStatus(created.status),
+      });
 
       setAddOpen(false);
       addForm.resetFields();
+      setAutoCalc(null);
       message.success("Pattern added");
     } catch (error) {
       if (error && typeof error === "object" && "errorFields" in error) return;
@@ -610,40 +856,49 @@ export default function MachinePatternPage() {
           </div>
         }
       >
-        <Form<PatternFormValues>
+        <Form<AddPatternFormValues>
           form={addForm}
           layout="vertical"
           initialValues={{ status: "Active", movingType: "Fast Moving", workingDays: 25 }}
         >
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <Form.Item name="uniqCode" label="Uniq Code" rules={[{ required: true, message: "Required" }]}> 
-              <Select options={uniqOptions} placeholder="Select uniq code" className="w-full" showSearch optionFilterProp="label" />
-            </Form.Item>
-            <Form.Item name="machineId" label="Machine Name" rules={[{ required: true, message: "Required" }]}> 
-              <Select options={machineOptions} placeholder="Select machine" className="w-full" showSearch optionFilterProp="label" />
-            </Form.Item>
-            <Form.Item name="cycleTime" label="Cycle Time" rules={[{ required: true, message: "Required" }]}> 
-              <InputNumber min={0} className="w-full" />
-            </Form.Item>
-            <Form.Item name="patternValue" label="Pattern Value" rules={[{ required: true, message: "Required" }]}> 
-              <InputNumber min={0} step={0.1} className="w-full" />
-            </Form.Item>
-            <Form.Item name="workingDays" label="Working Days" rules={[{ required: true, message: "Required" }]}> 
-              <InputNumber min={0} className="w-full" />
-            </Form.Item>
-            <Form.Item name="movingType" label="Moving Type" rules={[{ required: true, message: "Required" }]}> 
-              <Select options={movementOptions} className="w-full" />
-            </Form.Item>
-            <Form.Item name="minOutput" label="Min Output" rules={[{ required: true, message: "Required" }]}> 
-              <InputNumber min={0} className="w-full" />
-            </Form.Item>
-            <Form.Item name="prlReference" label="PRL Reference" rules={[{ required: true, message: "Required" }]}> 
-              <InputNumber min={0} className="w-full" />
-            </Form.Item>
-          </div>
-          <Form.Item name="status" label="Status" rules={[{ required: true, message: "Required" }]}> 
-            <Select options={[{ label: "Active", value: "Active" }, { label: "Inactive", value: "Inactive" }]} className="w-full" />
+          <Form.Item name="uniqCode" label="Uniq Name (from Bill of Material)" rules={[{ required: true, message: "Required" }]}>
+            <Select options={uniqOptions} placeholder="Select Uniq" className="w-full" showSearch optionFilterProp="label" />
           </Form.Item>
+          <Form.Item name="machineId" label="Machine Name (from Machine Master Data)" rules={[{ required: true, message: "Required" }]}>
+            <Select options={machineOptions} placeholder="Select machine" className="w-full" showSearch optionFilterProp="label" />
+          </Form.Item>
+          <Form.Item name="period" label="Period per Month" rules={[{ required: true, message: "Required" }]} extra={effectiveWorkingDays > 0 ? `Working Days: ${effectiveWorkingDays} (from System Settings)` : "Working Days retrieved from System Settings"}>
+            <Select options={periodOptions} placeholder="Select period" className="w-full" showSearch optionFilterProp="label" notFoundContent="No periods in System Settings" />
+          </Form.Item>
+          <Form.Item name="cycleTime" label="Cycle Time (seconds)" rules={[{ required: true, message: "Required" }]} extra="Retrieved from Bill of Material">
+            <InputNumber min={0} className="w-full" />
+          </Form.Item>
+
+          {autoCalc ? (
+            <div className="mt-2 rounded-xl border border-gray-100 bg-gray-50 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-xs font-semibold text-gray-700">Auto-calculated</span>
+                <Tag
+                  color={autoCalc.movingType === "Fast Moving" ? "green" : autoCalc.movingType === "Slow Moving" ? "purple" : "gold"}
+                  className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+                >
+                  {autoCalc.movingType}
+                </Tag>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="flex items-center justify-between"><span className="text-gray-500">PRL Reference</span><span className="font-medium text-gray-900">{formatNumber(autoCalc.prlReference)}</span></div>
+                <div className="flex items-center justify-between"><span className="text-gray-500">Working Days</span><span className="font-medium text-gray-900">{autoCalc.workingDays}</span></div>
+                <div className="flex items-center justify-between"><span className="text-gray-500">Daily Requirement</span><span className="font-medium text-gray-900">{formatNumber(Math.round(autoCalc.dailyRequirement))}</span></div>
+                <div className="flex items-center justify-between"><span className="text-gray-500">Cycle Time (min)</span><span className="font-medium text-gray-900">{autoCalc.cycleTimeMin.toFixed(2)}</span></div>
+                <div className="flex items-center justify-between"><span className="text-gray-500">Pattern Value</span><span className="font-medium text-gray-900">{autoCalc.patternValue}</span></div>
+                <div className="flex items-center justify-between"><span className="text-gray-500">Min Output</span><span className="font-medium text-gray-900">{formatNumber(autoCalc.minOutput)}</span></div>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-2 rounded-xl border border-dashed border-gray-200 bg-gray-50 p-4 text-xs text-gray-500">
+              Pilih Uniq, Machine, Period &amp; Cycle Time — Pattern Value, Min Output, PRL Reference, dan Moving Type dihitung otomatis lalu langsung masuk ke detail dashboard.
+            </div>
+          )}
         </Form>
       </Modal>
 

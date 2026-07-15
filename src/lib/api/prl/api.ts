@@ -106,6 +106,8 @@ export type PrlListResponse = PrlRecord[] & {
   pagination: PrlListPagination;
 };
 
+export type PrlType = "additional" | "reguler";
+
 export type CreatePrlRequest = {
   customer_uuid: string;
   uniq_code: string;
@@ -114,9 +116,25 @@ export type CreatePrlRequest = {
   part_number: string;
   forecast_period: string;
   quantity: number;
+  prl_type?: PrlType;
 };
 
-export type BulkCreatePrlRequest = CreatePrlRequest[];
+export type CreatePrlEntry = {
+  customer_uuid: string;
+  uniq_code: string;
+  product_model?: string;
+  part_name?: string;
+  part_number?: string;
+  forecast_period: string;
+  quantity: number;
+  prl_type?: PrlType;
+  remarks?: string;
+};
+
+// Bulk create shares ONE prl_id across all entries (backend groups them into a
+// single PRL group), while each entry keeps its own quantity. Must be sent as
+// { entries: [...] } so the backend routes it to BulkCreatePRLs.
+export type BulkCreatePrlRequest = { entries: CreatePrlEntry[] };
 
 export type UpdatePrlRequest = {
   forecast_period: string;

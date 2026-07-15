@@ -925,6 +925,7 @@ export const {
   useGetBomsBySupplierQuery,
   useGetBomByIdQuery,
   useGetBomFullByIdQuery,
+  useLazyGetBomFullByIdQuery,
   useGetBomVersionsQuery,
   useActivateBomMutation,
   useCreateBomMutation,

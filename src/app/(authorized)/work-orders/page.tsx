@@ -5,30 +5,24 @@ import {
   Button,
   Drawer,
   Input,
-  Modal,
   Progress,
   Table,
   Tag,
-  Upload,
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import type { UploadChangeParam, UploadFile } from "antd/es/upload/interface";
 import {
   AppstoreOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
-  DownloadOutlined,
   EyeOutlined,
-  FileExcelOutlined,
   PlusOutlined,
   PrinterOutlined,
   PlayCircleOutlined,
   SearchOutlined,
-  UploadOutlined,
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
-import { apiBaseUrl, generateHeaders } from "@/lib/api/instance";
+import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex, type BomUniqIndex } from "@/lib/utils/bomUniq";
 import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
@@ -47,6 +41,7 @@ import {
   useGetBulkWorkOrdersSummaryQuery,
   useListBulkWorkOrdersQuery,
 } from "@/lib/api/work-orders/bulk/api";
+import { useListPrlsQuery, type PrlRecord } from "@/lib/api/prl/api";
 
 const { TextArea } = Input;
 
@@ -133,12 +128,18 @@ type BulkWoRow = {
   woNumber: string;
   sourceDocumentType: string;
   sourceDocumentId: string;
+  customer: string;
+  model: string;
+  uniqCount: number;
+  kanbanCount: number;
+  totalQty: number;
   woType: string;
   status: string;
   approvalStatus: string;
   createdDate: string;
   targetDate: string;
   totalItems: number;
+  sourceUniqs: string[];
 };
 
 const bulkApprovalTag = (s: string) => {
@@ -437,12 +438,18 @@ const toBulkWoRow = (record: BulkWorkOrderRecordApi): BulkWoRow => ({
   woNumber: formatWorkOrderDisplayNumber(record.wo_number) || "-",
   sourceDocumentType: record.source_document_type ?? "-",
   sourceDocumentId: record.source_document_id ?? "-",
+  customer: record.customer_name ?? "-",
+  model: record.model ?? "-",
+  uniqCount: Number(record.uniq_count ?? 0),
+  kanbanCount: Number(record.kanban_count ?? record.total_items ?? 0),
+  totalQty: Number(record.total_qty ?? 0),
   woType: record.wo_type ?? "-",
   status: record.status ?? "-",
   approvalStatus: record.approval_status ?? "-",
   createdDate: formatDisplayDate(record.created_date),
   targetDate: formatDisplayDate(record.target_date),
   totalItems: Number(record.total_items ?? 0),
+  sourceUniqs: record.source_uniqs ?? [],
 });
 
 export default function WorkOrdersPage() {
@@ -463,9 +470,6 @@ export default function WorkOrdersPage() {
   const [selectedRows, setSelectedRows] = useState<WorkOrderRow[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkNote, setBulkNote] = useState("");
-  const [importOpen, setImportOpen] = useState(false);
-  const [importFile, setImportFile] = useState<UploadFile | null>(null);
-  const [importing, setImporting] = useState(false);
 
   const [bulkApproveWorkOrders, bulkApproveState] = useBulkApproveWorkOrdersMutation();
 
@@ -483,10 +487,64 @@ export default function WorkOrdersPage() {
   });
   const [bulkApproveBulkWos, bulkApproveBulkWosState] = useBulkApproveBulkWorkOrdersMutation();
 
-  const bulkWoRowsAll = useMemo(
-    () => bulkWoListQuery.data?.items?.map(toBulkWoRow) ?? [],
-    [bulkWoListQuery.data]
+  // Fallback enrichment: the running backend may not yet return
+  // source_document_id/customer_name on the bulk list. Derive PRL Reference and
+  // Customer from the PRL list (match by uniq, then uniquely by model) so the
+  // columns populate on the frontend. Backend-provided values always win.
+  const bulkWoPrlQuery = useListPrlsQuery(
+    { page: 1, limit: 1000 },
+    { skip: !apiEnabled || activeTab !== "bulkWo" }
   );
+
+  const bulkWoPrlIndex = useMemo(() => {
+    const list: PrlRecord[] = Array.isArray(bulkWoPrlQuery.data) ? bulkWoPrlQuery.data : [];
+    const byUniq = new Map<string, { prlId: string; customer: string }>();
+    const byModel = new Map<string, { prlIds: Set<string>; customers: Set<string> }>();
+    for (const p of list) {
+      const prlId = (p.prl_id ?? "").trim();
+      const customer = (p.customer_name ?? p.customer?.customer_name ?? "").trim();
+      for (const u of [p.uniq_code, p.item_uniq_code]) {
+        const key = (u ?? "").trim().toLowerCase();
+        if (key) byUniq.set(key, { prlId, customer });
+      }
+      const model = (p.product_model ?? "").trim().toLowerCase();
+      if (model) {
+        const entry = byModel.get(model) ?? { prlIds: new Set<string>(), customers: new Set<string>() };
+        if (prlId) entry.prlIds.add(prlId);
+        if (customer) entry.customers.add(customer);
+        byModel.set(model, entry);
+      }
+    }
+    return { byUniq, byModel };
+  }, [bulkWoPrlQuery.data]);
+
+  const bulkWoRowsAll = useMemo(() => {
+    const rows = bulkWoListQuery.data?.items?.map(toBulkWoRow) ?? [];
+    const { byUniq, byModel } = bulkWoPrlIndex;
+    return rows.map((row) => {
+      let prlId = row.sourceDocumentId && row.sourceDocumentId !== "-" ? row.sourceDocumentId : "";
+      let customer = row.customer && row.customer !== "-" ? row.customer : "";
+      if (!prlId || !customer) {
+        for (const u of row.sourceUniqs) {
+          const hit = byUniq.get((u ?? "").trim().toLowerCase());
+          if (hit) {
+            if (!prlId && hit.prlId) prlId = hit.prlId;
+            if (!customer && hit.customer) customer = hit.customer;
+            break;
+          }
+        }
+      }
+      if (!prlId || !customer) {
+        const model = (row.model ?? "").trim().toLowerCase();
+        const entry = model ? byModel.get(model) : undefined;
+        if (entry) {
+          if (!prlId && entry.prlIds.size === 1) prlId = [...entry.prlIds][0];
+          if (!customer && entry.customers.size === 1) customer = [...entry.customers][0];
+        }
+      }
+      return { ...row, sourceDocumentId: prlId || "-", customer: customer || "-" };
+    });
+  }, [bulkWoListQuery.data, bulkWoPrlIndex]);
 
   const bulkWoRows = useMemo(() => {
     const q = bulkWoSearch.trim().toLowerCase();
@@ -547,104 +605,6 @@ export default function WorkOrdersPage() {
 
   const openPrintDetail = (url: string) => {
     window.open(withQuery(url, { autoPrint: 1 }), "_blank", "noopener,noreferrer");
-  };
-
-  const handleDownloadTemplate = async () => {
-    if (!apiEnabled) {
-      message.error("API base URL is not configured");
-      return;
-    }
-
-    try {
-      const headers = await generateHeaders({ useAuthorization: true, contentType: "application/json" });
-      const response = await fetch(`${apiBaseUrl}/template/wo`, {
-        method: "GET",
-        headers,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => "");
-        throw new Error(errorText || `Download failed with status ${response.status}`);
-      }
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "work-order-template.xlsx";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      window.URL.revokeObjectURL(url);
-      message.success("Template downloaded successfully");
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : "Failed to download template");
-    }
-  };
-
-  const handleImportWorkOrders = async () => {
-    if (!apiEnabled) {
-      message.error("API base URL is not configured");
-      return;
-    }
-
-    const file = (importFile?.originFileObj ?? (importFile as UploadFile & { file?: File })?.file) as File | undefined;
-    if (!file) {
-      message.error("Please select an Excel file to import");
-      return;
-    }
-
-    try {
-      setImporting(true);
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const headers = await generateHeaders({ useAuthorization: true, contentType: "multipart/form-data" });
-      const response = await fetch(`${apiBaseUrl}/import/wo`, {
-        method: "POST",
-        headers,
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => "");
-        throw new Error(errorText || `Import failed with status ${response.status}`);
-      }
-
-      message.success("Work orders imported successfully");
-      setImportOpen(false);
-      setImportFile(null);
-      void workOrdersPagedQuery.refetch();
-      void workOrdersSummaryQuery.refetch();
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : "Failed to import work orders");
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  const importUploadProps = {
-    beforeUpload: (file: UploadFile) => {
-      const isExcelLike = /\.(xlsx|xls|csv)$/i.test(file.name ?? "");
-      if (!isExcelLike) {
-        message.error("Only Excel/CSV files are supported");
-        return Upload.LIST_IGNORE;
-      }
-      setImportFile(file);
-      return false;
-    },
-    maxCount: 1,
-    fileList: importFile ? [importFile] : [],
-    onRemove: () => setImportFile(null),
-    onChange: (info: UploadChangeParam<UploadFile>) => {
-      const latest = info.fileList[info.fileList.length - 1];
-      setImportFile(latest ?? null);
-    },
-  };
-
-  const closeImportModal = () => {
-    setImportOpen(false);
-    setImportFile(null);
   };
 
   const buildBulkWoDetailUrl = (row: BulkWoRow) =>
@@ -1240,9 +1200,18 @@ export default function WorkOrdersPage() {
     },
   ];
 
+  const bulkStatusText = (v: string) => {
+    const low = (v || "").toLowerCase();
+    let cls = "text-gray-600";
+    if (low.includes("progress")) cls = "text-blue-600";
+    else if (low.includes("complete") || low.includes("done")) cls = "text-green-600";
+    else if (low.includes("generat")) cls = "text-blue-600";
+    return <span className={`text-sm ${cls}`}>{v || "-"}</span>;
+  };
+
   const bulkWoColumns: ColumnsType<BulkWoRow> = [
     {
-      title: "WO Number",
+      title: "Bulk WO ID",
       dataIndex: "woNumber",
       key: "woNumber",
       width: 160,
@@ -1253,46 +1222,82 @@ export default function WorkOrdersPage() {
       ),
     },
     {
-      title: "Source",
-      key: "source",
-      width: 220,
-      render: (_: unknown, r) => (
-        <div className="leading-tight">
-          <div className="text-sm font-medium text-gray-900">{r.sourceDocumentType}</div>
-          <div className="text-xs text-gray-500">{r.sourceDocumentId}</div>
-        </div>
+      title: "PRL Reference",
+      dataIndex: "sourceDocumentId",
+      key: "prlReference",
+      width: 150,
+      render: (v: string) => <span className="text-sm font-medium text-blue-600">{v || "-"}</span>,
+    },
+    {
+      title: "Customer",
+      dataIndex: "customer",
+      key: "customer",
+      width: 130,
+      render: (v: string) => <span className="text-sm text-gray-800">{v || "-"}</span>,
+    },
+    {
+      title: "Model",
+      dataIndex: "model",
+      key: "model",
+      width: 140,
+      render: (v: string) => <span className="text-sm text-gray-800">{v || "-"}</span>,
+    },
+    {
+      title: "UNIQs",
+      dataIndex: "uniqCount",
+      key: "uniqCount",
+      width: 100,
+      render: (v: number) => (
+        <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600">
+          {Number(v || 0)} UNIQs
+        </span>
       ),
     },
     {
-      title: "WO Type",
+      title: "Kanbans",
+      dataIndex: "kanbanCount",
+      key: "kanbanCount",
+      width: 110,
+      render: (v: number) => (
+        <span className="inline-flex items-center rounded-md bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-700">
+          {Number(v || 0)} Kanbans
+        </span>
+      ),
+    },
+    {
+      title: "Total Qty",
+      dataIndex: "totalQty",
+      key: "totalQty",
+      width: 110,
+      render: (v: number) => <span className="text-sm font-medium text-gray-900">{Number(v || 0).toLocaleString()}</span>,
+    },
+    {
+      title: "Type",
       dataIndex: "woType",
       key: "woType",
-      width: 120,
-      render: (v: string) => <span className="text-sm text-gray-800">{v}</span>,
-    },
-    {
-      title: "Items",
-      dataIndex: "totalItems",
-      key: "totalItems",
-      width: 90,
-      render: (v: number) => <span className="text-sm text-gray-800">{v}</span>,
-    },
-    { title: "Created", dataIndex: "createdDate", key: "createdDate", width: 120 },
-    { title: "Target", dataIndex: "targetDate", key: "targetDate", width: 120 },
-    {
-      title: "Approval",
-      dataIndex: "approvalStatus",
-      key: "approvalStatus",
-      width: 120,
-      render: (value: string) => bulkApprovalTag(value),
+      width: 110,
+      render: (v: string) => (
+        <span className="inline-flex items-center rounded-md border border-gray-200 bg-white px-2 py-0.5 text-xs text-gray-700">
+          {v || "-"}
+        </span>
+      ),
     },
     {
       title: "Status",
       dataIndex: "status",
       key: "status",
       width: 120,
-      render: (value: string) => <Tag color="blue" className="!rounded-md">{value || "-"}</Tag>,
+      render: (value: string) => bulkStatusText(value),
     },
+    {
+      title: "Approval",
+      dataIndex: "approvalStatus",
+      key: "approvalStatus",
+      width: 130,
+      render: (value: string) => bulkApprovalTag(value),
+    },
+    { title: "Created", dataIndex: "createdDate", key: "createdDate", width: 110 },
+    { title: "Target", dataIndex: "targetDate", key: "targetDate", width: 110 },
     {
       title: "Actions",
       key: "actions",
@@ -1322,17 +1327,9 @@ export default function WorkOrdersPage() {
               </div>
             ) : null}
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <Button className="!rounded-lg" icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>
-              Download Template
-            </Button>
-            <Button className="!rounded-lg" icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
-              Import WO
-            </Button>
-            <Button className="!rounded-lg" icon={<PrinterOutlined />} onClick={() => message.info("Print Kanban (mock)")}>
-              Print Kanban
-            </Button>
-          </div>
+          <Button className="!rounded-lg" icon={<PrinterOutlined />} onClick={() => message.info("Print Kanban (mock)")}> 
+            Print Kanban
+          </Button>
         </div>
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -1386,7 +1383,7 @@ export default function WorkOrdersPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-gray-900">Bulk Work Orders from Production Planning</div>
-                <div className="text-xs text-gray-500 mt-1">Create multiple WOs from a source document and approve them in one action</div>
+                <div className="text-xs text-gray-500 mt-1">Create multiple WOs from PRL with editable UNIQs and quantities</div>
               </div>
               <Button
                 type="primary"
@@ -1399,7 +1396,7 @@ export default function WorkOrdersPage() {
             </div>
 
             <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
-              <span className="font-semibold">Workflow:</span> Enter source document → Load document items → Set target dates → Generate WOs → Bulk approve/reject
+              <span className="font-semibold">Workflow:</span> Select PRL → View PRL items → Edit UNIQ & Qty → Set target dates → Generate WOs (1 UNIQ = 1 Kanban)
             </div>
 
             {apiEnabled ? (
@@ -1717,44 +1714,6 @@ export default function WorkOrdersPage() {
           </div>
         )}
       </div>
-
-      <Modal
-        title={<div className="text-sm font-semibold">Import Work Orders</div>}
-        open={importOpen}
-        onCancel={closeImportModal}
-        maskClosable={false}
-        destroyOnClose
-        footer={
-          <div className="flex items-center justify-end gap-2">
-            <Button onClick={closeImportModal}>Cancel</Button>
-            <Button type="primary" onClick={handleImportWorkOrders} loading={importing}>
-              Import
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-3">
-          <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50 px-4 py-4 text-sm text-blue-700">
-            <div className="flex items-center gap-2 font-semibold">
-              <FileExcelOutlined />
-              Upload .xlsx file for work order import
-            </div>
-            <div className="mt-1 text-xs text-blue-600">The file will be sent to /import/wo using POST. Excel (.xlsx/.xls) and CSV are supported.</div>
-          </div>
-
-          <Upload {...importUploadProps}>
-            <Button icon={<UploadOutlined />} className="!rounded-lg">
-              Select .xlsx File
-            </Button>
-          </Upload>
-
-          {importFile ? (
-            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
-              Selected file: <span className="font-semibold">{importFile.name}</span>
-            </div>
-          ) : null}
-        </div>
-      </Modal>
 
       <Drawer
         title={<div className="text-sm font-semibold">Bulk Approval</div>}

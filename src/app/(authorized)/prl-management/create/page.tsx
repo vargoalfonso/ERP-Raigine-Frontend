@@ -18,18 +18,24 @@ import { useListCustomersQuery } from "@/lib/api/customers/api";
 import { useGetBomListQuery, useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import { useGetGlobalWorkingDaysQuery } from "@/lib/api/system-settings/api";
-import { useCreatePrlMutation, useImportPrlsMutation } from "@/lib/api/prl/api";
+import {
+  useCreatePrlMutation,
+  useCreatePrlsBulkMutation,
+  useImportPrlsMutation,
+} from "@/lib/api/prl/api";
 
 type ForecastEntry = {
   id: string;
   customerUuid?: string;
   customerName?: string;
   forecastPeriod?: string;
+  prlType: "additional" | "reguler";
   uniqCode: string[];
   productModel: string;
   partName: string;
   partNumber: string;
   quantity: string; // keep as string for input UX
+  quantities: Record<string, string>; // per-uniq quantity when multiple uniqs
   remarks?: string;
 };
 
@@ -47,26 +53,35 @@ function newEntry(seed?: Partial<ForecastEntry>): ForecastEntry {
     customerUuid: seed?.customerUuid,
     customerName: seed?.customerName,
     forecastPeriod: seed?.forecastPeriod,
+    prlType: seed?.prlType ?? "reguler",
     uniqCode: normalizeUniqCodes(seed?.uniqCode),
     productModel: seed?.productModel ?? "",
     partName: seed?.partName ?? "",
     partNumber: seed?.partNumber ?? "",
     quantity: seed?.quantity ?? "",
+    quantities: seed?.quantities ?? {},
     remarks: seed?.remarks ?? "",
   };
 }
 
 function isComplete(entry: ForecastEntry): boolean {
-  const quantityValue = Number(entry.quantity);
-  return (
+  const hasBase =
     !!entry.customerUuid &&
     !!entry.forecastPeriod &&
     entry.uniqCode.length > 0 &&
     entry.partName.trim().length > 0 &&
-    entry.partNumber.trim().length > 0 &&
-    Number.isFinite(quantityValue) &&
-    quantityValue > 0
-  );
+    entry.partNumber.trim().length > 0;
+  if (!hasBase) return false;
+
+  if (entry.uniqCode.length > 1) {
+    return entry.uniqCode.every((code) => {
+      const q = Number(entry.quantities?.[code]);
+      return Number.isFinite(q) && q > 0;
+    });
+  }
+
+  const quantityValue = Number(entry.quantity);
+  return Number.isFinite(quantityValue) && quantityValue > 0;
 }
 
 export default function AddForecastPage() {
@@ -76,6 +91,7 @@ export default function AddForecastPage() {
 
   const apiEnabled = Boolean(apiBaseUrl);
   const [createPrl, createPrlState] = useCreatePrlMutation();
+  const [createPrlsBulk, createPrlsBulkState] = useCreatePrlsBulkMutation();
   const [importPrls, importPrlsState] = useImportPrlsMutation();
   const { data: customers = [] } = useListCustomersQuery(undefined, {
     skip: !apiEnabled,
@@ -214,6 +230,16 @@ export default function AddForecastPage() {
     );
   };
 
+  const updateUniqQuantity = (id: string, code: string, value: string) => {
+    setEntries((prev) =>
+      prev.map((e) =>
+        e.id === id
+          ? { ...e, quantities: { ...e.quantities, [code]: value } }
+          : e,
+      ),
+    );
+  };
+
   const handleCustomerChange = (id: string, customerUuid?: string) => {
     const selected = customerOptions.find(
       (customer) => customer.value === customerUuid,
@@ -238,12 +264,23 @@ export default function AddForecastPage() {
       .filter(Boolean)
       .join(", ");
 
-    updateEntry(id, {
-      uniqCode: nextUniq,
-      productModel,
-      partName,
-      partNumber,
-    });
+    setEntries((prev) =>
+      prev.map((e) => {
+        if (e.id !== id) return e;
+        const nextQuantities: Record<string, string> = {};
+        for (const code of nextUniq) {
+          nextQuantities[code] = e.quantities?.[code] ?? "";
+        }
+        return {
+          ...e,
+          uniqCode: nextUniq,
+          productModel,
+          partName,
+          partNumber,
+          quantities: nextQuantities,
+        };
+      }),
+    );
   };
 
   const addAnother = () => {
@@ -271,25 +308,66 @@ export default function AddForecastPage() {
     }
 
     try {
-      await Promise.all(
-        entries.map((entry) => {
+      // A single-uniq entry becomes one standalone PRL (its own prl_id).
+      // A multi-uniq entry is sent as ONE bulk group ({ entries: [...] }) so the
+      // backend creates a single shared prl_id, with each uniq stored as a
+      // detail row that keeps its own quantity.
+      const singlePayloads: any[] = [];
+      const groupPayloads: { entries: any[] }[] = [];
+
+      for (const entry of entries) {
+        const codes = entry.uniqCode;
+        const customer_uuid = String(entry.customerUuid ?? "").trim();
+        const forecast_period = String(entry.forecastPeriod ?? "");
+        const remarks = String(entry.remarks ?? "").trim();
+
+        if (codes.length > 1) {
+          const entriesPayload = codes.map((code) => {
+            const productModel =
+              bomIndex.modelByUniq[code] ??
+              bomIndex.assemblyCodeByUniq[code] ??
+              entry.productModel;
+            const detail: any = {
+              customer_uuid,
+              uniq_code: code,
+              product_model: String(productModel ?? "").trim(),
+              part_name: String(bomIndex.partNameByUniq[code] ?? "").trim(),
+              part_number: String(bomIndex.partNumberByUniq[code] ?? "").trim(),
+              forecast_period,
+              quantity: Number(entry.quantities?.[code] ?? 0),
+              prl_type: entry.prlType,
+            };
+            if (remarks) detail.remarks = remarks;
+            return detail;
+          });
+          groupPayloads.push({ entries: entriesPayload });
+        } else {
           const payload: any = {
-            customer_uuid: String(entry.customerUuid ?? "").trim(),
+            customer_uuid,
             uniq_code: entry.uniqCode,
             product_model: entry.productModel.trim(),
             part_name: entry.partName.trim(),
             part_number: entry.partNumber.trim(),
-            forecast_period: String(entry.forecastPeriod ?? ""),
+            forecast_period,
             quantity: Number(entry.quantity),
+            prl_type: entry.prlType,
           };
-          const r = String(entry.remarks ?? "").trim();
-          if (r) payload.remarks = r;
-          return createPrl(payload as any).unwrap();
-        }),
-      );
+          if (remarks) payload.remarks = remarks;
+          singlePayloads.push(payload);
+        }
+      }
 
+      await Promise.all([
+        ...singlePayloads.map((payload) => createPrl(payload as any).unwrap()),
+        ...groupPayloads.map((payload) =>
+          createPrlsBulk(payload as any).unwrap(),
+        ),
+      ]);
+
+      // Each group counts as a single PRL id.
+      const totalCount = singlePayloads.length + groupPayloads.length;
       message.success(
-        `Saved ${entries.length} PRL entr${entries.length > 1 ? "ies" : "y"}`,
+        `Saved ${totalCount} PRL entr${totalCount > 1 ? "ies" : "y"}`,
       );
       router.push("/prl-management");
     } catch (err) {
@@ -370,7 +448,9 @@ export default function AddForecastPage() {
                 className="!rounded-lg"
                 icon={<SaveOutlined />}
                 onClick={saveAll}
-                loading={createPrlState.isLoading}>
+                loading={
+                  createPrlState.isLoading || createPrlsBulkState.isLoading
+                }>
                 Save PRL
               </Button>
             ) : null}
@@ -557,6 +637,26 @@ export default function AddForecastPage() {
 
                     <div>
                       <div className="text-xs font-semibold text-gray-700 mb-1">
+                        PRL Type
+                      </div>
+                      <Select
+                        value={entry.prlType}
+                        onChange={(value) =>
+                          updateEntry(entry.id, {
+                            prlType: value as "additional" | "reguler",
+                          })
+                        }
+                        options={[
+                          { value: "reguler", label: "Reguler" },
+                          { value: "additional", label: "Additional" },
+                        ]}
+                        placeholder="Select PRL type"
+                        className="w-full"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="text-xs font-semibold text-gray-700 mb-1">
                         UNIQ Code
                       </div>
                       <Select
@@ -613,22 +713,70 @@ export default function AddForecastPage() {
                       />
                     </div>
 
-                    <div>
-                      <div className="text-xs font-semibold text-gray-700 mb-1">
-                        Quantity
+                    {entry.uniqCode.length > 1 ? (
+                      <div className="lg:col-span-2">
+                        <div className="text-xs font-semibold text-gray-700 mb-1">
+                          Quantity per UNIQ
+                        </div>
+                        <div className="overflow-hidden rounded-lg border border-gray-200">
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="text-left px-3 py-2 font-semibold text-gray-600">
+                                  UNIQ Code
+                                </th>
+                                <th className="text-left px-3 py-2 font-semibold text-gray-600 w-52">
+                                  Quantity
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {entry.uniqCode.map((code) => (
+                                <tr
+                                  key={code}
+                                  className="border-t border-gray-100">
+                                  <td className="px-3 py-2 font-medium text-gray-700">
+                                    {code}
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <Input
+                                      value={entry.quantities?.[code] ?? ""}
+                                      onChange={(e) =>
+                                        updateUniqQuantity(
+                                          entry.id,
+                                          code,
+                                          e.target.value.replace(/[^0-9]/g, ""),
+                                        )
+                                      }
+                                      placeholder="e.g., 2500"
+                                      className="!rounded-lg"
+                                      inputMode="numeric"
+                                    />
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
-                      <Input
-                        value={entry.quantity}
-                        onChange={(e) =>
-                          updateEntry(entry.id, {
-                            quantity: e.target.value.replace(/[^0-9]/g, ""),
-                          })
-                        }
-                        placeholder="e.g., 2500"
-                        className="!rounded-lg"
-                        inputMode="numeric"
-                      />
-                    </div>
+                    ) : (
+                      <div>
+                        <div className="text-xs font-semibold text-gray-700 mb-1">
+                          Quantity
+                        </div>
+                        <Input
+                          value={entry.quantity}
+                          onChange={(e) =>
+                            updateEntry(entry.id, {
+                              quantity: e.target.value.replace(/[^0-9]/g, ""),
+                            })
+                          }
+                          placeholder="e.g., 2500"
+                          className="!rounded-lg"
+                          inputMode="numeric"
+                        />
+                      </div>
+                    )}
 
                     <div className="lg:col-span-2">
                       <div className="text-xs font-semibold text-gray-700 mb-1">
