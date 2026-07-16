@@ -6,7 +6,7 @@ import { DownloadOutlined, EditOutlined, LeftOutlined } from "@ant-design/icons"
 import { useParams, useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
-import { useGetProcurementDnByIdQuery, useLazyScanProcurementDnPackingQuery } from "@/lib/api/procurement-dn/api";
+import { useGetProcurementDnByIdQuery, useLazyScanProcurementDnPackingQuery, useGetProcurementDnHistoryQuery } from "@/lib/api/procurement-dn/api";
 
 type DetailTabId = "details";
 
@@ -166,6 +166,7 @@ function DnRawMaterialDetailPageContent() {
   const apiEnabled = Boolean(apiBaseUrl);
 
   const detailQuery = useGetProcurementDnByIdQuery(dnNumber, { skip: !apiEnabled || !dnNumber });
+  const historyQuery = useGetProcurementDnHistoryQuery(dnNumber, { skip: !apiEnabled || !dnNumber });
   const [runScan, scanState] = useLazyScanProcurementDnPackingQuery();
   const [scanPacking, setScanPacking] = useState("");
 
@@ -291,6 +292,19 @@ function DnRawMaterialDetailPageContent() {
       .filter((l) => l.qty > 0 || l.receivedAt !== "-")
       .slice(0, 6);
   }, [detail]);
+
+  const historyLogs = useMemo(() => {
+    const rows = historyQuery.data?.data ?? [];
+    return rows.map((row, index) => ({
+      key: String(row.id ?? index),
+      uniq: row.uniq_code ?? "-",
+      qty: Number(row.qty_change ?? 0),
+      source: row.source_flag ?? "-",
+      packing: row.packing_number ?? "-",
+      by: row.logged_by ?? "-",
+      at: formatDateTime(row.logged_at ?? "-"),
+    }));
+  }, [historyQuery.data]);
 
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
 
@@ -591,6 +605,53 @@ function DnRawMaterialDetailPageContent() {
                         </div>
                       </div>
                     ))
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-gray-100 bg-white p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xl font-semibold text-gray-900">History Logs</div>
+                    <div className="text-xs text-gray-500">Stock tercatat saat QC Incoming di-approve (mendukung partial incoming per DN)</div>
+                  </div>
+                  <div className="text-xs text-gray-500">{historyLogs.length} logs</div>
+                </div>
+
+                <div className="mt-4 overflow-x-auto">
+                  {historyQuery.isFetching ? (
+                    <div className="text-sm text-gray-500">Loading history…</div>
+                  ) : historyLogs.length === 0 ? (
+                    <div className="text-sm text-gray-500">Belum ada history logs. Log muncul setelah QC Incoming di-approve.</div>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-gray-600">
+                        <tr>
+                          <th className="text-left font-medium px-4 py-3">Uniq</th>
+                          <th className="text-left font-medium px-4 py-3">Packing / DN</th>
+                          <th className="text-left font-medium px-4 py-3">Reason</th>
+                          <th className="text-left font-medium px-4 py-3">Qty</th>
+                          <th className="text-left font-medium px-4 py-3">By</th>
+                          <th className="text-left font-medium px-4 py-3">Last Update</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {historyLogs.map((log) => (
+                          <tr key={log.key} className="text-gray-800">
+                            <td className="px-4 py-3 font-medium text-gray-900">{log.uniq}</td>
+                            <td className="px-4 py-3">{log.packing}</td>
+                            <td className="px-4 py-3">
+                              <span className="inline-flex rounded-md border border-green-200 bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">
+                                {log.source === "qc_approve" ? "QC Approved" : log.source}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 font-semibold text-green-700">+{formatNumber(log.qty)}</td>
+                            <td className="px-4 py-3">{log.by}</td>
+                            <td className="px-4 py-3 whitespace-nowrap">{log.at}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   )}
                 </div>
               </div>
