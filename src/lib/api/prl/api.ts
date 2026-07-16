@@ -66,6 +66,7 @@ export type PrlRecord = {
   delivery_quantity?: number;
   status?: PrlStatus;
   approval_status?: string;
+  prl_type?: PrlType;
   product_model?: string;
   part_name?: string;
   part_number?: string;
@@ -92,6 +93,8 @@ export type PrlListRequest = {
   forecast_period?: string;
   customer_uuid?: string;
   uniq_code?: string;
+  /** Single type or comma-separated list, e.g. "reguler" or "reguler,additional". */
+  prl_type?: string;
 };
 
 export type PrlListPagination = {
@@ -187,6 +190,7 @@ const normalizePrlRecord = (raw: unknown): PrlRecord => {
     delivery_quantity: toNumber(record.delivery_quantity),
     status: toText(record.status) ?? toText(record.approval_status),
     approval_status: toText(record.approval_status) ?? toText(record.status),
+    prl_type: (toText(record.prl_type) as PrlType | undefined) ?? undefined,
     product_model:
       toText(record.product_model) ??
       toText(productDetails?.model) ??
@@ -260,6 +264,7 @@ export const prlApiSlice = apiSlice
             ...(params?.forecast_period ? { forecast_period: params.forecast_period } : {}),
             ...(params?.customer_uuid ? { customer_uuid: params.customer_uuid } : {}),
             ...(params?.uniq_code ? { uniq_code: params.uniq_code } : {}),
+            ...(params?.prl_type ? { prl_type: params.prl_type } : {}),
           },
           meta: { useAuthorization: true, contentType: "application/json" },
         };

@@ -42,7 +42,7 @@ import {
   useListCustomersQuery,
   type CustomerRecord,
 } from "@/lib/api/customers/api";
-import { useListPrlsQuery, type PrlRecord } from "@/lib/api/prl/api";
+import { useListPrlsQuery, type PrlRecord, type PrlType } from "@/lib/api/prl/api";
 import { useListCustomerPosQuery } from "@/lib/api/customer-orders/api";
 import {
   useGetGlobalWorkingDaysQuery,
@@ -94,6 +94,10 @@ const EMPTY_PO_BUDGET_RESPONSE: ApiResponse<ApiPoBudgetRow[]> = {
 };
 
 type BulkBudgetType = "adhoc" | "kanban";
+
+function budgetTypeToPrlType(budgetType: BulkBudgetType): PrlType {
+  return budgetType === "adhoc" ? "additional" : "reguler";
+}
 
 const PRL_LAZY_PAGE_SIZE = 100;
 
@@ -586,6 +590,7 @@ function resolveSupplierName(
   const [bulkPeriod, setBulkPeriod] = useState<string | undefined>(undefined);
   const [bulkPo1Pct, setBulkPo1Pct] = useState<number>(60);
   const [bulkPo2Pct, setBulkPo2Pct] = useState<number>(40);
+  const [addBudgetType, setAddBudgetType] = useState<BulkBudgetType>("adhoc");
   const [selectedSinglePrlId, setSelectedSinglePrlId] = useState<string | undefined>(undefined);
   const [singleChildRows, setSingleChildRows] = useState<BulkItemRow[]>([]);
   const [bulkPrlDetailCache, setBulkPrlDetailCache] = useState<Record<string, PoBudgetPrlDetail>>({});
@@ -604,11 +609,19 @@ function resolveSupplierName(
     skip: !useApi,
   });
   const shouldFetchPrls = useApi && (addOpen || bulkOpen);
-  const { data: prlsResponse, isFetching: prlsFetching } = useListPrlsQuery(
+  const activePrlTypeFilter = budgetTypeToPrlType(
+    bulkOpen ? bulkBudgetType : addBudgetType,
+  );
+  const {
+    data: prlsResponse,
+    isFetching: prlsFetching,
+    refetch: refetchPrls,
+  } = useListPrlsQuery(
     {
       page: bulkPrlPage,
       limit: PRL_LAZY_PAGE_SIZE,
       search: bulkPrlSearch.trim() || undefined,
+      prl_type: activePrlTypeFilter,
     },
     { skip: !shouldFetchPrls },
   );
@@ -634,6 +647,10 @@ function resolveSupplierName(
   );
 
   useEffect(() => {
+    // Skip while no fetch is active for the current selector, so a response
+    // left over from a previous prl_type/skip state never repopulates the
+    // cache after switching PO Budget Type.
+    if (!shouldFetchPrls) return;
     const incoming = prlsResponse?.items ?? [];
     if (incoming.length === 0) return;
 
@@ -652,7 +669,7 @@ function resolveSupplierName(
       incoming.forEach((item, index) => byKey.set(getKey(item, index), item));
       return Array.from(byKey.values());
     });
-  }, [bulkPrlPage, prlsResponse]);
+  }, [bulkPrlPage, prlsResponse, shouldFetchPrls, activePrlTypeFilter]);
 
   const prls = prlCache;
   const bulkPrlPagination = prlsResponse?.pagination;
@@ -665,6 +682,15 @@ function resolveSupplierName(
     setBulkPrlPage(1);
     setPrlCache([]);
   };
+
+  useEffect(() => {
+    setBulkPrlPage(1);
+    setPrlCache([]);
+    // RTK Query serves cached data instantly for an arg combo it has seen
+    // before (e.g. switching additional -> reguler -> additional again), so
+    // force a real refetch whenever the active PRL type changes.
+    if (shouldFetchPrls) refetchPrls();
+  }, [activePrlTypeFilter]);
 
   const handleBulkPrlPopupScroll = (event: React.UIEvent<HTMLDivElement>) => {
     const target = event.currentTarget;
@@ -1305,7 +1331,10 @@ function resolveSupplierName(
 
   const defaultUom = uomOptions[0]?.value ?? "";
 
-  const prlOptions = useMemo(() => {
+  // approvedPrls already reflects the active PRL type filter, since
+  // useListPrlsQuery sends prl_type derived from whichever modal (bulk or
+  // single Add) is open — see activePrlTypeFilter.
+  const bulkPrlOptions = useMemo(() => {
     const prlGroups = new Map<string, { customerName: string; uniqs: string[] }>();
     for (const item of approvedPrls) {
       const prlId = String(item.prl_id ?? item.id ?? "");
@@ -1320,14 +1349,18 @@ function resolveSupplierName(
       const group = prlGroups.get(prlId)!;
       if (uniqCode && !group.uniqs.includes(uniqCode)) group.uniqs.push(uniqCode);
     }
-    const fromPrl = Array.from(prlGroups.entries()).map(([prlId, group]) => {
+    return Array.from(prlGroups.entries()).map(([prlId, group]) => {
       const uniqSummary = group.uniqs.length > 0 ? group.uniqs.join(", ") : "-";
       return {
         label: `${prlId} — ${uniqSummary} (${group.customerName})`,
         value: `prl::${encodeURIComponent(prlId)}`,
       };
     });
+  }, [approvedPrls]);
 
+  const addPrlOptions = bulkPrlOptions;
+
+  const prlOptions = useMemo(() => {
     const fromPo = (customerPos as any[])
       .map((po: any) => {
         const id = String(po.id ?? po.po_id ?? "");
@@ -1342,8 +1375,8 @@ function resolveSupplierName(
       })
       .filter((x: any) => Boolean(x.value));
 
-    return [...fromPrl, ...fromPo];
-  }, [approvedPrls, customerPos]);
+    return [...bulkPrlOptions, ...fromPo];
+  }, [bulkPrlOptions, customerPos]);
 
   const matchedAddPrl = useMemo(() => {
     const effectiveCustomerId =
@@ -2041,6 +2074,8 @@ function resolveSupplierName(
   const openAddBudget = () => {
     setSelectedSinglePrlId(undefined);
     setSingleChildRows([]);
+    setAddBudgetType("adhoc");
+    setAddForm((p) => ({ ...p, prl: "" }));
     setAddOpen(true);
   };
 
@@ -3385,14 +3420,32 @@ function resolveSupplierName(
         }>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
+            <div className="text-xs text-gray-600 mb-1">PO Budget Type</div>
+            <Select
+              value={addBudgetType}
+              onChange={(v) => {
+                setAddBudgetType(v as BulkBudgetType);
+                setSelectedSinglePrlId(undefined);
+                setSingleChildRows([]);
+                setAddForm((p) => ({ ...p, prl: "" }));
+              }}
+              options={[
+                { label: "Additional", value: "adhoc" },
+                { label: "Reguler", value: "kanban" },
+              ]}
+              className="w-full"
+            />
+          </div>
+          <div>
             <div className="text-xs text-gray-600 mb-1">PRL (Select)</div>
               <Select
               showSearch
               allowClear
               value={addForm.prl ?? undefined}
-              options={prlOptions}
+              options={addPrlOptions}
               placeholder="Select PRL to autofill"
               className="w-full"
+              loading={prlsFetching}
               onChange={(v) => {
                 const raw = String(v ?? "");
                 const parsed = parsePrlSelection(raw);
@@ -3917,7 +3970,7 @@ function resolveSupplierName(
                       }}
                       onSearch={handleBulkPrlSearch}
                       onPopupScroll={handleBulkPrlPopupScroll}
-                      options={prlOptions}
+                      options={bulkPrlOptions}
                       className="w-full"
                       placeholder="Search and select one or more PRL UNIQ"
                       optionFilterProp="label"
