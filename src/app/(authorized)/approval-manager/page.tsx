@@ -273,9 +273,8 @@ export default function ApprovalManagerPage() {
     if (label.includes("opname")) return "stock_opname";
     if (label.includes("material") || label.includes("bom")) return "bom";
     if (label.includes("prl")) return "prl";
-    if (label.includes("po budget") || label.includes("budget"))
-      return "po_budget";
-    if (label.includes("wo")) return "wo";
+    if (label.includes("po budget") || label.includes("budget")) return "po_budget";
+    if (label.includes("wo") || label.includes("working order") || label.includes("work order")) { return "wo"; }
     return "unknown";
   };
 
@@ -347,7 +346,8 @@ export default function ApprovalManagerPage() {
       if (v.includes("prl")) return "PRL";
       if (v.includes("budget")) return "PR Budget";
       if (v.includes("opname")) return "Stock Opname";
-       if (v.includes("wo")) return "Working Order";
+      if (v.includes("wo")) return "Working Order";
+      if (v.includes("wo") || v.includes("working order") || v.includes("work order")) return "Working Order";
       return "All Items";
     };
 
@@ -604,10 +604,10 @@ export default function ApprovalManagerPage() {
       String(item?.module_label ?? item?.module ?? "-") || "-";
     const itemId = String(
       item?.document_id ??
-        item?.item_code ??
-        item?.reference_id ??
-        item?.instance_id ??
-        "-",
+      item?.item_code ??
+      item?.reference_id ??
+      item?.instance_id ??
+      "-",
     );
     const itemName = String(item?.item_name ?? "-") || "-";
     const itemCode = String(item?.item_code ?? item?.document_id ?? "-") || "-";
@@ -1095,9 +1095,9 @@ export default function ApprovalManagerPage() {
             action: toText(row.action ?? row.status),
             user: toText(
               row.user ??
-                row.user_name ??
-                row.approved_by_name ??
-                row.submitted_by_name,
+              row.user_name ??
+              row.approved_by_name ??
+              row.submitted_by_name,
             ),
             notes: toText(row.notes ?? row.note ?? row.remarks),
           };
@@ -1249,12 +1249,51 @@ export default function ApprovalManagerPage() {
       );
     };
 
+    const renderWO = () => {
+      if (!isRecord(payload)) return missing;
+
+      const wo =
+        isRecord(payload.wo)
+          ? payload.wo
+          : isRecord(payload.data)
+            ? payload.data
+            : payload;
+
+      return (
+        <>
+          <div className="mt-4">
+            <div className="text-sm font-semibold text-gray-900">
+              Working Order Detail
+            </div>
+
+            <div className="mt-2 grid grid-cols-1 gap-3 md:grid-cols-2">
+              {Object.entries(wo).map(([key, value]) =>
+                kv(
+                  key
+                    .replace(/_/g, " ")
+                    .replace(/\b\w/g, c => c.toUpperCase()),
+                  toText(value),
+                ),
+              )}
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <pre className="rounded bg-gray-50 p-3 text-xs overflow-auto">
+              {JSON.stringify(wo, null, 2)}
+            </pre>
+          </div>
+        </>
+      );
+    };
+
     const details = (() => {
       if (!payload) return missing;
       if (kind === "stock_opname") return renderStockOpname();
       if (kind === "bom") return renderBom();
       if (kind === "prl") return renderPrl();
       if (kind === "po_budget") return renderPoBudget();
+      if (kind === "wo") return renderWO();
       return (
         <div className="mt-4">
           <div className="text-sm text-gray-500">
