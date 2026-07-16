@@ -44,6 +44,14 @@ const normalizeObjectResponse = <T,>(response: unknown): T | null => {
   return null;
 };
 
+function parseArrayResponse<T>(response: unknown): T[] {
+  if (!isRecord(response)) return [];
+  const data = response.data;
+  if (Array.isArray(data)) return data as T[];
+  if (isRecord(data) && Array.isArray(data.items)) return data.items as T[];
+  return [];
+}
+
 const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
   const empty: Paginated<T> = {
     items: [],
@@ -89,6 +97,7 @@ export type OutgoingRawMaterial = {
   destination_location: string;
   requested_by: string;
   remarks: string;
+  stock_restored_at: string | null;
   created_at: string;
 };
 
@@ -106,6 +115,10 @@ export type CreateOutgoingRawMaterialRequest = {
   requested_by?: string;
   remarks?: string;
 };
+
+// All fields optional: the backend applies a partial update and
+// auto-recalculates stock when quantity_out and/or uniq change.
+export type UpdateOutgoingRawMaterialRequest = Partial<CreateOutgoingRawMaterialRequest>;
 
 const toOutgoingRawMaterial = (raw: unknown): OutgoingRawMaterial => {
   const record = isRecord(raw) ? raw : {};
@@ -126,12 +139,34 @@ const toOutgoingRawMaterial = (raw: unknown): OutgoingRawMaterial => {
     destination_location: getString(record, ["destination_location", "destinationLocation"]) ?? "",
     requested_by: getString(record, ["requested_by", "requestedBy"]) ?? "",
     remarks: getString(record, ["remarks"]) ?? "",
+    stock_restored_at: getString(record, ["stock_restored_at", "stockRestoredAt"]) ?? null,
     created_at: getString(record, ["created_at", "createdAt"]) ?? "",
   };
 };
 
+export type FormOptionItem = {
+  id: number;
+  uniq_code: string;
+  part_number: string;
+  part_name: string;
+  uom: string;
+  stock_qty: number;
+  warehouse_location: string;
+};
+
 export const outgoingRawMaterialSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
+    getFormOptions: builder.query<FormOptionItem[], { q?: string; limit?: number }>({
+      query: ({ q, limit = 20 }) => ({
+        url: "/outgoing-raw-materials/form-options",
+        method: "GET",
+        params: { q, limit },
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) =>
+        parseArrayResponse<FormOptionItem>(response),
+    }),
+
     getOutgoingRawMaterials: builder.query<Paginated<OutgoingRawMaterial>, GetOutgoingRawMaterialsParams>({
       query: ({ page, limit }) => ({
         url: "/outgoing-raw-materials",
@@ -168,11 +203,49 @@ export const outgoingRawMaterialSlice = apiSlice.injectEndpoints({
       transformResponse: (response: unknown) =>
         toOutgoingRawMaterial(normalizeObjectResponse<unknown>(response) ?? response),
     }),
+
+    updateOutgoingRawMaterial: builder.mutation<
+      OutgoingRawMaterial,
+      { id: number; body: UpdateOutgoingRawMaterialRequest }
+    >({
+      query: ({ id, body }) => ({
+        url: `/outgoing-raw-materials/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) =>
+        toOutgoingRawMaterial(normalizeObjectResponse<unknown>(response) ?? response),
+    }),
+
+    deleteOutgoingRawMaterial: builder.mutation<{ id: number }, { id: number }>({
+      query: ({ id }) => ({
+        url: `/outgoing-raw-materials/${id}`,
+        method: "DELETE",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (_response: unknown, _meta, arg) => ({ id: arg.id }),
+    }),
+
+    // Manually returns the transaction quantity back into stock (one-time).
+    restoreOutgoingRawMaterialStock: builder.mutation<OutgoingRawMaterial, { id: number }>({
+      query: ({ id }) => ({
+        url: `/outgoing-raw-materials/${id}/restore-stock`,
+        method: "POST",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) =>
+        toOutgoingRawMaterial(normalizeObjectResponse<unknown>(response) ?? response),
+    }),
   }),
 });
 
 export const {
+  useGetFormOptionsQuery,
   useGetOutgoingRawMaterialsQuery,
   useGetOutgoingRawMaterialByIdQuery,
   useCreateOutgoingRawMaterialMutation,
+  useUpdateOutgoingRawMaterialMutation,
+  useDeleteOutgoingRawMaterialMutation,
+  useRestoreOutgoingRawMaterialStockMutation,
 } = outgoingRawMaterialSlice;

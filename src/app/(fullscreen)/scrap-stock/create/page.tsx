@@ -52,6 +52,7 @@ const scrapTypeOptions = [
   { label: "Setting Machine Scrap", value: "Setting Machine Scrap" },
   { label: "Process Scrap", value: "Process Scrap" },
   { label: "Product Return Scrap", value: "Product Return Scrap" },
+  { label: "Customer Return Scrap", value: "Customer Return Scrap" },
 ];
 
 function CreateScrapStockContent() {

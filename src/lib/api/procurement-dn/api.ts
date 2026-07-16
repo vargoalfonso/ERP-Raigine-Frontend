@@ -345,6 +345,31 @@ const toScanResult = (raw: unknown): ProcurementDnScanResult => {
   };
 };
 
+export type ProcurementDnHistoryLog = {
+  id: string;
+  uniq_code?: string;
+  qty_change?: number;
+  weight_change?: number;
+  source_flag?: string;
+  packing_number?: string;
+  logged_by?: string;
+  logged_at?: string;
+};
+
+const toDnHistoryLog = (raw: unknown): ProcurementDnHistoryLog => {
+  const record = isRecord(raw) ? raw : {};
+  return {
+    id: toText(record.id ?? record.ID) ?? "",
+    uniq_code: toText(record.uniq_code ?? record.UniqCode),
+    qty_change: toNumber(record.qty_change ?? record.QtyChange),
+    weight_change: toNumber(record.weight_change ?? record.WeightChange),
+    source_flag: toText(record.source_flag ?? record.SourceFlag),
+    packing_number: toText(record.packing_number ?? record.PackingNumber ?? record.reference_id ?? record.ReferenceID),
+    logged_by: toText(record.logged_by ?? record.LoggedBy),
+    logged_at: toText(record.logged_at ?? record.LoggedAt),
+  };
+};
+
 export const procurementDnApiSlice = apiSlice
   .enhanceEndpoints({ addTagTypes: [TAG] })
   .injectEndpoints({
@@ -406,6 +431,15 @@ export const procurementDnApiSlice = apiSlice
       }),
       transformResponse: (response: unknown) => ok(toDnRecord(parseObjectResponse<unknown>(response))),
     }),
+
+    getProcurementDnHistory: builder.query<ApiResponse<ProcurementDnHistoryLog[]>, string | number>({
+      query: (id) => ({
+        url: `/delivery-notes/${encodeURIComponent(String(id))}/history`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => ok(parseArrayResponse<unknown>(response).map(toDnHistoryLog)),
+    }),
   }),
 });
 
@@ -416,4 +450,5 @@ export const {
   useLazyScanProcurementDnPackingQuery,
   useGetProcurementDnByIdQuery,
   useCreateProcurementDnMutation,
+  useGetProcurementDnHistoryQuery,
 } = procurementDnApiSlice;

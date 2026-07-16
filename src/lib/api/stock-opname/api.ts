@@ -27,6 +27,19 @@ const getNumber = (record: UnknownRecord, keys: string[]): number | undefined =>
   return undefined;
 };
 
+const getNullableNumber = (record: UnknownRecord, keys: string[]): number | null => {
+  for (const key of keys) {
+    const value = record[key];
+    if (value === null) return null;
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return null;
+};
+
 export type Pagination = {
   total: number;
   page: number;
@@ -162,8 +175,28 @@ export type StockOpnameSessionListRecord = {
   updated_at?: string | null;
 };
 
-export type StockOpnameSessionDetail = StockOpnameSessionListRecord & {
-  items?: unknown[];
+export type StockOpnameEntryRecord = {
+  id: number;
+  uuid: string;
+  uniq_code: string;
+  part_number: string;
+  part_name: string;
+  uom: string;
+  system_qty_snapshot: number;
+  counted_qty: number;
+  variance_qty: number;
+  variance_pct: number | null;
+  weight_kg: number | null;
+  cycle_pengiriman: string;
+  user_counter: string;
+  status: string;
+  reject_reason: string | null;
+};
+
+// Detail returned by GET /stock-opname-sessions/:id => { session, entries, approval }
+export type StockOpnameSessionDetailResult = {
+  session: StockOpnameSessionListRecord;
+  entries: StockOpnameEntryRecord[];
 };
 
 export type StockOpnameApprovalRequest = {
@@ -180,6 +213,15 @@ export type StockOpnameHistoryLogRecord = {
   last_update: string;
 };
 
+export type StockOpnameAuditLogRecord = {
+  id: number;
+  action: string;
+  entity_type: string;
+  actor: string;
+  remarks: string;
+  created_at: string;
+};
+
 const toUniqOption = (raw: unknown): StockOpnameUniqOption => {
   const r = isRecord(raw) ? raw : {};
   return {
@@ -188,16 +230,7 @@ const toUniqOption = (raw: unknown): StockOpnameUniqOption => {
     part_name: getString(r, ["part_name", "partName", "item_name", "itemName"]) ?? "",
     uom: getString(r, ["uom", "unit", "unit_measurement"]) ?? "",
     system_qty: getNumber(r, ["system_qty", "systemQty", "system_quantity"]) ?? 0,
-    weight_kg: ((): number | null => {
-      const v = (r as UnknownRecord)["weight_kg"];
-      if (v === null) return null;
-      if (typeof v === "number" && Number.isFinite(v)) return v;
-      if (typeof v === "string" && v.trim()) {
-        const parsed = Number(v);
-        return Number.isFinite(parsed) ? parsed : null;
-      }
-      return null;
-    })(),
+    weight_kg: getNullableNumber(r, ["weight_kg"]),
   };
 };
 
@@ -239,6 +272,27 @@ const toSessionListRecord = (raw: unknown): StockOpnameSessionListRecord => {
   };
 };
 
+const toEntryRecord = (raw: unknown): StockOpnameEntryRecord => {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    id: getNumber(r, ["id"]) ?? 0,
+    uuid: getString(r, ["uuid"]) ?? "",
+    uniq_code: getString(r, ["uniq_code", "uniq"]) ?? "-",
+    part_number: getString(r, ["part_number", "partNumber"]) ?? "-",
+    part_name: getString(r, ["part_name", "partName"]) ?? "-",
+    uom: getString(r, ["uom", "unit"]) ?? "-",
+    system_qty_snapshot: getNumber(r, ["system_qty_snapshot"]) ?? 0,
+    counted_qty: getNumber(r, ["counted_qty"]) ?? 0,
+    variance_qty: getNumber(r, ["variance_qty"]) ?? 0,
+    variance_pct: getNullableNumber(r, ["variance_pct"]),
+    weight_kg: getNullableNumber(r, ["weight_kg"]),
+    cycle_pengiriman: getString(r, ["cycle_pengiriman"]) ?? "-",
+    user_counter: getString(r, ["user_counter"]) ?? "-",
+    status: getString(r, ["status"]) ?? "-",
+    reject_reason: getString(r, ["reject_reason"]) ?? null,
+  };
+};
+
 const toHistoryLogRecord = (raw: unknown): StockOpnameHistoryLogRecord => {
   const r = isRecord(raw) ? raw : {};
   return {
@@ -248,6 +302,18 @@ const toHistoryLogRecord = (raw: unknown): StockOpnameHistoryLogRecord => {
     reason: getString(r, ["reason"]) ?? "-",
     qty: getNumber(r, ["qty"]) ?? 0,
     last_update: getString(r, ["last_update", "lastUpdate", "updated_at"]) ?? "-",
+  };
+};
+
+const toAuditLogRecord = (raw: unknown): StockOpnameAuditLogRecord => {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    id: getNumber(r, ["id"]) ?? 0,
+    action: getString(r, ["action"]) ?? "-",
+    entity_type: getString(r, ["entity_type", "entityType"]) ?? "-",
+    actor: getString(r, ["actor"]) ?? "-",
+    remarks: getString(r, ["remarks"]) ?? "-",
+    created_at: getString(r, ["created_at", "createdAt"]) ?? "-",
   };
 };
 
@@ -299,17 +365,39 @@ export const stockOpnameApiSlice = apiSlice
         },
       }),
 
-      // Not in the provided spec, but common in the backend; used by detail page if available.
-      getStockOpnameSessionById: builder.query<StockOpnameSessionDetail | null, { id: string | number }>({
+      // GET /stock-opname-sessions/:id => { session, entries, approval }
+      getStockOpnameSessionById: builder.query<StockOpnameSessionDetailResult | null, { id: string | number }>({
         query: ({ id }) => ({
           url: `/stock-opname-sessions/${encodeURIComponent(String(id))}`,
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) => {
-          const obj = normalizeObjectResponse<unknown>(response);
+          const obj = normalizeObjectResponse<UnknownRecord>(response);
           if (!obj) return null;
-          return toSessionListRecord(obj) as StockOpnameSessionDetail;
+          const sessionRaw = isRecord(obj.session) ? obj.session : obj;
+          const entriesRaw = Array.isArray(obj.entries) ? obj.entries : [];
+          return {
+            session: toSessionListRecord(sessionRaw),
+            entries: entriesRaw.map(toEntryRecord),
+          };
+        },
+        providesTags: (_r, _e, arg) => [{ type: TAG, id: String(arg.id) }],
+      }),
+
+      getStockOpnameAuditLogs: builder.query<Paginated<StockOpnameAuditLogRecord>, { id: string | number; page: number; limit: number }>({
+        query: ({ id, page, limit }) => ({
+          url: `/stock-opname-sessions/${encodeURIComponent(String(id))}/audit-logs`,
+          method: "GET",
+          params: { page, limit },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => {
+          const normalized = normalizePaginatedResponse<unknown>(response);
+          return {
+            items: normalized.items.map(toAuditLogRecord),
+            pagination: normalized.pagination,
+          };
         },
         providesTags: (_r, _e, arg) => [{ type: TAG, id: String(arg.id) }],
       }),
@@ -329,7 +417,7 @@ export const stockOpnameApiSlice = apiSlice
 
       rejectStockOpnameSession: builder.mutation<unknown, { id: string | number; body: StockOpnameApprovalRequest }>({
         query: ({ id, body }) => ({
-          url: `/stock-opname-sessions/${encodeURIComponent(String(id))}/reject`,
+          url: `/stock-opname-sessions/${encodeURIComponent(String(id))}/approve`,
           method: "PUT",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
@@ -364,6 +452,7 @@ export const {
   useCreateStockOpnameSessionMutation,
   useGetStockOpnameSessionsQuery,
   useGetStockOpnameSessionByIdQuery,
+  useGetStockOpnameAuditLogsQuery,
   useApproveStockOpnameSessionMutation,
   useRejectStockOpnameSessionMutation,
   useGetStockOpnameHistoryLogsQuery,
