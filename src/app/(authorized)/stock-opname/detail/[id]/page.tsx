@@ -65,6 +65,14 @@ function variance(systemQty: number, physicalQty: number) {
   return { diff, pct };
 }
 
+function statusTagColor(label?: string): string {
+  const lower = (label ?? "").toLowerCase();
+  if (lower.includes("approved") || lower.includes("complete")) return "green";
+  if (lower.includes("reject")) return "red";
+  if (lower.includes("waiting") || lower.includes("pending")) return "gold";
+  return "blue";
+}
+
 function normalizeStatus(value?: string): { statusLabel: string; impactLabel: string } {
   const lower = (value ?? "").toLowerCase();
   if (lower.includes("approved") || lower.includes("complete")) return { statusLabel: "Completed", impactLabel: "Approved" };
@@ -260,9 +268,16 @@ function StockOpnameDetailPageContent() {
               {data.countedDate ? `Counted: ${data.countedDate}` : null}
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Tag className="!rounded-full !px-3 !py-0.5">{data.statusLabel}</Tag>
-            <Tag className="!rounded-full !px-3 !py-0.5">{data.impactLabel}</Tag>
+          <div className="flex flex-col items-end gap-1">
+            <div className="text-xs font-semibold text-gray-500">Status</div>
+            <div className="flex items-center gap-2">
+              <Tag color={statusTagColor(data.statusLabel)} className="!rounded-full !px-3 !py-0.5 !font-semibold">
+                {data.statusLabel}
+              </Tag>
+              <Tag color={statusTagColor(data.impactLabel)} className="!rounded-full !px-3 !py-0.5">
+                {data.impactLabel}
+              </Tag>
+            </div>
           </div>
         </div>
       </div>

@@ -35,6 +35,7 @@ import {
   useCreateStockOpnameSessionMutation,
   useLazyGetStockOpnameUniqOptionsQuery,
 } from "@/lib/api/stock-opname/api";
+import { getCurrentUserDisplayName } from "@/lib/utils/currentUser";
 import { useGetEmployeesQuery } from "@/lib/api/system-settings/api";
 
 type Method = "manual" | "bulk";
@@ -144,6 +145,29 @@ function StockOpnameStartCountPageContent() {
     }));
   }, [employeesQuery.data]);
 
+  // User Counter is not selectable — it auto-fills from the logged-in user.
+  const currentUserName = useMemo(() => getCurrentUserDisplayName() ?? "", []);
+
+  const [entries, setEntries] = useState<Entry[]>(() =>
+    apiEnabled
+      ? [{ id: toId("entry"), systemStock: 0 }]
+      : [{ id: toId("entry"), uniq: "FG-001", systemStock: 250, countedQty: 245, userCounter: "John Meijer" }]
+  );
+
+  // Keep every entry's counter in sync with the current user (also covers newly added rows).
+  useEffect(() => {
+    if (!currentUserName) return;
+    setEntries((prev) => {
+      let changed = false;
+      const next = prev.map((entry) => {
+        if (entry.userCounter === currentUserName) return entry;
+        changed = true;
+        return { ...entry, userCounter: currentUserName };
+      });
+      return changed ? next : prev;
+    });
+  }, [currentUserName, entries.length]);
+
   const uniqOptions = useMemo(
     () =>
       apiEnabled
@@ -158,12 +182,6 @@ function StockOpnameStartCountPageContent() {
   const uniqLookup = useMemo(
     () => new Map(uniqSearchResults.map((item) => [item.uniq_code, item])),
     [uniqSearchResults]
-  );
-
-  const [entries, setEntries] = useState<Entry[]>(() =>
-    apiEnabled
-      ? [{ id: toId("entry"), systemStock: 0 }]
-      : [{ id: toId("entry"), uniq: "FG-001", systemStock: 250, countedQty: 245, userCounter: "John Meijer" }]
   );
 
   useEffect(() => {
@@ -559,15 +577,12 @@ function StockOpnameStartCountPageContent() {
                           <div className="text-xs text-gray-500">User Counter</div>
                           <InfoCircleOutlined className="text-blue-600" />
                         </div>
-                        <Select
-                          placeholder="Select Counter"
-                          value={e.userCounter}
-                          options={liveUserCounterOptions.length ? liveUserCounterOptions : [
-                            { label: "John Meijer", value: "John Meijer" },
-                            { label: "Sarah Tan", value: "Sarah Tan" },
-                            { label: "Mike Johnson", value: "Mike Johnson" },
-                          ]}
-                          onChange={(v) => setEntry(e.id, { userCounter: v })}
+                        <Input
+                          value={e.userCounter || currentUserName}
+                          readOnly
+                          placeholder="Auto-filled from your account"
+                          title="Auto-filled from the logged-in user"
+                          className="!rounded-lg bg-gray-50"
                         />
                       </div>
 
