@@ -451,9 +451,9 @@ export const poBudgetSlice = apiSlice
         providesTags: (_result, _error, arg) => [{ type: "PoBudget", id: arg.type }],
       }),
 
-      getPoBudgetList: builder.query<ApiResponse<PoBudgetRow[]>, { type: PoBudgetType; page?: number; limit?: number }>({
-        query: ({ type, page = 1, limit = 20 }) => ({
-          url: `/po-budget/${type}/budget?limit=${limit}&page=${page}`,
+      getPoBudgetList: builder.query<ApiResponse<PoBudgetRow[]>, { type: PoBudgetType; page?: number; limit?: number; budgetSubtype?: "adhoc" | "regular" | string }>({
+        query: ({ type, page = 1, limit = 20, budgetSubtype }) => ({
+          url: `/po-budget/${type}/budget?limit=${limit}&page=${page}${budgetSubtype ? `&budget_subtype=${encodeURIComponent(budgetSubtype)}` : ""}`,
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
