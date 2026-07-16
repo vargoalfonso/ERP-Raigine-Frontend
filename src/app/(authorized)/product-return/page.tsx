@@ -58,6 +58,7 @@ type ProductReturnRow = {
     | "Rework WO Created"
     | "Rejected"
     | "Unknown";
+  updatedAt?: string;
 };
 
 type SubmitFormValues = {
@@ -114,7 +115,8 @@ export default function ProductReturnPage() {
   const [createProductReturn] = useCreateProductReturnMutation();
   const [updateProductReturn, { isLoading: decisionLoading }] =
     useUpdateProductReturnMutation();
-  const [scanProductReturn, { isLoading: scanLoading }] = useScanProductReturnMutation();
+  const [scanProductReturn, { isLoading: scanLoading }] =
+    useScanProductReturnMutation();
 
   const listQuery = useGetProductReturnListQuery(
     { page, limit },
@@ -137,6 +139,9 @@ export default function ProductReturnPage() {
   const [historyStatusFilter, setHistoryStatusFilter] = useState<
     "all" | string
   >("all");
+  const [historySortBy, setHistorySortBy] = useState<
+    "date_approved_desc" | "date_approved_asc"
+  >("date_approved_desc");
 
   const tabs = useMemo(
     () => [
@@ -240,6 +245,7 @@ export default function ProductReturnPage() {
         scrapType: pickStr(r.scrap_type, r.scrapType) || "Product Return",
         status: status.raw,
         statusLabel: status.label,
+        updatedAt: pickStr(r.updated_at, r.updatedAt, r.created_at, r.createdAt),
       };
     });
   }, [listQuery.data?.data.items]);
@@ -286,12 +292,20 @@ export default function ProductReturnPage() {
   const qcRows = pendingRows;
   const historyRows = useMemo(() => {
     const base = [...rows];
-    base.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+    base.sort((a, b) => {
+      const da = a.updatedAt ?? "";
+      const db = b.updatedAt ?? "";
+      if (historySortBy === "date_approved_desc") {
+        return da < db ? 1 : da > db ? -1 : 0;
+      } else {
+        return da > db ? 1 : da < db ? -1 : 0;
+      }
+    });
     const historyOnly = base.filter((r) => r.status !== "PENDING");
     return historyStatusFilter === "all"
       ? historyOnly
       : historyOnly.filter((r) => r.status === historyStatusFilter);
-  }, [rows, historyStatusFilter]);
+  }, [rows, historyStatusFilter, historySortBy]);
 
   const tableRows = useMemo(() => {
     // if (tab === "pending") return pendingRows;
@@ -314,22 +328,19 @@ export default function ProductReturnPage() {
   }, [rows]);
 
   const columns = useMemo<ColumnsType<ProductReturnRow>>(() => {
-    const statusTag = (v: ProductReturnRow["statusLabel"]) => (
-      <Tag
-        color={
-          v === "QC Approved"
-            ? "blue"
-            : v === "Pending QC"
-              ? "gold"
-              : v === "Rework WO Created"
-                ? "purple"
-                : "red"
-        }
-        className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
-      >
-        {v}
-      </Tag>
-    );
+    const statusTag = (v: ProductReturnRow["statusLabel"]) => {
+      let colorClass = "bg-gray-100 text-gray-700 border-gray-200";
+      if (v === "QC Approved") colorClass = "bg-blue-50 text-blue-700 border-blue-200";
+      else if (v === "Pending QC") colorClass = "bg-yellow-50 text-yellow-700 border-yellow-200";
+      else if (v === "Rework WO Created") colorClass = "bg-purple-50 text-purple-700 border-purple-200";
+      else if (v === "Rejected") colorClass = "bg-red-50 text-red-700 border-red-200";
+
+      return (
+        <span className={`inline-flex items-center rounded-full border px-3 py-0.5 text-xs font-semibold ${colorClass}`}>
+          {v}
+        </span>
+      );
+    };
 
     const base: ColumnsType<ProductReturnRow> = [
       // {
@@ -357,7 +368,7 @@ export default function ProductReturnPage() {
         dataIndex: "uniq",
         key: "uniq",
         render: (v: string) => (
-          <Tag className="!rounded-md !px-2 !py-0.5 !text-xs">{v}</Tag>
+          <span className="inline-block rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-700">{v}</span>
         ),
       },
       {
@@ -398,13 +409,11 @@ export default function ProductReturnPage() {
         width: 140,
       },
       {
-        title: "Weight",
+        title: "Weight (Kg)",
         dataIndex: "weight",
         key: "weight",
         render: (v: number | undefined, r: ProductReturnRow) => (
-          <span className="text-sm">
-            {Number(v ?? 0)} {r?.uom || ""}
-          </span>
+          <span className="text-sm">{Number(v ?? 0)}</span>
         ),
         width: 110,
       },
@@ -659,20 +668,34 @@ export default function ProductReturnPage() {
         )}
 
         {tab === "history" && (
-          <div className="mb-3 flex items-center gap-2 text-xs text-slate-600">
-            <FilterOutlined className="text-slate-400" />
-            <span className="font-medium">Filter by Status:</span>
-            <Select
-              value={historyStatusFilter}
-              onChange={setHistoryStatusFilter}
-              className="min-w-[160px]"
-              options={[
-                { label: "All Returns", value: "all" },
-                { label: "QC Approved", value: "APPROVED" },
-                { label: "Rework WO Created", value: "REWORK_WO_CREATED" },
-                { label: "Rejected", value: "REJECTED" },
-              ]}
-            />
+          <div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-slate-600">
+            <div className="flex items-center gap-2">
+              <FilterOutlined className="text-slate-400" />
+              <span className="font-medium">Filter by Status:</span>
+              <Select
+                value={historyStatusFilter}
+                onChange={setHistoryStatusFilter}
+                className="min-w-[160px]"
+                options={[
+                  { label: "All Returns", value: "all" },
+                  { label: "QC Approved", value: "APPROVED" },
+                  { label: "Rework WO Created", value: "REWORK_WO_CREATED" },
+                  { label: "Rejected", value: "REJECTED" },
+                ]}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-medium">Sort by:</span>
+              <Select
+                value={historySortBy}
+                onChange={setHistorySortBy}
+                className="min-w-[180px]"
+                options={[
+                  { label: "Date Approved (Newest)", value: "date_approved_desc" },
+                  { label: "Date Approved (Oldest)", value: "date_approved_asc" },
+                ]}
+              />
+            </div>
           </div>
         )}
 
@@ -768,7 +791,11 @@ export default function ProductReturnPage() {
               <Input
                 placeholder="Scan or input Kanban / DN"
                 disabled={scanLoading}
-                suffix={scanLoading ? <LoadingOutlined className="text-blue-500" /> : null}
+                suffix={
+                  scanLoading ? (
+                    <LoadingOutlined className="text-blue-500" />
+                  ) : null
+                }
                 onPressEnter={async (e) => {
                   e.preventDefault();
                   const val = (e.target as HTMLInputElement).value;
@@ -795,13 +822,18 @@ export default function ProductReturnPage() {
                     const uniq = d.uniq_id || d.uniq || "";
                     const partNm = d.part_name || "";
                     const mod = d.model || "";
-                    const packNo = d.packing_number || d.kanban_packing_list || val.trim();
+                    const packNo =
+                      d.packing_number || d.kanban_packing_list || val.trim();
                     const sType = d.scrap_type || "Product Return";
-                    const uom = d.selected_unit || d.unit_measurement || d.unit || "KG";
+                    const uom =
+                      d.selected_unit || d.unit_measurement || d.unit || "KG";
                     const dnNo = d.dn_number || packNo || "-";
 
                     const uomOptions = ["KG", "G", "PCS", "BOX"];
-                    const matchedUom = uomOptions.find(o => o.toLowerCase() === uom.toLowerCase()) || "KG";
+                    const matchedUom =
+                      uomOptions.find(
+                        (o) => o.toLowerCase() === uom.toLowerCase(),
+                      ) || "KG";
 
                     form.setFieldsValue({
                       uniqId: uniq,
@@ -842,13 +874,18 @@ export default function ProductReturnPage() {
                     const uniq = d.uniq_id || d.uniq || "";
                     const partNm = d.part_name || "";
                     const mod = d.model || "";
-                    const packNo = d.packing_number || d.kanban_packing_list || val.trim();
+                    const packNo =
+                      d.packing_number || d.kanban_packing_list || val.trim();
                     const sType = d.scrap_type || "Product Return";
-                    const uom = d.selected_unit || d.unit_measurement || d.unit || "KG";
+                    const uom =
+                      d.selected_unit || d.unit_measurement || d.unit || "KG";
                     const dnNo = d.dn_number || "-";
 
                     const uomOptions = ["KG", "G", "PCS", "BOX"];
-                    const matchedUom = uomOptions.find(o => o.toLowerCase() === uom.toLowerCase()) || "KG";
+                    const matchedUom =
+                      uomOptions.find(
+                        (o) => o.toLowerCase() === uom.toLowerCase(),
+                      ) || "KG";
 
                     form.setFieldsValue({
                       uniqId: uniq,
@@ -861,7 +898,7 @@ export default function ProductReturnPage() {
                       uom: matchedUom,
                     });
                   } catch (err) {
-                    // silently fail on blur to not spam errors if they just tabbed out of an invalid input, 
+                    // silently fail on blur to not spam errors if they just tabbed out of an invalid input,
                     // or maybe just log it.
                     console.error("Scan on blur failed", err);
                   }
@@ -878,25 +915,38 @@ export default function ProductReturnPage() {
             </Form.Item>
 
             <Form.Item label="Part Number" name="partNumber">
-              <Input readOnly placeholder="Auto-filled by uniq chosen" className="bg-gray-50" />
+              <Input
+                readOnly
+                placeholder="Auto-filled by uniq chosen"
+                className="bg-gray-50"
+              />
             </Form.Item>
 
             <Form.Item label="Part Name" name="partName">
-              <Input readOnly placeholder="Auto-filled by uniq chosen" className="bg-gray-50" />
+              <Input
+                readOnly
+                placeholder="Auto-filled by uniq chosen"
+                className="bg-gray-50"
+              />
             </Form.Item>
 
             <Form.Item label="Model" name="model">
-              <Input readOnly placeholder="Auto-filled by uniq chosen" className="bg-gray-50" />
+              <Input
+                readOnly
+                placeholder="Auto-filled by uniq chosen"
+                className="bg-gray-50"
+              />
             </Form.Item>
 
             <Form.Item label="Packing Number" name="packingNumber">
-              <Input readOnly placeholder="Auto-filled by uniq chosen" className="bg-gray-50" />
+              <Input
+                readOnly
+                placeholder="Auto-filled by uniq chosen"
+                className="bg-gray-50"
+              />
             </Form.Item>
 
-            <Form.Item
-              label="DN Number"
-              name="dnNumber"
-            >
+            <Form.Item label="DN Number" name="dnNumber">
               <Input placeholder="Auto-filled or -" className="bg-gray-50" />
             </Form.Item>
           </div>
