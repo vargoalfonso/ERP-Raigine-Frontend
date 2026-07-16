@@ -38,6 +38,8 @@ type PoSupplierGroup = {
   totalQty: number;
 };
 
+type BudgetSubtype = "adhoc" | "regular";
+
 const specText = (spec: Record<string, unknown> | undefined, key: string): string => {
   const value = spec?.[key];
   if (value == null || value === "") return "-";
@@ -56,6 +58,12 @@ const procurementTypeToBudgetType = (type: ProcurementPoType): PoBudgetType => {
   if (type === "raw_material") return "raw-material";
   if (type === "subcon") return "subcon";
   return "indirect";
+};
+
+const isBudgetSubtype = (value: string | undefined, subtype: BudgetSubtype) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (subtype === "adhoc") return normalized === "adhoc" || normalized === "additional";
+  return normalized === "regular" || normalized === "kanban" || normalized === "";
 };
 
 function CreatePoProcurementPageContent() {
@@ -79,13 +87,14 @@ function CreatePoProcurementPageContent() {
   const [dnIncoming, setDnIncoming] = useState<number>(0);
 
   const [selectedBudgetIds, setSelectedBudgetIds] = useState<number[]>([]);
+  const [budgetSubtype, setBudgetSubtype] = useState<BudgetSubtype>("adhoc");
   const [externalSystem, setExternalSystem] = useState<string>("zahir");
   // External PO (Zahir) number per PO-stage + supplier group, keyed by group key.
   const [externalPoNumbers, setExternalPoNumbers] = useState<Record<string, string>>({});
   const [generateMode, setGenerateMode] = useState<string>("both_stages");
 
   const poBudgetQuery = useGetPoBudgetListQuery(
-    { type: poBudgetType, page: 1, limit: 100 },
+    { type: poBudgetType, page: 1, limit: 100, budgetSubtype },
     { skip: !apiEnabled },
   );
 
@@ -101,6 +110,8 @@ function CreatePoProcurementPageContent() {
     const rows = poBudgetQuery.data?.data ?? [];
     if (!periodKey) return rows;
     return rows.filter((row) => {
+      if (!isBudgetSubtype(row.type, budgetSubtype)) return false;
+
       const rowPeriod = String(row.period ?? "").trim();
       if (!rowPeriod) return false;
       // Compare on month+year so "July 2026" and "2026-07" both line up.
@@ -110,7 +121,7 @@ function CreatePoProcurementPageContent() {
         ? parsed.format("MMMM YYYY") === periodKey
         : rowPeriod === periodKey;
     });
-  }, [poBudgetQuery.data?.data, periodKey]);
+  }, [budgetSubtype, poBudgetQuery.data?.data, periodKey]);
 
   const poBudgetOptions = useMemo<{ label: string; value: number }[]>(() => {
     if (!apiEnabled) {
@@ -133,6 +144,14 @@ function CreatePoProcurementPageContent() {
       { label: "Stage 2", value: "stage_2" },
     ],
     []
+  );
+
+  const budgetSubtypeOptions = useMemo(
+    () => [
+      { label: "Additional (Adhoc)", value: "adhoc" },
+      { label: "Regular / Kanban", value: "regular" },
+    ],
+    [],
   );
 
   // Split every selected budget entry's detail_jsonb children into PO1 / PO2
@@ -417,13 +436,30 @@ function CreatePoProcurementPageContent() {
 
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">PR Budget</div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">Budget source</div>
+              <Select
+                value={budgetSubtype}
+                onChange={(value) => {
+                  setBudgetSubtype(value);
+                  setSelectedBudgetIds([]);
+                }}
+                options={budgetSubtypeOptions}
+                placeholder="Select budget source"
+                className="w-full"
+              />
+            </div>
+            <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                {budgetSubtype === "adhoc" ? "PRL Adhoc" : "PR Budget"}
+              </div>
               <Select
                 mode="multiple"
+                showSearch
+                optionFilterProp="label"
                 value={selectedBudgetIds}
                 onChange={(values) => setSelectedBudgetIds(values.map((value) => Number(value)).filter(Number.isFinite))}
                 options={poBudgetOptions}
-                placeholder="Select PR Budget entries"
+                placeholder={budgetSubtype === "adhoc" ? "Select PRL Adhoc entries" : "Select PR Budget entries"}
                 className="w-full"
               />
             </div>
@@ -452,7 +488,7 @@ function CreatePoProcurementPageContent() {
           <div className="mt-6 space-y-6">
             {poSupplierGroups.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
-                Select PO Budget entries above to preview the PO1 / PO2 child split.
+                Select {budgetSubtype === "adhoc" ? "PRL Adhoc" : "PR Budget"} entries above to preview the PO1 / PO2 child split.
               </div>
             ) : (
               poSupplierGroups.map((g) => (
