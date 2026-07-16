@@ -1,17 +1,22 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { Button, Descriptions, Form, Input, InputNumber, Modal, Select, Table, Tag, message } from "antd";
+import { Button, Descriptions, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { EyeOutlined, PlusOutlined } from "@ant-design/icons";
+import { CalendarOutlined, DeleteOutlined, EditOutlined, EyeOutlined, LineChartOutlined, PlusOutlined, RedoOutlined } from "@ant-design/icons";
 
 import { apiBaseUrl } from "@/lib/api/instance";
+import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import {
   type OutgoingRawMaterial,
   useCreateOutgoingRawMaterialMutation,
+  useDeleteOutgoingRawMaterialMutation,
   useGetOutgoingRawMaterialByIdQuery,
   useGetOutgoingRawMaterialsQuery,
+  useRestoreOutgoingRawMaterialStockMutation,
+  useUpdateOutgoingRawMaterialMutation,
+  useGetFormOptionsQuery,
 } from "@/lib/api/outgoing-raw-material/api";
 import { useListProcurementDnsQuery } from "@/lib/api/procurement-dn/api";
 import { useListProcurementPosQuery, type ProcurementPoRecord } from "@/lib/api/procurement-po/api";
@@ -36,12 +41,8 @@ type OutgoingFormValues = {
 };
 
 const reasonOptions = [
-  "Production Use",
   "Quality Testing",
   "Sample Request",
-  "Rework",
-  "Maintenance",
-  "Others",
 ];
 
 const getPoUniq = (po: ProcurementPoRecord | undefined): string | undefined => {
@@ -67,6 +68,8 @@ export default function OutgoingRawMaterialPage() {
 
   const [reasonFilter, setReasonFilter] = useState<string>("ALL");
   const [trxOpen, setTrxOpen] = useState(false);
+  // When set, the transaction modal is in "edit" mode for this row id.
+  const [editId, setEditId] = useState<number | null>(null);
   const [form] = Form.useForm<OutgoingFormValues>();
 
   const listQuery = useGetOutgoingRawMaterialsQuery(
@@ -74,16 +77,20 @@ export default function OutgoingRawMaterialPage() {
     { skip: !apiEnabled }
   );
   const [createOutgoingRawMaterial, createState] = useCreateOutgoingRawMaterialMutation();
+  const [updateOutgoingRawMaterial, updateState] = useUpdateOutgoingRawMaterialMutation();
+  const [deleteOutgoingRawMaterial, deleteState] = useDeleteOutgoingRawMaterialMutation();
+  const [restoreOutgoingRawMaterialStock, restoreState] = useRestoreOutgoingRawMaterialStockMutation();
+  const [pendingRowId, setPendingRowId] = useState<number | null>(null);
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
 
-  const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled || !trxOpen });
   const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeQuery.data?.data ?? []), [bomTreeQuery.data]);
-  const warehousesQuery = useListWarehousesQuery(undefined, { skip: !apiEnabled });
-  const procurementPosQuery = useListProcurementPosQuery({ po_type: "raw_material" }, { skip: !apiEnabled });
-  const procurementDnsQuery = useListProcurementDnsQuery(undefined, { skip: !apiEnabled });
-  const workOrdersQuery = useGetWorkOrdersQuery({ page: 1, limit: 200 }, { skip: !apiEnabled });
+  const warehousesQuery = useListWarehousesQuery(undefined, { skip: !apiEnabled || !trxOpen });
+  const procurementPosQuery = useListProcurementPosQuery({ po_type: "raw_material" }, { skip: !apiEnabled || !trxOpen });
+  const procurementDnsQuery = useListProcurementDnsQuery(undefined, { skip: !apiEnabled || !trxOpen });
+  const workOrdersQuery = useGetWorkOrdersQuery({ page: 1, limit: 200 }, { skip: !apiEnabled || !trxOpen });
 
   const detailQuery = useGetOutgoingRawMaterialByIdQuery(
     { id: detailId ?? 0 },
@@ -91,7 +98,9 @@ export default function OutgoingRawMaterialPage() {
   );
 
   const procurementPos = procurementPosQuery.data?.data ?? [];
-  const procurementDns = (procurementDnsQuery.data?.data ?? []).filter((item) => item.type === "RM");
+  const procurementDns = (procurementDnsQuery.data?.data ?? []).filter(
+    (item: any) => String(item.type ?? "").toUpperCase() === "RM"
+  );
   const workOrders = workOrdersQuery.data?.items ?? [];
 
   const poOptions = useMemo(
@@ -136,6 +145,22 @@ export default function OutgoingRawMaterialPage() {
     [warehousesQuery.data]
   );
 
+  const packingOptions = useMemo(() => {
+    const options: { value: string; label: string; item: any }[] = [];
+    procurementDns.forEach((dn: any) => {
+      (dn.items || []).forEach((item: any) => {
+        if (item.packing_number) {
+          options.push({
+            value: item.packing_number,
+            label: `${item.packing_number} — ${item.item_uniq_code}`,
+            item: item,
+          });
+        }
+      });
+    });
+    return options;
+  }, [procurementDns]);
+
   const workOrderOptions = useMemo(
     () =>
       workOrders
@@ -147,6 +172,38 @@ export default function OutgoingRawMaterialPage() {
     [workOrders]
   );
 
+  const watchedUniq = Form.useWatch("uniq", form);
+  const watchedPackingListRm = Form.useWatch("packing_list_rm", form);
+
+  const formOptionsQuery = useGetFormOptionsQuery(
+    { q: watchedUniq, limit: 1 },
+    { skip: !apiEnabled || !trxOpen || !watchedUniq }
+  );
+  
+  const stockQty = useMemo(() => {
+    if (!formOptionsQuery.data || formOptionsQuery.data.length === 0) return 0;
+    // Attempt exact match first
+    const exact = formOptionsQuery.data.find(opt => opt.uniq_code === watchedUniq);
+    if (exact) return exact.stock_qty;
+    return formOptionsQuery.data[0].stock_qty;
+  }, [formOptionsQuery.data, watchedUniq]);
+
+  React.useEffect(() => {
+    if (formOptionsQuery.data && formOptionsQuery.data.length > 0 && watchedUniq) {
+      const exact = formOptionsQuery.data.find(opt => opt.uniq_code === watchedUniq) || formOptionsQuery.data[0];
+      if (exact.warehouse_location && !form.getFieldValue("destination_location")) {
+        form.setFieldsValue({ destination_location: exact.warehouse_location });
+      }
+    }
+  }, [formOptionsQuery.data, watchedUniq, form]);
+
+  const selectedIncomingItem = useMemo(() => {
+    if (!watchedPackingListRm) return null;
+    return packingOptions.find(o => o.value === watchedPackingListRm)?.item;
+  }, [watchedPackingListRm, packingOptions]);
+
+  const incomingQty = selectedIncomingItem?.quantity ?? 0;
+
   const rows = listQuery.data?.items ?? [];
   const total = listQuery.data?.pagination.total ?? rows.length;
 
@@ -157,11 +214,13 @@ export default function OutgoingRawMaterialPage() {
 
   const openTrx = () => {
     setTrxOpen(true);
-    form.setFieldsValue({
-      unit: "g",
-      quantity_out: 0,
-      reason: "Production Use",
-    });
+    setTimeout(() => {
+      form.setFieldsValue({
+        unit: "g",
+        quantity_out: 0,
+        reason: "Quality Testing",
+      });
+    }, 0);
   };
 
   const applyUniqAutofill = (uniq?: string) => {
@@ -173,10 +232,22 @@ export default function OutgoingRawMaterialPage() {
     });
   };
 
+  const onSelectPackingList = (packingNum: string) => {
+    const option = packingOptions.find(o => o.value === packingNum);
+    if (option) {
+      const { item } = option;
+      const uniq = item.item_uniq_code;
+      form.setFieldsValue({
+        uniq,
+        unit: item.uom || bomIndex.uomByUniq[uniq] || form.getFieldValue("unit") || "g",
+      });
+    }
+  };
+
   const onSelectPo = (poNumber: string) => {
-    const po = procurementPos.find((item) => item.po_number === poNumber);
+    const po = procurementPos.find((item: ProcurementPoRecord) => item.po_number === poNumber);
     const uniq = getPoUniq(po);
-    const relatedDn = procurementDns.find((item) => item.po_number === poNumber);
+    const relatedDn = procurementDns.find((item: any) => item.po_number === poNumber);
 
     form.setFieldsValue({
       po_number: poNumber,
@@ -188,7 +259,7 @@ export default function OutgoingRawMaterialPage() {
   };
 
   const onSelectDn = (dnNumber: string) => {
-    const dn = procurementDns.find((item) => item.dn_number === dnNumber);
+    const dn = procurementDns.find((item: any) => item.dn_number === dnNumber);
     const firstItem = dn?.items?.[0];
     const uniq = firstItem?.item_uniq_code;
 
@@ -216,18 +287,49 @@ export default function OutgoingRawMaterialPage() {
 
   const closeTrx = () => {
     setTrxOpen(false);
+    setEditId(null);
     form.resetFields();
   };
 
+  const openEdit = (row: OutgoingRawMaterial) => {
+    setEditId(row.id);
+    setTrxOpen(true);
+    setTimeout(() => {
+      form.setFieldsValue({
+        packing_list_rm: row.packing_list_rm,
+        uniq: row.uniq,
+        unit: row.unit,
+        quantity_out: row.quantity_out,
+        reason: row.reason,
+        purpose: row.purpose,
+        work_order_no: row.work_order_no || undefined,
+        destination_location: row.destination_location || undefined,
+        requested_by: row.requested_by,
+        remarks: row.remarks,
+      });
+    }, 0);
+  };
+
   const handleProcess = async () => {
-    const values = await form.validateFields();
+    let values: OutgoingFormValues;
+    try {
+      values = await form.validateFields();
+    } catch {
+      // antd already highlights the invalid fields inline.
+      return;
+    }
 
     if (!apiEnabled) {
       message.info("NEXT_PUBLIC_API_URL is not configured");
       return;
     }
 
-    await createOutgoingRawMaterial({
+    if (stockQty !== null && Number(values.quantity_out) > stockQty) {
+      message.error(`Quantity out (${values.quantity_out}) tidak boleh melebihi Available Stock RM (${stockQty})`);
+      return;
+    }
+
+    const payload = {
       packing_list_rm: values.packing_list_rm,
       uniq: values.uniq,
       unit: values.unit,
@@ -238,11 +340,57 @@ export default function OutgoingRawMaterialPage() {
       destination_location: values.destination_location,
       requested_by: values.requested_by,
       remarks: values.remarks,
-    }).unwrap();
+    };
 
-    message.success("Outgoing transaction created");
-    listQuery.refetch();
-    closeTrx();
+    try {
+      if (editId) {
+        await updateOutgoingRawMaterial({ id: editId, body: payload }).unwrap();
+        message.success("Outgoing transaction updated");
+      } else {
+        await createOutgoingRawMaterial(payload).unwrap();
+        message.success("Outgoing transaction created");
+      }
+      listQuery.refetch();
+      closeTrx();
+    } catch (err) {
+      message.error(
+        getApiErrorMessage(err, editId ? "Failed to update transaction" : "Failed to create transaction")
+      );
+    }
+  };
+
+  const handleDelete = async (row: OutgoingRawMaterial) => {
+    if (!apiEnabled) {
+      message.info("NEXT_PUBLIC_API_URL is not configured");
+      return;
+    }
+    setPendingRowId(row.id);
+    try {
+      await deleteOutgoingRawMaterial({ id: row.id }).unwrap();
+      message.success("Outgoing transaction deleted (stock not restored)");
+      listQuery.refetch();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to delete transaction"));
+    } finally {
+      setPendingRowId(null);
+    }
+  };
+
+  const handleRestoreStock = async (row: OutgoingRawMaterial) => {
+    if (!apiEnabled) {
+      message.info("NEXT_PUBLIC_API_URL is not configured");
+      return;
+    }
+    setPendingRowId(row.id);
+    try {
+      await restoreOutgoingRawMaterialStock({ id: row.id }).unwrap();
+      message.success(`Stock for ${row.quantity_out} ${row.unit} returned to inventory`);
+      listQuery.refetch();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Failed to restore stock"));
+    } finally {
+      setPendingRowId(null);
+    }
   };
 
   const openDetail = (row: OutgoingRawMaterial) => {
@@ -264,53 +412,88 @@ export default function OutgoingRawMaterialPage() {
       render: (v: string) => <span className="font-medium text-gray-900">{v || "-"}</span>,
     },
     {
-      title: "Transaction Date",
+      title: "Date",
       dataIndex: "transaction_date",
       key: "transaction_date",
       width: 160,
-      render: (v: string) => (v ? new Date(v).toLocaleDateString() : "-"),
+      render: (v: string) => (
+        <Space size={6} className="text-gray-600">
+          <CalendarOutlined />
+          <span>{v ? v.substring(0, 10) : "-"}</span>
+        </Space>
+      ),
     },
-    { title: "UNIQ", dataIndex: "uniq", key: "uniq", width: 120 },
-    { title: "RM Name", dataIndex: "rm_name", key: "rm_name", width: 240 },
-    { title: "Packing List RM", dataIndex: "packing_list_rm", key: "packing_list_rm", width: 160 },
-    { title: "Unit", dataIndex: "unit", key: "unit", width: 80 },
     {
-      title: "Quantity Out",
+      title: "RM Info",
+      key: "rm_info",
+      width: 240,
+      render: (_: unknown, r) => (
+        <div className="flex flex-col">
+          <span className="font-medium text-gray-900">{r.uniq}</span>
+          <span className="text-gray-500 text-sm">{r.rm_name}</span>
+        </div>
+      ),
+    },
+    {
+      title: "Qty Out",
       dataIndex: "quantity_out",
       key: "quantity_out",
       width: 130,
       align: "right",
       render: (_: number, r) => (
-        <span className="text-red-600 font-medium">- {r.quantity_out} {r.unit}</span>
+        <span className="text-red-600 font-medium">
+          <LineChartOutlined className="mr-1" /> -{r.quantity_out} {r.unit}
+        </span>
       ),
     },
-    { title: "Stock Before", dataIndex: "stock_before", key: "stock_before", width: 120, align: "right" },
-    { title: "Stock After", dataIndex: "stock_after", key: "stock_after", width: 120, align: "right" },
+    { 
+      title: "Stock Before", 
+      dataIndex: "stock_before", 
+      key: "stock_before", 
+      width: 120,
+      align: "right", 
+      render: (v: number, r) => `${v} ${r.unit}` 
+    },
+    { 
+      title: "Stock After", 
+      dataIndex: "stock_after", 
+      key: "stock_after", 
+      width: 120,
+      align: "right", 
+      render: (v: number, r) => <span className="font-medium text-gray-900">{v} {r.unit}</span> 
+    },
     {
       title: "Reason",
       dataIndex: "reason",
       key: "reason",
       width: 160,
-      render: (v: string) => <Tag className="bg-blue-50 text-blue-700 border-blue-100">{v || "-"}</Tag>,
+      render: (v: string) => {
+        let bgColor = "bg-gray-50";
+        let textColor = "text-gray-700";
+        let borderColor = "border-gray-200";
+        if (v === "Production Use") {
+          bgColor = "bg-blue-600";
+          textColor = "text-white";
+          borderColor = "border-blue-600";
+        } else if (v === "Quality Testing") {
+           bgColor = "bg-slate-100";
+           textColor = "text-slate-600";
+           borderColor = "border-slate-200";
+        }
+        return <Tag className={`border ${borderColor} ${bgColor} ${textColor} px-2 py-0.5 rounded-full font-medium`}>{v || "-"}</Tag>;
+      },
     },
-    { title: "Purpose", dataIndex: "purpose", key: "purpose", width: 220 },
-    { title: "WO", dataIndex: "work_order_no", key: "work_order_no", width: 140 },
-    { title: "Destination", dataIndex: "destination_location", key: "destination_location", width: 180 },
     { title: "Requested By", dataIndex: "requested_by", key: "requested_by", width: 140 },
-    {
-      title: "Created At",
-      dataIndex: "created_at",
-      key: "created_at",
-      width: 180,
-      render: (v: string) => (v ? new Date(v).toLocaleString() : "-"),
-    },
     {
       title: "Actions",
       key: "actions",
-      width: 80,
+      width: 90,
       fixed: "right",
+      align: "center",
       render: (_: unknown, r) => (
-        <Button type="text" icon={<EyeOutlined />} className="text-gray-500" onClick={() => openDetail(r)} />
+        <Tooltip title="View detail">
+          <Button type="text" icon={<EyeOutlined />} className="text-gray-800" onClick={() => openDetail(r)} />
+        </Tooltip>
       ),
     },
   ];
@@ -380,31 +563,25 @@ export default function OutgoingRawMaterialPage() {
       </Modal>
 
       <Modal
-        title="Create Outgoing Raw Material"
+        title={editId ? "Edit Outgoing Raw Material" : "Create Outgoing Raw Material"}
         open={trxOpen}
         onCancel={closeTrx}
         onOk={handleProcess}
-        okText="Create"
-        confirmLoading={createState.isLoading}
+        okText={editId ? "Save" : "Create"}
+        confirmLoading={createState.isLoading || updateState.isLoading}
         width={680}
         destroyOnHidden
       >
         <Form form={form} layout="vertical" requiredMark={false}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Form.Item label="PO Number" name="po_number">
-              <Select placeholder="Select PO from procurement" options={poOptions} showSearch optionFilterProp="label" allowClear onChange={onSelectPo} />
-            </Form.Item>
 
-            <Form.Item label="DN Number" name="dn_number">
-              <Select placeholder="Select related DN" options={dnOptions} showSearch optionFilterProp="label" allowClear onChange={onSelectDn} />
-            </Form.Item>
 
             <Form.Item
               label="Packing List RM"
               name="packing_list_rm"
               rules={[{ required: true, message: "packing_list_rm wajib" }]}
             >
-              <Input placeholder="PL-EMA-LV3-001" />
+              <Select placeholder="Select Packing List from Incoming DN" options={packingOptions} showSearch optionFilterProp="label" allowClear onChange={onSelectPackingList} />
             </Form.Item>
 
             <Form.Item label="UNIQ" name="uniq" rules={[{ required: true, message: "uniq wajib" }]}>
@@ -418,7 +595,26 @@ export default function OutgoingRawMaterialPage() {
             <Form.Item
               label="Quantity Out"
               name="quantity_out"
-              rules={[{ required: true, message: "quantity_out wajib" }]}
+              rules={[
+                { required: true, message: "quantity_out wajib" },
+                {
+                  validator: async (_, value) => {
+                    if (value > stockQty) {
+                      message.error("Quantity Out cannot be more than current stock in raw material");
+                      return Promise.reject(new Error("Exceeds stock"));
+                    }
+                    return Promise.resolve();
+                  }
+                }
+              ]}
+              extra={
+                watchedUniq ? (
+                  <div className="text-xs text-gray-500 mt-1">
+                    Current Stock: {stockQty} {form.getFieldValue("unit")}
+                    {selectedIncomingItem ? ` | DN Incoming Qty: ${incomingQty}` : null}
+                  </div>
+                ) : null
+              }
             >
               <InputNumber className="w-full" min={0} />
             </Form.Item>
@@ -427,12 +623,10 @@ export default function OutgoingRawMaterialPage() {
               <Select options={reasonOptions.map((r) => ({ label: r, value: r }))} />
             </Form.Item>
 
-            <Form.Item label="Work Order No" name="work_order_no">
-              <Select placeholder="Select work order" options={workOrderOptions} showSearch optionFilterProp="label" allowClear onChange={onSelectWorkOrder} />
-            </Form.Item>
+
 
             <Form.Item label="Purpose" name="purpose">
-              <Input placeholder="Work Order WO-2024-045" />
+              <Input placeholder="Describe the Purpose" />
             </Form.Item>
 
             <Form.Item label="Destination Location" name="destination_location">
@@ -478,6 +672,11 @@ function buildDetailItems(row: OutgoingRawMaterial) {
     },
     { key: "requested_by", label: "Requested By", children: row.requested_by || "-" },
     { key: "remarks", label: "Remarks", children: row.remarks || "-" },
+    {
+      key: "stock_restored_at",
+      label: "Stock Restored At",
+      children: row.stock_restored_at ? new Date(row.stock_restored_at).toLocaleString() : "-",
+    },
     {
       key: "created_at",
       label: "Created At",
