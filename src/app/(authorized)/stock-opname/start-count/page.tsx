@@ -114,7 +114,7 @@ function StockOpnameStartCountPageContent() {
   const [getUniqOptions, { data: uniqSearchResults = [], isFetching: uniqLoading }] =
     useLazyGetStockOpnameUniqOptionsQuery();
   const [createStockOpnameSession, { isLoading: saving }] = useCreateStockOpnameSessionMutation();
-
+  const [warehouseLocation, setWarehouseLocation] = useState<string>();
   const fallbackUniqOptions = useMemo(
     () => [
       { label: "FG-001", value: "FG-001" },
@@ -172,9 +172,9 @@ function StockOpnameStartCountPageContent() {
     () =>
       apiEnabled
         ? uniqSearchResults.map((item) => ({
-            label: `${item.uniq_code} — ${item.part_name} (${item.system_qty} ${item.uom})`,
-            value: item.uniq_code,
-          }))
+          label: `${item.uniq_code} - ${item.part_number} - ${item.part_name} `,
+          value: item.uniq_code,
+        }))
         : fallbackUniqOptions,
     [apiEnabled, fallbackUniqOptions, uniqSearchResults]
   );
@@ -316,17 +316,17 @@ function StockOpnameStartCountPageContent() {
       const items =
         method === "manual"
           ? entries.map((entry) => ({
-              uniq_code: entry.uniq ?? "",
-              counted_qty: entry.countedQty ?? 0,
-              user_counter: entry.userCounter ?? "",
-              weight_kg: entry.weightKg ?? uniqLookup.get(entry.uniq ?? "")?.weight_kg ?? null,
-            }))
+            uniq_code: entry.uniq ?? "",
+            counted_qty: entry.countedQty ?? 0,
+            user_counter: entry.userCounter ?? "",
+            weight_kg: entry.weightKg ?? uniqLookup.get(entry.uniq ?? "")?.weight_kg ?? null,
+          }))
           : bulkRows.map((row) => ({
-              uniq_code: row.uniq,
-              counted_qty: row.countedQty,
-              user_counter: row.userCounted || "",
-              weight_kg: null,
-            }));
+            uniq_code: row.uniq,
+            counted_qty: row.countedQty,
+            user_counter: row.userCounted || "",
+            weight_kg: null,
+          }));
 
       await createStockOpnameSession({
         inventory_type: inventoryType,
@@ -337,6 +337,7 @@ function StockOpnameStartCountPageContent() {
         counted_date: countedDate.format("YYYY-MM-DD"),
         remarks: "",
         items,
+        warehouse_location: warehouseLocation,
       }).unwrap();
 
       message.success("Stock Opname saved successfully");
@@ -504,14 +505,19 @@ function StockOpnameStartCountPageContent() {
                       )}
                     </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-                      <div className="lg:col-span-2">
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className="text-xs text-gray-500">Uniq</div>
-                          <InfoCircleOutlined className="text-blue-600" />
-                        </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+
+                      {/* Uniq */}
+                      <div className="xl:col-span-2">
+                        <label className="flex items-center gap-2 text-xs font-semibold text-gray-600 mb-2">
+                          Uniq
+                          <InfoCircleOutlined className="text-blue-500" />
+                        </label>
+
                         <Select
-                          placeholder="Select Uniq"
+                          className="w-full"
+                          size="large"
+                          placeholder="Search Uniq..."
                           value={e.uniq}
                           options={uniqOptions}
                           showSearch
@@ -519,76 +525,140 @@ function StockOpnameStartCountPageContent() {
                           loading={uniqLoading}
                           onSearch={(value) => {
                             if (!apiEnabled) return;
+
                             if (uniqSearchTimeoutRef.current) {
                               clearTimeout(uniqSearchTimeoutRef.current);
                             }
 
                             const normalizedValue = value.trim();
+
                             if (normalizedValue.length > 0 && normalizedValue.length < 2) {
                               return;
                             }
 
                             uniqSearchTimeoutRef.current = setTimeout(() => {
-                              void getUniqOptions({ type: inventoryType, q: normalizedValue, limit: 10 });
+                              void getUniqOptions({
+                                type: inventoryType,
+                                q: normalizedValue,
+                                limit: 10,
+                              });
                             }, 300);
                           }}
                           onChange={(v) => {
                             if (apiEnabled) {
                               const selected = uniqLookup.get(v);
+
                               setEntry(e.id, {
                                 uniq: v,
-                                partNumber: selected?.part_number ?? undefined,
-                                partName: selected?.part_name ?? undefined,
+                                partNumber: selected?.part_number,
+                                partName: selected?.part_name,
                                 systemStock: selected?.system_qty ?? 0,
-                                uom: selected?.uom ?? undefined,
+                                uom: selected?.uom,
                                 weightKg: selected?.weight_kg ?? null,
                               });
+
                               return;
                             }
 
-                            const sys = systemStockByUniq[v] ?? 0;
-                            setEntry(e.id, { uniq: v, systemStock: sys });
+                            setEntry(e.id, {
+                              uniq: v,
+                              systemStock: systemStockByUniq[v] ?? 0,
+                            });
                           }}
                         />
                       </div>
 
+                      {/* System Stock */}
                       <div>
-                        <div className="text-xs text-gray-500 mb-1">Current System Stock</div>
+                        <label className="text-xs font-semibold text-gray-600 mb-2 block">
+                          Current System Stock
+                        </label>
+
                         <InputNumber
                           className="w-full"
-                          value={e.systemStock}
-                          readOnly
                           controls={false}
+                          readOnly
+                          size="large"
+                          value={e.systemStock}
+                          formatter={(v) => `${v ?? 0}`}
                         />
+
+                        <div className="mt-2 text-lg font-bold text-blue-600">
+                          {e.systemStock ?? 0}
+                        </div>
                       </div>
 
+                      {/* Counted */}
                       <div>
-                        <div className="text-xs text-gray-500 mb-1">Counted Quantity</div>
+                        <label className="text-xs font-semibold text-gray-600 mb-2 block">
+                          Counted Quantity
+                        </label>
+
                         <InputNumber
                           className="w-full"
-                          value={e.countedQty}
+                          size="large"
                           min={0}
-                          onChange={(v) => setEntry(e.id, { countedQty: typeof v === "number" ? v : undefined })}
+                          value={e.countedQty}
+                          onChange={(v) =>
+                            setEntry(e.id, {
+                              countedQty: typeof v === "number" ? v : undefined,
+                            })
+                          }
                         />
                       </div>
 
+                      {/* User */}
                       <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className="text-xs text-gray-500">User Counter</div>
-                          <InfoCircleOutlined className="text-blue-600" />
-                        </div>
+                        <label className="flex items-center gap-2 text-xs font-semibold text-gray-600 mb-2">
+                          User Counter
+                          <InfoCircleOutlined className="text-blue-500" />
+                        </label>
+
                         <Input
-                          value={e.userCounter || currentUserName}
+                          size="large"
                           readOnly
-                          placeholder="Auto-filled from your account"
-                          title="Auto-filled from the logged-in user"
-                          className="!rounded-lg bg-gray-50"
+                          className="bg-gray-50"
+                          value={e.userCounter || currentUserName}
                         />
                       </div>
 
+                      {/* UOM */}
                       <div>
-                        <div className="text-xs text-gray-500 mb-1">Unit of Measurement</div>
-                        <Input placeholder="-" value={e.uom} readOnly />
+                        <label className="text-xs font-semibold text-gray-600 mb-2 block">
+                          Unit of Measurement
+                        </label>
+
+                        <Input
+                          size="large"
+                          readOnly
+                          className="bg-gray-50"
+                          value={e.uom}
+                        />
+                      </div>
+
+                      {/* WAREHOUSE */}
+                      <div>
+                        <label className="text-xs font-semibold text-gray-600 mb-2 block">
+                          Warehouse Location
+                        </label>
+
+                        <Select
+                          size="large"
+                          className="w-full"
+                          placeholder="Select Warehouse"
+                          value={warehouseLocation}
+                          options={[
+                            {
+                              label: "WH-A",
+                              value: "WH-A",
+                            },
+                            {
+                              label: "WH-B",
+                              value: "WH-B",
+                            },
+                          ]}
+                          onChange={setWarehouseLocation}
+                        />
                       </div>
                     </div>
 
@@ -608,7 +678,8 @@ function StockOpnameStartCountPageContent() {
                 );
               })}
             </div>
-          )}
+          )
+          }
 
           {method === "bulk" && (
             <div className="mt-2">
