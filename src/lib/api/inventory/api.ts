@@ -176,10 +176,10 @@ const toInventoryHistoryRecord = (raw: unknown): InventoryHistoryRecord => {
     qty: toNumber(record.qty ?? record.quantity ?? record.qty_change ?? record.stock_change ?? record.Qty ?? record.Quantity),
     stock_before: toNumber(record.stock_before ?? record.StockBefore),
     stock_after: toNumber(record.stock_after ?? record.qty_after ?? record.StockAfter),
-    date_time: toText(record.date_time ?? record.created_at ?? record.updated_at ?? record.DateTime ?? record.CreatedAt ?? record.UpdatedAt),
+    date_time: toText(record.date_time ?? record.logged_at ?? record.created_at ?? record.updated_at ?? record.DateTime ?? record.LoggedAt ?? record.CreatedAt ?? record.UpdatedAt),
     created_by: toText(record.created_by ?? record.user_name ?? record.CreatedBy ?? record.UserName),
     reference_number: toText(record.reference_number ?? record.reference_no ?? record.ReferenceNumber ?? record.ReferenceNo),
-    kanban_number: toText(record.kanban_number ?? record.KanbanNumber),
+    kanban_number: toText(record.kanban_number ?? record.packing_number ?? record.kanban_packing ?? record.KanbanNumber ?? record.PackingNumber),
     packing_number: toText(record.packing_number ?? record.PackingNumber),
   };
 };

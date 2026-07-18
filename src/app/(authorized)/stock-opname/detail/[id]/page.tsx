@@ -1,18 +1,21 @@
 "use client";
 
 import React, { Suspense, useEffect, useMemo, useState } from "react";
-import { Button, Card, Input, Modal, Table, Tabs, Tag, message } from "antd";
+import { Button, Card, Empty, Input, Modal, Table, Tabs, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeftOutlined,
+  AuditOutlined,
   FileTextOutlined,
   HistoryOutlined,
 } from "@ant-design/icons";
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
   type StockInventoryType,
+  type StockOpnameEntryRecord,
   useApproveStockOpnameSessionMutation,
+  useGetStockOpnameAuditLogsQuery,
   useGetStockOpnameHistoryLogsQuery,
   useGetStockOpnameSessionByIdQuery,
 } from "@/lib/api/stock-opname/api";
@@ -42,11 +45,19 @@ const TAB_TO_INVENTORY_TYPE: Record<string, StockInventoryType> = {
   wip: "WIP",
 };
 
-function inventoryLabelFromTab(tab: string) {
-  if (tab === "raw") return "Raw Material";
-  if (tab === "indirect") return "Indirect";
-  if (tab === "wip") return "WIP";
-  return "Finished Goods";
+function inventoryLabelFromType(type: string) {
+  switch ((type ?? "").toUpperCase()) {
+    case "RM":
+      return "Raw Material";
+    case "IDR":
+      return "Indirect Raw Material";
+    case "WIP":
+      return "Work In Process";
+    case "FG":
+      return "Finished Goods";
+    default:
+      return "Finished Goods";
+  }
 }
 
 function formatNumber(value: number) {
@@ -59,17 +70,38 @@ function formatMoney(value: number) {
   return `${sign}$${formatNumber(abs)}`;
 }
 
+function formatDateTime(value?: string | null) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d);
+}
+
 function variance(systemQty: number, physicalQty: number) {
   const diff = physicalQty - systemQty;
   const pct = systemQty === 0 ? 0 : (diff / systemQty) * 100;
   return { diff, pct };
 }
 
+function statusTagColor(label?: string): string {
+  const lower = (label ?? "").toLowerCase();
+  if (lower.includes("approved") || lower.includes("complete")) return "green";
+  if (lower.includes("reject")) return "red";
+  if (lower.includes("waiting") || lower.includes("pending")) return "gold";
+  return "blue";
+}
+
 function normalizeStatus(value?: string): { statusLabel: string; impactLabel: string } {
   const lower = (value ?? "").toLowerCase();
   if (lower.includes("approved") || lower.includes("complete")) return { statusLabel: "Completed", impactLabel: "Approved" };
   if (lower.includes("reject")) return { statusLabel: "Rejected", impactLabel: "Rejected" };
-  if (lower.includes("waiting")) return { statusLabel: "Waiting Approval", impactLabel: "Waiting for Approval" };
+  if (lower.includes("waiting") || lower.includes("pending")) return { statusLabel: "Waiting Approval", impactLabel: "Waiting for Approval" };
   return { statusLabel: "In Progress", impactLabel: "Pending" };
 }
 
@@ -89,8 +121,7 @@ function StockOpnameDetailPageContent() {
 
   const id = useMemo(() => decodeURIComponent(params?.id ?? ""), [params?.id]);
   const tab = (searchParams.get("tab") ?? "finished").toLowerCase();
-  const inventoryType = TAB_TO_INVENTORY_TYPE[tab] ?? "FG";
-  const inventoryLabel = inventoryLabelFromTab(tab);
+  const tabInventoryType = TAB_TO_INVENTORY_TYPE[tab] ?? "FG";
 
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [approvalAction, setApprovalAction] = useState<"approve" | "reject">("approve");
@@ -99,16 +130,58 @@ function StockOpnameDetailPageContent() {
   const [uniqCode, setUniqCode] = useState<string>(() => searchParams.get("uniq_code") ?? "");
   const [logsPage, setLogsPage] = useState(1);
   const [logsLimit, setLogsLimit] = useState(20);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditLimit, setAuditLimit] = useState(20);
 
-  const { data: session, isFetching, refetch } = useGetStockOpnameSessionByIdQuery(
+  const { data: detail, isFetching, refetch } = useGetStockOpnameSessionByIdQuery(
     { id },
     { skip: !apiEnabled || !id }
   );
+  const session = detail?.session ?? null;
+  const entries = detail?.entries ?? [];
   const [approveSession, { isLoading: approving }] = useApproveStockOpnameSessionMutation();
 
+  // The material type follows the actual session; fall back to the tab param.
+  const inventoryType: StockInventoryType = (session?.inventory_type as StockInventoryType) || tabInventoryType;
+  const inventoryLabel = inventoryLabelFromType(inventoryType);
+
+  // History logs are scoped to THIS session. We fetch the logs for the
+  // inventory type once (large page) and then filter client-side to only the
+  // uniq codes that belong to this session's entries. The backend history-logs
+  // endpoint only supports a single uniq_code filter, so scoping by a set of
+  // uniq codes must be done here.
   const { data: history, isFetching: logsLoading } = useGetStockOpnameHistoryLogsQuery(
-    { type: inventoryType, uniq_code: uniqCode, page: logsPage, limit: logsLimit },
-    { skip: !apiEnabled || !uniqCode }
+    { type: inventoryType, uniq_code: "", page: 1, limit: 1000 },
+    { skip: !apiEnabled }
+  );
+
+  // Set of uniq codes belonging to this session (defines the history scope).
+  const sessionUniqSet = useMemo(
+    () => new Set(entries.map((e) => (e.uniq_code ?? "").trim()).filter(Boolean)),
+    [entries]
+  );
+
+  // Rows limited to this session, then narrowed further by the manual filter.
+  const filteredHistory = useMemo(() => {
+    const all = history?.items ?? [];
+    // If the session has no entries (or is still loading), we should show no history logs,
+    // not ALL history logs for the inventory type.
+    if (sessionUniqSet.size === 0) return [];
+    
+    const scoped = all.filter((r) => sessionUniqSet.has((r.uniq_code ?? "").trim()));
+    const term = uniqCode.trim().toLowerCase();
+    return term ? scoped.filter((r) => (r.uniq_code ?? "").toLowerCase().includes(term)) : scoped;
+  }, [history, sessionUniqSet, uniqCode]);
+
+  // Client-side pagination over the scoped/filtered rows.
+  const pagedHistory = useMemo(() => {
+    const start = (logsPage - 1) * logsLimit;
+    return filteredHistory.slice(start, start + logsLimit);
+  }, [filteredHistory, logsPage, logsLimit]);
+
+  const { data: audit, isFetching: auditLoading } = useGetStockOpnameAuditLogsQuery(
+    { id, page: auditPage, limit: auditLimit },
+    { skip: !apiEnabled || !id }
   );
 
   const fallbackData = useMemo<DetailData>(() => {
@@ -117,18 +190,18 @@ function StockOpnameDetailPageContent() {
       sessionId: id || "mock-session",
       sessionNumber: id || "SO-FG-012024",
       inventoryLabel,
-      period: "Sep 2025",
+      period: "-",
       location: "-",
-      scheduleDate: "2025-09-24",
-      countedDate: "2025-09-24",
+      scheduleDate: undefined,
+      countedDate: undefined,
       statusLabel: norm.statusLabel,
       impactLabel: norm.impactLabel,
-      systemQty: 17890,
-      physicalQty: 17888,
-      costImpact: 250,
-      submittedBy: "Admin PPIC",
-      approvedBy: "Admin PPIC",
-      approvalRemarks: "OK",
+      systemQty: 0,
+      physicalQty: 0,
+      costImpact: 0,
+      submittedBy: "-",
+      approvedBy: "-",
+      approvalRemarks: "-",
     };
   }, [id, inventoryLabel]);
 
@@ -168,7 +241,7 @@ function StockOpnameDetailPageContent() {
     if (!session) return false;
     if (lower.includes("approved") || lower.includes("complete") || lower.includes("reject")) return false;
     return true;
-  }, [apiEnabled, id, session?.status, session?.status_label]);
+  }, [apiEnabled, id, session]);
 
   async function submitApproval(action: "approve" | "reject") {
     try {
@@ -182,20 +255,72 @@ function StockOpnameDetailPageContent() {
     }
   }
 
+  const entryColumns = useMemo<ColumnsType<StockOpnameEntryRecord & { key: string }>>(
+    () => [
+      { title: "Uniq", dataIndex: "uniq_code", key: "uniq_code", width: 140 },
+      { title: "Part Name", dataIndex: "part_name", key: "part_name" },
+      { title: "UOM", dataIndex: "uom", key: "uom", width: 90 },
+      {
+        title: "System Qty",
+        dataIndex: "system_qty_snapshot",
+        key: "system_qty_snapshot",
+        width: 120,
+        render: (val: number) => formatNumber(val),
+      },
+      {
+        title: "Counted Qty",
+        dataIndex: "counted_qty",
+        key: "counted_qty",
+        width: 120,
+        render: (val: number) => formatNumber(val),
+      },
+      {
+        title: "Variance",
+        dataIndex: "variance_qty",
+        key: "variance_qty",
+        width: 110,
+        render: (val: number) => (
+          <span className={val < 0 ? "text-red-600" : val > 0 ? "text-green-600" : "text-slate-600"}>
+            {val > 0 ? `+${val}` : val}
+          </span>
+        ),
+      },
+      {
+        title: "Status",
+        dataIndex: "status",
+        key: "status",
+        width: 130,
+        render: (val: string) => <Tag color={statusTagColor(val)}>{val}</Tag>,
+      },
+    ],
+    []
+  );
+
   const historyColumns = useMemo<ColumnsType<{ key: string; uniq_code: string; packing: string; qty_change: number; reason: string; qty: number; last_update: string }>>(
     () => [
       { title: "Uniq", dataIndex: "uniq_code", key: "uniq_code", width: 140 },
-      { title: "Packing", dataIndex: "packing", key: "packing", width: 120 },
+      { title: "Packing", dataIndex: "packing", key: "packing", width: 160 },
       {
         title: "Qty Change",
         dataIndex: "qty_change",
         key: "qty_change",
         width: 120,
-        render: (v2: number) => <span className={v2 < 0 ? "text-red-600" : v2 > 0 ? "text-green-600" : "text-slate-600"}>{v2}</span>,
+        render: (v2: number) => <span className={v2 < 0 ? "text-red-600" : v2 > 0 ? "text-green-600" : "text-slate-600"}>{v2 > 0 ? `+${v2}` : v2}</span>,
       },
       { title: "Reason", dataIndex: "reason", key: "reason" },
-      { title: "Qty", dataIndex: "qty", key: "qty", width: 100 },
-      { title: "Last Update", dataIndex: "last_update", key: "last_update", width: 180 },
+      { title: "Qty", dataIndex: "qty", key: "qty", width: 100, render: (val: number) => formatNumber(val) },
+      { title: "Last Update", dataIndex: "last_update", key: "last_update", width: 180, render: (val: string) => formatDateTime(val) },
+    ],
+    []
+  );
+
+  const auditColumns = useMemo<ColumnsType<{ key: string; action: string; entity_type: string; actor: string; remarks: string; created_at: string }>>(
+    () => [
+      { title: "Action", dataIndex: "action", key: "action", width: 160, render: (val: string) => <Tag color={statusTagColor(val)}>{val}</Tag> },
+      { title: "Entity", dataIndex: "entity_type", key: "entity_type", width: 140 },
+      { title: "Actor", dataIndex: "actor", key: "actor", width: 180 },
+      { title: "Remarks", dataIndex: "remarks", key: "remarks" },
+      { title: "Time", dataIndex: "created_at", key: "created_at", width: 180, render: (val: string) => formatDateTime(val) },
     ],
     []
   );
@@ -260,9 +385,16 @@ function StockOpnameDetailPageContent() {
               {data.countedDate ? `Counted: ${data.countedDate}` : null}
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Tag className="!rounded-full !px-3 !py-0.5">{data.statusLabel}</Tag>
-            <Tag className="!rounded-full !px-3 !py-0.5">{data.impactLabel}</Tag>
+          <div className="flex flex-col items-end gap-1">
+            <div className="text-xs font-semibold text-gray-500">Status</div>
+            <div className="flex items-center gap-2">
+              <Tag color={statusTagColor(data.statusLabel)} className="!rounded-full !px-3 !py-0.5 !font-semibold">
+                {data.statusLabel}
+              </Tag>
+              <Tag color={statusTagColor(data.impactLabel)} className="!rounded-full !px-3 !py-0.5">
+                {data.impactLabel}
+              </Tag>
+            </div>
           </div>
         </div>
       </div>
@@ -291,6 +423,7 @@ function StockOpnameDetailPageContent() {
       <Card className="!rounded-xl !border-gray-100 !shadow-sm" bodyStyle={{ padding: 0 }}>
         <Tabs
           defaultActiveKey="detail"
+          className="px-4!"
           items={[
             {
               key: "detail",
@@ -301,14 +434,23 @@ function StockOpnameDetailPageContent() {
               ),
               children: (
                 <div className="p-4">
-                  <div className="text-sm text-gray-500">
+                  <div className="text-sm text-gray-500 mb-3">
                     Submitted By: {data.submittedBy ?? "-"}
                     <span className="mx-2">•</span>
-                    Approved By: {data.approvedBy ?? "-"}
+                    Approved By: {data.approvedBy ?? "-"} 
+                    <span className="mx-2">•</span>
+                    Approval Remarks: {data.approvalRemarks ?? "-"}
                   </div>
-                  <div className="text-sm text-gray-500 mt-1">Approval Remarks: {data.approvalRemarks ?? "-"}</div>
-                  <div className="mt-3 text-xs text-gray-400">
-                    Note: item-level lines are not fetched here (backend detail endpoint not specified for session items).
+                  <div className="overflow-hidden rounded-xl border border-gray-100">
+                    <Table
+                      dataSource={entries.map((e, idx) => ({ key: e.uuid || `${e.uniq_code}-${idx}`, ...e }))}
+                      rowKey="key"
+                      size="middle"
+                      loading={isFetching}
+                      columns={entryColumns}
+                      locale={{ emptyText: <Empty description="Belum ada item pada sesi ini" /> }}
+                      pagination={false}
+                    />
                   </div>
                 </div>
               ),
@@ -317,38 +459,73 @@ function StockOpnameDetailPageContent() {
               key: "history",
               label: (
                 <span className="inline-flex items-center gap-2">
-                  <HistoryOutlined /> Audit Logs
+                  <HistoryOutlined /> History Logs
                 </span>
               ),
               children: (
                 <div className="p-4">
                   <div className="flex flex-col lg:flex-row lg:items-center gap-2 mb-3">
                     <Input
-                      placeholder="Uniq Code (e.g. LV7-001)"
+                      placeholder="Filter Uniq Code pada sesi ini"
                       value={uniqCode}
                       onChange={(e) => {
                         setUniqCode(e.target.value);
                         setLogsPage(1);
                       }}
+                      allowClear
                       className="max-w-md"
                     />
-                    <div className="text-xs text-gray-400">Type: {inventoryType}</div>
+                    <Tag color="blue">Type: {inventoryType}</Tag>
+                    <Tag color="purple">Sesi ini: {sessionUniqSet.size} uniq</Tag>
                   </div>
                   <div className="overflow-hidden rounded-xl border border-gray-100">
                     <Table
-                      dataSource={(history?.items ?? []).map((r, idx) => ({ key: `${r.uniq_code}-${idx}`, ...r }))}
+                      dataSource={pagedHistory.map((r, idx) => ({ key: `${r.uniq_code}-${idx}`, ...r }))}
                       rowKey="key"
                       size="middle"
                       loading={logsLoading}
                       columns={historyColumns}
+                      locale={{ emptyText: <Empty description="Belum ada history logs untuk sesi ini" /> }}
                       pagination={{
                         current: logsPage,
                         pageSize: logsLimit,
-                        total: history?.pagination.total ?? 0,
+                        total: filteredHistory.length,
                         showSizeChanger: true,
                         onChange: (p, s) => {
                           setLogsPage(p);
                           if (typeof s === "number") setLogsLimit(s);
+                        },
+                      }}
+                    />
+                  </div>
+                </div>
+              ),
+            },
+            {
+              key: "audit",
+              label: (
+                <span className="inline-flex items-center gap-2">
+                  <AuditOutlined /> Audit Trail
+                </span>
+              ),
+              children: (
+                <div className="p-4">
+                  <div className="overflow-hidden rounded-xl border border-gray-100">
+                    <Table
+                      dataSource={(audit?.items ?? []).map((r, idx) => ({ key: `${r.id}-${idx}`, ...r }))}
+                      rowKey="key"
+                      size="middle"
+                      loading={auditLoading}
+                      columns={auditColumns}
+                      locale={{ emptyText: <Empty description="Belum ada audit trail" /> }}
+                      pagination={{
+                        current: auditPage,
+                        pageSize: auditLimit,
+                        total: audit?.pagination.total ?? 0,
+                        showSizeChanger: true,
+                        onChange: (p, s) => {
+                          setAuditPage(p);
+                          if (typeof s === "number") setAuditLimit(s);
                         },
                       }}
                     />

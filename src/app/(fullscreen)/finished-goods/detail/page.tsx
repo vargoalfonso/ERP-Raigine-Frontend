@@ -166,7 +166,7 @@ export default function FinishedGoodDetailPage() {
               {
                 key: "1",
                 label: (
-                  <span className="flex items-center gap-2">📦 Details</span>
+                  <span className="flex items-center gap-2">Details</span>
                 ),
                 children: (
                   <Card className="mt-5 bg-gray-50 rounded-2xl">
