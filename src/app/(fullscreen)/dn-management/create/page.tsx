@@ -103,6 +103,8 @@ const toNumber = (value: unknown): number | undefined => {
   return undefined;
 };
 
+const normalizeUniq = (value: unknown): string => String(value ?? "").trim().toLowerCase();
+
 const parseIncomingDate = (value?: string): Dayjs | undefined => {
   const text = toText(value);
   if (!text) return undefined;
@@ -229,17 +231,24 @@ function DnRawMaterialCreatePageContent() {
       .filter((opt) => Boolean(opt.value));
   }, [poListQuery.data]);
 
-  const { data: kanbanApi = { items: [] } } = useGetKanbanStandardsQuery(undefined, { skip: !apiEnabled });
+  const {
+    data: kanbanApi = [],
+    isFetching: kanbanFetching,
+  } = useGetKanbanStandardsQuery(undefined, { skip: !apiEnabled });
 
   const kanbanMap = useMemo(() => {
-    const map = new Map<string, { kanbanQty?: number; productCode?: string }>();
-    const items = Array.isArray(kanbanApi) ? kanbanApi : (kanbanApi?.items ?? []);
-    items.forEach((k: any) => {
-      const code = String(k.item_uniq_code ?? k.item_uniq ?? k.uniq_code ?? k.uniq ?? "").trim();
-      if (!code) return;
-      const qty = Number(k.kanban_qty ?? k.kanbanQty ?? k.kanban_quantity ?? 0) || 0;
-      map.set(code, { kanbanQty: qty, productCode: code });
+    const map = new Map<string, number>();
+    const items = Array.isArray(kanbanApi) ? kanbanApi : [];
+
+    items.forEach((item) => {
+      const code = normalizeUniq(item.item_uniq_code);
+      const status = String(item.status ?? "").trim().toLowerCase();
+      const quantity = Number(item.kanban_qty ?? 0);
+
+      if (!code || status !== "active" || !Number.isFinite(quantity) || quantity <= 0) return;
+      map.set(code, quantity);
     });
+
     return map;
   }, [kanbanApi]);
 
@@ -376,6 +385,7 @@ function DnRawMaterialCreatePageContent() {
   const totalUniqChosen = useMemo(() => items.length, [items]);
   const totalQty = useMemo(() => items.reduce((sum, it) => sum + Number(it.orderQty ?? 0), 0), [items]);
   const tableRows = useMemo(() => items, [items]);
+  const hasValidDraftPcs = Number(draft.pcsPerKanban ?? 0) > 0;
 
   const requestPreview = async (poNumber: string, periodValue?: string) => {
     if (!apiEnabled || !poNumber) return;
@@ -463,24 +473,9 @@ function DnRawMaterialCreatePageContent() {
 
   const onPickUniq = (uniq: string) => {
     const found = getPreviewItemForUniq(uniq);
-
-    // Ensure pcsPerKanban is populated even if preview-mapped value is 0
-    let resolvedPcs = found?.pcsPerKanban ?? undefined;
-    if ((resolvedPcs == null || Number(resolvedPcs) === 0) && preview?.items?.length) {
-      const match = preview.items.find((it) => {
-        const item = it as any;
-        const code = String(item.item_uniq_code ?? item.uniq ?? "").trim();
-        return code === uniq;
-      });
-      if (match) {
-        const m = match as any;
-        resolvedPcs = Number(m.pcs_per_kanban ?? m.pcsPerKanban ?? resolvedPcs ?? 0);
-      }
-    }
-
-    // Try to autofill pcsPerKanban from system-settings kanban map if available
-    const kanbanEntry = kanbanMap.get(uniq) ?? kanbanMap.get(uniq.toLowerCase());
-    const kanbanPcs = kanbanEntry?.kanbanQty ?? undefined;
+    const previewPcs = Number(found?.pcsPerKanban ?? 0);
+    const configuredPcs = kanbanMap.get(normalizeUniq(uniq));
+    const resolvedPcs = previewPcs > 0 ? previewPcs : configuredPcs;
 
     setDraft((prev) => ({
       ...prev,
@@ -488,10 +483,16 @@ function DnRawMaterialCreatePageContent() {
       orderQty: undefined,
       uom: found?.uom ?? prev.uom,
       packing: found?.packingNumber ?? prev.packing,
-      pcsPerKanban: kanbanPcs ?? resolvedPcs ?? prev.pcsPerKanban,
+      pcsPerKanban: resolvedPcs,
       dateIncoming: parseIncomingDate(found?.dateIncoming) ?? prev.dateIncoming,
       weightKg: prev.weightKg,
     }));
+
+    if (!resolvedPcs && !kanbanFetching) {
+      message.warning(
+        "Konfigurasi Pcs/Kanban untuk UNIQ ini belum tersedia. Silakan lengkapi Kanban Parameter terlebih dahulu.",
+      );
+    }
   };
 
   const addItem = () => {
@@ -505,6 +506,12 @@ function DnRawMaterialCreatePageContent() {
     }
     if (!draft.uom) {
       message.error("Unit of Measurement is required");
+      return;
+    }
+    if (!draft.pcsPerKanban || draft.pcsPerKanban <= 0) {
+      message.error(
+        "Konfigurasi Pcs/Kanban belum tersedia. Silakan lengkapi Kanban Parameter terlebih dahulu.",
+      );
       return;
     }
 
@@ -716,11 +723,16 @@ function DnRawMaterialCreatePageContent() {
                   <div className="mb-2 text-sm font-medium text-gray-700">Pcs/Kanban</div>
                   <InputNumber
                     value={draft.pcsPerKanban}
-                    onChange={(v) => setDraft((p) => ({ ...p, pcsPerKanban: v ?? undefined }))}
                     className="w-full"
-                    min={0}
-                    placeholder="Input pcs/kanban"
+                    placeholder="Autofilled from Kanban Parameter"
+                    controls={false}
+                    disabled
                   />
+                  {draft.uniq && !hasValidDraftPcs && !kanbanFetching ? (
+                    <div className="mt-1 text-xs text-red-600">
+                      Konfigurasi belum tersedia. Lengkapi Kanban Parameter terlebih dahulu.
+                    </div>
+                  ) : null}
                 </div>
                 <div>
                   <div className="mb-2 text-sm font-medium text-gray-700">Weight (kg)</div>
@@ -748,7 +760,7 @@ function DnRawMaterialCreatePageContent() {
                     className="!h-10 !w-full !rounded-lg"
                     onClick={addItem}
                     icon={<PlusOutlined />}
-                    disabled={!step1.poNumber || previewing}
+                    disabled={!step1.poNumber || previewing || !draft.uniq || !hasValidDraftPcs}
                   >
                     Create DN
                   </Button>
