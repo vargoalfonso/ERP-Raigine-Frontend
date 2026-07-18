@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Button, Input, Select, Table, Tag, message } from "antd";
+import { Button, Input, Popconfirm, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useRouter } from "next/navigation";
 import {
   CalendarOutlined,
   CheckCircleOutlined,
+  DeleteOutlined,
   EyeOutlined,
   ExportOutlined,
   QrcodeOutlined,
@@ -22,6 +23,7 @@ import { apiBaseUrl } from "@/lib/api/instance";
 import {
   type StockInventoryType,
   type StockOpnameSessionListRecord,
+  useDeleteStockOpnameSessionMutation,
   useGetStockOpnameSessionsQuery,
 } from "@/lib/api/stock-opname/api";
 
@@ -159,6 +161,24 @@ export default function StockOpnamePage() {
     },
     { skip: !apiEnabled }
   );
+
+  const [deleteSession, { isLoading: deleting }] = useDeleteStockOpnameSessionMutation();
+
+  // Deleting relies on the numeric session id (the backend resolves sessions by
+  // their integer primary key, not by uuid/session_number).
+  const handleDeleteSession = async (r: StockOpnameRow) => {
+    if (!apiEnabled) {
+      message.info("Hapus hanya tersedia saat terhubung ke backend");
+      return;
+    }
+    const targetId = r.apiId ?? r.key;
+    try {
+      await deleteSession({ id: targetId }).unwrap();
+      message.success("Sesi stock opname berhasil dihapus");
+    } catch {
+      message.error("Gagal menghapus sesi stock opname");
+    }
+  };
 
   const tabs = useMemo(
     () => [
@@ -400,8 +420,22 @@ export default function StockOpnamePage() {
               size="small"
               className="!rounded-lg"
               icon={<EyeOutlined />}
-              onClick={() => router.push(`/stock-opname/detail/${encodeURIComponent(r.key)}?tab=${tab}`)}
+              onClick={() =>
+                router.push(
+                  `/stock-opname/detail/${encodeURIComponent(String(r.apiId ?? r.key))}?tab=${tab}`
+                )
+              }
             />
+            {/* <Popconfirm
+              title="Hapus sesi stock opname?"
+              description="Tindakan ini tidak dapat dibatalkan."
+              okText="Hapus"
+              okButtonProps={{ danger: true, loading: deleting }}
+              cancelText="Batal"
+              onConfirm={() => handleDeleteSession(r)}
+            >
+              <Button size="small" danger className="!rounded-lg" icon={<DeleteOutlined />} />
+            </Popconfirm> */}
           </div>
         ),
       };

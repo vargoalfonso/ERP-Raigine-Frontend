@@ -118,6 +118,10 @@ export type StockOpnameUniqOption = {
   uom: string;
   system_qty: number;
   weight_kg: number | null;
+  // Raw material type — only meaningful for Raw Material uniqs
+  // (e.g. "wire", "sheet_plate", "ssp", "others"). Drives the Weight field
+  // shown for "wire". Empty for other inventory types.
+  raw_material_type: string;
 };
 
 export type StockOpnameCreateItemRequest = {
@@ -231,6 +235,9 @@ const toUniqOption = (raw: unknown): StockOpnameUniqOption => {
     uom: getString(r, ["uom", "unit", "unit_measurement"]) ?? "",
     system_qty: getNumber(r, ["system_qty", "systemQty", "system_quantity"]) ?? 0,
     weight_kg: getNullableNumber(r, ["weight_kg"]),
+    raw_material_type: (getString(r, ["raw_material_type", "rawMaterialType"]) ?? "")
+      .trim()
+      .toLowerCase(),
   };
 };
 
@@ -428,6 +435,18 @@ export const stockOpnameApiSlice = apiSlice
         ],
       }),
 
+      deleteStockOpnameSession: builder.mutation<unknown, { id: string | number }>({
+        query: ({ id }) => ({
+          url: `/stock-opname-sessions/${encodeURIComponent(String(id))}`,
+          method: "DELETE",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        invalidatesTags: (_r, _e, arg) => [
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: String(arg.id) },
+        ],
+      }),
+
       getStockOpnameHistoryLogs: builder.query<Paginated<StockOpnameHistoryLogRecord>, { type: StockInventoryType; uniq_code: string; page: number; limit: number }>({
         query: ({ type, uniq_code, page, limit }) => ({
           url: "/stock-opname-sessions/history-logs",
@@ -455,5 +474,6 @@ export const {
   useGetStockOpnameAuditLogsQuery,
   useApproveStockOpnameSessionMutation,
   useRejectStockOpnameSessionMutation,
+  useDeleteStockOpnameSessionMutation,
   useGetStockOpnameHistoryLogsQuery,
 } = stockOpnameApiSlice;

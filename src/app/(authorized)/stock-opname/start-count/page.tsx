@@ -18,6 +18,7 @@ import {
 } from "antd";
 import type { UploadProps } from "antd";
 import dayjs, { Dayjs } from "dayjs";
+import * as XLSX from "xlsx";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeftOutlined,
@@ -32,6 +33,7 @@ import {
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
   type StockInventoryType,
+  type StockOpnameUniqOption,
   useCreateStockOpnameSessionMutation,
   useLazyGetStockOpnameUniqOptionsQuery,
 } from "@/lib/api/stock-opname/api";
@@ -50,7 +52,14 @@ type Entry = {
   userCounter?: string;
   uom?: string;
   weightKg?: number | null;
+  // Raw material type (only Raw Materials have it, e.g. "wire").
+  // Drives the conditional Weight field.
+  rawMaterialType?: string;
 };
+
+// A Raw Material uniq is weight-tracked (needs a Weight input) when its
+// raw_material_type is "wire".
+const isWireType = (t?: string | null) => (t ?? "").trim().toLowerCase() === "wire";
 
 const TAB_TO_INVENTORY_TYPE: Record<string, StockInventoryType> = {
   finished: "FG",
@@ -77,6 +86,76 @@ function difference(systemStock: number, countedQty?: number) {
 
 function toId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+// Bulk Upload template definition. Part Number / Part Name (and Model) are
+// auto-filled from the Uniq, so the template only asks for the fields a
+// counter actually needs to enter.
+const BULK_TEMPLATE_SHEET = "Template";
+const BULK_TEMPLATE_HEADERS = [
+  "Uniq",
+  "Counted Qty",
+  "User Counted",
+  "Delivery Cycle",
+] as const;
+
+// Reads the first non-empty value among the provided header aliases so the
+// parser tolerates minor header differences (spaces, casing, snake_case).
+function pickCell(row: Record<string, unknown>, keys: string[]): string {
+  for (const k of keys) {
+    const v = row[k];
+    if (v !== undefined && v !== null && String(v).trim() !== "") {
+      return String(v).trim();
+    }
+  }
+  return "";
+}
+
+function pickNumber(row: Record<string, unknown>, keys: string[]): number {
+  const raw = pickCell(row, keys);
+  if (!raw) return 0;
+  const n = Number(raw.replace(/,/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+// Maps a parsed Excel row (flexible header names) into a BulkRow.
+function mapExcelRow(row: Record<string, unknown>, index: number): BulkRow {
+  return {
+    key: `bulk-${index}-${Math.floor(Math.random() * 1e6)}`,
+    uniq: pickCell(row, ["Uniq", "uniq", "Uniq Code", "uniq_code", "UniqCode"]),
+    partNumber: pickCell(row, ["Part Number", "part_number", "partNumber", "Part No"]),
+    partName: pickCell(row, ["Part Name", "part_name", "partName"]),
+    model: pickCell(row, ["Model", "model"]),
+    countedQty: pickNumber(row, ["Counted Qty", "Counted Quantity", "counted_qty", "countedQty", "Qty"]),
+    userCounted: pickCell(row, ["User Counted", "user_counted", "userCounted", "User Counter", "user_counter"]),
+    deliveryCycle: pickCell(row, ["Delivery Cycle", "delivery_cycle", "deliveryCycle"]),
+  };
+}
+
+// Reads an uploaded Excel file into BulkRow[] fully client-side (the file is
+// never uploaded to the server; only the parsed rows are submitted on Save).
+function readExcelFile(file: File): Promise<BulkRow[]> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        if (!sheetName) {
+          resolve([]);
+          return;
+        }
+        const sheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+        resolve(json.map((row, index) => mapExcelRow(row, index)).filter((row) => row.uniq));
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 export default function StockOpnameStartCountPage() {
@@ -172,7 +251,7 @@ function StockOpnameStartCountPageContent() {
     () =>
       apiEnabled
         ? uniqSearchResults.map((item) => ({
-            label: `${item.uniq_code} — ${item.part_name} (${item.system_qty} ${item.uom})`,
+            label: `${item.uniq_code} — ${item.part_name} `,
             value: item.uniq_code,
           }))
         : fallbackUniqOptions,
@@ -202,47 +281,81 @@ function StockOpnameStartCountPageContent() {
     return `${entries.length} entry`;
   }, [bulkRows.length, entries.length, method]);
 
-  function mockLoadBulkRows() {
-    setBulkRows([
-      {
-        key: "b1",
-        uniq: "FG-001",
-        partNumber: "SP-001-A",
-        partName: "Steel Plate",
-        model: "Camry 2024",
-        countedQty: 250,
-        userCounted: "WO-2024-001",
-        deliveryCycle: "XXX",
-      },
-      {
-        key: "b2",
-        uniq: "FG-001",
-        partNumber: "SP-001-A",
-        partName: "Steel Plate",
-        model: "Camry 2024",
-        countedQty: 250,
-        userCounted: "WO-2024-001",
-        deliveryCycle: "XXX",
-      },
-      {
-        key: "b3",
-        uniq: "FG-001",
-        partNumber: "SP-001-A",
-        partName: "Steel Plate",
-        model: "Camry 2024",
-        countedQty: 250,
-        userCounted: "WO-2024-001",
-        deliveryCycle: "XXX",
-      },
-    ]);
+  // Generates and downloads a ready-to-fill .xlsx template with an example row.
+  function handleDownloadTemplate() {
+    const exampleRow: Record<string, string | number> = {
+      Uniq: uniqOptions[0]?.value ?? "FG-001",
+      "Counted Qty": 0,
+      "User Counted": currentUserName,
+      "Delivery Cycle": "",
+    };
+    const worksheet = XLSX.utils.json_to_sheet([exampleRow], {
+      header: [...BULK_TEMPLATE_HEADERS],
+    });
+    worksheet["!cols"] = BULK_TEMPLATE_HEADERS.map((h) => ({ wch: Math.max(14, h.length + 2) }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, BULK_TEMPLATE_SHEET);
+    XLSX.writeFile(workbook, `stock-opname-template-${tab}.xlsx`);
+    message.success("Template downloaded");
+  }
+
+  // Auto-fills Part Number / Part Name from the Uniq for each row, resolving
+  // any codes not already cached via the uniq options endpoint.
+  async function enrichBulkRows(rows: BulkRow[]): Promise<BulkRow[]> {
+    const details = new Map<string, StockOpnameUniqOption>();
+    if (apiEnabled) {
+      const uniqueCodes = Array.from(new Set(rows.map((row) => row.uniq).filter(Boolean)));
+      await Promise.all(
+        uniqueCodes.map(async (code) => {
+          const cached = uniqLookup.get(code);
+          if (cached) {
+            details.set(code, cached);
+            return;
+          }
+          try {
+            const results = await getUniqOptions({ type: inventoryType, q: code, limit: 5 }).unwrap();
+            const match = results.find((item) => item.uniq_code === code) ?? results[0];
+            if (match) details.set(code, match);
+          } catch {
+            // Leave autofill empty if the code cannot be resolved.
+          }
+        })
+      );
+    }
+    return rows.map((row) => {
+      const detail = details.get(row.uniq);
+      return {
+        ...row,
+        partNumber: detail?.part_number || row.partNumber || "",
+        partName: detail?.part_name || row.partName || "",
+        userCounted: row.userCounted || currentUserName,
+      };
+    });
   }
 
   const bulkUploadProps: UploadProps = {
     multiple: false,
     beforeUpload: (file) => {
+      const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+      if (!isExcel) {
+        message.error("File harus berformat .xlsx atau .xls");
+        return Upload.LIST_IGNORE;
+      }
       setBulkFileName(file.name);
-      mockLoadBulkRows();
-      message.success("Excel uploaded (mock)");
+      setBulkRows([]);
+      readExcelFile(file)
+        .then(async (rows) => {
+          if (rows.length === 0) {
+            message.warning("Tidak ada baris valid. Pastikan kolom Uniq terisi.");
+            return;
+          }
+          // Part Number / Part Name auto-fill from the Uniq; User Counted falls
+          // back to the logged-in user when the sheet omits it.
+          const enriched = await enrichBulkRows(rows);
+          setBulkRows(enriched);
+          message.success(`${enriched.length} baris dimuat dari ${file.name}`);
+        })
+        .catch(() => message.error("Gagal membaca file Excel"));
       return false;
     },
     onRemove: () => {
@@ -469,7 +582,7 @@ function StockOpnameStartCountPageContent() {
                   type="primary"
                   className="!rounded-lg"
                   icon={<PlusOutlined />}
-                  onClick={() => message.info("Download Template (mock)")}
+                  onClick={handleDownloadTemplate}
                 >
                   Download Template
                 </Button>
@@ -512,6 +625,7 @@ function StockOpnameStartCountPageContent() {
                         </div>
                         <Select
                           placeholder="Select Uniq"
+                          className="!w-full"
                           value={e.uniq}
                           options={uniqOptions}
                           showSearch
@@ -542,6 +656,7 @@ function StockOpnameStartCountPageContent() {
                                 systemStock: selected?.system_qty ?? 0,
                                 uom: selected?.uom ?? undefined,
                                 weightKg: selected?.weight_kg ?? null,
+                                rawMaterialType: selected?.raw_material_type ?? "",
                               });
                               return;
                             }
@@ -553,19 +668,9 @@ function StockOpnameStartCountPageContent() {
                       </div>
 
                       <div>
-                        <div className="text-xs text-gray-500 mb-1">Current System Stock</div>
-                        <InputNumber
-                          className="w-full"
-                          value={e.systemStock}
-                          readOnly
-                          controls={false}
-                        />
-                      </div>
-
-                      <div>
                         <div className="text-xs text-gray-500 mb-1">Counted Quantity</div>
                         <InputNumber
-                          className="w-full"
+                          className="!w-full"
                           value={e.countedQty}
                           min={0}
                           onChange={(v) => setEntry(e.id, { countedQty: typeof v === "number" ? v : undefined })}
@@ -582,7 +687,7 @@ function StockOpnameStartCountPageContent() {
                           readOnly
                           placeholder="Auto-filled from your account"
                           title="Auto-filled from the logged-in user"
-                          className="!rounded-lg bg-gray-50"
+                          className="!rounded-lg bg-gray-50 !w-full"
                         />
                       </div>
 
@@ -590,9 +695,28 @@ function StockOpnameStartCountPageContent() {
                         <div className="text-xs text-gray-500 mb-1">Unit of Measurement</div>
                         <Input placeholder="-" value={e.uom} readOnly />
                       </div>
+
+                      {isWireType(e.rawMaterialType) && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="text-xs text-gray-500">Weight (Kg)</div>
+                            <InfoCircleOutlined className="text-blue-600" />
+                          </div>
+                          <InputNumber
+                            className="w-full"
+                            value={e.weightKg ?? undefined}
+                            min={0}
+                            step={0.0001}
+                            placeholder="Enter weight in kg"
+                            onChange={(v) =>
+                              setEntry(e.id, { weightKg: typeof v === "number" ? v : null })
+                            }
+                          />
+                        </div>
+                      )}
                     </div>
 
-                    <div className="mt-3">
+                    {/* <div className="mt-3">
                       <Alert
                         type="error"
                         showIcon={false}
@@ -603,7 +727,7 @@ function StockOpnameStartCountPageContent() {
                           </div>
                         }
                       />
-                    </div>
+                    </div> */}
                   </div>
                 );
               })}
