@@ -43,6 +43,7 @@ const isRecord = (value: unknown): value is UnknownRecord => typeof value === "o
 const isMissingRouteError = (error: unknown): boolean => isRecord(error) && error.status === 404;
 
 const formatNumber = (value: number | undefined) => new Intl.NumberFormat("en-US").format(Number(value ?? 0));
+const formatConfiguredNumber = (value: number | undefined) => Number(value ?? 0) > 0 ? formatNumber(value) : "-";
 const formatCompactNumber = (value: number | undefined) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(Number(value ?? 0));
 
 const clampPercent = (value: number) => Math.max(0, Math.min(100, value));
@@ -236,7 +237,7 @@ function DnRawMaterialDetailPageContent() {
         uom: item.uom ?? "-",
         orderQty: Number(item.order_qty ?? 0),
         packingNumber: item.packing_number ?? "-",
-        pcsPerKanban: Number(item.pcs_per_kanban ?? item.kanban?.kanban_qty ?? 0),
+        pcsPerKanban: Number(item.pcs_per_kanban ?? 0),
         dateIncoming: formatDate(item.date_incoming ?? item.received_at ?? "-"),
         qtyReceived,
         qtySent: Number(item.qty_sent ?? 0),
@@ -425,7 +426,7 @@ function DnRawMaterialDetailPageContent() {
                   </div>
                   <div className="rounded-xl bg-gray-50 p-4">
                     <div className="text-xs text-gray-500">Pcs per Kanban</div>
-                    <div className="text-lg font-semibold text-gray-900">{formatNumber(firstItem?.pcsPerKanban)}</div>
+                    <div className="text-lg font-semibold text-gray-900">{formatConfiguredNumber(firstItem?.pcsPerKanban)}</div>
                   </div>
                 </div>
               </div>
@@ -565,7 +566,7 @@ function DnRawMaterialDetailPageContent() {
                               <td className="px-4 py-4 whitespace-nowrap">
                                 <span className="inline-flex rounded-md border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-medium text-gray-700">{item.packingNumber}</span>
                               </td>
-                              <td className="px-4 py-4 whitespace-nowrap">{formatNumber(item.pcsPerKanban)}</td>
+                              <td className="px-4 py-4 whitespace-nowrap">{formatConfiguredNumber(item.pcsPerKanban)}</td>
                               <td className="px-4 py-4 whitespace-nowrap">{item.dateIncoming}</td>
                             </tr>
                           );

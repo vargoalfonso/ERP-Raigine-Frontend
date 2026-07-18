@@ -134,7 +134,7 @@ function RawMaterialsDetailPageContent() {
             items={[
               {
                 key: "1",
-                label: <span className="flex items-center gap-2">📦 Details</span>,
+                label: <span className="flex items-center gap-2">Details</span>,
                 children: (
                   <Card className="mt-5 bg-gray-50 rounded-2xl">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -194,7 +194,7 @@ function RawMaterialsDetailPageContent() {
               },
               {
                 key: "2",
-                label: <span className="flex items-center gap-2">🕘 History Logs</span>,
+                label: <span className="flex items-center gap-2">History Logs</span>,
                 children: (
                   <div className="mt-6">
                     <div className="bg-blue-50 p-4 rounded-xl mb-5">
