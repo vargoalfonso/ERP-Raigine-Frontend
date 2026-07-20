@@ -182,6 +182,8 @@ export type PoBudgetRow = {
   supplier: string;
   supplierId?: string;
   type: string;
+  /** Budget source subtype: "adhoc" | "regular". Null/empty is normalized to "regular" (matches backend COALESCE). */
+  budgetSubtype: string;
   salesPlan: number;
   pr: number;
   po1: number;
@@ -416,6 +418,9 @@ const toPoBudgetRow = (item: unknown, index: number): PoBudgetRow => {
     supplier: getString(record, ["supplier_name", "supplier"]) ?? "-",
     supplierId: getString(record, ["supplier_id"]),
     type: getString(record, ["type_label", "budget_subtype", "type"]) ?? "",
+    budgetSubtype:
+      (getString(record, ["budget_subtype"]) ?? "").trim().toLowerCase() ||
+      "regular",
     salesPlan,
     pr: purchaseRequest,
     po1,

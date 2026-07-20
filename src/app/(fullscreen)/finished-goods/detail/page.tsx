@@ -1,89 +1,132 @@
 "use client";
 
-import React, { useState } from "react";
-import { useRouter } from "next/navigation";
-import { ArrowLeftOutlined, EyeOutlined } from "@ant-design/icons";
-import { Table, Tabs, Card, Tag, Button } from "antd";
+import React, { Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { ArrowLeftOutlined } from "@ant-design/icons";
+import { Table, Tabs, Card, Tag, Button, Spin } from "antd";
+import type { ColumnsType } from "antd/es/table";
+import {
+  useGetFinishedGoodParameterizedSummaryQuery,
+  useGetFinishedGoodHistoryQuery,
+  type FinishedGoodHistoryItem,
+} from "@/lib/api/finished-goods/api";
 
-interface RowHistory {
-  key: string;
-  uniq: string;
-  kanban: string;
-  stock: number;
-  reason: string;
-  qty: number;
-  lastUpdate: string;
-}
+/* ================= HELPERS ================= */
 
-export default function FinishedGoodDetailPage() {
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+const formatDateTime = (iso: string): string => {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const mm = MONTHS[d.getMonth()];
+  const dd = String(d.getDate()).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${mm} ${dd}, ${yyyy} ${hh}.${min}`;
+};
+
+const statusLabel = (status: string): string => {
+  switch ((status || "").toLowerCase()) {
+    case "low_on_stock":
+      return "Low on Stock";
+    case "overstock":
+      return "Overstock";
+    case "normal":
+      return "Normal";
+    default:
+      return status || "-";
+  }
+};
+
+const statusTagClass = (status: string): string => {
+  switch ((status || "").toLowerCase()) {
+    case "low_on_stock":
+      return "bg-red-100 text-red-600";
+    case "overstock":
+      return "bg-orange-100 text-orange-600";
+    default:
+      return "bg-green-100 text-green-600";
+  }
+};
+
+/* ================= DETAIL CONTENT ================= */
+
+function FinishedGoodDetailContent() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState("1");
+  const searchParams = useSearchParams();
+  const [activeTab, setActiveTab] = React.useState("1");
 
-  /* ================= SAMPLE DATA HISTORY ================= */
-  const historyData: RowHistory[] = [
-    {
-      key: "1",
-      uniq: "FG7-001",
-      kanban: "XXX-XXXX",
-      stock: -10,
-      reason: "Delivery Notes",
-      qty: 1090,
-      lastUpdate: "Feb 04, 2025 13.06",
-    },
-    {
-      key: "2",
-      uniq: "FG7-001",
-      kanban: "XXX-XXXX",
-      stock: +6,
-      reason: "Scan",
-      qty: 1090,
-      lastUpdate: "Jan 04, 2025 13.06",
-    },
-    {
-      key: "3",
-      uniq: "FG7-001",
-      kanban: "XXX-XXXX",
-      stock: -12,
-      reason: "Delivery Notes",
-      qty: 1090,
-      lastUpdate: "Dec 04, 2024 13.06",
-    },
-    {
-      key: "4",
-      uniq: "FG7-001",
-      kanban: "XXX-XXXX",
-      stock: +6,
-      reason: "Stock Opname",
-      qty: 1090,
-      lastUpdate: "Dec 03, 2024 13.06",
-    },
-    {
-      key: "5",
-      uniq: "FG7-001",
-      kanban: "XXX-XXXX",
-      stock: +6,
-      reason: "Scan",
-      qty: 1090,
-      lastUpdate: "Nov 06, 2024 13.06",
-    },
-  ];
+  const uniqCode =
+    searchParams.get("uniq_code") ??
+    searchParams.get("uniq") ??
+    searchParams.get("uniqCode") ??
+    "";
+
+  const {
+    data: detail,
+    isFetching: detailLoading,
+    isError: detailError,
+  } = useGetFinishedGoodParameterizedSummaryQuery(
+    { uniq_code: uniqCode },
+    { skip: !uniqCode },
+  );
+
+  const {
+    data: historyRes,
+    isFetching: historyLoading,
+  } = useGetFinishedGoodHistoryQuery(
+    { uniq_code: uniqCode, page: 1, limit: 100 },
+    { skip: !uniqCode },
+  );
+
+  const historyData: FinishedGoodHistoryItem[] = historyRes?.items ?? [];
+  const resolvedUniq = detail?.uniq_code || uniqCode || "-";
 
   /* ================= COLUMNS HISTORY ================= */
-  const historyColumns = [
+  const historyColumns: ColumnsType<FinishedGoodHistoryItem> = [
     {
       title: "Uniq",
-      dataIndex: "uniq",
-      key: "uniq",
+      dataIndex: "uniq_code",
+      key: "uniq_code",
+      render: (value: string) => value || "-",
     },
     {
       title: "Kanban / Packing List",
-      dataIndex: "kanban",
-      key: "kanban",
+      dataIndex: "reference_id",
+      key: "reference_id",
+      render: (value: string) => value || "-",
+    },
+    {
+      title: "DN Number",
+      dataIndex: "dn_number",
+      key: "dn_number",
+      render: (value: string) => value || "-",
+    },
+    {
+      title: "WO Number",
+      dataIndex: "wo_number",
+      key: "wo_number",
+      render: (value: string) => value || "-",
     },
     {
       title: "Stock",
-      dataIndex: "stock",
-      key: "stock",
+      dataIndex: "qty_change",
+      key: "qty_change",
       render: (value: number) => {
         if (value < 0) {
           return <Tag className="bg-red-100 text-red-600">{value}</Tag>;
@@ -95,43 +138,20 @@ export default function FinishedGoodDetailPage() {
       title: "Reason",
       dataIndex: "reason",
       key: "reason",
+      render: (value: string) => value || "-",
     },
     {
       title: "Qty",
-      dataIndex: "qty",
-      key: "qty",
+      dataIndex: "qty_after",
+      key: "qty_after",
     },
     {
       title: "Last Update",
-      dataIndex: "lastUpdate",
-      key: "lastUpdate",
-    },
-    {
-      title: "Action",
-      key: "action",
-      render: (_: any, record: RowHistory) => (
-        <Button
-          type="text"
-          icon={<EyeOutlined />}
-          className="text-blue-600 hover:text-blue-800"
-          onClick={() => router.push(`/finished-good/detail/${record.key}`)}
-        />
-      ),
+      dataIndex: "logged_at",
+      key: "logged_at",
+      render: (value: string) => formatDateTime(value),
     },
   ];
-
-  /* ================= DATA DETAIL ================= */
-  const detailInfo = {
-    uniq: "LV7-001",
-    productName: "Engine Mount Assembly",
-    model: "Camry 2024",
-    woNumber: "WO-2024-001",
-    warehouse: "WH-FG-002",
-    stock: 250,
-    stockKanban: 50,
-    kanban: 5,
-    status: "Normal",
-  };
 
   return (
     <div className="w-full min-h-screen bg-gray-50">
@@ -144,10 +164,6 @@ export default function FinishedGoodDetailPage() {
           />
           <h1 className="text-2xl font-semibold m-0">Finished Good Details</h1>
         </div>
-
-        {/* <div>
-          <Button className="rounded-xl">Admin PPIC</Button>
-        </div> */}
       </div>
 
       {/* ================= CARD UTAMA ================= */}
@@ -155,112 +171,134 @@ export default function FinishedGoodDetailPage() {
         <Card className="rounded-2xl shadow">
           <h2 className="text-xl font-bold">Details & History Log</h2>
           <p className="text-gray-400">
-            Complete Finished Good Detail for {detailInfo.uniq}
+            Complete Finished Good Detail for {resolvedUniq}
           </p>
 
-          {/* ================= TABS ================= */}
-          <Tabs
-            activeKey={activeTab}
-            onChange={(key) => setActiveTab(key)}
-            items={[
-              {
-                key: "1",
-                label: (
-                  <span className="flex items-center gap-2">Details</span>
-                ),
-                children: (
-                  <Card className="mt-5 bg-gray-50 rounded-2xl">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div>
-                        <p className="text-gray-400">Uniq</p>
-                        <p className="font-semibold">{detailInfo.uniq}</p>
-                      </div>
+          {!uniqCode ? (
+            <div className="text-gray-500 py-10 text-center">
+              No uniq_code provided. Open this page from the Finished Goods list.
+            </div>
+          ) : (
+            <Tabs
+              activeKey={activeTab}
+              onChange={(key) => setActiveTab(key)}
+              items={[
+                {
+                  key: "1",
+                  label: (
+                    <span className="flex items-center gap-2">Details</span>
+                  ),
+                  children: (
+                    <Card className="mt-5 bg-gray-50 rounded-2xl">
+                      {detailLoading ? (
+                        <div className="py-10 text-center">
+                          <Spin />
+                        </div>
+                      ) : detailError || !detail ? (
+                        <div className="text-red-500 py-6 text-center">
+                          Failed to load detail.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div>
+                            <p className="text-gray-400">Uniq</p>
+                            <p className="font-semibold">{detail.uniq_code || "-"}</p>
+                          </div>
 
-                      <div>
-                        <p className="text-gray-400">Product Name</p>
-                        <p className="font-semibold">
-                          {detailInfo.productName}
+                          <div>
+                            <p className="text-gray-400">Product Name</p>
+                            <p className="font-semibold">
+                              {detail.part_name || "-"}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-gray-400">Model</p>
+                            <p className="font-semibold">{detail.model || "-"}</p>
+                          </div>
+
+                          <div>
+                            <p className="text-gray-400">Working Order Number</p>
+                            <p className="font-semibold">
+                              {detail.wo_number || "-"}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-gray-400">Warehouse Destination</p>
+                            <p className="font-semibold">
+                              {detail.warehouse_location || "-"}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-gray-400">Stock</p>
+                            <Tag className="bg-blue-100 text-blue-600">
+                              {detail.stock_qty ?? 0}
+                            </Tag>
+                          </div>
+
+                          <div>
+                            <p className="text-gray-400">
+                              Stock to Complete Kanban
+                            </p>
+                            <p className="font-semibold">
+                              {detail.stock_to_kanban_pcs ?? 0}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-gray-400">Kanban</p>
+                            <p className="font-semibold">
+                              {detail.current_kanban ?? 0}
+                            </p>
+                          </div>
+
+                          <div>
+                            <p className="text-gray-400">Status</p>
+                            <Tag className={statusTagClass(detail.status)}>
+                              {statusLabel(detail.status)}
+                            </Tag>
+                          </div>
+                        </div>
+                      )}
+                    </Card>
+                  ),
+                },
+
+                {
+                  key: "2",
+                  label: (
+                    <span className="flex items-center gap-2">
+                      🕘 History Logs
+                    </span>
+                  ),
+                  children: (
+                    <div className="mt-6">
+                      <div className="bg-blue-50 p-4 rounded-xl mb-5">
+                        <p className="text-blue-600 font-semibold">
+                          Note: In-Out Activity Log {resolvedUniq}
                         </p>
                       </div>
 
-                      <div>
-                        <p className="text-gray-400">Model</p>
-                        <p className="font-semibold">{detailInfo.model}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Working Order Number</p>
-                        <p className="font-semibold">{detailInfo.woNumber}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Warehouse Destination</p>
-                        <p className="font-semibold">{detailInfo.warehouse}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Stock</p>
-                        <Tag className="bg-blue-100 text-blue-600">
-                          {detailInfo.stock}
-                        </Tag>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">
-                          Stock to Complete Kanban
-                        </p>
-                        <p className="font-semibold">
-                          {detailInfo.stockKanban}
-                        </p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Kanban</p>
-                        <p className="font-semibold">{detailInfo.kanban}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-gray-400">Status</p>
-                        <Tag className="bg-green-100 text-green-600">
-                          {detailInfo.status}
-                        </Tag>
+                      <div style={{ overflowX: "auto" }}>
+                        <Table<FinishedGoodHistoryItem>
+                          columns={historyColumns}
+                          dataSource={historyData}
+                          loading={historyLoading}
+                          pagination={false}
+                          rowKey="id"
+                          locale={{
+                            emptyText: "No history data",
+                          }}
+                        />
                       </div>
                     </div>
-                  </Card>
-                ),
-              },
-
-              {
-                key: "2",
-                label: (
-                  <span className="flex items-center gap-2">
-                    🕘 History Logs
-                  </span>
-                ),
-                children: (
-                  <div className="mt-6">
-                    <div className="bg-blue-50 p-4 rounded-xl mb-5">
-                      <p className="text-blue-600 font-semibold">
-                        Note: In-Out Activity Log {detailInfo.uniq}
-                      </p>
-                    </div>
-
-                    <div style={{ overflowX: "auto" }}>
-                      <Table<RowHistory>
-                        columns={historyColumns}
-                        dataSource={historyData}
-                        pagination={false}
-                        rowKey="key"
-                        locale={{
-                          emptyText: "No history data",
-                        }}
-                      />
-                    </div>
-                  </div>
-                ),
-              },
-            ]}
-          />
+                  ),
+                },
+              ]}
+            />
+          )}
         </Card>
       </div>
 
@@ -268,11 +306,25 @@ export default function FinishedGoodDetailPage() {
       <div className="flex justify-end px-8 pb-8">
         <Button
           className="bg-blue-600 text-white rounded-xl"
-          onClick={() => router.push("/finished-good")}
+          onClick={() => router.push("/finished-goods")}
         >
           Back
         </Button>
       </div>
     </div>
+  );
+}
+
+export default function FinishedGoodDetailPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="w-full min-h-screen flex items-center justify-center">
+          <Spin />
+        </div>
+      }
+    >
+      <FinishedGoodDetailContent />
+    </Suspense>
   );
 }

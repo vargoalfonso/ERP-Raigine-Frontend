@@ -554,7 +554,11 @@ export default function FinishedGoodsPage() {
             icon={<EyeOutlined />}
             onClick={(e) => {
               e.stopPropagation();
-              openDetail(record);
+              router.push(
+                `/finished-goods/detail?uniq_code=${encodeURIComponent(
+                  record.uniq_code,
+                )}`,
+              );
             }}
           />
           <PrintButton
