@@ -36,6 +36,8 @@ import { HiOutlineArchiveBox } from "react-icons/hi2";
 import { LuChartColumn } from "react-icons/lu";
 import { FaRegEdit, FaRegTrashAlt } from "react-icons/fa";
 import { RawMaterialRecord } from "@/lib/api/raw-materials/interface";
+import PrintButton from "@/components/PrintButton";
+import type { PrintCardOptions } from "@/lib/utils/printCard";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
@@ -631,25 +633,44 @@ export default function RawMaterialsPage() {
 
   const [generateQR] = useLazyGenerateQRRawmaterialQuery();
 
-  const handleGenerateQR = async (record: RawMaterialRecord) => {
-  if (!record.uniq) {
-    message.error("Uniq code tidak ditemukan");
-    return;
-  }
+  const handleGenerateQR = async (
+    record: RawMaterialRecord,
+  ): Promise<PrintCardOptions | null> => {
+    if (!record.uniq) {
+      message.error("Uniq code tidak ditemukan");
+      return null;
+    }
 
-  try {
-    const result = await generateQR(record.uniq).unwrap();
-    
-   setQrModal({
-  open: true,
-  qr: result.data.qr,
-  uniq: record.uniq!,
-});
-  } catch (err) {
-    console.error(err);
-    message.error("Failed generate QR Uniq Not Found Packing");
-  }
-};
+    let qrDataUrl: string | undefined;
+    try {
+      const result = await generateQR(record.uniq).unwrap();
+      const qr = result?.data?.qr ?? "";
+      qrDataUrl = qr
+        ? qr.startsWith("data:image")
+          ? qr
+          : `data:image/png;base64,${qr}`
+        : undefined;
+    } catch (err) {
+      console.error(err);
+    }
+
+    return {
+      documentTitle: `Raw Material - ${record.uniq}`,
+      heading: "RAW MATERIAL",
+      subheading: record.uniq,
+      fields: [
+        { label: "Part Name", value: record.name, full: true },
+        { label: "RM Type", value: record.category },
+        { label: "RM Source", value: record.code },
+        { label: "Warehouse", value: record.warehouse?.name },
+        { label: "Stock", value: formatNumber(record.stock ?? 0) },
+        { label: "Status", value: record.status },
+      ],
+      qrDataUrl,
+      bottomCode: record.uniq,
+      onError: (msg) => message.error(msg),
+    };
+  };
 
   const columns: ColumnType<RawMaterialRecord>[] = [
     {
@@ -838,7 +859,7 @@ export default function RawMaterialsPage() {
             className="text-red-600 hover:text-red-800"
             onClick={() => openDeleteModal(record)}
           />
-          <Button
+          <PrintButton
             type="text"
             icon={
               <svg
@@ -869,7 +890,7 @@ export default function RawMaterialsPage() {
             }
             size="small"
             className="text-gray-600 hover:text-blue-600"
-            onClick={() => handleGenerateQR(record)}
+            loadOptions={() => handleGenerateQR(record)}
           />
         </div>
       ),

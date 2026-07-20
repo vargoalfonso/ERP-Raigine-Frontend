@@ -20,6 +20,7 @@ import {
   EyeOutlined,
   FilterOutlined,
   PlusOutlined,
+  QrcodeOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
@@ -32,6 +33,7 @@ import {
   useGetAllSubconRawMaterialQuery,
   useUpdateSubconRawMaterialMutation,
 } from "@/lib/api/subcon-raw-material/api";
+import PrintButton from "@/components/PrintButton";
 
 type ViewMode = "Stock In Vendor" | "Stock Received from Vendor";
 
@@ -257,6 +259,7 @@ export default function SubConMaterialsClient() {
       partNumber: row.partNumber,
       partName: row.partName,
       period: row.period,
+      dateDelivery: row.dateDelivery,
       subconVendor: row.subconVendor,
       stockDate: row.stockDate,
       totalStock: row.totalStock,
@@ -280,10 +283,11 @@ export default function SubConMaterialsClient() {
       partNumber: values.partNumber,
       partName: values.partName,
       period: values.period,
+      dateDelivery: values.dateDelivery,
       subconVendor: values.subconVendor,
       stockDate: Number(values.stockDate ?? 0),
       totalStock: Number(values.totalStock ?? 0),
-      totalPO: Number(values.totalPO ?? 0),
+      totalPO: Number(values.totalPO ?? editingRow.totalPO ?? 0),
     };
 
     next.deltaPoStock = Math.max(0, next.totalPO - next.totalStock);
@@ -402,7 +406,7 @@ export default function SubConMaterialsClient() {
     {
       title: "Action",
       key: "action",
-      width: 90,
+      width: 120,
       fixed: "right",
       render: (_: unknown, r: SubConRow) => (
         <div className="flex items-center gap-1">
@@ -413,6 +417,29 @@ export default function SubConMaterialsClient() {
             onClick={() =>
               router.push(`/sub-con-materials/detail?uniq=${encodeURIComponent(r.uniq)}`)
             }
+          />
+          <PrintButton
+            type="text"
+            icon={<QrcodeOutlined />}
+            title="Print"
+            className="text-gray-600 hover:text-blue-600"
+            options={{
+              documentTitle: `SubCon Material - ${r.uniq}`,
+              heading: "SUBCON MATERIAL",
+              subheading: r.uniq,
+              fields: [
+                { label: "Part Name", value: r.partName, full: true },
+                { label: "Subcon Vendor", value: r.subconVendor },
+                { label: "Period", value: r.period },
+                { label: "Date Delivery", value: r.dateDelivery },
+                { label: "Stock/Date", value: r.stockDate.toLocaleString("en-US") },
+                { label: "Total Stock", value: r.totalStock.toLocaleString("en-US") },
+                { label: "Total PO", value: r.totalPO.toLocaleString("en-US") },
+                { label: "\u0394PO-Stock", value: r.deltaPoStock.toLocaleString("en-US") },
+                { label: "Status", value: r.status },
+              ],
+              bottomCode: r.uniq,
+            }}
           />
           <Button type="text" icon={<EditOutlined />} onClick={() => openEdit(r)} />
           <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openDelete(r)} />
@@ -499,7 +526,7 @@ export default function SubConMaterialsClient() {
     {
       title: "Action",
       key: "action",
-      width: 90,
+      width: 120,
       fixed: "right",
       render: (_: unknown, r: SubConRow) => (
         <div className="flex items-center gap-1">
@@ -510,6 +537,29 @@ export default function SubConMaterialsClient() {
             onClick={() =>
               router.push(`/sub-con-materials/detail?uniq=${encodeURIComponent(r.uniq)}`)
             }
+          />
+          <PrintButton
+            type="text"
+            icon={<QrcodeOutlined />}
+            title="Print"
+            className="text-gray-600 hover:text-blue-600"
+            options={{
+              documentTitle: `SubCon Material (Received) - ${r.uniq}`,
+              heading: "SUBCON MATERIAL",
+              subheading: r.uniq,
+              fields: [
+                { label: "Part Name", value: r.partName, full: true },
+                { label: "Subcon Vendor", value: r.subconVendor },
+                { label: "Period", value: r.period },
+                { label: "Date Received", value: r.dateDelivery },
+                { label: "Received/Date", value: r.stockDate.toLocaleString("en-US") },
+                { label: "Total Received", value: r.totalStock.toLocaleString("en-US") },
+                { label: "Total PO", value: r.totalPO.toLocaleString("en-US") },
+                { label: "\u0394PO-Received", value: r.deltaPoStock.toLocaleString("en-US") },
+                { label: "Status", value: r.status },
+              ],
+              bottomCode: r.uniq,
+            }}
           />
           <Button type="text" icon={<EditOutlined />} onClick={() => openEdit(r)} />
           <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openDelete(r)} />
@@ -601,31 +651,19 @@ export default function SubConMaterialsClient() {
             />
           </Form.Item>
 
-          <Form.Item
-            label="Subcon Vendor Name"
-            name="subconVendor"
-            rules={[{ required: true }]}
-          >
+          <Form.Item label="Date Delivery" name="dateDelivery" rules={[{ required: true }]}>
+            <Input placeholder="Date delivery" />
+          </Form.Item>
+
+          <Form.Item label="Quantity Delivery Items" name="stockDate" rules={[{ required: true }]}>
+            <InputNumber className="w-full" min={0} />
+          </Form.Item>
+
+          <Form.Item label="Subcon Vendor Name" name="subconVendor" rules={[{ required: true }]}>
             <Input placeholder="Vendor" />
           </Form.Item>
 
-          <Form.Item
-            label={mode === "Stock Received from Vendor" ? "Received per Date" : "Stock per Date"}
-            name="stockDate"
-            rules={[{ required: true }]}
-          >
-            <InputNumber className="w-full" min={0} />
-          </Form.Item>
-
-          <Form.Item
-            label={mode === "Stock Received from Vendor" ? "Total Received" : "Stock Total"}
-            name="totalStock"
-            rules={[{ required: true }]}
-          >
-            <InputNumber className="w-full" min={0} />
-          </Form.Item>
-
-          <Form.Item label="Total PO" name="totalPO" rules={[{ required: true }]}>
+          <Form.Item label="Add Stock" name="totalStock" rules={[{ required: true }]}>
             <InputNumber className="w-full" min={0} />
           </Form.Item>
         </Form>
