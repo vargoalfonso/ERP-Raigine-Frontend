@@ -16,12 +16,14 @@ import {
   FilterOutlined,
   PlusOutlined,
   SearchOutlined,
+  QrcodeOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { type InventoryRecord, useGetInventoryListQuery } from "@/lib/api/inventory/api";
 import { consumeFlashMessage } from "@/lib/utils/flashMessage";
+import PrintButton from "@/components/PrintButton";
 
 type IndirectRawMaterialRow = {
   id: string;
@@ -275,6 +277,26 @@ export default function IndirectRawMaterialsPage() {
                 `/indirect-raw-material/detail?id=${encodeURIComponent(row.id)}&uniq=${encodeURIComponent(row.uniq)}`
               )
             }
+          />
+          <PrintButton
+            type="text"
+            icon={<QrcodeOutlined />}
+            title="Print"
+            className="text-gray-600 hover:text-blue-600"
+            options={{
+              documentTitle: `Indirect Raw Material - ${row.uniq}`,
+              heading: "INDIRECT RAW MATERIAL",
+              subheading: row.uniq,
+              fields: [
+                { label: "Part Number", value: row.partNumber },
+                { label: "Part Name", value: row.partName, full: true },
+                { label: "Warehouse", value: row.warehouse },
+                { label: "Current Stock", value: row.currentStock.toLocaleString("en-US") },
+                { label: "Status", value: row.status },
+                { label: "Buy/Not Buy", value: row.buyFlag },
+              ],
+              bottomCode: row.uniq,
+            }}
           />
           <Button
             type="text"

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, type MutableRefObject } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useMemo, useState, type MutableRefObject } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Button,
   Card,
@@ -24,8 +24,6 @@ import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { useCreateInventoryMutation } from "@/lib/api/inventory/api";
 import { useListProcurementDnsQuery } from "@/lib/api/procurement-dn/api";
-import { useListProcurementPosQuery, type ProcurementPoRecord } from "@/lib/api/procurement-po/api";
-import { useListWarehousesQuery, type WarehouseRecord } from "@/lib/api/warehouse/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import {
   focusFirstInvalidField,
@@ -36,71 +34,67 @@ import { setFlashMessage } from "@/lib/utils/flashMessage";
 
 const { Title, Text } = Typography;
 
-type SubConStockReceivedFormData = {
-  poNumber?: string;
+const PERIOD_OPTIONS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+].map((m) => ({ label: m, value: m }));
+
+type SubConStockFormData = {
   deliveryNotesNumber?: string;
-  invoiceNumber?: string;
   uniq?: string;
   partNumber?: string;
   partName?: string;
-  model?: string;
   periodPo?: string;
   dateReceived?: any;
   quantityReceived?: number;
   subconVendorName?: string;
-  warehouseDestination?: string;
   addStock?: number;
 };
 
 type FormEntry = {
   id: number;
   key: string;
-  formRef: MutableRefObject<FormInstance<SubConStockReceivedFormData> | null>;
+  formRef: MutableRefObject<FormInstance<SubConStockFormData> | null>;
 };
 
 type SelectOption = { label: string; value: string };
 
-const getPoUniq = (po: ProcurementPoRecord | undefined): string | undefined => {
-  if (!po) return undefined;
-  if (po.uniq_code) return po.uniq_code;
-  const firstItem = Array.isArray(po.items) ? po.items[0] : undefined;
-  if (!firstItem || typeof firstItem !== "object" || firstItem === null) return undefined;
-  const record = firstItem as Record<string, unknown>;
-  return typeof record.uniq_code === "string"
-    ? record.uniq_code
-    : typeof record.item_uniq_code === "string"
-      ? record.item_uniq_code
-      : typeof record.uniq === "string"
-        ? record.uniq
-        : undefined;
-};
-
-const SubConStockReceivedFormCard = ({
+const SubConStockFormCard = ({
   entryNumber,
   formRef,
   showRemove,
   onRemove,
   uniqOptions,
-  poOptions,
   dnOptions,
-  warehouseOptions,
   bomIndex,
-  procurementPos,
   procurementDns,
+  cardTitle,
+  dateLabel,
+  qtyLabel,
 }: {
   entryNumber: number;
-  formRef: MutableRefObject<FormInstance<SubConStockReceivedFormData> | null>;
+  formRef: MutableRefObject<FormInstance<SubConStockFormData> | null>;
   showRemove: boolean;
   onRemove: () => void;
   uniqOptions: SelectOption[];
-  poOptions: SelectOption[];
   dnOptions: SelectOption[];
-  warehouseOptions: SelectOption[];
   bomIndex: ReturnType<typeof buildBomUniqIndex>;
-  procurementPos: ProcurementPoRecord[];
   procurementDns: Array<{ dn_number?: string; po_number?: string; supplier_name?: string; items: Array<{ item_uniq_code?: string }> }>;
+  cardTitle: string;
+  dateLabel: string;
+  qtyLabel: string;
 }) => {
-  const [form] = Form.useForm<SubConStockReceivedFormData>();
+  const [form] = Form.useForm<SubConStockFormData>();
 
   useEffect(() => {
     formRef.current = form;
@@ -112,31 +106,14 @@ const SubConStockReceivedFormCard = ({
       uniq,
       partNumber: bomIndex.partNumberByUniq[uniq] ?? "",
       partName: bomIndex.partNameByUniq[uniq] ?? "",
-      model: bomIndex.modelByUniq[uniq] ?? bomIndex.assemblyCodeByUniq[uniq] ?? "",
     });
-  };
-
-  const onSelectPo = (poNumber: string) => {
-    const po = procurementPos.find((item) => item.po_number === poNumber);
-    const uniq = getPoUniq(po);
-    const relatedDn = procurementDns.find((item) => item.po_number === poNumber);
-
-    form.setFieldsValue({
-      poNumber,
-      deliveryNotesNumber: relatedDn?.dn_number,
-      periodPo: po?.period,
-      subconVendorName: po?.supplier_name ?? relatedDn?.supplier_name,
-    });
-    fillUniq(uniq);
   };
 
   const onSelectDn = (dnNumber: string) => {
     const dn = procurementDns.find((item) => item.dn_number === dnNumber);
     const uniq = dn?.items?.[0]?.item_uniq_code;
-
     form.setFieldsValue({
       deliveryNotesNumber: dnNumber,
-      poNumber: dn?.po_number,
       subconVendorName: dn?.supplier_name,
     });
     fillUniq(uniq);
@@ -147,7 +124,7 @@ const SubConStockReceivedFormCard = ({
       <div className="mb-6">
         <div className="flex items-center justify-between mb-2">
           <Title level={4} className="!mb-0">
-            Add Stock Received from Vendor #{entryNumber}
+            {cardTitle} #{entryNumber}
           </Title>
           <div className="flex items-center gap-2">
             <Text className="bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-sm">
@@ -166,43 +143,41 @@ const SubConStockReceivedFormCard = ({
             )}
           </div>
         </div>
-        <p className="text-gray-500">Sub Con materials stock received entry</p>
+        <p className="text-gray-500">Add Sub Con raw material entry</p>
       </div>
 
       <Form form={form} layout="vertical">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Form.Item
-            label="PO Number"
-            name="poNumber"
-            rules={[{ required: true, message: "Please select PO number!" }]}
-          >
-            <Select placeholder="Select PO from procurement" size="large" allowClear options={poOptions} onChange={onSelectPo} showSearch optionFilterProp="label" />
-          </Form.Item>
+        <Form.Item
+          label="Delivery Notes Number"
+          name="deliveryNotesNumber"
+          rules={[{ required: true, message: "Please select delivery notes number!" }]}
+        >
+          <Select
+            placeholder="Select Delivery Notes Number"
+            size="large"
+            allowClear
+            options={dnOptions}
+            onChange={onSelectDn}
+            showSearch
+            optionFilterProp="label"
+          />
+        </Form.Item>
 
-          <Form.Item
-            label="Delivery Notes Number"
-            name="deliveryNotesNumber"
-            rules={[{ required: true, message: "Please select delivery notes number!" }]}
-          >
-            <Select placeholder="Select related DN" size="large" allowClear options={dnOptions} onChange={onSelectDn} showSearch optionFilterProp="label" />
-          </Form.Item>
-
-          <Form.Item
-            label="Subcon Vendor's Invoice Number"
-            name="invoiceNumber"
-            rules={[{ required: true, message: "Please input invoice number!" }]}
-          >
-            <Input placeholder="INV-SUB-2025-001" size="large" />
-          </Form.Item>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Form.Item
             label="Uniq"
             name="uniq"
             rules={[{ required: true, message: "Please select uniq!" }]}
           >
-            <Select placeholder="Select UNIQ from BOM" size="large" allowClear options={uniqOptions} onChange={fillUniq} showSearch optionFilterProp="label" />
+            <Select
+              placeholder="IRM-001"
+              size="large"
+              allowClear
+              options={uniqOptions}
+              onChange={fillUniq}
+              showSearch
+              optionFilterProp="label"
+            />
           </Form.Item>
 
           <Form.Item
@@ -210,7 +185,7 @@ const SubConStockReceivedFormCard = ({
             name="partNumber"
             rules={[{ required: true, message: "Please input part number!" }]}
           >
-            <Input placeholder="Automatic field" size="large" disabled />
+            <Input placeholder="Automatic filled" size="large" disabled />
           </Form.Item>
 
           <Form.Item
@@ -218,11 +193,7 @@ const SubConStockReceivedFormCard = ({
             name="partName"
             rules={[{ required: true, message: "Please input part name!" }]}
           >
-            <Input placeholder="Automatic field" size="large" disabled />
-          </Form.Item>
-
-          <Form.Item label="Model" name="model">
-            <Input placeholder="Automatic field" size="large" disabled />
+            <Input placeholder="Automatic Filled" size="large" disabled />
           </Form.Item>
 
           <Form.Item
@@ -230,30 +201,32 @@ const SubConStockReceivedFormCard = ({
             name="periodPo"
             rules={[{ required: true, message: "Please select period!" }]}
           >
-            <Input placeholder="Auto-filled from PO" size="large" disabled />
+            <Select
+              placeholder="Select Period"
+              size="large"
+              allowClear
+              options={PERIOD_OPTIONS}
+              showSearch
+              optionFilterProp="label"
+            />
           </Form.Item>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <Form.Item
-            label="Date Received"
+            label={dateLabel}
             name="dateReceived"
-            rules={[{ required: true, message: "Please select date received!" }]}
+            rules={[{ required: true, message: `Please select ${dateLabel.toLowerCase()}!` }]}
           >
-            <DatePicker className="w-full" size="large" />
+            <DatePicker className="w-full" size="large" format="DD/MM/YYYY" />
           </Form.Item>
 
           <Form.Item
-            label="Quantity Received"
+            label={qtyLabel}
             name="quantityReceived"
-            rules={[{ required: true, message: "Please input quantity received!" }]}
+            rules={[{ required: true, message: `Please input ${qtyLabel.toLowerCase()}!` }]}
           >
-            <InputNumber
-              placeholder="Quantity received here"
-              size="large"
-              style={{ width: "100%" }}
-              min={0}
-            />
+            <InputNumber placeholder="300" size="large" style={{ width: "100%" }} min={0} />
           </Form.Item>
 
           <Form.Item
@@ -261,15 +234,7 @@ const SubConStockReceivedFormCard = ({
             name="subconVendorName"
             rules={[{ required: true, message: "Please input vendor name!" }]}
           >
-            <Input placeholder="Auto-filled from PO / DN" size="large" />
-          </Form.Item>
-
-          <Form.Item
-            label="Warehouse Destination"
-            name="warehouseDestination"
-            rules={[{ required: true, message: "Please select warehouse!" }]}
-          >
-            <Select placeholder="Select warehouse destination" size="large" allowClear options={warehouseOptions} showSearch optionFilterProp="label" />
+            <Input placeholder="PT Subcon" size="large" />
           </Form.Item>
 
           <Form.Item
@@ -277,7 +242,7 @@ const SubConStockReceivedFormCard = ({
             name="addStock"
             rules={[{ required: true, message: "Please input add stock!" }]}
           >
-            <InputNumber placeholder="Add stock" size="large" style={{ width: "100%" }} min={0} />
+            <InputNumber placeholder="300" size="large" style={{ width: "100%" }} min={0} />
           </Form.Item>
         </div>
       </Form>
@@ -285,8 +250,21 @@ const SubConStockReceivedFormCard = ({
   );
 };
 
-export default function CreateSubConStockReceivedPage() {
+function CreateSubConStockContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isReceived = (searchParams.get("type") ?? "in-vendor") === "received";
+
+  const labels = {
+    title: isReceived ? "Add Stock Received from Vendor" : "Add Stock In Vendor",
+    save: isReceived ? "Save Stock Received" : "Save Stock In Vendor",
+    cardTitle: isReceived ? "Add Stock Received from Vendor" : "Add Stock In Vendor",
+    addAnother: isReceived ? "Add Another Stock Received" : "Add Another SubCon Material",
+    dateLabel: isReceived ? "Date Received" : "Date Delivery",
+    qtyLabel: isReceived ? "Quantity Received Items" : "Quantity Delivery Items",
+    entryName: isReceived ? "Stock Received Entry" : "SubCon Material Entry",
+  };
+
   const [loading, setLoading] = useState(false);
   const [entries, setEntries] = useState<FormEntry[]>([]);
   const [createInventory] = useCreateInventoryMutation();
@@ -294,8 +272,6 @@ export default function CreateSubConStockReceivedPage() {
 
   const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
   const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeQuery.data?.data ?? []), [bomTreeQuery.data]);
-  const warehousesQuery = useListWarehousesQuery(undefined, { skip: !apiEnabled });
-  const procurementPosQuery = useListProcurementPosQuery({ po_type: "subcon" }, { skip: !apiEnabled });
   const procurementDnsQuery = useListProcurementDnsQuery(undefined, { skip: !apiEnabled });
 
   const uniqOptions = useMemo<SelectOption[]>(
@@ -305,29 +281,6 @@ export default function CreateSubConStockReceivedPage() {
         label: bomIndex.partNameByUniq[uniq] ? `${uniq} — ${bomIndex.partNameByUniq[uniq]}` : uniq,
       })),
     [bomIndex.partNameByUniq, bomIndex.uniqs]
-  );
-
-  const warehouseOptions = useMemo<SelectOption[]>(
-    () =>
-      (warehousesQuery.data ?? []).map((warehouse: WarehouseRecord) => ({
-        value: warehouse.warehouse_name ?? warehouse.id ?? "",
-        label: warehouse.type_warehouse
-          ? `${warehouse.warehouse_name ?? warehouse.id ?? "-"} — ${warehouse.type_warehouse}`
-          : warehouse.warehouse_name ?? warehouse.id ?? "-",
-      })).filter((item) => Boolean(item.value)),
-    [warehousesQuery.data]
-  );
-
-  const procurementPos = procurementPosQuery.data?.data ?? [];
-  const poOptions = useMemo<SelectOption[]>(
-    () =>
-      procurementPos
-        .filter((po) => Boolean(po.po_number))
-        .map((po) => ({
-          value: po.po_number ?? "",
-          label: po.supplier_name ? `${po.po_number} — ${po.supplier_name}` : po.po_number ?? "",
-        })),
-    [procurementPos]
   );
 
   const procurementDns = useMemo(
@@ -364,11 +317,9 @@ export default function CreateSubConStockReceivedPage() {
     return entries.filter((e) => {
       const form = e.formRef.current;
       if (!form) return false;
-      const v = form.getFieldsValue() as SubConStockReceivedFormData;
+      const v = form.getFieldsValue() as SubConStockFormData;
       return (
-        v.poNumber &&
         v.deliveryNotesNumber &&
-        v.invoiceNumber &&
         v.uniq &&
         v.partNumber &&
         v.partName &&
@@ -376,7 +327,6 @@ export default function CreateSubConStockReceivedPage() {
         v.dateReceived &&
         typeof v.quantityReceived === "number" &&
         v.subconVendorName &&
-        v.warehouseDestination &&
         typeof v.addStock === "number"
       );
     }).length;
@@ -417,45 +367,47 @@ export default function CreateSubConStockReceivedPage() {
           throw error;
         }
 
-        const values = form.getFieldsValue() as SubConStockReceivedFormData;
+        const values = form.getFieldsValue() as SubConStockFormData;
         await createInventory({
           type: "subcon-materials",
           body: {
             uniq_code: String(values.uniq ?? ""),
             raw_material_type: "Subcon",
-            rm_source: [values.poNumber, values.deliveryNotesNumber, values.invoiceNumber].filter(Boolean).join(" / "),
+            rm_source: values.deliveryNotesNumber,
             part_name: values.partName,
             part_number: values.partNumber,
-            warehouse_location: values.warehouseDestination,
             stock_qty: Number(values.addStock ?? values.quantityReceived ?? 0),
           },
         }).unwrap();
       }
       setFlashMessage({
         type: "success",
-        content: "Stock received saved",
+        content: isReceived ? "Stock received saved" : "Stock in vendor saved",
         targetPath: "/sub-con-materials",
       });
-      router.push("/sub-con-materials");
+      router.push(isReceived ? "/sub-con-materials?mode=received" : "/sub-con-materials");
     } catch (error) {
       message.error(
         (error as { data?: { message?: string } })?.data?.message ||
-          "Failed to save stock received."
+          "Failed to save stock."
       );
     } finally {
       setLoading(false);
     }
   };
 
+  const backToList = () =>
+    router.push(isReceived ? "/sub-con-materials?mode=received" : "/sub-con-materials");
+
   return (
     <div className="min-h-screen bg-gray-50 justify-center pb-32">
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="border-r border-gray-300">
+            <div className="border-r border-gray-300 pr-4">
               <Button
                 icon={<ArrowLeftOutlined />}
-                onClick={() => router.push("/sub-con-materials")}
+                onClick={backToList}
                 className="flex items-center gap-2"
                 type="text"
               >
@@ -464,18 +416,18 @@ export default function CreateSubConStockReceivedPage() {
             </div>
             <div>
               <Title level={3} className="!mb-0">
-                Add Stock Received from Vendor
+                {labels.title}
               </Title>
               <Text className="text-gray-500">
-                Sub Con Material Database • Stock Received from Vendor
+                Create Sub Con Material Database • {entries.length} entry
               </Text>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            <Button onClick={() => router.push("/sub-con-materials")}>Cancel</Button>
+            <Button onClick={backToList}>Cancel</Button>
             <Button type="primary" icon={<SaveOutlined />} loading={loading} onClick={saveAll}>
-              Save Stock Received
+              {labels.save}
             </Button>
           </div>
         </div>
@@ -485,18 +437,18 @@ export default function CreateSubConStockReceivedPage() {
         <div className="mx-auto w-full max-w-6xl">
           {entries.map((entry, index) => (
             <div key={entry.key} className={index !== entries.length - 1 ? "mb-12" : ""}>
-              <SubConStockReceivedFormCard
+              <SubConStockFormCard
                 entryNumber={entry.id}
                 formRef={entry.formRef}
                 showRemove={entries.length > 1}
                 onRemove={() => removeEntry(entry.id)}
                 uniqOptions={uniqOptions}
-                poOptions={poOptions}
                 dnOptions={dnOptions}
-                warehouseOptions={warehouseOptions}
                 bomIndex={bomIndex}
-                procurementPos={procurementPos}
                 procurementDns={procurementDns}
+                cardTitle={labels.cardTitle}
+                dateLabel={labels.dateLabel}
+                qtyLabel={labels.qtyLabel}
               />
             </div>
           ))}
@@ -509,7 +461,7 @@ export default function CreateSubConStockReceivedPage() {
               onClick={addEntry}
               className="w-full max-w-md"
             >
-              Add Another Stock Received
+              {labels.addAnother}
             </Button>
           </div>
         </div>
@@ -535,7 +487,7 @@ export default function CreateSubConStockReceivedPage() {
           <div>
             <Title level={5} className="!mb-1">Summary</Title>
             <Text className="text-gray-600">
-              {entries.length} Stock Received Entry ready to be saved
+              {entries.length} {labels.entryName} ready to be saved
             </Text>
           </div>
           <div className="flex items-center gap-8">
@@ -551,5 +503,13 @@ export default function CreateSubConStockReceivedPage() {
         </div>
       </Card>
     </div>
+  );
+}
+
+export default function CreateSubConStockPage() {
+  return (
+    <Suspense fallback={null}>
+      <CreateSubConStockContent />
+    </Suspense>
   );
 }

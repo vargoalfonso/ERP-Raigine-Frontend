@@ -11,6 +11,7 @@ import {
   PlusOutlined,
   ShoppingCartOutlined,
   WarningOutlined,
+  QrcodeOutlined,
 } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
@@ -21,6 +22,7 @@ import {
 } from "@/lib/api/procurement-po/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
+import PrintButton from "@/components/PrintButton";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -463,6 +465,29 @@ function PoProcurementPageContent() {
             className="!rounded-lg"
             icon={<EyeOutlined />}
             onClick={() => router.push(`/po-procurement/detail/${encodeURIComponent(record.key)}`)}
+          />
+          <PrintButton
+            size="small"
+            className="!rounded-lg"
+            icon={<QrcodeOutlined />}
+            title="Print PO"
+            options={{
+              documentTitle: `Purchase Order - ${record.poNumber}`,
+              heading: "PURCHASE ORDER",
+              subheading: record.poNumber,
+              fields: [
+                { label: "Supplier", value: record.supplier, full: true },
+                { label: "Uniq", value: record.uniq },
+                { label: "Period", value: record.period },
+                { label: "Total PO", value: formatNumber(record.budgetIdr) },
+                { label: "Qty Delivered", value: formatNumber(record.qtyDelivered) },
+                { label: "DN Created", value: record.dnCreated },
+                { label: "DN Incoming", value: record.dnIncoming },
+                { label: "Open PO", value: formatNumber(record.openPo) },
+              ],
+              bottomCode: record.poNumber,
+              onError: (msg) => message.error(msg),
+            }}
           />
           <Button
             size="small"

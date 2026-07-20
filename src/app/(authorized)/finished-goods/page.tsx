@@ -12,6 +12,7 @@ import {
   SearchOutlined,
   PlusOutlined,
   ScanOutlined,
+  QrcodeOutlined,
 } from "@ant-design/icons";
 import { Button, Form, Input, InputNumber, Modal, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -32,6 +33,7 @@ import {
   useDeleteFinishedGoodMutation,
   useUpdateFinishedGoodMutation,
 } from "@/lib/api/finished-goods/api";
+import PrintButton from "@/components/PrintButton";
 
 function StatusTag({ status }: { status?: string }) {
   const normalized = (status ?? "").trim().toLowerCase();
@@ -553,6 +555,25 @@ export default function FinishedGoodsPage() {
             onClick={(e) => {
               e.stopPropagation();
               openDetail(record);
+            }}
+          />
+          <PrintButton
+            type="text"
+            size="small"
+            icon={<QrcodeOutlined />}
+            title="Print"
+            options={{
+              documentTitle: `Finished Good - ${record.uniq_code}`,
+              heading: "FINISHED GOOD",
+              subheading: record.uniq_code,
+              fields: [
+                { label: "Part Number", value: record.part_number },
+                { label: "Part Name", value: record.part_name, full: true },
+                { label: "Model", value: record.model },
+                { label: "WO Number", value: record.wo_number },
+                { label: "Warehouse", value: record.warehouse_location },
+              ],
+              bottomCode: record.uniq_code,
             }}
           />
           <Button
