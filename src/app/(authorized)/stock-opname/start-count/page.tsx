@@ -39,6 +39,7 @@ import {
 } from "@/lib/api/stock-opname/api";
 import { getCurrentUserDisplayName } from "@/lib/utils/currentUser";
 import { useGetEmployeesQuery } from "@/lib/api/system-settings/api";
+import { useListWarehousesQuery } from "@/lib/api/warehouse/api";
 
 type Method = "manual" | "bulk";
 
@@ -66,6 +67,7 @@ const TAB_TO_INVENTORY_TYPE: Record<string, StockInventoryType> = {
   raw: "RM",
   indirect: "IDR",
   wip: "WIP",
+  subcon: "SUBCON",
 };
 
 type BulkRow = {
@@ -76,7 +78,7 @@ type BulkRow = {
   model: string;
   countedQty: number;
   userCounted: string;
-  deliveryCycle: string;
+  warehouseLocation: string;
 };
 
 function difference(systemStock: number, countedQty?: number) {
@@ -96,7 +98,7 @@ const BULK_TEMPLATE_HEADERS = [
   "Uniq",
   "Counted Qty",
   "User Counted",
-  "Delivery Cycle",
+  "Warehouse Location",
 ] as const;
 
 // Reads the first non-empty value among the provided header aliases so the
@@ -128,7 +130,7 @@ function mapExcelRow(row: Record<string, unknown>, index: number): BulkRow {
     model: pickCell(row, ["Model", "model"]),
     countedQty: pickNumber(row, ["Counted Qty", "Counted Quantity", "counted_qty", "countedQty", "Qty"]),
     userCounted: pickCell(row, ["User Counted", "user_counted", "userCounted", "User Counter", "user_counter"]),
-    deliveryCycle: pickCell(row, ["Delivery Cycle", "delivery_cycle", "deliveryCycle"]),
+    warehouseLocation: pickCell(row, ["Warehouse Location", "warehouse_location", "warehouseLocation", "WRH Location", "Warehouse"]),
   };
 }
 
@@ -177,6 +179,7 @@ function StockOpnameStartCountPageContent() {
     if (tab === "raw") return "Back to Raw Materials";
     if (tab === "indirect") return "Back to Indirect Stock";
     if (tab === "wip") return "Back to Work In-Progress";
+    if (tab === "subcon") return "Back to Subcon Materials";
     return "Back to Finished Goods";
   }, [tab]);
 
@@ -194,6 +197,17 @@ function StockOpnameStartCountPageContent() {
     useLazyGetStockOpnameUniqOptionsQuery();
   const [createStockOpnameSession, { isLoading: saving }] = useCreateStockOpnameSessionMutation();
   const [warehouseLocation, setWarehouseLocation] = useState<string>();
+  const { data: warehouseList = [] } = useListWarehousesQuery(undefined, { skip: !apiEnabled });
+  const warehouseOptions = useMemo(
+    () =>
+      warehouseList
+        .map((w) => ({
+          value: w.warehouse_name ?? w.id ?? "",
+          label: w.type_warehouse ? `${w.warehouse_name ?? w.id ?? "-"} — ${w.type_warehouse}` : w.warehouse_name ?? w.id ?? "-",
+        }))
+        .filter((o) => Boolean(o.value)),
+    [warehouseList]
+  );
   const fallbackUniqOptions = useMemo(
     () => [
       { label: "FG-001", value: "FG-001" },
@@ -287,7 +301,7 @@ function StockOpnameStartCountPageContent() {
       Uniq: uniqOptions[0]?.value ?? "FG-001",
       "Counted Qty": 0,
       "User Counted": currentUserName,
-      "Delivery Cycle": "",
+      "Warehouse Location": warehouseOptions[0]?.value ?? "",
     };
     const worksheet = XLSX.utils.json_to_sheet([exampleRow], {
       header: [...BULK_TEMPLATE_HEADERS],
@@ -295,6 +309,21 @@ function StockOpnameStartCountPageContent() {
     worksheet["!cols"] = BULK_TEMPLATE_HEADERS.map((h) => ({ wch: Math.max(14, h.length + 2) }));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, BULK_TEMPLATE_SHEET);
+
+    // Second sheet: master warehouse data so counters can copy exact names.
+    const masterHeaders = ["Warehouse Name", "Type", "Plant"];
+    const masterRows =
+      warehouseList.length > 0
+        ? warehouseList.map((w) => ({
+            "Warehouse Name": w.warehouse_name ?? "",
+            Type: w.type_warehouse ?? "",
+            Plant: w.plant_name ?? w.plant_id ?? "",
+          }))
+        : [{ "Warehouse Name": "", Type: "", Plant: "" }];
+    const masterSheet = XLSX.utils.json_to_sheet(masterRows, { header: masterHeaders });
+    masterSheet["!cols"] = [{ wch: 28 }, { wch: 16 }, { wch: 22 }];
+    XLSX.utils.book_append_sheet(workbook, masterSheet, "Master Warehouse");
+
     XLSX.writeFile(workbook, `stock-opname-template-${tab}.xlsx`);
     message.success("Template downloaded");
   }
@@ -450,7 +479,10 @@ function StockOpnameStartCountPageContent() {
         counted_date: countedDate.format("YYYY-MM-DD"),
         remarks: "",
         items,
-        warehouse_location: warehouseLocation,
+        warehouse_location:
+          method === "bulk"
+            ? bulkRows.find((row) => row.warehouseLocation)?.warehouseLocation ?? warehouseLocation ?? null
+            : warehouseLocation ?? null,
       }).unwrap();
 
       message.success("Stock Opname saved successfully");
@@ -706,6 +738,7 @@ function StockOpnameStartCountPageContent() {
                         <Input
                           size="large"
                           readOnly
+                          value={e.userCounter ?? currentUserName}
                           placeholder="Auto-filled from your account"
                           title="Auto-filled from the logged-in user"
                           className="!rounded-lg bg-gray-50 !w-full"
@@ -737,16 +770,9 @@ function StockOpnameStartCountPageContent() {
                           className="w-full"
                           placeholder="Select Warehouse"
                           value={warehouseLocation}
-                          options={[
-                            {
-                              label: "WH-A",
-                              value: "WH-A",
-                            },
-                            {
-                              label: "WH-B",
-                              value: "WH-B",
-                            },
-                          ]}
+                          options={warehouseOptions}
+                          showSearch
+                          optionFilterProp="label"
                           onChange={setWarehouseLocation}
                         />
                       </div>
@@ -879,7 +905,25 @@ function StockOpnameStartCountPageContent() {
                       ),
                     },
                     { title: "User Counted", dataIndex: "userCounted", key: "userCounted", width: 140 },
-                    { title: "Delivery Cycle", dataIndex: "deliveryCycle", key: "deliveryCycle", width: 130 },
+                    {
+                      title: "Warehouse Location",
+                      dataIndex: "warehouseLocation",
+                      key: "warehouseLocation",
+                      width: 200,
+                      render: (_: string, r: BulkRow) => (
+                        <Select
+                          className="w-full"
+                          placeholder="Select Warehouse"
+                          value={r.warehouseLocation || undefined}
+                          options={warehouseOptions}
+                          showSearch
+                          optionFilterProp="label"
+                          onChange={(next) => {
+                            setBulkRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, warehouseLocation: next } : x)));
+                          }}
+                        />
+                      ),
+                    },
                   ]}
                   locale={{ emptyText: bulkFileName ? "No rows loaded" : "Upload an Excel file to preview rows" }}
                 />

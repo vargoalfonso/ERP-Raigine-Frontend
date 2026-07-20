@@ -23,6 +23,7 @@ import { useListProcurementPosQuery, type ProcurementPoRecord } from "@/lib/api/
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
 import { useListWarehousesQuery } from "@/lib/api/warehouse/api";
+import { useGetEmployeesQuery } from "@/lib/api/system-settings/api";
 import { useGetWorkOrdersQuery } from "@/lib/api/work-orders/api";
 
 type OutgoingFormValues = {
@@ -88,6 +89,7 @@ export default function OutgoingRawMaterialPage() {
   const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled || !trxOpen });
   const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeQuery.data?.data ?? []), [bomTreeQuery.data]);
   const warehousesQuery = useListWarehousesQuery(undefined, { skip: !apiEnabled || !trxOpen });
+  const employeesQuery = useGetEmployeesQuery(undefined, { skip: !apiEnabled || !trxOpen });
   const procurementPosQuery = useListProcurementPosQuery({ po_type: "raw_material" }, { skip: !apiEnabled || !trxOpen });
   const procurementDnsQuery = useListProcurementDnsQuery(undefined, { skip: !apiEnabled || !trxOpen });
   const workOrdersQuery = useGetWorkOrdersQuery({ page: 1, limit: 200 }, { skip: !apiEnabled || !trxOpen });
@@ -143,6 +145,17 @@ export default function OutgoingRawMaterialPage() {
         }))
         .filter((item) => Boolean(item.value)),
     [warehousesQuery.data]
+  );
+
+  const requestedByOptions = useMemo(
+    () =>
+      (employeesQuery.data ?? [])
+        .map((item) => ({
+          value: item.full_name ?? "",
+          label: item.job_title ? `${item.full_name} — ${item.job_title}` : item.full_name ?? "",
+        }))
+        .filter((item) => Boolean(item.value)),
+    [employeesQuery.data]
   );
 
   const packingOptions = useMemo(() => {
@@ -634,7 +647,14 @@ export default function OutgoingRawMaterialPage() {
             </Form.Item>
 
             <Form.Item label="Requested By" name="requested_by">
-              <Input placeholder="John Doe" />
+              <Select
+                placeholder="Select requester"
+                options={requestedByOptions}
+                showSearch
+                optionFilterProp="label"
+                allowClear
+                loading={employeesQuery.isFetching}
+              />
             </Form.Item>
           </div>
 
