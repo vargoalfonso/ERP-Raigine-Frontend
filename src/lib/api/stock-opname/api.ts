@@ -107,7 +107,7 @@ const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
   };
 };
 
-export type StockInventoryType = "RM" | "FG" | "WIP" | "IDR";
+export type StockInventoryType = "RM" | "FG" | "WIP" | "IDR" | "SUBCON";
 export type StockOpnameMethod = "manual" | "bulk";
 export type StockOpnameApprovalAction = "approve" | "reject";
 
