@@ -110,7 +110,8 @@ function CreatePoProcurementPageContent() {
     const rows = poBudgetQuery.data?.data ?? [];
     if (!periodKey) return rows;
     return rows.filter((row) => {
-      if (!isBudgetSubtype(row.type, budgetSubtype)) return false;
+      if (!isBudgetSubtype(row.budgetSubtype || row.type, budgetSubtype))
+        return false;
 
       const rowPeriod = String(row.period ?? "").trim();
       if (!rowPeriod) return false;

@@ -29,13 +29,18 @@ import {
 } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  useApproveBulkDeliveryScheduleMutation,
   useApproveDeliveryScheduleMutation,
+  useCreateDeliveryScheduleMutation,
   useGetDeliveryScheduleDnCreationListQuery,
   useGetDeliverySchedulesSummaryQuery,
   useGetDeliverySchedulesQuery,
   useScanDeliveryScheduleDnRobotMutation,
+  type CreateDeliveryScheduleRequest,
 } from "@/lib/api/delivery-schedule/api";
+import {
+  useListCustomerOrdersQuery,
+  type CustomerOrderRecord,
+} from "@/lib/api/customer-orders/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 
 type TabKey = "schedule" | "dn";
@@ -45,6 +50,10 @@ type ScheduleStatus = "Scheduled" | "Approved";
 type ScheduleRow = {
   key: string;
   scheduleId: string;
+  orderId: string;
+  itemId: string;
+  customerId: number;
+  docType: string;
   customer: string;
   poDnName: string;
   uniq: string;
@@ -52,7 +61,8 @@ type ScheduleRow = {
   partNo: string;
   partName: string;
   quantity: number;
-  cycle: "Daily" | "Weekly";
+  cycle: string;
+  deliveryDate: string;
   dnNumber: string;
   status: ScheduleStatus;
 };
@@ -104,8 +114,40 @@ const formatDateShort = (iso: string) => {
   return new Intl.DateTimeFormat("en-US").format(date);
 };
 
-const toScheduleStatus = (status: string): ScheduleStatus =>
-  status.toLowerCase() === "approved" ? "Approved" : "Scheduled";
+// Only surface schedules whose delivery date falls within H-3..H+3 from today.
+const DELIVERY_WINDOW_BACK_DAYS = 3;
+const DELIVERY_WINDOW_AHEAD_DAYS = 3;
+
+const isWithinDeliveryWindow = (
+  iso: string,
+  backDays = DELIVERY_WINDOW_BACK_DAYS,
+  aheadDays = DELIVERY_WINDOW_AHEAD_DAYS,
+): boolean => {
+  if (!iso || iso === "-") return false;
+  const date = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = new Date(today);
+  start.setDate(today.getDate() - backDays);
+  const end = new Date(today);
+  end.setDate(today.getDate() + aheadDays);
+  return date >= start && date <= end;
+};
+
+// Normalize a date/datetime string to a YYYY-MM-DD key.
+const toDateKey = (value: string): string => {
+  if (!value) return "";
+  const trimmed = value.trim();
+  const match = trimmed.match(/^\d{4}-\d{2}-\d{2}/);
+  if (match) return match[0];
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 
 const toDnStatus = (status: string): DnStatus => {
   const normalized = status.trim().toLowerCase();
@@ -147,12 +189,18 @@ function DeliverySchedulingPageInner() {
   const [scanOpen, setScanOpen] = useState(false);
   const [scanDnNumber, setScanDnNumber] = useState("");
 
-  const schedulesQuery = useGetDeliverySchedulesQuery({ status: "scheduled", page: 1, limit: 20 });
+  const schedulesQuery = useGetDeliverySchedulesQuery({ page: 1, limit: 200 });
   const schedulesSummaryQuery = useGetDeliverySchedulesSummaryQuery();
   const dnCreationQuery = useGetDeliveryScheduleDnCreationListQuery({ page: 1, limit: 20 });
+  const poOrdersQuery = useListCustomerOrdersQuery({ document_type: "PO", page: 1, limit: 200 });
+  const dnOrdersQuery = useListCustomerOrdersQuery({ document_type: "DN", page: 1, limit: 200 });
+  const soOrdersQuery = useListCustomerOrdersQuery({ document_type: "SO", page: 1, limit: 200 });
   const [approveDeliverySchedule, approveState] = useApproveDeliveryScheduleMutation();
-  const [approveBulkDeliverySchedule, approveBulkState] = useApproveBulkDeliveryScheduleMutation();
+  const [createDeliverySchedule, createState] = useCreateDeliveryScheduleMutation();
   const [scanDeliveryScheduleDnRobot, scanState] = useScanDeliveryScheduleDnRobotMutation();
+
+  const [approvedKeys, setApprovedKeys] = useState<Set<string>>(new Set());
+  const [rowApproving, setRowApproving] = useState<string>("");
 
   useEffect(() => {
     if (schedulesQuery.error) {
@@ -172,65 +220,144 @@ function DeliverySchedulingPageInner() {
     }
   }, [dnCreationQuery.error]);
 
+  const buildCreateRequest = (row: ScheduleRow): CreateDeliveryScheduleRequest => ({
+    customer_order_document_uuid: row.orderId,
+    customer_order_reference: row.poDnName === "-" ? "" : row.poDnName,
+    customer_id: row.customerId,
+    customer_name: row.customer === "-" ? "" : row.customer,
+    delivery_date: row.deliveryDate,
+    cycle: row.cycle || "Daily",
+    priority: "normal",
+    transport_company: "",
+    vehicle_number: "",
+    driver_name: "",
+    driver_contact: "",
+    departure_at: "",
+    arrival_at: "",
+    delivery_instructions: "",
+    items: [
+      {
+        customer_order_document_item_uuid: row.itemId,
+        item_uniq_code: row.uniq === "-" ? "" : row.uniq,
+        part_no: row.partNo === "-" ? "" : row.partNo,
+        part_name: row.partName === "-" ? "" : row.partName,
+        model: row.model === "-" ? "" : row.model,
+        total_order: row.quantity,
+        total_delivery: row.quantity,
+        uom: "Pcs",
+      },
+    ],
+  });
+
+  // Reuse the delivery schedule module: generate a schedule from the order, then approve it.
+  const approveRow = async (row: ScheduleRow): Promise<void> => {
+    let scheduleId = row.scheduleId;
+    if (!scheduleId) {
+      const created = await createDeliverySchedule(buildCreateRequest(row)).unwrap();
+      scheduleId = created.data.id;
+    }
+    if (!scheduleId) {
+      throw new Error("Failed to generate delivery schedule");
+    }
+    await approveDeliverySchedule({
+      schedule_id: scheduleId,
+      notes: "",
+      force_partial: false,
+    }).unwrap();
+    setApprovedKeys((prev) => {
+      const next = new Set(prev);
+      next.add(row.key);
+      return next;
+    });
+  };
+
+  const handleApproveRow = (row: ScheduleRow) => {
+    setRowApproving(row.key);
+    approveRow(row)
+      .then(() => message.success(`Approved ${row.poDnName}`))
+      .catch((error) =>
+        message.error(getApiErrorMessage(error, "Failed to approve delivery schedule")),
+      )
+      .finally(() => setRowApproving(""));
+  };
+
   const groups: DayGroup[] = useMemo(() => {
-    const source = schedulesQuery.data?.data ?? [];
-    const grouped = new Map<string, DayGroup>();
+    const orders: CustomerOrderRecord[] = [
+      ...(poOrdersQuery.data?.items ?? []),
+      ...(dnOrdersQuery.data?.items ?? []),
+      ...(soOrdersQuery.data?.items ?? []),
+    ];
 
-    source.forEach((schedule) => {
-      const deliveryDate = schedule.deliveryDate || "-";
-      const dayLabel = formatDateLabel(deliveryDate);
-      const baseGroup = grouped.get(deliveryDate) ?? {
-        key: deliveryDate,
-        dayLabel,
-        itemsLabel: "0 items",
-        rows: [],
-      };
-
-      const cycle: ScheduleRow["cycle"] = schedule.cycle === "Weekly" ? "Weekly" : "Daily";
-
-      const rows: ScheduleRow[] = schedule.items.length
-        ? schedule.items.map((item, index) => ({
-            key: `${schedule.id || schedule.poDnName || deliveryDate}-${item.uniq}-${index}`,
-            scheduleId: schedule.id,
-            customer:
-              schedule.customerName ||
-              (schedule.customerId ? `Customer #${schedule.customerId}` : "-"),
-            poDnName: schedule.poDnName || "-",
-            uniq: item.uniq,
-            model: item.model,
-            partNo: item.partNo,
-            partName: item.partName,
-            quantity: item.totalDelivery,
-            cycle,
-            dnNumber: toScheduleStatus(schedule.status) === "Approved" ? schedule.poDnName || "-" : "-",
-            status: toScheduleStatus(schedule.status),
-          }))
-        : [
-            {
-              key: `${schedule.id || schedule.poDnName || deliveryDate}-empty`,
-              scheduleId: schedule.id,
-              customer:
-                schedule.customerName ||
-                (schedule.customerId ? `Customer #${schedule.customerId}` : "-"),
-              poDnName: schedule.poDnName || "-",
-              uniq: "-",
-              model: "-",
-              partNo: "-",
-              partName: "-",
-              quantity: 0,
-              cycle,
-              dnNumber: toScheduleStatus(schedule.status) === "Approved" ? schedule.poDnName || "-" : "-",
-              status: toScheduleStatus(schedule.status),
-            },
-          ];
-
-      baseGroup.rows.push(...rows);
-      baseGroup.itemsLabel = `${baseGroup.rows.length} items`;
-      grouped.set(deliveryDate, baseGroup);
+    // Documents already approved through the delivery schedule module.
+    const approvedRefSet = new Set<string>();
+    (schedulesQuery.data?.data ?? []).forEach((schedule) => {
+      if (
+        String(schedule.status).toLowerCase() === "approved" &&
+        schedule.poDnName
+      ) {
+        approvedRefSet.add(schedule.poDnName);
+      }
     });
 
-    return Array.from(grouped.values()).sort((a, b) => a.key.localeCompare(b.key));
-  }, [schedulesQuery.data]);
+    const grouped = new Map<string, DayGroup>();
+
+    orders.forEach((order) => {
+      order.items.forEach((item, index) => {
+        // Target delivery is taken from each order item's delivery date.
+        const dateKey = toDateKey(item.delivery_date ?? "");
+        if (!dateKey || !isWithinDeliveryWindow(dateKey)) return;
+
+        const rowKey = `${order.id}-${item.id || index}`;
+        const approved =
+          approvedKeys.has(rowKey) || approvedRefSet.has(order.document_number);
+
+        const row: ScheduleRow = {
+          key: rowKey,
+          scheduleId: "",
+          orderId: order.id,
+          itemId: item.id,
+          customerId: order.customer_id,
+          docType: order.document_type,
+          customer:
+            order.customer_name ||
+            (order.customer_id ? `Customer #${order.customer_id}` : "-"),
+          poDnName: order.document_number || "-",
+          uniq: item.item_uniq_code || "-",
+          model: item.model || "-",
+          partNo: item.part_number || "-",
+          partName: item.part_name || "-",
+          quantity: item.quantity,
+          cycle: order.period_schedule || "Daily",
+          deliveryDate: dateKey,
+          dnNumber:
+            approved && order.document_type === "DN"
+              ? order.document_number || "-"
+              : "-",
+          status: approved ? "Approved" : "Scheduled",
+        };
+
+        const baseGroup = grouped.get(dateKey) ?? {
+          key: dateKey,
+          dayLabel: formatDateLabel(dateKey),
+          itemsLabel: "0 items",
+          rows: [],
+        };
+        baseGroup.rows.push(row);
+        baseGroup.itemsLabel = `${baseGroup.rows.length} items`;
+        grouped.set(dateKey, baseGroup);
+      });
+    });
+
+    return Array.from(grouped.values()).sort((a, b) =>
+      a.key.localeCompare(b.key),
+    );
+  }, [
+    poOrdersQuery.data,
+    dnOrdersQuery.data,
+    soOrdersQuery.data,
+    schedulesQuery.data,
+    approvedKeys,
+  ]);
 
   const dnRows: DnRow[] = useMemo(
     () =>
@@ -269,7 +396,8 @@ function DeliverySchedulingPageInner() {
         });
         return { ...g, rows };
       })
-      .filter((g) => g.rows.length > 0);
+      // Keep only deliveries scheduled within H-3..H+3 from today.
+      .filter((g) => g.rows.length > 0 && isWithinDeliveryWindow(g.key));
   }, [activeTab, groups, query, customer]);
 
   const customerOptions = useMemo(() => {
@@ -561,15 +689,8 @@ function DeliverySchedulingPageInner() {
                 size="small"
                 className="!rounded-lg"
                 icon={<CheckCircleOutlined />}
-                loading={approveState.isLoading}
-                onClick={() => {
-                  approveDeliverySchedule({ schedule_id: record.scheduleId, notes: "", force_partial: false })
-                    .unwrap()
-                    .then(() => message.success(`Approved ${record.poDnName}`))
-                    .catch((error) =>
-                      message.error(getApiErrorMessage(error, "Failed to approve delivery schedule"))
-                    );
-                }}
+                loading={rowApproving === record.key}
+                onClick={() => handleApproveRow(record)}
               >
                 Approve
               </Button>
@@ -752,7 +873,7 @@ function DeliverySchedulingPageInner() {
                   dataSource={group.rows}
                   rowKey="key"
                   size="middle"
-                  loading={schedulesQuery.isFetching || approveState.isLoading || approveBulkState.isLoading}
+                  loading={poOrdersQuery.isFetching || dnOrdersQuery.isFetching || soOrdersQuery.isFetching || approveState.isLoading || createState.isLoading}
                   pagination={false}
                   scroll={{ x: "max-content" }}
                 />
@@ -768,34 +889,33 @@ function DeliverySchedulingPageInner() {
         title={<div className="text-sm font-semibold">Approve All</div>}
         okText="Yes"
         cancelText="Cancel"
-        onOk={() => {
+        onOk={async () => {
           if (!approveAllTargetGroup) return;
 
-          const scheduleIds = Array.from(
-            new Set(approveAllTargetGroup.rows.map((row) => row.scheduleId).filter(Boolean))
+          const pendingRows = approveAllTargetGroup.rows.filter(
+            (row) => row.status !== "Approved",
           );
 
-          if (!scheduleIds.length) {
-            message.error("No schedules found to approve");
+          if (!pendingRows.length) {
+            message.info("No pending schedules to approve");
+            setApproveAllOpen(false);
             return;
           }
 
-          approveBulkDeliverySchedule({
-            delivery_date: approveAllTargetGroup.key,
-            schedule_ids: scheduleIds,
-            notes: "",
-            force_partial: false,
-          })
-            .unwrap()
-            .then(() => {
-              setApproveAllOpen(false);
-              message.success("All schedules approved");
-            })
-            .catch((error) =>
-              message.error(getApiErrorMessage(error, "Failed to approve all delivery schedules"))
+          try {
+            for (const row of pendingRows) {
+              // eslint-disable-next-line no-await-in-loop
+              await approveRow(row);
+            }
+            setApproveAllOpen(false);
+            message.success("All schedules approved");
+          } catch (error) {
+            message.error(
+              getApiErrorMessage(error, "Failed to approve all delivery schedules"),
             );
+          }
         }}
-        okButtonProps={{ className: "!rounded-lg", loading: approveBulkState.isLoading }}
+        okButtonProps={{ className: "!rounded-lg", loading: createState.isLoading || approveState.isLoading }}
         cancelButtonProps={{ className: "!rounded-lg" }}
       >
         <div className="text-sm text-gray-600">
