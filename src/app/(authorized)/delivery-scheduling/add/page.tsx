@@ -75,8 +75,16 @@ export default function AddNewDeliverySchedulePage() {
     [bomTreeQuery.data],
   );
 
+  const poListQuery = useListCustomerOrdersQuery(
+    { document_type: "PO", page: 1, limit: 200 },
+    { skip: !apiEnabled },
+  );
   const dnListQuery = useListCustomerOrdersQuery(
     { document_type: "DN", page: 1, limit: 200 },
+    { skip: !apiEnabled },
+  );
+  const soListQuery = useListCustomerOrdersQuery(
+    { document_type: "SO", page: 1, limit: 200 },
     { skip: !apiEnabled },
   );
 
@@ -91,21 +99,30 @@ export default function AddNewDeliverySchedulePage() {
   const dnRefOptions = useMemo(() => {
     if (!apiEnabled) {
       return [
-        { label: "Select DN Number", value: "" },
+        { label: "Select PO / DN / SO Reference", value: "" },
         {
-          label: "DN-2026-0001",
+          label: "[DN] DN-2026-0001 · PT Endpoint Check Customer",
           value: "2f057f77-9006-4ffe-afd6-942133012bb3",
         },
       ];
     }
-    const items = dnListQuery.data?.items ?? [];
-    return [
-      { label: "Select DN Number", value: "" },
-      ...items
-        .filter((o) => o.id && o.document_number)
-        .map((o) => ({ label: o.document_number, value: o.id })),
+    const orders = [
+      ...(poListQuery.data?.items ?? []),
+      ...(dnListQuery.data?.items ?? []),
+      ...(soListQuery.data?.items ?? []),
     ];
-  }, [apiEnabled, dnListQuery.data]);
+    return [
+      { label: "Select PO / DN / SO Reference", value: "" },
+      ...orders
+        .filter((o) => o.id && o.document_number)
+        .map((o) => ({
+          label: `[${o.document_type}] ${o.document_number}${
+            o.customer_name ? ` \u00b7 ${o.customer_name}` : ""
+          }`,
+          value: o.id,
+        })),
+    ];
+  }, [apiEnabled, poListQuery.data, dnListQuery.data, soListQuery.data]);
 
   const customerOptions = useMemo(() => {
     if (!apiEnabled) {
@@ -554,7 +571,12 @@ export default function AddNewDeliverySchedulePage() {
                 }}
                 options={dnRefOptions}
                 className="w-full !rounded-lg mt-1"
-                loading={dnListQuery.isFetching || dnDetailQuery.isFetching}
+                loading={
+                  poListQuery.isFetching ||
+                  dnListQuery.isFetching ||
+                  soListQuery.isFetching ||
+                  dnDetailQuery.isFetching
+                }
                 showSearch
                 filterOption={(input, option) =>
                   String(option?.label ?? "")
@@ -596,7 +618,7 @@ export default function AddNewDeliverySchedulePage() {
               />
             </div>
 
-            <div className="ds-highlight">
+            <div className="">
               <div className="text-xs font-semibold text-gray-500">Uniq</div>
               <Select
                 value={draftUniq || undefined}
@@ -660,7 +682,7 @@ export default function AddNewDeliverySchedulePage() {
               />
             </div>
 
-            <div className="ds-highlight">
+            <div className="">
               <div className="text-xs font-semibold text-gray-500">
                 Quantity to Deliver
               </div>
