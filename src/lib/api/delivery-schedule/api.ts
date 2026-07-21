@@ -285,6 +285,49 @@ export interface DeliveryScheduleDnCreationRecord {
   updatedAt: string;
 }
 
+export interface ApprovedDeliveryScheduleDnItem {
+  itemUniqCode: string;
+  productName: string;
+  partNumber: string;
+  model: string;
+  fgLocation: string;
+  quantity: number;
+  uom: string;
+}
+
+export interface ApprovedDeliveryScheduleDnOption {
+  scheduleId: string;
+  dnId: string;
+  dnNumber: string;
+  scheduleDate: string;
+  deliveryDate: string;
+  customerId?: number;
+  customerName: string;
+  poNumber: string;
+  customerContactPerson: string;
+  customerPhoneNumber: string;
+  deliveryAddress: string;
+  priority: string;
+  transportCompany: string;
+  vehicleNumber: string;
+  driverName: string;
+  driverContact: string;
+  departureAt?: string;
+  arrivalAt?: string;
+  deliveryInstructions: string;
+  items: ApprovedDeliveryScheduleDnItem[];
+}
+
+export interface ApprovedDeliveryScheduleDnAutocompleteResponse {
+  items: ApprovedDeliveryScheduleDnOption[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
 export interface ScanDnRobotResponse {
   dnNumber: string;
   status: string;
@@ -380,6 +423,62 @@ const toDnCreationRecord = (raw: unknown): DeliveryScheduleDnCreationRecord => {
   };
 };
 
+const toApprovedDeliveryScheduleDnOption = (raw: unknown): ApprovedDeliveryScheduleDnOption => {
+  const record = isRecord(raw) ? raw : {};
+  const rawItems = Array.isArray(record.items) ? record.items : [];
+
+  return {
+    scheduleId: getString(record, ["schedule_id", "scheduleId"]) ?? "",
+    dnId: getString(record, ["dn_id", "dnId", "id"]) ?? "",
+    dnNumber: getString(record, ["dn_number", "dnNumber"]) ?? "",
+    scheduleDate: getString(record, ["schedule_date", "scheduleDate"]) ?? "",
+    deliveryDate: getString(record, ["delivery_date", "deliveryDate"]) ?? "",
+    customerId: getNumber(record, ["customer_id", "customerId"]),
+    customerName: getString(record, ["customer_name", "customerName"]) ?? "",
+    poNumber: getString(record, ["po_number", "poNumber"]) ?? "",
+    customerContactPerson: getString(record, ["customer_contact_person", "customerContactPerson"]) ?? "",
+    customerPhoneNumber: getString(record, ["customer_phone_number", "customerPhoneNumber"]) ?? "",
+    deliveryAddress: getString(record, ["delivery_address", "deliveryAddress"]) ?? "",
+    priority: getString(record, ["priority"]) ?? "normal",
+    transportCompany: getString(record, ["transport_company", "transportCompany"]) ?? "",
+    vehicleNumber: getString(record, ["vehicle_number", "vehicleNumber"]) ?? "",
+    driverName: getString(record, ["driver_name", "driverName"]) ?? "",
+    driverContact: getString(record, ["driver_contact", "driverContact"]) ?? "",
+    departureAt: getString(record, ["departure_at", "departureAt"]),
+    arrivalAt: getString(record, ["arrival_at", "arrivalAt"]),
+    deliveryInstructions: getString(record, ["delivery_instructions", "deliveryInstructions"]) ?? "",
+    items: rawItems.map((item) => {
+      const itemRecord = isRecord(item) ? item : {};
+      return {
+        itemUniqCode: getString(itemRecord, ["item_uniq_code", "itemUniqCode"]) ?? "",
+        productName: getString(itemRecord, ["product_name", "productName", "part_name", "partName"]) ?? "",
+        partNumber: getString(itemRecord, ["part_number", "partNumber"]) ?? "",
+        model: getString(itemRecord, ["model"]) ?? "",
+        fgLocation: getString(itemRecord, ["fg_location", "fgLocation"]) ?? "",
+        quantity: getNumber(itemRecord, ["quantity", "qty"]) ?? 0,
+        uom: getString(itemRecord, ["uom", "unit"]) ?? "",
+      };
+    }),
+  };
+};
+
+const normalizeApprovedDeliveryScheduleDnAutocomplete = (response: unknown): ApprovedDeliveryScheduleDnAutocompleteResponse => {
+  const data = normalizeInnerData(response);
+  const record = isRecord(data) ? data : {};
+  const pagination = isRecord(record.pagination) ? record.pagination : {};
+  const rawItems = Array.isArray(record.items) ? record.items : [];
+
+  return {
+    items: rawItems.map(toApprovedDeliveryScheduleDnOption).filter((item) => Boolean(item.dnNumber)),
+    pagination: {
+      total: getNumber(pagination, ["total"]) ?? 0,
+      page: getNumber(pagination, ["page"]) ?? 1,
+      limit: getNumber(pagination, ["limit"]) ?? 20,
+      totalPages: getNumber(pagination, ["total_pages", "totalPages"]) ?? 0,
+    },
+  };
+};
+
 const toScanDnRobotResponse = (raw: unknown): ScanDnRobotResponse => {
   const record = isRecord(raw) ? raw : {};
 
@@ -452,6 +551,26 @@ export const deliveryScheduleSlice = apiSlice
           });
         },
         providesTags: [{ type: TAG, id: "SUMMARY" }],
+      }),
+
+      getApprovedDeliveryScheduleDnAutocomplete: builder.query<
+        ApiResponse<ApprovedDeliveryScheduleDnAutocompleteResponse>,
+        { search?: string; page?: number; limit?: number } | void
+      >({
+        query: (arg) => ({
+          url: "/delivery-schedules/form-options/dn",
+          method: "GET",
+          params: isRecord(arg)
+            ? {
+                search: getString(arg, ["search"]) ?? undefined,
+                page: getNumber(arg, ["page"]) ?? 1,
+                limit: getNumber(arg, ["limit"]) ?? 10,
+              }
+            : { page: 1, limit: 10 },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => ok(normalizeApprovedDeliveryScheduleDnAutocomplete(response)),
+        providesTags: [{ type: TAG, id: "APPROVED-DN-AUTOCOMPLETE" }],
       }),
 
       getDeliveryScheduleDnCreationList: builder.query<
@@ -595,6 +714,8 @@ export const deliveryScheduleSlice = apiSlice
 export const {
   useGetDeliverySchedulesQuery,
   useGetDeliverySchedulesSummaryQuery,
+  useGetApprovedDeliveryScheduleDnAutocompleteQuery,
+  useLazyGetApprovedDeliveryScheduleDnAutocompleteQuery,
   useGetDeliveryScheduleDnCreationListQuery,
   useCreateDeliveryScheduleMutation,
   useUpdateDeliveryScheduleMutation,
