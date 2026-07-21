@@ -19,6 +19,7 @@ import {
 } from "@/lib/api/procurement-dn/api";
 import { type ProcurementPoType, useGetProcurementPoByIdQuery, useListProcurementPosQuery } from "@/lib/api/procurement-po/api";
 import { useGetGlobalWorkingDaysQuery } from "@/lib/api/system-settings/api";
+import { useGetWorkOrdersQuery } from "@/lib/api/work-orders/api";
 
 type DnManagementType = "rm" | "indirect" | "subcon";
 
@@ -155,6 +156,9 @@ function DnRawMaterialCreatePageContent() {
 
   const [step1, setStep1] = useState<Step1Data>({});
 
+  // Work Order khusus untuk DN Subcon (dipakai membaca process flow / poka-yoke)
+  const [workOrder, setWorkOrder] = useState<string | undefined>(undefined);
+
   const [scheduleDate, setScheduleDate] = useState<Dayjs | null>(dayjs());
   const [priority, setPriority] = useState<string>("normal");
 
@@ -182,6 +186,24 @@ function DnRawMaterialCreatePageContent() {
   const poType = managementTypeToPoType(dnType);
   const poListQuery = useListProcurementPosQuery({ po_type: poType }, { skip: !apiEnabled });
   const { data: globalParameters = [] } = useGetGlobalWorkingDaysQuery(undefined, { skip: !apiEnabled });
+
+  // Ambil daftar Work Order aktif + approved untuk pilihan pada DN Subcon.
+  const workOrdersQuery = useGetWorkOrdersQuery(
+    { page: 1, limit: 200 },
+    { skip: !apiEnabled || dnType !== "subcon" },
+  );
+
+  const workOrderOptions = useMemo(() => {
+    const list = workOrdersQuery.data?.items ?? [];
+    return list
+      .filter((wo) => String(wo.approval_status ?? "").trim().toLowerCase() === "approved")
+      .filter((wo) => {
+        const st = String(wo.status ?? "").trim().toLowerCase();
+        return st === "" || (st !== "cancelled" && st !== "canceled" && st !== "closed");
+      })
+      .map((wo) => ({ label: wo.wo_number, value: wo.wo_number }))
+      .filter((opt) => Boolean(opt.value));
+  }, [workOrdersQuery.data]);
 
   useEffect(() => {
     if (step1.poNumber || step1.period) return;
@@ -548,6 +570,7 @@ function DnRawMaterialCreatePageContent() {
         po_number: step1.poNumber,
         period: step1.period,
         type: procurementType,
+        ...(dnType === "subcon" && workOrder ? { wo_number: workOrder } : {}),
         items: items.map((item) => ({
           item_uniq_code: item.uniq,
           qty: Number(item.orderQty || 0),
@@ -592,7 +615,7 @@ function DnRawMaterialCreatePageContent() {
 
       <div className="px-6 py-6">
         <div className="max-w-6xl mx-auto space-y-5">
-          <Card className="rounded-2xl border border-gray-200" bodyStyle={{ padding: 24 }}>
+          <Card className="rounded-2xl border border-gray-200" styles={{ body: { padding: 24 } }}>
             <div className="rounded-2xl border-2 border-sky-400 p-5 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.35)]">
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -652,6 +675,22 @@ function DnRawMaterialCreatePageContent() {
                   <div className="mb-2 text-sm font-medium text-gray-700">DN Incoming</div>
                   <Input value={formatDisplayNumber(step1.dnIncoming)} disabled />
                 </div>
+                {dnType === "subcon" ? (
+                  <div className="xl:col-span-2">
+                    <div className="mb-2 text-sm font-medium text-gray-700">Work Order</div>
+                    <Select
+                      value={workOrder}
+                      onChange={(value) => setWorkOrder(value)}
+                      options={workOrderOptions}
+                      placeholder="Select Work Order"
+                      className="w-full"
+                      disabled={workOrdersQuery.isFetching}
+                      allowClear
+                      showSearch
+                      optionFilterProp="label"
+                    />
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -877,7 +916,7 @@ function DnRawMaterialCreatePageContent() {
             </Button>
           </div> */}
 
-          <Card className="rounded-2xl" bodyStyle={{ padding: 20 }}>
+          <Card className="rounded-2xl" styles={{ body: { padding: 20 } }}>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-semibold text-gray-900">Summary</div>

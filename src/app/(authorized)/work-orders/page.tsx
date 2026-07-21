@@ -605,6 +605,9 @@ export default function WorkOrdersPage() {
     return mockRmProcessingRows;
   }, [apiEnabled, mockRmProcessingRows, rmProcessingQuery.data, rmProcessingQuery.isError]);
 
+  console.log(workOrders,"AKSJDN");
+  
+
   const openPrintDetail = (url: string) => {
     window.open(withQuery(url, { autoPrint: 1 }), "_blank", "noopener,noreferrer");
   };

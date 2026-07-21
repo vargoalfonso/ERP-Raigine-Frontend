@@ -356,7 +356,9 @@ export default function WorkOrderDetailPage() {
     if (isItemQRFetching && !selectedItemQRResponse?.data_url) {
       return (
         <div className="flex aspect-square w-44 items-center justify-center rounded-lg border border-slate-200 bg-slate-50" aria-live="polite">
-          <Spin tip="Loading item QR" />
+          <Spin tip="Loading item QR">
+            <div />
+          </Spin>
         </div>
       );
     }
@@ -386,8 +388,8 @@ export default function WorkOrderDetailPage() {
   };
 
   return (
-    <div className="min-h-full overflow-x-clip bg-slate-50 px-4 py-5 text-slate-900 sm:px-6 lg:px-8">
-      <div className="mx-auto w-full max-w-[1440px]">
+    <div className=" min-h-full overflow-x-clip bg-slate-50 px-4 py-5 text-slate-900 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full ">
         <header className="mb-5 flex min-w-0 flex-col gap-4 border-b border-slate-200 pb-5 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
             <button
