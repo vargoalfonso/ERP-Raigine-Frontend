@@ -43,7 +43,9 @@ import {
   useGetSubconReceivedQuery,
   useRejectSubconInventoryMutation,
 } from "@/lib/api/subcon-inventory/api";
+import { useLazyGenerateQRSubconQuery } from "@/lib/api/inventory/api";
 import PrintButton from "@/components/PrintButton";
+import type { PrintCardOptions } from "@/lib/utils/printCard";
 
 type ApprovalStatus = "pending" | "approved" | "rejected";
 
@@ -107,6 +109,77 @@ const stockReceivedInitialRows: SubConRow[] = [
 
 export default function SubConMaterialsClient() {
   const router = useRouter();
+  const [generateQRSubcon] = useLazyGenerateQRSubconQuery();
+
+  // Builds the print-card options and fetches the QR (packing list / kanban
+  // list from DN management) on demand. 1 uniq = 1 QR.
+  const handleGenerateQR = async (
+    r: SubConRow,
+    received: boolean,
+  ): Promise<PrintCardOptions | null> => {
+    if (!r.uniq) {
+      message.error("Uniq code tidak ditemukan");
+      return null;
+    }
+
+    let qrDataUrl: string | undefined;
+    try {
+      const result = await generateQRSubcon(r.uniq).unwrap();
+      const qr = result?.data?.qr ?? "";
+      qrDataUrl = qr
+        ? qr.startsWith("data:image")
+          ? qr
+          : `data:image/png;base64,${qr}`
+        : undefined;
+      if (!qrDataUrl) {
+        message.error(
+          `QR untuk uniq ${r.uniq} belum tersedia di DN management`,
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      const detail =
+        (err as { data?: { message?: string } })?.data?.message ??
+        (err as { error?: string })?.error ??
+        "Gagal mengambil QR dari DN management";
+      message.error(`Gagal mengambil QR (${r.uniq}): ${detail}`);
+    }
+
+    return {
+      documentTitle: received
+        ? `SubCon Material (Received) - ${r.uniq}`
+        : `SubCon Material - ${r.uniq}`,
+      heading: "SUBCON MATERIAL",
+      subheading: r.uniq,
+      fields: [
+        { label: "Part Name", value: r.partName, full: true },
+        { label: "Subcon Vendor", value: r.subconVendor },
+        { label: "Period", value: r.period },
+        {
+          label: received ? "Date Received" : "Date Delivery",
+          value: r.dateDelivery,
+        },
+        {
+          label: received ? "Received/Date" : "Stock/Date",
+          value: r.stockDate.toLocaleString("en-US"),
+        },
+        {
+          label: received ? "Total Received" : "Total Stock",
+          value: r.totalStock.toLocaleString("en-US"),
+        },
+        { label: "Total PO", value: r.totalPO.toLocaleString("en-US") },
+        {
+          label: received ? "\u0394PO-Received" : "\u0394PO-Stock",
+          value: r.deltaPoStock.toLocaleString("en-US"),
+        },
+        { label: "Status", value: r.status },
+      ],
+      qrDataUrl,
+      bottomCode: r.uniq,
+      onError: (msg) => message.error(msg),
+    };
+  };
+
   const searchParams = useSearchParams();
   const [mode, setMode] = useState<ViewMode>("Stock In Vendor");
   const [query, setQuery] = useState("");
@@ -545,23 +618,7 @@ export default function SubConMaterialsClient() {
             icon={<QrcodeOutlined />}
             title="Print"
             className="text-gray-600 hover:text-blue-600"
-            options={{
-              documentTitle: `SubCon Material - ${r.uniq}`,
-              heading: "SUBCON MATERIAL",
-              subheading: r.uniq,
-              fields: [
-                { label: "Part Name", value: r.partName, full: true },
-                { label: "Subcon Vendor", value: r.subconVendor },
-                { label: "Period", value: r.period },
-                { label: "Date Delivery", value: r.dateDelivery },
-                { label: "Stock/Date", value: r.stockDate.toLocaleString("en-US") },
-                { label: "Total Stock", value: r.totalStock.toLocaleString("en-US") },
-                { label: "Total PO", value: r.totalPO.toLocaleString("en-US") },
-                { label: "\u0394PO-Stock", value: r.deltaPoStock.toLocaleString("en-US") },
-                { label: "Status", value: r.status },
-              ],
-              bottomCode: r.uniq,
-            }}
+            loadOptions={() => handleGenerateQR(r, false)}
           />
           <Button type="text" icon={<EditOutlined />} onClick={() => openEdit(r)} />
           <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openDelete(r)} />
@@ -711,23 +768,7 @@ export default function SubConMaterialsClient() {
             icon={<QrcodeOutlined />}
             title="Print"
             className="text-gray-600 hover:text-blue-600"
-            options={{
-              documentTitle: `SubCon Material (Received) - ${r.uniq}`,
-              heading: "SUBCON MATERIAL",
-              subheading: r.uniq,
-              fields: [
-                { label: "Part Name", value: r.partName, full: true },
-                { label: "Subcon Vendor", value: r.subconVendor },
-                { label: "Period", value: r.period },
-                { label: "Date Received", value: r.dateDelivery },
-                { label: "Received/Date", value: r.stockDate.toLocaleString("en-US") },
-                { label: "Total Received", value: r.totalStock.toLocaleString("en-US") },
-                { label: "Total PO", value: r.totalPO.toLocaleString("en-US") },
-                { label: "\u0394PO-Received", value: r.deltaPoStock.toLocaleString("en-US") },
-                { label: "Status", value: r.status },
-              ],
-              bottomCode: r.uniq,
-            }}
+            loadOptions={() => handleGenerateQR(r, true)}
           />
           <Button type="text" icon={<EditOutlined />} onClick={() => openEdit(r)} />
           <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openDelete(r)} />

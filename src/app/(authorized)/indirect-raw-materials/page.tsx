@@ -21,9 +21,14 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
-import { type InventoryRecord, useGetInventoryListQuery } from "@/lib/api/inventory/api";
+import {
+  type InventoryRecord,
+  useGetInventoryListQuery,
+  useLazyGenerateQRIndirectQuery,
+} from "@/lib/api/inventory/api";
 import { consumeFlashMessage } from "@/lib/utils/flashMessage";
 import PrintButton from "@/components/PrintButton";
+import type { PrintCardOptions } from "@/lib/utils/printCard";
 
 type IndirectRawMaterialRow = {
   id: string;
@@ -97,6 +102,58 @@ const initialRows: IndirectRawMaterialRow[] = [
 
 export default function IndirectRawMaterialsPage() {
   const router = useRouter();
+  const [generateQRIndirect] = useLazyGenerateQRIndirectQuery();
+
+  // Builds the print-card options and fetches the QR (packing list / kanban
+  // list from DN management) on demand. 1 uniq = 1 QR.
+  const handleGenerateQR = async (
+    row: IndirectRawMaterialRow,
+  ): Promise<PrintCardOptions | null> => {
+    if (!row.uniq) {
+      message.error("Uniq code tidak ditemukan");
+      return null;
+    }
+
+    let qrDataUrl: string | undefined;
+    try {
+      const result = await generateQRIndirect(row.uniq).unwrap();
+      const qr = result?.data?.qr ?? "";
+      qrDataUrl = qr
+        ? qr.startsWith("data:image")
+          ? qr
+          : `data:image/png;base64,${qr}`
+        : undefined;
+      if (!qrDataUrl) {
+        message.error(
+          `QR untuk uniq ${row.uniq} belum tersedia di DN management`,
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      const detail =
+        (err as { data?: { message?: string } })?.data?.message ??
+        (err as { error?: string })?.error ??
+        "Gagal mengambil QR dari DN management";
+      message.error(`Gagal mengambil QR (${row.uniq}): ${detail}`);
+    }
+
+    return {
+      documentTitle: `Indirect Raw Material - ${row.uniq}`,
+      heading: "INDIRECT RAW MATERIAL",
+      subheading: row.uniq,
+      fields: [
+        { label: "Part Number", value: row.partNumber },
+        { label: "Part Name", value: row.partName, full: true },
+        { label: "Warehouse", value: row.warehouse },
+        { label: "Current Stock", value: row.currentStock.toLocaleString("en-US") },
+        { label: "Status", value: row.status },
+        { label: "Buy/Not Buy", value: row.buyFlag },
+      ],
+      qrDataUrl,
+      bottomCode: row.uniq,
+      onError: (msg) => message.error(msg),
+    };
+  };
   const [messageApi, contextHolder] = message.useMessage();
 
   const [query, setQuery] = useState("");
@@ -283,20 +340,7 @@ export default function IndirectRawMaterialsPage() {
             icon={<QrcodeOutlined />}
             title="Print"
             className="text-gray-600 hover:text-blue-600"
-            options={{
-              documentTitle: `Indirect Raw Material - ${row.uniq}`,
-              heading: "INDIRECT RAW MATERIAL",
-              subheading: row.uniq,
-              fields: [
-                { label: "Part Number", value: row.partNumber },
-                { label: "Part Name", value: row.partName, full: true },
-                { label: "Warehouse", value: row.warehouse },
-                { label: "Current Stock", value: row.currentStock.toLocaleString("en-US") },
-                { label: "Status", value: row.status },
-                { label: "Buy/Not Buy", value: row.buyFlag },
-              ],
-              bottomCode: row.uniq,
-            }}
+            loadOptions={() => handleGenerateQR(row)}
           />
           <Button
             type="text"
