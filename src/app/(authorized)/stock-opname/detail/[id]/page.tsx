@@ -43,6 +43,7 @@ const TAB_TO_INVENTORY_TYPE: Record<string, StockInventoryType> = {
   raw: "RM",
   indirect: "IDR",
   wip: "WIP",
+  subcon: "SUBCON",
 };
 
 function inventoryLabelFromType(type: string) {
@@ -55,6 +56,8 @@ function inventoryLabelFromType(type: string) {
       return "Work In Process";
     case "FG":
       return "Finished Goods";
+    case "SUBCON":
+      return "Subcon Materials";
     default:
       return "Finished Goods";
   }
