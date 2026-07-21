@@ -20,6 +20,7 @@ type RmOption = {
   partName: string;
   partNumber: string;
   model?: string;
+  materialGrade?: string;
   gradeSize?: string;
   unit?: string;
   label: string;
@@ -55,13 +56,6 @@ export default function CreateRmProcessingWoPage() {
   const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
   const specIndex = useMemo(() => buildBomMaterialSpecIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
 
-  // Model auto-fill comes from the BOM node product model (outside material spec).
-  const resolveModel = (uniq: string, fallback?: string) =>
-    specIndex.productModelByUniq[uniq] ||
-    (fallback ?? "") ||
-    bomIndex.modelByUniq[uniq] ||
-    bomIndex.assemblyCodeByUniq[uniq] ||
-    "";
 
   // Grade/Size auto-fill = grade + (length x width x thickness) from material spec,
   // with the BOM child uniq/name appended in parentheses for detailing only.
@@ -84,8 +78,8 @@ export default function CreateRmProcessingWoPage() {
     if (!uniq) return;
 
     const found = rmOptions.find((option) => option.value === uniq);
-    const mappedModel = resolveModel(uniq, found?.model);
-    const mappedGradeSize = resolveGradeSize(uniq, found?.gradeSize);
+    const mappedModel = found?.model ?? null;
+    const mappedGradeSize = found?.materialGrade || resolveGradeSize(uniq, found?.gradeSize);
     const mappedPartName = found?.partName ?? bomIndex.partNameByUniq[uniq];
     const mappedPartNumber = found?.partNumber ?? bomIndex.partNumberByUniq[uniq];
     const mappedUom = found?.unit ?? bomIndex.uomByUniq[uniq];
@@ -105,11 +99,7 @@ export default function CreateRmProcessingWoPage() {
       nextValues.outputUom = mappedUom ?? currentValues.outputUom;
     }
 
-    if (mappedModel && !String(currentValues.model ?? "").trim()) {
-      nextValues.model = mappedModel;
-    } else if (mappedModel && fields?.source) {
-      nextValues.model = mappedModel;
-    }
+nextValues.model = mappedModel;
 
     if (mappedGradeSize && !String(currentValues.gradeSize ?? "").trim()) {
       nextValues.gradeSize = mappedGradeSize;
@@ -163,6 +153,8 @@ export default function CreateRmProcessingWoPage() {
 
   const rmOptions: RmOption[] = useMemo(() => {
     const inv = inventoryQuery.data?.data ?? [];
+    console.log("inventory", inv);
+console.log("M09", inv.find(x => x.uniq_code === "M09"));
     const fromInventory = apiEnabled && inv.length
       ? inv
           .filter((r) => (Number(r.stock_qty ?? 0) || 0) > 0 && String(r.uniq_code ?? "").trim())
@@ -170,6 +162,8 @@ export default function CreateRmProcessingWoPage() {
             const uniq = String(r.uniq_code ?? "").trim();
             const partName = String(r.part_name ?? r.item_name ?? bomIndex.partNameByUniq[uniq] ?? "-").trim() || "-";
             const partNumber = String(r.part_number ?? bomIndex.partNumberByUniq[uniq] ?? "-").trim() || "-";
+              const model = String(r.model ?? "").trim() || bomIndex.modelByUniq[uniq] || bomIndex.assemblyCodeByUniq[uniq] || "-";
+             const materialGrade = String(r.material_grade ?? "").trim();
             const unit = String(r.uom ?? bomIndex.uomByUniq[uniq] ?? "pcs").trim() || "pcs";
             const stockQty = Number(r.stock_qty ?? 0) || 0;
             return {
@@ -177,7 +171,8 @@ export default function CreateRmProcessingWoPage() {
               name: partName === "-" ? uniq : partName,
               partName,
               partNumber,
-              model: bomIndex.modelByUniq[uniq] ?? bomIndex.assemblyCodeByUniq[uniq] ?? undefined,
+          model,
+          materialGrade,
               gradeSize: bomIndex.gradeSizeByUniq[uniq] ?? undefined,
               unit,
               label: `${uniq}${partName && partName !== "-" ? ` - ${partName}` : ""} (stock: ${stockQty} ${unit})`,
@@ -230,13 +225,13 @@ export default function CreateRmProcessingWoPage() {
   const onSelectSourceRm = (value: string) => {
     const found = rmOptions.find((o) => o.value === value);
     if (!found) return;
-
+console.log(found);
     const currentTarget = form.getFieldValue("targetMaterialUniq");
 
     const nextValues: Record<string, unknown> = {
       partName: found.partName,
       partNumber: found.partNumber,
-      model: resolveModel(value, found.model),
+      model: found.model ?? null,
       gradeSize: resolveGradeSize(value, found.gradeSize),
       sourceMaterialUniq: value,
       inputUom: found.unit ?? form.getFieldValue("inputUom"),

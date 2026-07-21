@@ -83,6 +83,8 @@ export type InventoryRecord = {
   created_at?: string;
   updated_at?: string;
   qr?: string;
+  model?: string;
+  material_grade?: string;
 };
 
 export type InventoryHistoryRecord = {
@@ -162,6 +164,8 @@ const toInventoryRecord = (raw: unknown): InventoryRecord => {
     item_name: toText(record.item_name ?? record.name ?? record.ItemName ?? record.Name),
     created_at: toText(record.created_at ?? record.CreatedAt),
     updated_at: toText(record.updated_at ?? record.UpdatedAt),
+        model: toText(record.model ?? record.model),
+    material_grade: toText(record.material_grade ?? record.material_grade),
   };
 };
 
@@ -255,7 +259,23 @@ export const inventoryApiSlice = apiSlice.injectEndpoints({
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(parseArrayResponse<unknown>(response).map(toInventoryRecord), "Inventory retrieved", parsePagination(response)),
+   transformResponse: (response: unknown) => {
+  console.log("RAW API RESPONSE", response);
+
+  const arr = parseArrayResponse<unknown>(response);
+
+  console.log("PARSED ARRAY", arr);
+  console.log(
+    "M09 RAW",
+    arr.find((x: any) => x.uniq_code === "M09")
+  );
+
+  return ok(
+    arr.map(toInventoryRecord),
+    "Inventory retrieved",
+    parsePagination(response)
+  );
+},
     }),
 
     getInventoryDetail: builder.query<ApiResponse<InventoryRecord>, { type: InventoryType; id: string | number }>({
