@@ -68,6 +68,7 @@ export type CreateProcurementDnRequest = {
   items: CreateProcurementDnItemRequest[];
   customer_id?: number;
   contact_person?: string;
+  wo_number?: string;
 };
 
 export type ProcurementDnItem = {

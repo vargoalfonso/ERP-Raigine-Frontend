@@ -21,7 +21,7 @@ export const formatWorkOrderNumber = (prefix: string, sequence: number): string 
 export const formatWorkOrderDisplayNumber = (woNumber?: string | null): string => {
   const value = String(woNumber ?? "").trim();
   if (!value) return "";
-  return value.replace(/-\d{2}$/, "");
+  return value.replace(/-\d{0}$/, "");
 };
 
 export const tryParseWorkOrderSequence = (woNumber: string, prefix: string): number | null => {
