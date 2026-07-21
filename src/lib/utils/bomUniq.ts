@@ -164,11 +164,26 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
     }
   };
 
-  if (Array.isArray(tree)) {
-    for (const node of tree) visit(node);
-  } else {
-    visit(tree);
-  }
+  // The BOM tree query wraps nodes as { data: { items: [...] } } (see ok() in
+  // bom/api.ts). Normalize any of: array, { items }, { data: [...] },
+  // { data: { items } }, or a single node, before traversing.
+  const toNodeArray = (input: unknown): unknown[] => {
+    if (Array.isArray(input)) return input;
+    if (isRecord(input)) {
+      if (Array.isArray((input as { items?: unknown }).items)) {
+        return (input as { items: unknown[] }).items;
+      }
+      const data = (input as { data?: unknown }).data;
+      if (Array.isArray(data)) return data;
+      if (isRecord(data) && Array.isArray((data as { items?: unknown }).items)) {
+        return (data as { items: unknown[] }).items;
+      }
+      return [input];
+    }
+    return [];
+  };
+
+  for (const node of toNodeArray(tree)) visit(node);
 
   const uniqs = Array.from(uniqSet).sort((a, b) => a.localeCompare(b));
   const options = uniqs.map((u) => ({ label: u, value: u }));
