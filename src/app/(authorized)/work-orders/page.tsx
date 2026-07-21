@@ -5,6 +5,7 @@ import {
   Button,
   Drawer,
   Input,
+  Modal,
   Progress,
   Table,
   Tag,
@@ -460,6 +461,7 @@ export default function WorkOrdersPage() {
   const [limit, setLimit] = useState(20);
   const [rmPage, setRmPage] = useState(1);
   const [rmLimit, setRmLimit] = useState(20);
+  const [rmQrModal, setRmQrModal] = useState<RmProcessingRow | null>(null);
   const [bulkWoPage, setBulkWoPage] = useState(1);
   const [bulkWoLimit, setBulkWoLimit] = useState(20);
   const [bulkWoSearch, setBulkWoSearch] = useState("");
@@ -638,7 +640,6 @@ export default function WorkOrdersPage() {
       remarks: row.remarks,
       status: row.status,
       agingDays: row.agingDays,
-      qrDataUrl: row.qrDataUrl,
     });
 
   const rows = useMemo(() => {
@@ -1193,7 +1194,7 @@ export default function WorkOrdersPage() {
       fixed: "right",
       render: (_: unknown, row) => (
         <div className="flex items-center justify-end gap-1">
-          <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => router.push(buildRmProcessingDetailUrl(row))} />
+          <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => setRmQrModal(row)} />
           <Button size="small" type="text" icon={<PrinterOutlined />} onClick={() => openPrintDetail(buildRmProcessingDetailUrl(row))} />
         </div>
       ),
@@ -1878,6 +1879,68 @@ export default function WorkOrdersPage() {
           />
         </div>
       </Drawer>
+      <Modal
+        open={Boolean(rmQrModal)}
+        title="QR / Kanban - RM Processing"
+        onCancel={() => setRmQrModal(null)}
+        footer={[
+          <Button
+            key="detail"
+            onClick={() => {
+              if (rmQrModal) router.push(buildRmProcessingDetailUrl(rmQrModal));
+            }}
+          >
+            Open Detail
+          </Button>,
+          <Button
+            key="print"
+            icon={<PrinterOutlined />}
+            onClick={() => {
+              if (rmQrModal) openPrintDetail(buildRmProcessingDetailUrl(rmQrModal));
+            }}
+          >
+            Print
+          </Button>,
+          <Button key="close" type="primary" onClick={() => setRmQrModal(null)}>
+            Close
+          </Button>,
+        ]}
+      >
+        {rmQrModal ? (
+          <div className="flex flex-col items-center gap-3">
+            {rmQrModal.qrDataUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={rmQrModal.qrDataUrl}
+                alt="QR"
+                className="w-56 h-56"
+                style={{ imageRendering: "pixelated" }}
+              />
+            ) : (
+              <div className="text-sm text-gray-500">QR belum tersedia</div>
+            )}
+            <div className="text-center">
+              <div className="text-sm font-semibold text-gray-900">{rmQrModal.woNumber}</div>
+              <div className="text-xs text-gray-500">
+                {rmQrModal.model} · {rmQrModal.gradeSize}
+              </div>
+              <div className="text-xs text-gray-400">
+                {rmQrModal.sourceMaterialUniq} → {rmQrModal.targetMaterialUniq}
+              </div>
+            </div>
+            {rmQrModal.qrDataUrl ? (
+              <details className="w-full">
+                <summary className="cursor-pointer text-xs text-gray-500">Detail base64</summary>
+                <textarea
+                  readOnly
+                  value={rmQrModal.qrDataUrl}
+                  className="mt-2 w-full h-24 text-[10px] font-mono border border-gray-200 rounded p-2"
+                />
+              </details>
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

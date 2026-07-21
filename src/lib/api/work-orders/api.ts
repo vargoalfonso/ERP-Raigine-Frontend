@@ -149,11 +149,12 @@ export type RmProcessingWorkOrderRequest = {
   model: string;
   grade_size: string;
   input_qty: number;
-  input_uom: string;
+  input_uom?: string;
   output_qty: number;
   output_uom: string;
   date_issued: string;
   remarks: string | null;
+  pre_processing: boolean;
 };
 
 export type WorkOrderUniqSource = "raw_material" | "indirect" | "subcon";
@@ -247,6 +248,10 @@ export type RmProcessingWorkOrderRecord = {
   aging_days?: number;
   qr_data_url?: string;
   created_at?: string;
+  kanban_number?: string;
+  size_breakdown?: string;
+  pre_processing?: boolean;
+  kanban_qr_data_url?: string;
 };
 
 const toWorkOrderItem = (raw: unknown): WorkOrderItemRecord => {
@@ -344,6 +349,10 @@ const toRmProcessingWorkOrderRecord = (raw: unknown): RmProcessingWorkOrderRecor
     aging_days: getNumber(record, ["aging_days", "aging", "agingDays"]),
     qr_data_url: getString(record, ["qr_data_url", "qrDataUrl"]),
     created_at: getString(record, ["created_at", "createdAt"]),
+    kanban_number: getString(record, ["kanban_number", "kanbanNumber"]),
+    size_breakdown: getString(record, ["size_breakdown", "sizeBreakdown"]),
+    pre_processing: Boolean((record as Record<string, unknown>)["pre_processing"] ?? (record as Record<string, unknown>)["preProcessing"]),
+    kanban_qr_data_url: getString(record, ["kanban_qr_data_url", "kanbanQrDataUrl"]),
   };
 };
 

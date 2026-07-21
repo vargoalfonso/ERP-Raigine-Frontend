@@ -83,6 +83,8 @@ export type InventoryRecord = {
   created_at?: string;
   updated_at?: string;
   qr?: string;
+  model?: string;
+  material_grade?: string;
 };
 
 export type InventoryHistoryRecord = {
@@ -162,6 +164,8 @@ const toInventoryRecord = (raw: unknown): InventoryRecord => {
     item_name: toText(record.item_name ?? record.name ?? record.ItemName ?? record.Name),
     created_at: toText(record.created_at ?? record.CreatedAt),
     updated_at: toText(record.updated_at ?? record.UpdatedAt),
+        model: toText(record.model ?? record.model),
+    material_grade: toText(record.material_grade ?? record.material_grade),
   };
 };
 
@@ -225,15 +229,53 @@ const toInventoryKanbanSummary = (raw: unknown): InventoryKanbanSummary => {
   };
 };
 
+export type InventoryQRResult = { qr?: string };
+
 export const inventoryApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
+    // Generate (or fetch) the QR for an indirect raw material. The QR carries
+    // the packing list / kanban list from DN management. 1 uniq = 1 QR.
+    generateQRIndirect: builder.query<ApiResponse<InventoryQRResult>, string>({
+      query: (code) => ({
+        url: `/inventory/indirect-materials/${encodeURIComponent(code)}/create-qr`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    // Generate (or fetch) the QR for a subcon inventory item. The QR carries
+    // the packing list / kanban list from DN management. 1 uniq = 1 QR.
+    generateQRSubcon: builder.query<ApiResponse<InventoryQRResult>, string>({
+      query: (code) => ({
+        url: `/inventory/subcon-materials/${encodeURIComponent(code)}/create-qr`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
     getInventoryList: builder.query<ApiResponse<InventoryRecord[]>, { type: InventoryType; page?: number; limit?: number }>({
       query: ({ type, page = 1, limit = 20 }) => ({
         url: `/inventory/${encodeURIComponent(type)}?page=${page}&limit=${limit}`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(parseArrayResponse<unknown>(response).map(toInventoryRecord), "Inventory retrieved", parsePagination(response)),
+   transformResponse: (response: unknown) => {
+  console.log("RAW API RESPONSE", response);
+
+  const arr = parseArrayResponse<unknown>(response);
+
+  console.log("PARSED ARRAY", arr);
+  console.log(
+    "M09 RAW",
+    arr.find((x: any) => x.uniq_code === "M09")
+  );
+
+  return ok(
+    arr.map(toInventoryRecord),
+    "Inventory retrieved",
+    parsePagination(response)
+  );
+},
     }),
 
     getInventoryDetail: builder.query<ApiResponse<InventoryRecord>, { type: InventoryType; id: string | number }>({
@@ -309,4 +351,6 @@ export const {
   useLazyGetInventoryKanbanSummaryQuery,
   useCreateInventoryMutation,
   useUpdateInventoryMutation,
+  useLazyGenerateQRIndirectQuery,
+  useLazyGenerateQRSubconQuery,
 } = inventoryApiSlice;
