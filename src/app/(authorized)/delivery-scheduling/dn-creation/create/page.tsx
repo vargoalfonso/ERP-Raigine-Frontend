@@ -197,38 +197,51 @@ export default function DeliverySchedulingDnCreationCreatePage() {
     const selected = approvedDnOptions.find((option) => option.dnNumber === dnNumber);
     if (!selected) return;
 
-    const customer = selected.customerId == null ? undefined : customerById.get(String(selected.customerId));
-    const fallbackContactPerson = String(customer?.customer_name ?? "").trim();
     const currentEntry = form.getFieldValue(["entries", entryIndex]) ?? {};
-    form.setFieldValue(["entries", entryIndex], {
+    const existingItems = Array.isArray(currentEntry.items)
+      ? currentEntry.items.filter((item: DeliveryItemFormRow) => String(item?.item_uniq_code ?? "").trim())
+      : [];
+    const isFirstSelectedDn = existingItems.length === 0;
+    const selectedItems = selected.items.map((item) => ({
+      source_dn_number: selected.dnNumber,
+      item_uniq_code: item.itemUniqCode,
+      product_name: item.productName,
+      part_number: item.partNumber,
+      model: item.model,
+      fg_location: item.fgLocation,
+      quantity: item.quantity,
+      uom: item.uom,
+    }));
+
+    const nextEntry: EntryFormValues = {
       ...currentEntry,
-      schedule_id: selected.scheduleId,
-      schedule_date: toFormDate(selected.deliveryDate || selected.scheduleDate),
-      customer_id: selected.customerId,
-      customer_name: selected.customerName,
-      po_number: selected.poNumber,
-      customer_contact_person: selected.customerContactPerson || fallbackContactPerson,
-      customer_phone_number: selected.customerPhoneNumber,
-      delivery_address: selected.deliveryAddress,
-      priority: selected.priority || "normal",
-      transport_company: selected.transportCompany,
-      vehicle_number: selected.vehicleNumber,
-      driver_name: selected.driverName,
-      driver_contact: selected.driverContact,
-      departure_at: toFormDate(selected.departureAt),
-      arrival_at: toFormDate(selected.arrivalAt),
-      delivery_instructions: selected.deliveryInstructions,
-      items: selected.items.map((item) => ({
-        source_dn_number: selected.dnNumber,
-        item_uniq_code: item.itemUniqCode,
-        product_name: item.productName,
-        part_number: item.partNumber,
-        model: item.model,
-        fg_location: item.fgLocation,
-        quantity: item.quantity,
-        uom: item.uom,
-      })),
-    });
+      items: isFirstSelectedDn ? selectedItems : [...existingItems, ...selectedItems],
+    };
+
+    if (isFirstSelectedDn) {
+      const customer = selected.customerId == null ? undefined : customerById.get(String(selected.customerId));
+      const fallbackContactPerson = String(customer?.customer_name ?? "").trim();
+      Object.assign(nextEntry, {
+        schedule_id: selected.scheduleId,
+        schedule_date: toFormDate(selected.deliveryDate || selected.scheduleDate),
+        customer_id: selected.customerId,
+        customer_name: selected.customerName,
+        po_number: selected.poNumber,
+        customer_contact_person: selected.customerContactPerson || fallbackContactPerson,
+        customer_phone_number: selected.customerPhoneNumber,
+        delivery_address: selected.deliveryAddress,
+        priority: selected.priority || "normal",
+        transport_company: selected.transportCompany,
+        vehicle_number: selected.vehicleNumber,
+        driver_name: selected.driverName,
+        driver_contact: selected.driverContact,
+        departure_at: toFormDate(selected.departureAt),
+        arrival_at: toFormDate(selected.arrivalAt),
+        delivery_instructions: selected.deliveryInstructions,
+      });
+    }
+
+    form.setFieldValue(["entries", entryIndex], nextEntry);
     updateEntryTotals(entryIndex);
   };
 
