@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AutoComplete, Button, DatePicker, Form, Input, InputNumber, Select, message } from "antd";
+import { AutoComplete, Button, DatePicker, Form, Input, InputNumber, Modal, Select, Switch, message } from "antd";
 import { useRouter } from "next/navigation";
 import dayjs, { type Dayjs } from "dayjs";
 import { apiBaseUrl } from "@/lib/api/instance";
@@ -9,6 +9,7 @@ import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { useGetInventoryListQuery } from "@/lib/api/inventory/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { buildBomMaterialSpecIndex } from "@/lib/utils/bomMaterialSpec";
 import {
   useCreateRmProcessingWorkOrderMutation,
 } from "@/lib/api/work-orders/api";
@@ -34,6 +35,12 @@ export default function CreateRmProcessingWoPage() {
   const router = useRouter();
   const [form] = Form.useForm();
   const [packingNumber] = useState(buildPackingNumber);
+  const [qrModal, setQrModal] = useState<{
+    woNumber: string;
+    kanban: string;
+    size: string;
+    qr: string;
+  } | null>(null);
   const { TextArea } = Input;
   const apiEnabled = Boolean(apiBaseUrl);
 
@@ -46,18 +53,39 @@ export default function CreateRmProcessingWoPage() {
   });
   const [createRmProcessingWorkOrder, createState] = useCreateRmProcessingWorkOrderMutation();
   const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
+  const specIndex = useMemo(() => buildBomMaterialSpecIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
+
+  // Model auto-fill comes from the BOM node product model (outside material spec).
+  const resolveModel = (uniq: string, fallback?: string) =>
+    specIndex.productModelByUniq[uniq] ||
+    (fallback ?? "") ||
+    bomIndex.modelByUniq[uniq] ||
+    bomIndex.assemblyCodeByUniq[uniq] ||
+    "";
+
+  // Grade/Size auto-fill = grade + (length x width x thickness) from material spec,
+  // with the BOM child uniq/name appended in parentheses for detailing only.
+  const resolveGradeSize = (uniq: string, fallback?: string) => {
+    const grade = specIndex.gradeByUniq[uniq] || specIndex.materialGradeByUniq[uniq] || "";
+    const size = specIndex.sizeByUniq[uniq] || "";
+    const base =
+      [grade, size].filter(Boolean).join(" ") ||
+      (fallback ?? "") ||
+      bomIndex.gradeSizeByUniq[uniq] ||
+      "";
+    if (!uniq) return base;
+    const partName = bomIndex.partNameByUniq[uniq] || "";
+    const detail = partName ? `${uniq} - ${partName}` : uniq;
+    return base ? `${base} (${detail})` : `(${detail})`;
+  };
 
   const applyUniqMapping = (value: string, fields?: { source?: boolean; target?: boolean }) => {
     const uniq = String(value ?? "").trim();
     if (!uniq) return;
 
     const found = rmOptions.find((option) => option.value === uniq);
-    const mappedModel =
-      found?.model ??
-      bomIndex.modelByUniq[uniq] ??
-      bomIndex.assemblyCodeByUniq[uniq] ??
-      bomIndex.partNameByUniq[uniq];
-    const mappedGradeSize = found?.gradeSize ?? bomIndex.gradeSizeByUniq[uniq];
+    const mappedModel = resolveModel(uniq, found?.model);
+    const mappedGradeSize = resolveGradeSize(uniq, found?.gradeSize);
     const mappedPartName = found?.partName ?? bomIndex.partNameByUniq[uniq];
     const mappedPartNumber = found?.partNumber ?? bomIndex.partNumberByUniq[uniq];
     const mappedUom = found?.unit ?? bomIndex.uomByUniq[uniq];
@@ -208,8 +236,8 @@ export default function CreateRmProcessingWoPage() {
     const nextValues: Record<string, unknown> = {
       partName: found.partName,
       partNumber: found.partNumber,
-      model: found.model ?? bomIndex.modelByUniq[value] ?? bomIndex.assemblyCodeByUniq[value],
-      gradeSize: found.gradeSize ?? bomIndex.gradeSizeByUniq[value],
+      model: resolveModel(value, found.model),
+      gradeSize: resolveGradeSize(value, found.gradeSize),
       sourceMaterialUniq: value,
       inputUom: found.unit ?? form.getFieldValue("inputUom"),
     };
@@ -234,21 +262,32 @@ export default function CreateRmProcessingWoPage() {
       }
 
       const dateIssued = values.dateIssued as Dayjs;
-      await createRmProcessingWorkOrder({
+      const res = await createRmProcessingWorkOrder({
         source_material_uniq: String(values.sourceMaterialUniq),
         target_material_uniq: String(values.targetMaterialUniq),
         model: String(values.model),
         grade_size: String(values.gradeSize),
         input_qty: Number(values.qtyInput),
-        input_uom: String(values.inputUom ?? "pcs"),
+        input_uom: String(form.getFieldValue("inputUom") ?? values.outputUom ?? "pcs"),
         output_qty: Number(values.qtyOutput),
         output_uom: String(values.outputUom ?? "pcs"),
         date_issued: dayjs(dateIssued).format("YYYY-MM-DD"),
         remarks: values.remarks ? String(values.remarks) : null,
+        pre_processing: Boolean(values.preProcessing),
       }).unwrap();
 
       message.success("RM Processing WO created");
-      router.push("/work-orders");
+      const qr = res.kanban_qr_data_url || res.qr_data_url || "";
+      if (qr) {
+        setQrModal({
+          woNumber: res.wo_number ?? "",
+          kanban: res.kanban_number ?? String(values.packingNumber ?? ""),
+          size: res.size_breakdown ?? "",
+          qr,
+        });
+      } else {
+        router.push("/work-orders");
+      }
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
       message.error(getApiErrorMessage(err, "Failed to create RM processing work order"));
@@ -257,6 +296,77 @@ export default function CreateRmProcessingWoPage() {
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
+      <Modal
+        open={Boolean(qrModal)}
+        title="QR Kanban / Packing List"
+        onCancel={() => {
+          setQrModal(null);
+          router.push("/work-orders");
+        }}
+        footer={[
+          <Button
+            key="print"
+            onClick={() => {
+              if (!qrModal?.qr) return;
+              const w = window.open("", "_blank");
+              if (!w) return;
+              w.document.write(
+                `<html><head><title>${qrModal.kanban || "QR"}</title></head>` +
+                  `<body style="text-align:center;font-family:sans-serif;padding:24px">` +
+                  `<img src="${qrModal.qr}" style="width:260px;height:260px;image-rendering:pixelated" />` +
+                  `<div style="margin-top:12px;font-size:14px"><b>${qrModal.kanban || ""}</b></div>` +
+                  `<div style="font-size:12px;color:#555">${qrModal.size || ""}</div>` +
+                  `</body></html>`,
+              );
+              w.document.close();
+              w.focus();
+              w.print();
+            }}
+          >
+            Print
+          </Button>,
+          <Button
+            key="done"
+            type="primary"
+            onClick={() => {
+              setQrModal(null);
+              router.push("/work-orders");
+            }}
+          >
+            Done
+          </Button>,
+        ]}
+      >
+        {qrModal ? (
+          <div className="flex flex-col items-center gap-3">
+            {qrModal.qr ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={qrModal.qr}
+                alt="QR Kanban"
+                className="w-56 h-56"
+                style={{ imageRendering: "pixelated" }}
+              />
+            ) : null}
+            <div className="text-center">
+              <div className="text-sm font-semibold text-gray-900">{qrModal.woNumber || "-"}</div>
+              <div className="text-sm text-gray-700">Kanban: {qrModal.kanban || "-"}</div>
+              {qrModal.size ? (
+                <div className="text-xs text-gray-500">Size: {qrModal.size}</div>
+              ) : null}
+            </div>
+            <details className="w-full">
+              <summary className="cursor-pointer text-xs text-gray-500">Detail base64</summary>
+              <textarea
+                readOnly
+                value={qrModal.qr}
+                className="mt-2 w-full h-24 text-[10px] font-mono border border-gray-200 rounded p-2"
+              />
+            </details>
+          </div>
+        ) : null}
+      </Modal>
+
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
         <div className="flex items-center justify-between gap-3">
           <button
@@ -298,6 +408,7 @@ export default function CreateRmProcessingWoPage() {
           packingNumber,
           inputUom: "pcs",
           outputUom: "pcs",
+          preProcessing: false,
         }}
       >
         <div className="space-y-6">
@@ -332,12 +443,12 @@ export default function CreateRmProcessingWoPage() {
                 <Input className="!rounded-lg" disabled placeholder="Auto-filled from RM Master Data" />
               </Form.Item>
 
-              <Form.Item name="model" label="Model" rules={[{ required: true, message: "Enter model" }]}>
-                <Input className="!rounded-lg" placeholder="Auto-filled from RM selection" />
+              <Form.Item name="model" label="Model" rules={[{ message: "Enter model" }]}>
+                <Input className="!rounded-lg" disabled placeholder="Auto-filled from RM selection" />
               </Form.Item>
 
-              <Form.Item name="gradeSize" label="Grade / Size" rules={[{ required: true, message: "Enter grade/size" }]}>
-                <Input className="!rounded-lg" placeholder="e.g., SPHC 1.2 mm × 4 ft × 8 ft" />
+              <Form.Item name="gradeSize" label="Grade / Size" rules={[{ message: "Enter grade/size" }]}>
+                <Input className="!rounded-lg" disabled placeholder="e.g., SPHC 1.2 mm × 4 ft × 8 ft" />
               </Form.Item>
             </div>
           </div>
@@ -397,8 +508,18 @@ export default function CreateRmProcessingWoPage() {
                 <InputNumber className="!rounded-lg w-full" min={0} placeholder="e.g 100 Sheet / Coil / kg" />
               </Form.Item>
 
-              <Form.Item name="inputUom" label="Input UoM" rules={[{ required: true }]}>
-                <Input className="!rounded-lg" placeholder="e.g. pcs" />
+              <Form.Item
+                label="Size Breakdown"
+                shouldUpdate={(prev, cur) => prev.qtyInput !== cur.qtyInput || prev.qtyOutput !== cur.qtyOutput}
+                extra={<span className="text-xs text-gray-400">Ukuran per unit × qty output (mis. 0.2 × 5)</span>}
+              >
+                {() => {
+                  const qi = Number(form.getFieldValue("qtyInput")) || 0;
+                  const qo = Number(form.getFieldValue("qtyOutput")) || 0;
+                  const perUnit = qo > 0 ? Math.round((qi / qo) * 10000) / 10000 : 0;
+                  const text = qo > 0 ? `${perUnit} × ${qo}` : "-";
+                  return <Input className="!rounded-lg" value={text} disabled />;
+                }}
               </Form.Item>
 
               <Form.Item
@@ -448,6 +569,15 @@ export default function CreateRmProcessingWoPage() {
             <div className="text-xs text-gray-500 mt-1">Manager approval and special instructions</div>
 
             <div className="mt-5 grid grid-cols-1 gap-4">
+              <Form.Item
+                name="preProcessing"
+                label="Pre-Processing Flag"
+                valuePropName="checked"
+                extra={<span className="text-xs text-gray-400">Tandai agar hasil olahan masuk ke inventory raw material saat scan selesai (stok sumber berkurang)</span>}
+              >
+                <Switch />
+              </Form.Item>
+
               <Form.Item
                 name="remarks"
                 label="Remarks"
