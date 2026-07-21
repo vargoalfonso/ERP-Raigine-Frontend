@@ -19,7 +19,6 @@ import {
 } from "@/lib/api/procurement-dn/api";
 import { type ProcurementPoType, useGetProcurementPoByIdQuery, useListProcurementPosQuery } from "@/lib/api/procurement-po/api";
 import { useGetGlobalWorkingDaysQuery } from "@/lib/api/system-settings/api";
-import { useGetKanbanStandardsQuery } from "@/lib/api/system-settings/api";
 
 type DnManagementType = "rm" | "indirect" | "subcon";
 
@@ -102,8 +101,6 @@ const toNumber = (value: unknown): number | undefined => {
   }
   return undefined;
 };
-
-const normalizeUniq = (value: unknown): string => String(value ?? "").trim().toLowerCase();
 
 const parseIncomingDate = (value?: string): Dayjs | undefined => {
   const text = toText(value);
@@ -231,27 +228,6 @@ function DnRawMaterialCreatePageContent() {
       .filter((opt) => Boolean(opt.value));
   }, [poListQuery.data]);
 
-  const {
-    data: kanbanApi = [],
-    isFetching: kanbanFetching,
-  } = useGetKanbanStandardsQuery(undefined, { skip: !apiEnabled });
-
-  const kanbanMap = useMemo(() => {
-    const map = new Map<string, number>();
-    const items = Array.isArray(kanbanApi) ? kanbanApi : [];
-
-    items.forEach((item) => {
-      const code = normalizeUniq(item.item_uniq_code);
-      const status = String(item.status ?? "").trim().toLowerCase();
-      const quantity = Number(item.kanban_qty ?? 0);
-
-      if (!code || status !== "active" || !Number.isFinite(quantity) || quantity <= 0) return;
-      map.set(code, quantity);
-    });
-
-    return map;
-  }, [kanbanApi]);
-
   const periodOptions = useMemo(() => {
     const activePlanningPeriods = globalParameters
       .filter((item) => String(item.status ?? "active").trim().toLowerCase() === "active")
@@ -346,7 +322,8 @@ function DnRawMaterialCreatePageContent() {
             toText(item.packing) ??
             toText(item.kanban_number) ??
             "-",
-          pcsPerKanban: toNumber(item.pcs_per_kanban) ?? toNumber(item.pcs) ?? 0,
+          // Supplier-specific Pcs/Kanban must come from the DN preview endpoint.
+          pcsPerKanban: 0,
           dateIncoming: undefined,
         };
       })
@@ -474,8 +451,7 @@ function DnRawMaterialCreatePageContent() {
   const onPickUniq = (uniq: string) => {
     const found = getPreviewItemForUniq(uniq);
     const previewPcs = Number(found?.pcsPerKanban ?? 0);
-    const configuredPcs = kanbanMap.get(normalizeUniq(uniq));
-    const resolvedPcs = previewPcs > 0 ? previewPcs : configuredPcs;
+    const resolvedPcs = previewPcs > 0 ? previewPcs : undefined;
 
     setDraft((prev) => ({
       ...prev,
@@ -488,9 +464,9 @@ function DnRawMaterialCreatePageContent() {
       weightKg: prev.weightKg,
     }));
 
-    if (!resolvedPcs && !kanbanFetching) {
+    if (!resolvedPcs) {
       message.warning(
-        "Konfigurasi Pcs/Kanban untuk UNIQ ini belum tersedia. Silakan lengkapi Kanban Parameter terlebih dahulu.",
+        "Pcs/Kanban Supplier Item untuk supplier dan UNIQ ini belum tersedia. Silakan lengkapi Master Supplier terlebih dahulu.",
       );
     }
   };
@@ -510,7 +486,7 @@ function DnRawMaterialCreatePageContent() {
     }
     if (!draft.pcsPerKanban || draft.pcsPerKanban <= 0) {
       message.error(
-        "Konfigurasi Pcs/Kanban belum tersedia. Silakan lengkapi Kanban Parameter terlebih dahulu.",
+        "Pcs/Kanban Supplier Item belum tersedia. Silakan lengkapi Master Supplier terlebih dahulu.",
       );
       return;
     }
@@ -724,13 +700,13 @@ function DnRawMaterialCreatePageContent() {
                   <InputNumber
                     value={draft.pcsPerKanban}
                     className="w-full"
-                    placeholder="Autofilled from Kanban Parameter"
+                    placeholder="Autofilled from Supplier Item"
                     controls={false}
                     disabled
                   />
-                  {draft.uniq && !hasValidDraftPcs && !kanbanFetching ? (
+                  {draft.uniq && !hasValidDraftPcs ? (
                     <div className="mt-1 text-xs text-red-600">
-                      Konfigurasi belum tersedia. Lengkapi Kanban Parameter terlebih dahulu.
+                      Data belum tersedia. Lengkapi Pcs/Kanban di Master Supplier terlebih dahulu.
                     </div>
                   ) : null}
                 </div>

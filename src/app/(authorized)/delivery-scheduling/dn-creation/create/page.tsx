@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   DatePicker,
@@ -17,12 +17,15 @@ import { useRouter } from "next/navigation";
 
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
-import { useCreateCustomerDeliveryNoteMutation } from "@/lib/api/delivery-schedule/api";
+import {
+  type ApprovedDeliveryScheduleDnOption,
+  useCreateCustomerDeliveryNoteMutation,
+  useLazyGetApprovedDeliveryScheduleDnAutocompleteQuery,
+} from "@/lib/api/delivery-schedule/api";
 import { useListCustomersQuery } from "@/lib/api/customers/api";
-import { useGetBomTreeQuery } from "@/lib/api/bom/api";
-import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 
 type DeliveryItemFormRow = {
+  source_dn_number?: string;
   item_uniq_code?: string;
   product_name?: string;
   part_number?: string;
@@ -77,6 +80,14 @@ const stripEmpty = (obj: Record<string, unknown>) =>
 const formatDateTime = (value: dayjs.Dayjs | null | undefined, format: string) =>
   value ? value.format(format) : undefined;
 
+const DN_AUTOCOMPLETE_PAGE_SIZE = 10;
+
+const toFormDate = (value?: string): dayjs.Dayjs | null => {
+  if (!value) return null;
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed : null;
+};
+
 export default function DeliverySchedulingDnCreationCreatePage() {
   const router = useRouter();
   const apiEnabled = Boolean(apiBaseUrl);
@@ -84,6 +95,12 @@ export default function DeliverySchedulingDnCreationCreatePage() {
   const [form] = Form.useForm<FormValues>();
 
   const [createCustomerDeliveryNote, createState] = useCreateCustomerDeliveryNoteMutation();
+  const [loadApprovedDnOptions, approvedDnOptionsState] = useLazyGetApprovedDeliveryScheduleDnAutocompleteQuery();
+  const [approvedDnOptions, setApprovedDnOptions] = useState<ApprovedDeliveryScheduleDnOption[]>([]);
+  const [approvedDnSearch, setApprovedDnSearch] = useState("");
+  const [approvedDnPage, setApprovedDnPage] = useState(0);
+  const [hasMoreApprovedDns, setHasMoreApprovedDns] = useState(true);
+  const approvedDnRequestInFlight = useRef(false);
 
   const customersQuery = useListCustomersQuery(undefined, { skip: !apiEnabled });
   useEffect(() => {
@@ -107,29 +124,12 @@ export default function DeliverySchedulingDnCreationCreatePage() {
   const customerById = useMemo(() => {
     const map = new Map<string, (typeof customers)[number]>();
     for (const c of customers) {
-      const id = c.row_id ?? c.id ?? c.customer_id;
-      if (id === undefined || id === null) continue;
-      map.set(String(id), c);
+      [c.row_id, c.id, c.customer_id, c.customer_code]
+        .filter((id): id is string | number => id !== undefined && id !== null && String(id).trim() !== "")
+        .forEach((id) => map.set(String(id), c));
     }
     return map;
   }, [customers]);
-
-  const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
-  useEffect(() => {
-    if (bomTreeQuery.error) {
-      message.error(getApiErrorMessage(bomTreeQuery.error, "Failed to load BOM"));
-    }
-  }, [bomTreeQuery.error]);
-
-  const bomIndex = useMemo(
-    () => buildBomUniqIndex(bomTreeQuery.data?.data ?? []),
-    [bomTreeQuery.data]
-  );
-
-  const uniqOptions = useMemo(
-    () => bomIndex.options.map((o) => ({ value: o.value, label: `${o.value} — ${bomIndex.partNameByUniq[o.value] ?? ""}`.trim() })),
-    [bomIndex.options, bomIndex.partNameByUniq]
-  );
 
   const updateEntryTotals = (entryIndex: number) => {
     const entryItems = (form.getFieldValue(["entries", entryIndex, "items"]) ?? []) as DeliveryItemFormRow[];
@@ -137,6 +137,99 @@ export default function DeliverySchedulingDnCreationCreatePage() {
     const totalQuantity = entryItems.reduce((sum, it) => sum + (Number(it?.quantity) || 0), 0);
     form.setFieldValue(["entries", entryIndex, "total_items"], totalItems);
     form.setFieldValue(["entries", entryIndex, "total_quantity"], totalQuantity);
+  };
+
+  const fetchApprovedDnOptions = useCallback(
+    async (page: number, search: string, replace: boolean) => {
+      if (!apiEnabled || approvedDnRequestInFlight.current) return;
+
+      approvedDnRequestInFlight.current = true;
+      try {
+        const response = await loadApprovedDnOptions({
+          search: search.trim() || undefined,
+          page,
+          limit: DN_AUTOCOMPLETE_PAGE_SIZE,
+        }).unwrap();
+        const nextItems = response.data.items;
+
+        setApprovedDnOptions((previous) => {
+          if (replace) return nextItems;
+          const byDnNumber = new Map(previous.map((item) => [item.dnNumber, item]));
+          nextItems.forEach((item) => byDnNumber.set(item.dnNumber, item));
+          return Array.from(byDnNumber.values());
+        });
+        setApprovedDnPage(response.data.pagination.page);
+        setHasMoreApprovedDns(response.data.pagination.page < response.data.pagination.totalPages);
+      } catch (error) {
+        if (replace) {
+          message.error(getApiErrorMessage(error, "Failed to load approved DN options"));
+        }
+      } finally {
+        approvedDnRequestInFlight.current = false;
+      }
+    },
+    [apiEnabled, loadApprovedDnOptions],
+  );
+
+  useEffect(() => {
+    if (!apiEnabled) {
+      setApprovedDnOptions([]);
+      setApprovedDnPage(0);
+      setHasMoreApprovedDns(false);
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      void fetchApprovedDnOptions(1, approvedDnSearch, true);
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [apiEnabled, approvedDnSearch, fetchApprovedDnOptions]);
+
+  const approvedDnSelectOptions = useMemo(
+    () => approvedDnOptions.map((option) => ({
+      value: option.dnNumber,
+      label: `${option.dnNumber} — ${option.customerName || option.scheduleId || "-"}`,
+    })),
+    [approvedDnOptions],
+  );
+
+  const onSelectApprovedDn = (entryIndex: number, dnNumber?: string) => {
+    const selected = approvedDnOptions.find((option) => option.dnNumber === dnNumber);
+    if (!selected) return;
+
+    const customer = selected.customerId == null ? undefined : customerById.get(String(selected.customerId));
+    const fallbackContactPerson = String(customer?.customer_name ?? "").trim();
+    const currentEntry = form.getFieldValue(["entries", entryIndex]) ?? {};
+    form.setFieldValue(["entries", entryIndex], {
+      ...currentEntry,
+      schedule_id: selected.scheduleId,
+      schedule_date: toFormDate(selected.deliveryDate || selected.scheduleDate),
+      customer_id: selected.customerId,
+      customer_name: selected.customerName,
+      po_number: selected.poNumber,
+      customer_contact_person: selected.customerContactPerson || fallbackContactPerson,
+      customer_phone_number: selected.customerPhoneNumber,
+      delivery_address: selected.deliveryAddress,
+      priority: selected.priority || "normal",
+      transport_company: selected.transportCompany,
+      vehicle_number: selected.vehicleNumber,
+      driver_name: selected.driverName,
+      driver_contact: selected.driverContact,
+      departure_at: toFormDate(selected.departureAt),
+      arrival_at: toFormDate(selected.arrivalAt),
+      delivery_instructions: selected.deliveryInstructions,
+      items: selected.items.map((item) => ({
+        source_dn_number: selected.dnNumber,
+        item_uniq_code: item.itemUniqCode,
+        product_name: item.productName,
+        part_number: item.partNumber,
+        model: item.model,
+        fg_location: item.fgLocation,
+        quantity: item.quantity,
+        uom: item.uom,
+      })),
+    });
+    updateEntryTotals(entryIndex);
   };
 
   const onSave = async (values: FormValues) => {
@@ -344,6 +437,7 @@ export default function DeliverySchedulingDnCreationCreatePage() {
                             form.setFieldValue(["entries", entryField.name, "customer_id"], Number.isFinite(idNum) ? idNum : undefined);
                             if (customer) {
                               form.setFieldValue(["entries", entryField.name, "customer_name"], String(customer.customer_name ?? "").trim());
+                              form.setFieldValue(["entries", entryField.name, "customer_contact_person"], String(customer.customer_name ?? "").trim());
                               form.setFieldValue(["entries", entryField.name, "customer_phone_number"], String(customer.phone_number ?? "").trim());
                               form.setFieldValue(["entries", entryField.name, "delivery_address"], String(customer.shipping_address ?? "").trim());
                             }
@@ -406,40 +500,33 @@ export default function DeliverySchedulingDnCreationCreatePage() {
                               <Form.Item
                                 {...field}
                                 label={index === 0 ? "DN Number" : ""}
-                                name={[field.name, "item_uniq_code"]}
+                                name={[field.name, "source_dn_number"]}
                                 className="mb-0"
                                 rules={[{ required: index === 0, message: "Select DN Number" }]}
                               >
                                 <Select
-                                  placeholder="Select DN Number"
-                                  options={uniqOptions}
-                                  loading={bomTreeQuery.isFetching}
+                                  allowClear
                                   showSearch
-                                  onChange={(value) => {
-                                    const uniq = String(value ?? "").trim();
-                                    const productName = bomIndex.partNameByUniq[uniq] ?? "";
-                                    const partNumber = bomIndex.partNumberByUniq[uniq] ?? "";
-                                    const model = bomIndex.modelByUniq[uniq] ?? "";
-                                    const uom = bomIndex.uomByUniq[uniq] ?? "";
-
-                                    form.setFieldValue(["entries", entryField.name, "items", field.name, "product_name"], productName);
-                                    form.setFieldValue(["entries", entryField.name, "items", field.name, "part_number"], partNumber);
-                                    form.setFieldValue(["entries", entryField.name, "items", field.name, "model"], model);
-                                    form.setFieldValue(["entries", entryField.name, "items", field.name, "uom"], uom);
-                                    form.setFieldValue(
-                                      ["entries", entryField.name, "items", field.name, "fg_location"],
-                                      form.getFieldValue(["entries", entryField.name, "items", field.name, "fg_location"]) || "WH-FG-A01"
-                                    );
-                                    updateEntryTotals(entryIndex);
+                                  filterOption={false}
+                                  placeholder="Select DN Number"
+                                  options={approvedDnSelectOptions}
+                                  loading={approvedDnOptionsState.isFetching}
+                                  notFoundContent={approvedDnOptionsState.isFetching ? "Loading approved DNs..." : "No approved DN found"}
+                                  onSearch={setApprovedDnSearch}
+                                  onChange={(value) => onSelectApprovedDn(entryIndex, typeof value === "string" ? value : undefined)}
+                                  onPopupScroll={(event) => {
+                                    const target = event.currentTarget;
+                                    const reachedEnd = target.scrollTop + target.clientHeight >= target.scrollHeight - 24;
+                                    if (reachedEnd && hasMoreApprovedDns && !approvedDnOptionsState.isFetching) {
+                                      void fetchApprovedDnOptions(approvedDnPage + 1, approvedDnSearch, false);
+                                    }
                                   }}
-                                  filterOption={(input, option) =>
-                                    String(option?.label ?? "")
-                                      .toLowerCase()
-                                      .includes(input.trim().toLowerCase())
-                                  }
                                 />
                               </Form.Item>
 
+                              <Form.Item {...field} name={[field.name, "item_uniq_code"]} hidden>
+                                <Input />
+                              </Form.Item>
                               <Form.Item {...field} name={[field.name, "part_number"]} hidden>
                                 <Input />
                               </Form.Item>
