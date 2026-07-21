@@ -32,8 +32,10 @@ import {
   useGetFinishedGoodsSummaryQuery,
   useDeleteFinishedGoodMutation,
   useUpdateFinishedGoodMutation,
+  useLazyGenerateFinishedGoodQRQuery,
 } from "@/lib/api/finished-goods/api";
 import PrintButton from "@/components/PrintButton";
+import type { PrintCardOptions } from "@/lib/utils/printCard";
 
 function StatusTag({ status }: { status?: string }) {
   const normalized = (status ?? "").trim().toLowerCase();
@@ -393,6 +395,47 @@ function EditFinishedGoodModal({
 
 export default function FinishedGoodsPage() {
   const router = useRouter();
+  const [generateFinishedGoodQR] = useLazyGenerateFinishedGoodQRQuery();
+
+  // Builds the print-card options and fetches the QR (kanban list / packing
+  // list resolved from the work order) on demand. 1 uniq = 1 QR.
+  const handleGenerateQR = async (
+    record: FinishedGoodListItem,
+  ): Promise<PrintCardOptions | null> => {
+    if (!record.uniq_code) {
+      message.error("Uniq code tidak ditemukan");
+      return null;
+    }
+
+    let qrDataUrl: string | undefined;
+    try {
+      const result = await generateFinishedGoodQR(record.uniq_code).unwrap();
+      const qr = result?.qr ?? "";
+      qrDataUrl = qr
+        ? qr.startsWith("data:image")
+          ? qr
+          : `data:image/png;base64,${qr}`
+        : undefined;
+    } catch (err) {
+      console.error(err);
+    }
+
+    return {
+      documentTitle: `Finished Good - ${record.uniq_code}`,
+      heading: "FINISHED GOOD",
+      subheading: record.uniq_code,
+      fields: [
+        { label: "Part Number", value: record.part_number },
+        { label: "Part Name", value: record.part_name, full: true },
+        { label: "Model", value: record.model },
+        { label: "WO Number", value: record.wo_number },
+        { label: "Warehouse", value: record.warehouse_location },
+      ],
+      qrDataUrl,
+      bottomCode: record.uniq_code,
+      onError: (msg) => message.error(msg),
+    };
+  };
   const apiEnabled = Boolean(apiBaseUrl);
 
   const [deleteFinishedGood, deleteState] = useDeleteFinishedGoodMutation();
@@ -566,19 +609,7 @@ export default function FinishedGoodsPage() {
             size="small"
             icon={<QrcodeOutlined />}
             title="Print"
-            options={{
-              documentTitle: `Finished Good - ${record.uniq_code}`,
-              heading: "FINISHED GOOD",
-              subheading: record.uniq_code,
-              fields: [
-                { label: "Part Number", value: record.part_number },
-                { label: "Part Name", value: record.part_name, full: true },
-                { label: "Model", value: record.model },
-                { label: "WO Number", value: record.wo_number },
-                { label: "Warehouse", value: record.warehouse_location },
-              ],
-              bottomCode: record.uniq_code,
-            }}
+            loadOptions={() => handleGenerateQR(record)}
           />
           <Button
             type="text"
