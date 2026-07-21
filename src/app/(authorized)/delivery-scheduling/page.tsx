@@ -31,6 +31,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   useApproveDeliveryScheduleMutation,
   useCreateDeliveryScheduleMutation,
+  useGetCustomerDeliveryNoteByIdQuery,
   useGetDeliveryScheduleDnCreationListQuery,
   useGetDeliverySchedulesSummaryQuery,
   useGetDeliverySchedulesQuery,
@@ -167,6 +168,15 @@ const normalizeQrSrc = (value: string): string => {
   return looksLikeBase64 ? `data:image/png;base64,${qr}` : qr;
 };
 
+const escapeHtml = (value: string) =>
+  String(value ?? "").replace(/[&<>\"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#039;",
+  })[char] ?? char);
+
 function DeliverySchedulingPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -185,6 +195,7 @@ function DeliverySchedulingPageInner() {
   const [approveAllTargetGroupKey, setApproveAllTargetGroupKey] = useState<string>("");
 
   const [dnDetailOpen, setDnDetailOpen] = useState(false);
+  const [dnPrintOpen, setDnPrintOpen] = useState(false);
   const [selectedDn, setSelectedDn] = useState<DnRow | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
   const [scanDnNumber, setScanDnNumber] = useState("");
@@ -192,6 +203,9 @@ function DeliverySchedulingPageInner() {
   const schedulesQuery = useGetDeliverySchedulesQuery({ page: 1, limit: 200 });
   const schedulesSummaryQuery = useGetDeliverySchedulesSummaryQuery();
   const dnCreationQuery = useGetDeliveryScheduleDnCreationListQuery({ page: 1, limit: 20 });
+  const selectedDnDetailQuery = useGetCustomerDeliveryNoteByIdQuery(selectedDn?.key ?? "", {
+    skip: !selectedDn || (!dnDetailOpen && !dnPrintOpen),
+  });
   const poOrdersQuery = useListCustomerOrdersQuery({ document_type: "PO", page: 1, limit: 200 });
   const dnOrdersQuery = useListCustomerOrdersQuery({ document_type: "DN", page: 1, limit: 200 });
   const soOrdersQuery = useListCustomerOrdersQuery({ document_type: "SO", page: 1, limit: 200 });
@@ -385,6 +399,53 @@ function DeliverySchedulingPageInner() {
     [dnCreationQuery.data]
   );
 
+  const selectedDnDetail = selectedDnDetailQuery.data;
+  const selectedDnItems = selectedDnDetail?.items.length
+    ? selectedDnDetail.items
+    : selectedDn
+      ? [{
+          dnItemId: "",
+          itemUniqCode: selectedDn.uniq,
+          partName: selectedDn.partTitle,
+          partNumber: selectedDn.partNo,
+          model: "",
+          quantity: selectedDn.quantity,
+          uom: "",
+          fgLocation: selectedDn.fgLocation,
+          packingNumber: selectedDn.packingList,
+          qr: selectedDn.qrCode,
+        }]
+      : [];
+
+  const printSelectedDn = () => {
+    if (!selectedDn) return;
+
+    const item = selectedDnItems[0];
+    const dnNumber = selectedDnDetail?.dnNumber || selectedDn.dnNumber;
+    const customerName = selectedDnDetail?.customerName || selectedDn.customer;
+    const deliveryDate = selectedDnDetail?.deliveryDate || selectedDn.dnDate;
+    const qr = normalizeQrSrc(item?.qr || selectedDn.qrCode);
+    const popup = window.open("", "_blank", "noopener,noreferrer,width=800,height=900");
+    if (!popup) {
+      message.error("Popup is blocked. Please allow popups to print the packing list.");
+      return;
+    }
+
+    popup.document.write(`<!doctype html><html><head><title>${escapeHtml(dnNumber)} Packing List</title><style>
+      body{font-family:Arial,sans-serif;color:#111827;padding:36px;max-width:720px;margin:auto}h1{text-align:center;font-size:24px;margin:0} .dn{text-align:center;color:#64748b;margin:8px 0 32px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;border-top:1px solid #dbe2ea;padding-top:24px}.label{font-size:11px;color:#64748b;margin-bottom:5px}.value{font-size:15px;font-weight:600;line-height:1.45}.qr{text-align:center;border-top:1px solid #dbe2ea;margin-top:28px;padding-top:28px}.qr img{width:180px;height:180px;object-fit:contain}.note{font-size:13px;margin-top:12px;color:#334155}@media print{body{padding:0}}
+    </style></head><body><h1>DELIVERY NOTE</h1><div class="dn">${escapeHtml(dnNumber)}</div><div class="grid">
+      <div><div class="label">Customer</div><div class="value">${escapeHtml(customerName)}</div></div>
+      <div><div class="label">Delivery Date</div><div class="value">${escapeHtml(formatDateShort(deliveryDate))}</div></div>
+      <div><div class="label">Part Name</div><div class="value">${escapeHtml(item?.partName || selectedDn.partTitle)}</div></div>
+      <div><div class="label">Part Number</div><div class="value">${escapeHtml(item?.partNumber || selectedDn.partNo)}</div></div>
+      <div><div class="label">Uniq / Model</div><div class="value">${escapeHtml(`${item?.itemUniqCode || selectedDn.uniq}${item?.model ? ` / ${item.model}` : ""}`)}</div></div>
+      <div><div class="label">Quantity</div><div class="value">${escapeHtml(`${formatNumber(item?.quantity || selectedDn.quantity)} ${item?.uom || ""}`.trim())}</div></div>
+    </div><div class="qr">${qr ? `<img src="${qr}" alt="QR code"/>` : ""}<div class="note">Scan for Shipment Confirmation</div></div></body></html>`);
+    popup.document.close();
+    popup.focus();
+    popup.print();
+  };
+
   const filteredGroups = useMemo(() => {
     if (activeTab !== "schedule") return [];
 
@@ -571,7 +632,11 @@ function DeliverySchedulingPageInner() {
             size="small"
             type="text"
             icon={<PrinterOutlined />}
-            onClick={() => message.info(`Print ${record.dnNumber} (mock)`)}
+            aria-label={`Open packing list for ${record.dnNumber}`}
+            onClick={() => {
+              setSelectedDn(record);
+              setDnPrintOpen(true);
+            }}
           />
           <Button
             size="small"
@@ -970,90 +1035,155 @@ function DeliverySchedulingPageInner() {
 
       <Modal
         open={dnDetailOpen}
+        width={500}
+        footer={null}
         onCancel={() => {
           setDnDetailOpen(false);
           setSelectedDn(null);
         }}
-        title={<div className="text-sm font-semibold">DN Details</div>}
-        footer={
-          <div className="flex items-center justify-end gap-2">
-            <Button className="!rounded-lg" onClick={() => setDnDetailOpen(false)}>
-              Close
-            </Button>
-            <Button
-              type="primary"
-              className="!rounded-lg"
-              icon={<PrinterOutlined />}
-              onClick={() => {
-                if (!selectedDn) return;
-                message.info(`Print ${selectedDn.dnNumber} (mock)`);
-              }}
-            >
-              Print
-            </Button>
-          </div>
-        }
+        styles={{ body: { padding: "20px 24px 24px" } }}
+        title={null}
       >
         {selectedDn && (
-          <div className="space-y-3 text-sm">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="rounded-lg border border-gray-100 p-3">
-                <div className="text-xs text-gray-500">DN Number</div>
-                <div className="font-semibold text-gray-900">{selectedDn.dnNumber}</div>
-                <div className="text-xs text-gray-500 mt-1">{selectedDn.dnDate}</div>
-              </div>
-              <div className="rounded-lg border border-gray-100 p-3">
-                <div className="text-xs text-gray-500">Status</div>
-                <div className="mt-1">
-                  <Tag className="!rounded-full !px-3 !py-0.5 !text-xs">{selectedDn.status}</Tag>
-                  <div className="text-xs text-gray-500 mt-1">{selectedDn.statusHint}</div>
+          <div className="text-sm text-slate-800">
+            <div className="pr-8">
+              <h2 className="text-lg font-semibold tracking-tight text-slate-900">
+                Delivery Schedule Details - {selectedDnDetail?.scheduleId || selectedDnDetail?.dnNumber || selectedDn.dnNumber}
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">Complete delivery scheduling information and shipment details</p>
+            </div>
+
+            {selectedDnDetailQuery.isFetching ? (
+              <div className="py-12 text-center text-sm text-slate-400">Loading delivery note details...</div>
+            ) : (
+              <div className="mt-5 space-y-6">
+                <div className="grid grid-cols-2 gap-x-8 gap-y-5">
+                  <div>
+                    <div className="text-xs font-medium text-slate-500">Schedule ID</div>
+                    <div className="mt-1 font-medium text-slate-900">{selectedDnDetail?.scheduleId || selectedDn.dnNumber}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium text-slate-500">Schedule Date</div>
+                    <div className="mt-1 font-medium text-slate-900">{formatDateShort(selectedDnDetail?.deliveryDate || selectedDn.dnDate)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium text-slate-500">Customer Information</div>
+                    <div className="mt-1 font-medium text-slate-900">{selectedDnDetail?.customerName || selectedDn.customer}</div>
+                    <div className="mt-1 text-xs text-slate-500">{selectedDnDetail?.poNumber || selectedDn.customerPo}</div>
+                    <div className="text-xs text-slate-500">{[selectedDnDetail?.customerContactPerson, selectedDnDetail?.customerPhoneNumber].filter(Boolean).join(" • ") || "-"}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium text-slate-500">Delivery Address</div>
+                    <div className="mt-1 leading-5 text-slate-800">{selectedDnDetail?.deliveryAddress || "-"}</div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-5">
+                  <div>
+                    <div className="text-xs font-medium text-slate-500">Total Items</div>
+                    <div className="mt-1 text-lg font-semibold tabular-nums text-slate-900">{selectedDnDetail?.totalItems || selectedDnItems.length}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium text-slate-500">Total Quantity</div>
+                    <div className="mt-1 text-lg font-semibold tabular-nums text-slate-900">{formatNumber(selectedDnDetail?.totalQuantity || selectedDnItems.reduce((sum, item) => sum + item.quantity, 0))}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium text-slate-500">Priority</div>
+                    <Tag color="red" className="!m-0 !mt-1 !rounded-md !border-0 !bg-red-50 !px-2 !py-0.5 !text-red-600">
+                      {selectedDnDetail?.priority || "-"}
+                    </Tag>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-3 text-xs font-medium text-slate-500">Delivery Items</div>
+                  <div className="space-y-4">
+                    {selectedDnItems.map((item, index) => (
+                      <div key={item.dnItemId || `${item.itemUniqCode}-${index}`} className="flex items-start justify-between gap-5">
+                        <div className="min-w-0">
+                          <div className="font-medium text-slate-900">{item.partName || "-"}</div>
+                          <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                            <span className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-slate-700">{item.itemUniqCode || "-"}</span>
+                            <span>{item.partNumber || item.packingNumber || "-"}</span>
+                          </div>
+                        </div>
+                        <div className="shrink-0 pt-1 font-medium tabular-nums text-slate-900">{formatNumber(item.quantity)} {item.uom || "units"}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-x-8 gap-y-5">
+                  <div>
+                    <div className="text-xs font-medium text-slate-500">Transport Details</div>
+                    <div className="mt-1 leading-6 text-slate-800">{selectedDnDetail?.transportCompany || "-"}<br />{selectedDnDetail?.vehicleNumber || "-"}<br />Driver: {selectedDnDetail?.driverName || "-"}<br />Phone: {selectedDnDetail?.driverContact || "-"}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium text-slate-500">Timing</div>
+                    <div className="mt-1 leading-6 text-slate-800">Departure: {selectedDnDetail?.departureAt ? new Date(selectedDnDetail.departureAt).toLocaleString() : "-"}<br />Arrival: {selectedDnDetail?.arrivalAt ? new Date(selectedDnDetail.arrivalAt).toLocaleString() : "-"}</div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-xs font-medium text-slate-500">Delivery Instructions</div>
+                  <div className="mt-1 leading-5 text-slate-800">{selectedDnDetail?.deliveryInstructions || "-"}</div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-5 border-t border-slate-200 pt-4">
+                  <div><span className="text-xs font-medium text-slate-500">Status</span><Tag className="!ml-1 !rounded-md">{selectedDnDetail?.status || selectedDn.status}</Tag></div>
+                  <div><span className="text-xs font-medium text-slate-500">Approval Status</span><Tag color="blue" className="!ml-1 !rounded-md">{selectedDnDetail?.approvalStatus || "-"}</Tag></div>
+                  <div><div className="text-xs font-medium text-slate-500">Created By</div><div className="mt-1 text-slate-800">{selectedDnDetail?.createdBy || "-"}</div></div>
                 </div>
               </div>
-            </div>
+            )}
+          </div>
+        )}
+      </Modal>
 
-            <div className="rounded-lg border border-gray-100 p-3">
-              <div className="text-xs text-gray-500">Customer</div>
-              <div className="font-semibold text-gray-900">{selectedDn.customer}</div>
-              <div className="text-xs text-gray-500 mt-1">{selectedDn.customerPo}</div>
-            </div>
-
-            <div className="rounded-lg border border-gray-100 p-3">
-              <div className="text-xs text-gray-500">Part Details</div>
-              <div className="font-semibold text-gray-900">{selectedDn.partTitle}</div>
-              <div className="text-xs text-gray-500 mt-1">
-                {selectedDn.uniq} • {selectedDn.partNo}
+      <Modal
+        open={dnPrintOpen}
+        width={485}
+        footer={null}
+        title={null}
+        onCancel={() => {
+          setDnPrintOpen(false);
+          setSelectedDn(null);
+        }}
+        styles={{ body: { padding: "20px 24px 24px" } }}
+      >
+        {selectedDn && (
+          <div className="text-slate-800">
+            <div className="pr-8 text-lg font-semibold tracking-tight text-slate-900">Delivery Note &amp; Packing List</div>
+            {selectedDnDetailQuery.isFetching ? (
+              <div className="py-12 text-center text-sm text-slate-400">Loading packing list...</div>
+            ) : (
+              <div className="mt-4 bg-white px-6 py-6">
+                <div className="border-b-2 border-slate-100 pb-5 text-center">
+                  <div className="text-2xl font-semibold tracking-tight text-slate-900">DELIVERY NOTE</div>
+                  <div className="mt-1 text-sm text-slate-500">{selectedDnDetail?.dnNumber || selectedDn.dnNumber}</div>
+                </div>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-6 border-b border-slate-200 py-6 text-sm">
+                  <div><div className="text-xs text-slate-500">Customer</div><div className="mt-1 font-medium text-slate-900">{selectedDnDetail?.customerName || selectedDn.customer}</div></div>
+                  <div><div className="text-xs text-slate-500">Delivery Date</div><div className="mt-1 font-medium text-slate-900">{formatDateShort(selectedDnDetail?.deliveryDate || selectedDn.dnDate)}</div></div>
+                  <div><div className="text-xs text-slate-500">Part Name</div><div className="mt-1 font-medium text-slate-900">{selectedDnItems[0]?.partName || selectedDn.partTitle}</div></div>
+                  <div><div className="text-xs text-slate-500">Part Number</div><div className="mt-1 font-medium text-slate-900">{selectedDnItems[0]?.partNumber || selectedDn.partNo || "-"}</div></div>
+                  <div><div className="text-xs text-slate-500">Uniq / Model</div><div className="mt-1 font-medium text-slate-900">{selectedDnItems[0]?.itemUniqCode || selectedDn.uniq}{selectedDnItems[0]?.model ? ` / ${selectedDnItems[0].model}` : ""}</div></div>
+                  <div><div className="text-xs text-slate-500">Quantity</div><div className="mt-1 font-medium tabular-nums text-slate-900">{formatNumber(selectedDnItems[0]?.quantity || selectedDn.quantity)} {selectedDnItems[0]?.uom || "units"}</div></div>
+                </div>
+                <div className="py-7 text-center">
+                  {normalizeQrSrc(selectedDnItems[0]?.qr || selectedDn.qrCode) ? (
+                    <img src={normalizeQrSrc(selectedDnItems[0]?.qr || selectedDn.qrCode)} alt="Shipment confirmation QR" className="mx-auto h-44 w-44 border-[3px] border-slate-900 bg-white p-1 object-contain" />
+                  ) : (
+                    <div className="mx-auto flex h-44 w-44 items-center justify-center border-[3px] border-dashed border-slate-300 text-xs text-slate-400">QR unavailable</div>
+                  )}
+                  <div className="mt-3 text-sm text-slate-700">Scan for Shipment Confirmation</div>
+                </div>
+                <div className="flex justify-end gap-2 border-t border-slate-200 pt-5">
+                  <Button className="!rounded-md" onClick={() => setDnPrintOpen(false)}>Close</Button>
+                  <Button type="primary" className="!rounded-md" icon={<PrinterOutlined />} onClick={printSelectedDn}>Print DN &amp; Packing List</Button>
+                </div>
               </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="rounded-lg border border-gray-100 p-3">
-                <div className="text-xs text-gray-500">Quantity</div>
-                <div className="font-semibold text-gray-900">{formatNumber(selectedDn.quantity)}</div>
-              </div>
-              <div className="rounded-lg border border-gray-100 p-3">
-                <div className="text-xs text-gray-500">FG Location</div>
-                <div className="font-semibold text-gray-900">{selectedDn.fgLocation}</div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="rounded-lg border border-gray-100 p-3">
-                <div className="text-xs text-gray-500">QR Code</div>
-                {normalizeQrSrc(selectedDn.qrCode) ? (
-                  <img
-                    src={normalizeQrSrc(selectedDn.qrCode)}
-                    alt="QR"
-                    className="mt-2 h-40 w-40 rounded-xl border border-gray-200 bg-white object-contain"
-                  />
-                ) : (
-                  <div className="font-semibold text-gray-400">-</div>
-                )}
-              </div>
-              <div className="rounded-lg border border-gray-100 p-3">
-                <div className="text-xs text-gray-500">Packing List</div>
-                <div className="font-semibold text-gray-900">{selectedDn.packingList}</div>
-              </div>
-            </div>
+            )}
           </div>
         )}
       </Modal>

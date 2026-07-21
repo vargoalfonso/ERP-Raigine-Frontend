@@ -285,6 +285,46 @@ export interface DeliveryScheduleDnCreationRecord {
   updatedAt: string;
 }
 
+export interface CustomerDeliveryNoteDetailItem {
+  dnItemId: string;
+  itemUniqCode: string;
+  partName: string;
+  partNumber: string;
+  model: string;
+  quantity: number;
+  uom: string;
+  fgLocation: string;
+  packingNumber: string;
+  qr: string;
+}
+
+export interface CustomerDeliveryNoteDetail {
+  dnId: string;
+  dnNumber: string;
+  scheduleId: string;
+  customerId?: number;
+  customerName: string;
+  poNumber: string;
+  customerContactPerson: string;
+  customerPhoneNumber: string;
+  deliveryAddress: string;
+  deliveryDate: string;
+  priority: string;
+  status: string;
+  approvalStatus: string;
+  transportCompany: string;
+  vehicleNumber: string;
+  driverName: string;
+  driverContact: string;
+  departureAt?: string;
+  arrivalAt?: string;
+  deliveryInstructions: string;
+  totalItems: number;
+  totalQuantity: number;
+  createdBy: string;
+  items: CustomerDeliveryNoteDetailItem[];
+}
+
 export interface ApprovedDeliveryScheduleDnItem {
   itemUniqCode: string;
   productName: string;
@@ -420,6 +460,52 @@ const toDnCreationRecord = (raw: unknown): DeliveryScheduleDnCreationRecord => {
     statusHint: getString(record, ["approval_status", "notes"]) ?? "",
     createdAt: getString(record, ["created_at", "createdAt"]) ?? "",
     updatedAt: getString(record, ["updated_at", "updatedAt"]) ?? "",
+  };
+};
+
+const toCustomerDeliveryNoteDetail = (raw: unknown): CustomerDeliveryNoteDetail => {
+  const record = isRecord(raw) ? raw : {};
+  const rawItems = Array.isArray(record.items) ? record.items : [];
+
+  return {
+    dnId: getString(record, ["dn_id", "dnId", "id"]) ?? "",
+    dnNumber: getString(record, ["dn_number", "dnNumber"]) ?? "",
+    scheduleId: getString(record, ["schedule_id", "scheduleId"]) ?? "",
+    customerId: getNumber(record, ["customer_id", "customerId"]),
+    customerName: getString(record, ["customer_name", "customerName"]) ?? "",
+    poNumber: getString(record, ["po_number", "poNumber"]) ?? "",
+    customerContactPerson: getString(record, ["customer_contact_person", "customerContactPerson"]) ?? "",
+    customerPhoneNumber: getString(record, ["customer_phone_number", "customerPhoneNumber"]) ?? "",
+    deliveryAddress: getString(record, ["delivery_address", "deliveryAddress"]) ?? "",
+    deliveryDate: getString(record, ["delivery_date", "deliveryDate"]) ?? "",
+    priority: getString(record, ["priority"]) ?? "",
+    status: getString(record, ["status"]) ?? "",
+    approvalStatus: getString(record, ["approval_status", "approvalStatus"]) ?? "",
+    transportCompany: getString(record, ["transport_company", "transportCompany"]) ?? "",
+    vehicleNumber: getString(record, ["vehicle_number", "vehicleNumber"]) ?? "",
+    driverName: getString(record, ["driver_name", "driverName"]) ?? "",
+    driverContact: getString(record, ["driver_contact", "driverContact"]) ?? "",
+    departureAt: getString(record, ["departure_at", "departureAt"]),
+    arrivalAt: getString(record, ["arrival_at", "arrivalAt"]),
+    deliveryInstructions: getString(record, ["delivery_instructions", "deliveryInstructions"]) ?? "",
+    totalItems: getNumber(record, ["total_items", "totalItems"]) ?? 0,
+    totalQuantity: getNumber(record, ["total_quantity", "totalQuantity"]) ?? 0,
+    createdBy: getString(record, ["created_by", "createdBy"]) ?? "",
+    items: rawItems.map((item) => {
+      const itemRecord = isRecord(item) ? item : {};
+      return {
+        dnItemId: getString(itemRecord, ["dn_item_id", "dnItemId", "id"]) ?? "",
+        itemUniqCode: getString(itemRecord, ["item_uniq_code", "itemUniqCode"]) ?? "",
+        partName: getString(itemRecord, ["part_name", "partName", "product_name", "productName"]) ?? "",
+        partNumber: getString(itemRecord, ["part_number", "partNumber", "part_no", "partNo"]) ?? "",
+        model: getString(itemRecord, ["model"]) ?? "",
+        quantity: getNumber(itemRecord, ["quantity", "qty"]) ?? 0,
+        uom: getString(itemRecord, ["uom", "unit"]) ?? "",
+        fgLocation: getString(itemRecord, ["fg_location", "fgLocation"]) ?? "",
+        packingNumber: getString(itemRecord, ["packing_number", "packingNumber"]) ?? "",
+        qr: getString(itemRecord, ["qr", "qr_code", "qrCode"]) ?? "",
+      };
+    }),
   };
 };
 
@@ -686,13 +772,13 @@ export const deliveryScheduleSlice = apiSlice
         invalidatesTags: [{ type: TAG, id: "DN-CREATION-LIST" }],
       }),
 
-      getCustomerDeliveryNoteById: builder.query<unknown, string>({
+      getCustomerDeliveryNoteById: builder.query<CustomerDeliveryNoteDetail, string>({
         query: (id) => ({
           url: `/customer-delivery-notes/${encodeURIComponent(String(id))}`,
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => normalizeInnerData(response),
+        transformResponse: (response: unknown) => toCustomerDeliveryNoteDetail(normalizeInnerData(response)),
         providesTags: (_res, _err, id) => [{ type: TAG, id: `DN-${id}` }],
       }),
 
