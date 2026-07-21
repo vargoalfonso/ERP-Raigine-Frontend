@@ -180,6 +180,7 @@ export type CustomerOrderRecord = {
   document_type: CustomerOrderDocumentType;
   document_number: string;
   document_date: string;
+  delivery_date: string | null;
   period_schedule?: string | null;
   customer_id: number;
   customer_name: string;
@@ -237,6 +238,7 @@ const toCustomerOrderRecord = (raw: unknown): CustomerOrderRecord => {
     document_type: getString(record, ["document_type", "documentType"]) ?? "",
     document_number: getString(record, ["document_number", "documentNumber"]) ?? "",
     document_date: getString(record, ["document_date", "documentDate"]) ?? "",
+    delivery_date: getString(record, ["delivery_date", "deliveryDate"]) ?? null,
     period_schedule: getString(record, ["period_schedule", "periodSchedule"]) ?? null,
     customer_id: getNumber(record, ["customer_id", "customerId"]) ?? 0,
     customer_name: getString(record, ["customer_name", "customerName"]) ?? "",
@@ -464,6 +466,9 @@ export const customerOrdersApiSlice = apiSlice.injectEndpoints({
           items: body.items.map((i) => ({
             item_uniq_code: i.item_uniq_code,
             quantity: Number(i.quantity),
+            // Backend requires delivery_date per item for SO; fall back to the
+            // order-level date when a per-item target date is not provided.
+            delivery_date: i.target_date ?? body.order_date,
           })),
         };
         return {

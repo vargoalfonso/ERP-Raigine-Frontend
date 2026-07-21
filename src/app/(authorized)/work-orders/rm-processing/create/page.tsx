@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AutoComplete, Button, DatePicker, Form, Input, InputNumber, Modal, Select, Switch, message } from "antd";
+import { AutoComplete, Button, DatePicker, Form, Input, InputNumber, Select, Switch, message } from "antd";
 import { useRouter } from "next/navigation";
 import dayjs, { type Dayjs } from "dayjs";
 import { apiBaseUrl } from "@/lib/api/instance";
@@ -20,6 +20,7 @@ type RmOption = {
   partName: string;
   partNumber: string;
   model?: string;
+  materialGrade?: string;
   gradeSize?: string;
   unit?: string;
   label: string;
@@ -35,12 +36,6 @@ export default function CreateRmProcessingWoPage() {
   const router = useRouter();
   const [form] = Form.useForm();
   const [packingNumber] = useState(buildPackingNumber);
-  const [qrModal, setQrModal] = useState<{
-    woNumber: string;
-    kanban: string;
-    size: string;
-    qr: string;
-  } | null>(null);
   const { TextArea } = Input;
   const apiEnabled = Boolean(apiBaseUrl);
 
@@ -55,13 +50,6 @@ export default function CreateRmProcessingWoPage() {
   const bomIndex = useMemo(() => buildBomUniqIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
   const specIndex = useMemo(() => buildBomMaterialSpecIndex(bomTreeRes?.data ?? []), [bomTreeRes?.data]);
 
-  // Model auto-fill comes from the BOM node product model (outside material spec).
-  const resolveModel = (uniq: string, fallback?: string) =>
-    specIndex.productModelByUniq[uniq] ||
-    (fallback ?? "") ||
-    bomIndex.modelByUniq[uniq] ||
-    bomIndex.assemblyCodeByUniq[uniq] ||
-    "";
 
   // Grade/Size auto-fill = grade + (length x width x thickness) from material spec,
   // with the BOM child uniq/name appended in parentheses for detailing only.
@@ -84,8 +72,8 @@ export default function CreateRmProcessingWoPage() {
     if (!uniq) return;
 
     const found = rmOptions.find((option) => option.value === uniq);
-    const mappedModel = resolveModel(uniq, found?.model);
-    const mappedGradeSize = resolveGradeSize(uniq, found?.gradeSize);
+    const mappedModel = found?.model ?? null;
+    const mappedGradeSize = found?.materialGrade || resolveGradeSize(uniq, found?.gradeSize);
     const mappedPartName = found?.partName ?? bomIndex.partNameByUniq[uniq];
     const mappedPartNumber = found?.partNumber ?? bomIndex.partNumberByUniq[uniq];
     const mappedUom = found?.unit ?? bomIndex.uomByUniq[uniq];
@@ -105,11 +93,7 @@ export default function CreateRmProcessingWoPage() {
       nextValues.outputUom = mappedUom ?? currentValues.outputUom;
     }
 
-    if (mappedModel && !String(currentValues.model ?? "").trim()) {
-      nextValues.model = mappedModel;
-    } else if (mappedModel && fields?.source) {
-      nextValues.model = mappedModel;
-    }
+nextValues.model = mappedModel;
 
     if (mappedGradeSize && !String(currentValues.gradeSize ?? "").trim()) {
       nextValues.gradeSize = mappedGradeSize;
@@ -163,6 +147,8 @@ export default function CreateRmProcessingWoPage() {
 
   const rmOptions: RmOption[] = useMemo(() => {
     const inv = inventoryQuery.data?.data ?? [];
+    console.log("inventory", inv);
+console.log("M09", inv.find(x => x.uniq_code === "M09"));
     const fromInventory = apiEnabled && inv.length
       ? inv
           .filter((r) => (Number(r.stock_qty ?? 0) || 0) > 0 && String(r.uniq_code ?? "").trim())
@@ -170,6 +156,8 @@ export default function CreateRmProcessingWoPage() {
             const uniq = String(r.uniq_code ?? "").trim();
             const partName = String(r.part_name ?? r.item_name ?? bomIndex.partNameByUniq[uniq] ?? "-").trim() || "-";
             const partNumber = String(r.part_number ?? bomIndex.partNumberByUniq[uniq] ?? "-").trim() || "-";
+              const model = String(r.model ?? "").trim() || bomIndex.modelByUniq[uniq] || bomIndex.assemblyCodeByUniq[uniq] || "-";
+             const materialGrade = String(r.material_grade ?? "").trim();
             const unit = String(r.uom ?? bomIndex.uomByUniq[uniq] ?? "pcs").trim() || "pcs";
             const stockQty = Number(r.stock_qty ?? 0) || 0;
             return {
@@ -177,7 +165,8 @@ export default function CreateRmProcessingWoPage() {
               name: partName === "-" ? uniq : partName,
               partName,
               partNumber,
-              model: bomIndex.modelByUniq[uniq] ?? bomIndex.assemblyCodeByUniq[uniq] ?? undefined,
+          model,
+          materialGrade,
               gradeSize: bomIndex.gradeSizeByUniq[uniq] ?? undefined,
               unit,
               label: `${uniq}${partName && partName !== "-" ? ` - ${partName}` : ""} (stock: ${stockQty} ${unit})`,
@@ -230,13 +219,13 @@ export default function CreateRmProcessingWoPage() {
   const onSelectSourceRm = (value: string) => {
     const found = rmOptions.find((o) => o.value === value);
     if (!found) return;
-
+console.log(found);
     const currentTarget = form.getFieldValue("targetMaterialUniq");
 
     const nextValues: Record<string, unknown> = {
       partName: found.partName,
       partNumber: found.partNumber,
-      model: resolveModel(value, found.model),
+      model: found.model ?? null,
       gradeSize: resolveGradeSize(value, found.gradeSize),
       sourceMaterialUniq: value,
       inputUom: found.unit ?? form.getFieldValue("inputUom"),
@@ -262,7 +251,7 @@ export default function CreateRmProcessingWoPage() {
       }
 
       const dateIssued = values.dateIssued as Dayjs;
-      const res = await createRmProcessingWorkOrder({
+      await createRmProcessingWorkOrder({
         source_material_uniq: String(values.sourceMaterialUniq),
         target_material_uniq: String(values.targetMaterialUniq),
         model: String(values.model),
@@ -277,17 +266,7 @@ export default function CreateRmProcessingWoPage() {
       }).unwrap();
 
       message.success("RM Processing WO created");
-      const qr = res.kanban_qr_data_url || res.qr_data_url || "";
-      if (qr) {
-        setQrModal({
-          woNumber: res.wo_number ?? "",
-          kanban: res.kanban_number ?? String(values.packingNumber ?? ""),
-          size: res.size_breakdown ?? "",
-          qr,
-        });
-      } else {
-        router.push("/work-orders");
-      }
+      router.push("/work-orders");
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
       message.error(getApiErrorMessage(err, "Failed to create RM processing work order"));
@@ -296,77 +275,6 @@ export default function CreateRmProcessingWoPage() {
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
-      <Modal
-        open={Boolean(qrModal)}
-        title="QR Kanban / Packing List"
-        onCancel={() => {
-          setQrModal(null);
-          router.push("/work-orders");
-        }}
-        footer={[
-          <Button
-            key="print"
-            onClick={() => {
-              if (!qrModal?.qr) return;
-              const w = window.open("", "_blank");
-              if (!w) return;
-              w.document.write(
-                `<html><head><title>${qrModal.kanban || "QR"}</title></head>` +
-                  `<body style="text-align:center;font-family:sans-serif;padding:24px">` +
-                  `<img src="${qrModal.qr}" style="width:260px;height:260px;image-rendering:pixelated" />` +
-                  `<div style="margin-top:12px;font-size:14px"><b>${qrModal.kanban || ""}</b></div>` +
-                  `<div style="font-size:12px;color:#555">${qrModal.size || ""}</div>` +
-                  `</body></html>`,
-              );
-              w.document.close();
-              w.focus();
-              w.print();
-            }}
-          >
-            Print
-          </Button>,
-          <Button
-            key="done"
-            type="primary"
-            onClick={() => {
-              setQrModal(null);
-              router.push("/work-orders");
-            }}
-          >
-            Done
-          </Button>,
-        ]}
-      >
-        {qrModal ? (
-          <div className="flex flex-col items-center gap-3">
-            {qrModal.qr ? (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                src={qrModal.qr}
-                alt="QR Kanban"
-                className="w-56 h-56"
-                style={{ imageRendering: "pixelated" }}
-              />
-            ) : null}
-            <div className="text-center">
-              <div className="text-sm font-semibold text-gray-900">{qrModal.woNumber || "-"}</div>
-              <div className="text-sm text-gray-700">Kanban: {qrModal.kanban || "-"}</div>
-              {qrModal.size ? (
-                <div className="text-xs text-gray-500">Size: {qrModal.size}</div>
-              ) : null}
-            </div>
-            <details className="w-full">
-              <summary className="cursor-pointer text-xs text-gray-500">Detail base64</summary>
-              <textarea
-                readOnly
-                value={qrModal.qr}
-                className="mt-2 w-full h-24 text-[10px] font-mono border border-gray-200 rounded p-2"
-              />
-            </details>
-          </div>
-        ) : null}
-      </Modal>
-
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
         <div className="flex items-center justify-between gap-3">
           <button
@@ -443,11 +351,11 @@ export default function CreateRmProcessingWoPage() {
                 <Input className="!rounded-lg" disabled placeholder="Auto-filled from RM Master Data" />
               </Form.Item>
 
-              <Form.Item name="model" label="Model" rules={[{ message: "Enter model" }]}>
+              <Form.Item name="model" label="Model" rules={[{ required: true, message: "Enter model" }]}>
                 <Input className="!rounded-lg" disabled placeholder="Auto-filled from RM selection" />
               </Form.Item>
 
-              <Form.Item name="gradeSize" label="Grade / Size" rules={[{ message: "Enter grade/size" }]}>
+              <Form.Item name="gradeSize" label="Grade / Size" rules={[{ required: true, message: "Enter grade/size" }]}>
                 <Input className="!rounded-lg" disabled placeholder="e.g., SPHC 1.2 mm × 4 ft × 8 ft" />
               </Form.Item>
             </div>

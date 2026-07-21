@@ -234,7 +234,11 @@ export default function CustomerPoDnSoPage() {
         customer:
           dn.customer?.customer_name ??
           (dn.customer_id ? `Customer #${dn.customer_id}` : "-"),
-        quantity: Number(firstItem?.quantity ?? 0),
+        // Total quantity = sum of all item quantities (matches detail).
+        quantity: (dn.items ?? []).reduce(
+          (sum, it) => sum + Number(it.quantity ?? 0),
+          0,
+        ),
         uom: firstItem?.uom ?? "Pcs",
         deliveryDate: dn.delivery_date ?? "-",
         cycle: "Monthly",
@@ -257,7 +261,11 @@ export default function CustomerPoDnSoPage() {
         customer:
           po.customer?.customer_name ??
           (po.customer_id ? `Customer #${po.customer_id}` : "-"),
-        quantity: Number(firstItem?.quantity ?? 0),
+        // Total quantity = sum of all item quantities (matches detail).
+        quantity: (po.items ?? []).reduce(
+          (sum, it) => sum + Number(it.quantity ?? 0),
+          0,
+        ),
         uom: firstItem?.uom ?? "Pcs",
         deliveryDate: firstItem?.delivery_date ?? "-",
         cycle: "Monthly",
@@ -280,7 +288,11 @@ export default function CustomerPoDnSoPage() {
         customer:
           so.customer?.customer_name ??
           (so.customer_id ? `Customer #${so.customer_id}` : "-"),
-        quantity: Number(firstItem?.quantity ?? 0),
+        // Total quantity = sum of all item quantities (matches detail).
+        quantity: (so.items ?? []).reduce(
+          (sum, it) => sum + Number(it.quantity ?? 0),
+          0,
+        ),
         uom: firstItem?.uom ?? "Pcs",
         deliveryDate: firstItem?.target_date ?? "-",
         cycle: "Monthly",
