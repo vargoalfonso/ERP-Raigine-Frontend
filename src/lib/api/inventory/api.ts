@@ -225,8 +225,30 @@ const toInventoryKanbanSummary = (raw: unknown): InventoryKanbanSummary => {
   };
 };
 
+export type InventoryQRResult = { qr?: string };
+
 export const inventoryApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
+    // Generate (or fetch) the QR for an indirect raw material. The QR carries
+    // the packing list / kanban list from DN management. 1 uniq = 1 QR.
+    generateQRIndirect: builder.query<ApiResponse<InventoryQRResult>, string>({
+      query: (code) => ({
+        url: `/inventory/indirect-materials/${encodeURIComponent(code)}/create-qr`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
+    // Generate (or fetch) the QR for a subcon inventory item. The QR carries
+    // the packing list / kanban list from DN management. 1 uniq = 1 QR.
+    generateQRSubcon: builder.query<ApiResponse<InventoryQRResult>, string>({
+      query: (code) => ({
+        url: `/inventory/subcon-materials/${encodeURIComponent(code)}/create-qr`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+    }),
+
     getInventoryList: builder.query<ApiResponse<InventoryRecord[]>, { type: InventoryType; page?: number; limit?: number }>({
       query: ({ type, page = 1, limit = 20 }) => ({
         url: `/inventory/${encodeURIComponent(type)}?page=${page}&limit=${limit}`,
@@ -309,4 +331,6 @@ export const {
   useLazyGetInventoryKanbanSummaryQuery,
   useCreateInventoryMutation,
   useUpdateInventoryMutation,
+  useLazyGenerateQRIndirectQuery,
+  useLazyGenerateQRSubconQuery,
 } = inventoryApiSlice;

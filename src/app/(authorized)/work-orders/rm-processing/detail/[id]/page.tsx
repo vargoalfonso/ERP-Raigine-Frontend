@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, Card, Tag } from "antd";
+import { Button, Card, QRCode, Tag } from "antd";
 import { ArrowLeftOutlined, PrinterOutlined } from "@ant-design/icons";
 import { useEffect, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -129,6 +129,23 @@ export default function RmProcessingDetailPage() {
           <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-700">
             <div className="text-xs font-semibold text-gray-600">Remarks</div>
             <div className="mt-1 whitespace-pre-wrap">{detail.remarks}</div>
+          </div>
+        </Card>
+
+        <Card className="rounded-xl border border-gray-100 shadow-sm print:border-0 print:shadow-none">
+          <div className="text-sm font-semibold text-gray-900 mb-3">QR / Kanban</div>
+          <div className="flex flex-col items-center gap-3">
+            <div className="rounded-lg border border-gray-200 p-3 bg-white">
+              <QRCode
+                value={JSON.stringify({ t: "wo", wo: detail.woNumber })}
+                size={200}
+                bordered={false}
+              />
+            </div>
+            <div className="text-center">
+              <div className="text-sm font-semibold text-gray-900">{detail.woNumber}</div>
+              <div className="text-xs text-gray-500">{detail.model} · {detail.gradeSize}</div>
+            </div>
           </div>
         </Card>
       </div>

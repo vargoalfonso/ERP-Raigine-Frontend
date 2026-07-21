@@ -270,8 +270,30 @@ const toFinishedGoodHistoryItem = (raw: unknown): FinishedGoodHistoryItem => {
   };
 };
 
+export type FinishedGoodQRResult = { qr?: string };
+
 export const finishedGoodsSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
+    // Generate (or fetch) the QR for a finished good. The QR carries the kanban
+    // list / packing list resolved from the work order. 1 uniq = 1 QR.
+    generateFinishedGoodQR: builder.query<
+      { qr?: string },
+      string
+    >({
+      query: (code) => ({
+        url: `/finished-goods/${encodeURIComponent(code)}/create-qr`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown): { qr?: string } => {
+        if (isRecord(response) && isRecord(response.data)) {
+          const qr = response.data.qr;
+          return { qr: typeof qr === "string" ? qr : undefined };
+        }
+        return { qr: undefined };
+      },
+    }),
+
     getFinishedGoods: builder.query<
       Paginated<FinishedGoodListItem>,
       GetFinishedGoodsParams
@@ -436,4 +458,5 @@ export const {
   useCreateFinishedGoodMutation,
   useUpdateFinishedGoodMutation,
   useDeleteFinishedGoodMutation,
+  useLazyGenerateFinishedGoodQRQuery,
 } = finishedGoodsSlice;

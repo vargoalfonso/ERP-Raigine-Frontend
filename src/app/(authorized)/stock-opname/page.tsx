@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Button, Input, Modal, Popconfirm, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   CalendarOutlined,
   CheckCircleOutlined,
@@ -150,11 +150,10 @@ function StatCard(props: {
 
 export default function StockOpnamePage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  // Respect the ?tab= query param so create redirects and the detail "Back"
-  // button land on the tab whose data was just created (e.g. Subcon), instead
-  // of always defaulting to Finished Goods.
-  const tabParam = (searchParams.get("tab") ?? "").toLowerCase();
+  // Read ?tab= param from window.location on client to avoid server-side
+  // useSearchParams() SSR bailout. Keep in sync with history via popstate.
+  const getTabFromLocation = () => (typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("tab") ?? "" : "");
+  const tabParam = (getTabFromLocation() ?? "").toLowerCase();
   const apiEnabled = Boolean(apiBaseUrl);
   const [tab, setTab] = useState<StockTab>(() =>
     isStockTab(tabParam) ? tabParam : "finished"
@@ -164,6 +163,15 @@ export default function StockOpnamePage() {
   useEffect(() => {
     if (isStockTab(tabParam)) setTab(tabParam);
   }, [tabParam]);
+
+  useEffect(() => {
+    const onPop = () => {
+      const newTab = getTabFromLocation().toLowerCase();
+      if (isStockTab(newTab)) setTab(newTab);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [scanMode, setScanMode] = useState(false);
