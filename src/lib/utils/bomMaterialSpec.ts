@@ -3,6 +3,9 @@ type BomNodeLike = {
   uniq_code?: unknown;
   material_spec?: unknown;
   material_specifications?: unknown;
+  product_model?: unknown;
+  productModel?: unknown;
+  model?: unknown;
   children?: unknown;
 };
 
@@ -18,6 +21,8 @@ export type BomMaterialSpecIndex = {
   weightKgByUniq: Record<string, number>;
   materialGradeByUniq: Record<string, string>;
   gradeByUniq: Record<string, string>;
+  productModelByUniq: Record<string, string>;
+  sizeByUniq: Record<string, string>;
 };
 
 export const buildBomMaterialSpecIndex = (tree: unknown): BomMaterialSpecIndex => {
@@ -25,6 +30,8 @@ export const buildBomMaterialSpecIndex = (tree: unknown): BomMaterialSpecIndex =
   const weightKgByUniq: Record<string, number> = {};
   const materialGradeByUniq: Record<string, string> = {};
   const gradeByUniq: Record<string, string> = {};
+  const productModelByUniq: Record<string, string> = {};
+  const sizeByUniq: Record<string, string> = {};
 
   const pickString = (...values: unknown[]): string => {
     for (const value of values) {
@@ -68,6 +75,29 @@ export const buildBomMaterialSpecIndex = (tree: unknown): BomMaterialSpecIndex =
       if (grade && !gradeByUniq[uniq]) gradeByUniq[uniq] = grade;
     }
 
+    if (uniq) {
+      const productModel = pickString(
+        current.product_model,
+        current.productModel,
+        current.model,
+        materialSpec?.product_model,
+        materialSpec?.productModel,
+        materialSpec?.product_model_name,
+        materialSpec?.model,
+      );
+      if (productModel && !productModelByUniq[uniq]) productModelByUniq[uniq] = productModel;
+      if (materialSpec) {
+        const length = pickString(materialSpec.length_mm, materialSpec.length);
+        const width = pickString(materialSpec.width_mm, materialSpec.width);
+        const thickness = pickString(materialSpec.thickness_mm, materialSpec.thickness);
+        const diameter = pickString(materialSpec.diameter_mm, materialSpec.diameter);
+        const dims = [length, width, thickness].filter(Boolean).join(" x ");
+        let size = dims;
+        if (diameter) size = dims ? `${dims} / Ø${diameter}` : `Ø${diameter}`;
+        if (size && !sizeByUniq[uniq]) sizeByUniq[uniq] = size;
+      }
+    }
+
     if (Array.isArray(current.children)) {
       for (const child of current.children) visit(child);
     }
@@ -84,5 +114,7 @@ export const buildBomMaterialSpecIndex = (tree: unknown): BomMaterialSpecIndex =
     weightKgByUniq,
     materialGradeByUniq,
     gradeByUniq,
+    productModelByUniq,
+    sizeByUniq,
   };
 };
