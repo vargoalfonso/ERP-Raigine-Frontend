@@ -9,17 +9,22 @@ import {
   Input,
   InputNumber,
   Modal,
+  Popconfirm,
   Segmented,
   Select,
   Table,
   Tag,
+  message,
 } from "antd";
 import {
+  CheckOutlined,
+  CloseOutlined,
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
   FilterOutlined,
   PlusOutlined,
+  QrcodeOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
@@ -32,6 +37,15 @@ import {
   useGetAllSubconRawMaterialQuery,
   useUpdateSubconRawMaterialMutation,
 } from "@/lib/api/subcon-raw-material/api";
+import {
+  useApproveSubconInventoryMutation,
+  useGetSubconInventoryQuery,
+  useGetSubconReceivedQuery,
+  useRejectSubconInventoryMutation,
+} from "@/lib/api/subcon-inventory/api";
+import PrintButton from "@/components/PrintButton";
+
+type ApprovalStatus = "pending" | "approved" | "rejected";
 
 type ViewMode = "Stock In Vendor" | "Stock Received from Vendor";
 
@@ -50,6 +64,7 @@ type SubConRow = {
   deltaPoStock: number;
   status: "NORMAL" | "LOW STOCK";
   dnLogs: number;
+  approvalStatus?: ApprovalStatus;
 };
 
 const stockInVendorInitialRows: SubConRow[] = [
@@ -113,17 +128,35 @@ export default function SubConMaterialsClient() {
     [bomTreeRes?.data]
   );
 
-  const {
-    data: apiRows,
-    isSuccess: apiSuccess,
-    refetch: refetchApiRows,
-  } = useGetAllSubconRawMaterialQuery(
+  const { refetch: refetchApiRows } = useGetAllSubconRawMaterialQuery(
     { currentPage, pageSize },
     { skip: !useApi }
   );
 
+  // Stock Received from Vendor is auto-populated from subcon DN Management on the backend
+  // (any DN status — "apapun statusnya bisa masuk yang penting subcon") and requires approval.
+  const {
+    data: apiReceivedRes,
+    isSuccess: apiReceivedSuccess,
+    isFetching: apiReceivedLoading,
+    refetch: refetchReceivedRows,
+  } = useGetSubconReceivedQuery({ page: 1, limit: 100 }, { skip: !useApi });
+
   const [deleteSubcon] = useDeleteSubconRawMaterialMutation();
   const [updateSubcon] = useUpdateSubconRawMaterialMutation();
+
+  // Stock In Vendor is auto-populated from subcon PO on the backend and requires approval.
+  const {
+    data: apiVendorRes,
+    isSuccess: apiVendorSuccess,
+    isFetching: apiVendorLoading,
+    refetch: refetchVendorRows,
+  } = useGetSubconInventoryQuery({ page: 1, limit: 100 }, { skip: !useApi });
+
+  const [approveSubcon, { isLoading: approving }] =
+    useApproveSubconInventoryMutation();
+  const [rejectSubcon, { isLoading: rejecting }] =
+    useRejectSubconInventoryMutation();
 
   const [editOpen, setEditOpen] = useState(false);
   const [editingRow, setEditingRow] = useState<SubConRow | null>(null);
@@ -137,57 +170,102 @@ export default function SubConMaterialsClient() {
   const [deletingRow, setDeletingRow] = useState<SubConRow | null>(null);
   const [deletingMode, setDeletingMode] = useState<ViewMode>("Stock In Vendor");
 
+  const apiVendorRows = useMemo((): SubConRow[] => {
+    if (!useApi || !apiVendorSuccess) return [];
+    const raw = apiVendorRes?.data ?? [];
+    return raw.map((r) => {
+      const uniq = r.uniq_code ?? "-";
+      const partNumber = bomIndex.partNumberByUniq?.[uniq] ?? r.part_number ?? "-";
+      const partName = bomIndex.partNameByUniq?.[uniq] ?? r.part_name ?? "-";
+      const totalStock = Number(r.stock_at_vendor_qty ?? 0);
+      const totalPO = Number(r.total_po_qty ?? 0);
+      const deltaPoStock = Number(r.delta_po ?? Math.max(0, totalPO - totalStock));
+      const status: SubConRow["status"] =
+        String(r.status).toLowerCase() === "low_on_stock" || totalStock <= 0
+          ? "LOW STOCK"
+          : "NORMAL";
+      return {
+        id: r.id,
+        deliveryNotesNumber: r.po_number,
+        uniq,
+        partNumber,
+        partName,
+        subconVendor: r.subcon_vendor_name ?? "-",
+        period: r.po_period ?? "-",
+        dateDelivery: r.date_delivery ?? "-",
+        stockDate: totalStock,
+        totalStock,
+        totalPO,
+        deltaPoStock,
+        status,
+        dnLogs: 0,
+        approvalStatus: r.approval_status,
+      };
+    });
+  }, [apiVendorRes?.data, apiVendorSuccess, bomIndex.partNameByUniq, bomIndex.partNumberByUniq, useApi]);
+
   const apiReceivedRows = useMemo((): SubConRow[] => {
-    if (!useApi || !apiSuccess) return [];
-
-    const raw = apiRows?.data ?? [];
-    const toTime = (value: string | undefined): number => {
-      if (!value) return 0;
-      const t = new Date(value).getTime();
-      return Number.isFinite(t) ? t : 0;
-    };
-
-    return [...raw]
-      .sort((a, b) => {
-        const bt = toTime(b.created_at) || toTime(b.updated_at);
-        const at = toTime(a.created_at) || toTime(a.updated_at);
-        if (bt !== at) return bt - at;
-        return String(b.id).localeCompare(String(a.id));
-      })
-      .map((r) => {
-        const uniq = r.uniq ?? "-";
-        const partNumber = bomIndex.partNumberByUniq?.[uniq] ?? "-";
-        const partName = bomIndex.partNameByUniq?.[uniq] ?? r.item_name ?? "-";
-        const quantity = Number(r.quantity ?? 0);
-        const dateDelivery = r.date ?? "-";
-        const totalStock = quantity;
-        const totalPO = 0;
-        const deltaPoStock = 0;
-        const status: SubConRow["status"] = totalStock <= 0 ? "LOW STOCK" : "NORMAL";
-        return {
-          id: r.id,
-          deliveryNotesNumber: r.reference_no,
-          uniq,
-          partNumber,
-          partName,
-          subconVendor: "-",
-          period: "-",
-          dateDelivery,
-          stockDate: quantity,
-          totalStock,
-          totalPO,
-          deltaPoStock,
-          status,
-          dnLogs: 0,
-        };
-      });
-  }, [apiRows?.data, apiSuccess, bomIndex.partNameByUniq, bomIndex.partNumberByUniq, useApi]);
+    if (!useApi || !apiReceivedSuccess) return [];
+    const raw = apiReceivedRes?.data ?? [];
+    return raw.map((r) => {
+      const uniq = r.uniq_code ?? "-";
+      const partNumber = bomIndex.partNumberByUniq?.[uniq] ?? r.part_number ?? "-";
+      const partName = bomIndex.partNameByUniq?.[uniq] ?? r.part_name ?? "-";
+      const totalReceived = Number(r.total_received_qty ?? 0);
+      const totalPO = Number(r.total_po_qty ?? 0);
+      const deltaPoStock = Number(r.delta_po ?? Math.max(0, totalPO - totalReceived));
+      const status: SubConRow["status"] =
+        String(r.status).toLowerCase() === "low_on_stock" || totalReceived <= 0
+          ? "LOW STOCK"
+          : "NORMAL";
+      return {
+        id: r.id,
+        deliveryNotesNumber: r.po_number,
+        uniq,
+        partNumber,
+        partName,
+        subconVendor: r.subcon_vendor_name ?? "-",
+        period: r.po_period ?? "-",
+        dateDelivery: r.date_delivery ?? "-",
+        stockDate: totalReceived,
+        totalStock: totalReceived,
+        totalPO,
+        deltaPoStock,
+        status,
+        dnLogs: 0,
+        approvalStatus: r.approval_status,
+      };
+    });
+  }, [apiReceivedRes?.data, apiReceivedSuccess, bomIndex.partNameByUniq, bomIndex.partNumberByUniq, useApi]);
 
   const activeRows = useMemo(() => {
-    if (mode === "Stock In Vendor") return rowsVendor;
-    if (useApi && apiSuccess) return apiReceivedRows;
+    if (mode === "Stock In Vendor") {
+      if (useApi && apiVendorSuccess) return apiVendorRows;
+      return rowsVendor;
+    }
+    if (useApi && apiReceivedSuccess) return apiReceivedRows;
     return rowsReceived;
-  }, [apiReceivedRows, apiSuccess, mode, rowsReceived, rowsVendor, useApi]);
+  }, [apiReceivedRows, apiVendorRows, apiReceivedSuccess, apiVendorSuccess, mode, rowsReceived, rowsVendor, useApi]);
+
+  const handleApprove = async (row: SubConRow) => {
+    try {
+      await approveSubcon(row.id).unwrap();
+      message.success(`Approved ${row.uniq}`);
+      await Promise.all([refetchVendorRows(), refetchReceivedRows()]);
+    } catch {
+      message.error("Failed to approve");
+    }
+  };
+
+  const handleReject = async (row: SubConRow) => {
+    try {
+      await rejectSubcon(row.id).unwrap();
+      message.success(`Rejected ${row.uniq}`);
+      await Promise.all([refetchVendorRows(), refetchReceivedRows()]);
+    } catch {
+      message.error("Failed to reject");
+    }
+  };
 
   const availablePeriods = useMemo(() => {
     const periods = new Set(activeRows.map((r) => r.period));
@@ -257,6 +335,7 @@ export default function SubConMaterialsClient() {
       partNumber: row.partNumber,
       partName: row.partName,
       period: row.period,
+      dateDelivery: row.dateDelivery,
       subconVendor: row.subconVendor,
       stockDate: row.stockDate,
       totalStock: row.totalStock,
@@ -280,10 +359,11 @@ export default function SubConMaterialsClient() {
       partNumber: values.partNumber,
       partName: values.partName,
       period: values.period,
+      dateDelivery: values.dateDelivery,
       subconVendor: values.subconVendor,
       stockDate: Number(values.stockDate ?? 0),
       totalStock: Number(values.totalStock ?? 0),
-      totalPO: Number(values.totalPO ?? 0),
+      totalPO: Number(values.totalPO ?? editingRow.totalPO ?? 0),
     };
 
     next.deltaPoStock = Math.max(0, next.totalPO - next.totalStock);
@@ -400,12 +480,58 @@ export default function SubConMaterialsClient() {
       ),
     },
     {
+      title: "Approval",
+      key: "approval",
+      width: 120,
+      render: (_: unknown, r: SubConRow) => {
+        const s = r.approvalStatus ?? "approved";
+        if (s === "approved")
+          return <Tag className="bg-green-50 text-green-600">APPROVED</Tag>;
+        if (s === "rejected")
+          return <Tag className="bg-red-50 text-red-600">REJECTED</Tag>;
+        return <Tag className="bg-amber-50 text-amber-600">PENDING</Tag>;
+      },
+    },
+    {
       title: "Action",
       key: "action",
-      width: 90,
+      width: 170,
       fixed: "right",
       render: (_: unknown, r: SubConRow) => (
         <div className="flex items-center gap-1">
+          {(r.approvalStatus ?? "approved") === "pending" && (
+            <>
+              <Popconfirm
+                title="Approve this item?"
+                okText="Approve"
+                cancelText="Cancel"
+                onConfirm={() => handleApprove(r)}
+              >
+                <Button
+                  type="text"
+                  icon={<CheckOutlined />}
+                  title="Approve"
+                  loading={approving}
+                  className="text-green-600 hover:text-green-800"
+                />
+              </Popconfirm>
+              <Popconfirm
+                title="Reject this item?"
+                okText="Reject"
+                okButtonProps={{ danger: true }}
+                cancelText="Cancel"
+                onConfirm={() => handleReject(r)}
+              >
+                <Button
+                  type="text"
+                  danger
+                  icon={<CloseOutlined />}
+                  title="Reject"
+                  loading={rejecting}
+                />
+              </Popconfirm>
+            </>
+          )}
           <Button
             type="text"
             icon={<EyeOutlined />}
@@ -413,6 +539,29 @@ export default function SubConMaterialsClient() {
             onClick={() =>
               router.push(`/sub-con-materials/detail?uniq=${encodeURIComponent(r.uniq)}`)
             }
+          />
+          <PrintButton
+            type="text"
+            icon={<QrcodeOutlined />}
+            title="Print"
+            className="text-gray-600 hover:text-blue-600"
+            options={{
+              documentTitle: `SubCon Material - ${r.uniq}`,
+              heading: "SUBCON MATERIAL",
+              subheading: r.uniq,
+              fields: [
+                { label: "Part Name", value: r.partName, full: true },
+                { label: "Subcon Vendor", value: r.subconVendor },
+                { label: "Period", value: r.period },
+                { label: "Date Delivery", value: r.dateDelivery },
+                { label: "Stock/Date", value: r.stockDate.toLocaleString("en-US") },
+                { label: "Total Stock", value: r.totalStock.toLocaleString("en-US") },
+                { label: "Total PO", value: r.totalPO.toLocaleString("en-US") },
+                { label: "\u0394PO-Stock", value: r.deltaPoStock.toLocaleString("en-US") },
+                { label: "Status", value: r.status },
+              ],
+              bottomCode: r.uniq,
+            }}
           />
           <Button type="text" icon={<EditOutlined />} onClick={() => openEdit(r)} />
           <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openDelete(r)} />
@@ -497,12 +646,58 @@ export default function SubConMaterialsClient() {
         ),
     },
     {
+      title: "Approval",
+      key: "approval",
+      width: 120,
+      render: (_: unknown, r: SubConRow) => {
+        const s = r.approvalStatus ?? "approved";
+        if (s === "approved")
+          return <Tag className="bg-green-50 text-green-600">APPROVED</Tag>;
+        if (s === "rejected")
+          return <Tag className="bg-red-50 text-red-600">REJECTED</Tag>;
+        return <Tag className="bg-amber-50 text-amber-600">PENDING</Tag>;
+      },
+    },
+    {
       title: "Action",
       key: "action",
-      width: 90,
+      width: 170,
       fixed: "right",
       render: (_: unknown, r: SubConRow) => (
         <div className="flex items-center gap-1">
+          {(r.approvalStatus ?? "approved") === "pending" && (
+            <>
+              <Popconfirm
+                title="Approve this item?"
+                okText="Approve"
+                cancelText="Cancel"
+                onConfirm={() => handleApprove(r)}
+              >
+                <Button
+                  type="text"
+                  icon={<CheckOutlined />}
+                  title="Approve"
+                  loading={approving}
+                  className="text-green-600 hover:text-green-800"
+                />
+              </Popconfirm>
+              <Popconfirm
+                title="Reject this item?"
+                okText="Reject"
+                okButtonProps={{ danger: true }}
+                cancelText="Cancel"
+                onConfirm={() => handleReject(r)}
+              >
+                <Button
+                  type="text"
+                  danger
+                  icon={<CloseOutlined />}
+                  title="Reject"
+                  loading={rejecting}
+                />
+              </Popconfirm>
+            </>
+          )}
           <Button
             type="text"
             icon={<EyeOutlined />}
@@ -510,6 +705,29 @@ export default function SubConMaterialsClient() {
             onClick={() =>
               router.push(`/sub-con-materials/detail?uniq=${encodeURIComponent(r.uniq)}`)
             }
+          />
+          <PrintButton
+            type="text"
+            icon={<QrcodeOutlined />}
+            title="Print"
+            className="text-gray-600 hover:text-blue-600"
+            options={{
+              documentTitle: `SubCon Material (Received) - ${r.uniq}`,
+              heading: "SUBCON MATERIAL",
+              subheading: r.uniq,
+              fields: [
+                { label: "Part Name", value: r.partName, full: true },
+                { label: "Subcon Vendor", value: r.subconVendor },
+                { label: "Period", value: r.period },
+                { label: "Date Received", value: r.dateDelivery },
+                { label: "Received/Date", value: r.stockDate.toLocaleString("en-US") },
+                { label: "Total Received", value: r.totalStock.toLocaleString("en-US") },
+                { label: "Total PO", value: r.totalPO.toLocaleString("en-US") },
+                { label: "\u0394PO-Received", value: r.deltaPoStock.toLocaleString("en-US") },
+                { label: "Status", value: r.status },
+              ],
+              bottomCode: r.uniq,
+            }}
           />
           <Button type="text" icon={<EditOutlined />} onClick={() => openEdit(r)} />
           <Button type="text" danger icon={<DeleteOutlined />} onClick={() => openDelete(r)} />
@@ -601,31 +819,19 @@ export default function SubConMaterialsClient() {
             />
           </Form.Item>
 
-          <Form.Item
-            label="Subcon Vendor Name"
-            name="subconVendor"
-            rules={[{ required: true }]}
-          >
+          <Form.Item label="Date Delivery" name="dateDelivery" rules={[{ required: true }]}>
+            <Input placeholder="Date delivery" />
+          </Form.Item>
+
+          <Form.Item label="Quantity Delivery Items" name="stockDate" rules={[{ required: true }]}>
+            <InputNumber className="w-full" min={0} />
+          </Form.Item>
+
+          <Form.Item label="Subcon Vendor Name" name="subconVendor" rules={[{ required: true }]}>
             <Input placeholder="Vendor" />
           </Form.Item>
 
-          <Form.Item
-            label={mode === "Stock Received from Vendor" ? "Received per Date" : "Stock per Date"}
-            name="stockDate"
-            rules={[{ required: true }]}
-          >
-            <InputNumber className="w-full" min={0} />
-          </Form.Item>
-
-          <Form.Item
-            label={mode === "Stock Received from Vendor" ? "Total Received" : "Stock Total"}
-            name="totalStock"
-            rules={[{ required: true }]}
-          >
-            <InputNumber className="w-full" min={0} />
-          </Form.Item>
-
-          <Form.Item label="Total PO" name="totalPO" rules={[{ required: true }]}>
+          <Form.Item label="Add Stock" name="totalStock" rules={[{ required: true }]}>
             <InputNumber className="w-full" min={0} />
           </Form.Item>
         </Form>
@@ -710,6 +916,7 @@ export default function SubConMaterialsClient() {
             columns={columns}
             dataSource={filtered}
             rowKey="id"
+            loading={mode === "Stock In Vendor" ? apiVendorLoading : apiReceivedLoading}
             pagination={false}
             scroll={{ x: "max-content" }}
           />

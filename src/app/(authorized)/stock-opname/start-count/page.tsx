@@ -18,6 +18,7 @@ import {
 } from "antd";
 import type { UploadProps } from "antd";
 import dayjs, { Dayjs } from "dayjs";
+import * as XLSX from "xlsx";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeftOutlined,
@@ -32,11 +33,13 @@ import {
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
   type StockInventoryType,
+  type StockOpnameUniqOption,
   useCreateStockOpnameSessionMutation,
   useLazyGetStockOpnameUniqOptionsQuery,
 } from "@/lib/api/stock-opname/api";
 import { getCurrentUserDisplayName } from "@/lib/utils/currentUser";
 import { useGetEmployeesQuery } from "@/lib/api/system-settings/api";
+import { useListWarehousesQuery } from "@/lib/api/warehouse/api";
 
 type Method = "manual" | "bulk";
 
@@ -50,13 +53,21 @@ type Entry = {
   userCounter?: string;
   uom?: string;
   weightKg?: number | null;
+  // Raw material type (only Raw Materials have it, e.g. "wire").
+  // Drives the conditional Weight field.
+  rawMaterialType?: string;
 };
+
+// A Raw Material uniq is weight-tracked (needs a Weight input) when its
+// raw_material_type is "wire".
+const isWireType = (t?: string | null) => (t ?? "").trim().toLowerCase() === "wire";
 
 const TAB_TO_INVENTORY_TYPE: Record<string, StockInventoryType> = {
   finished: "FG",
   raw: "RM",
   indirect: "IDR",
   wip: "WIP",
+  subcon: "SUBCON",
 };
 
 type BulkRow = {
@@ -67,7 +78,7 @@ type BulkRow = {
   model: string;
   countedQty: number;
   userCounted: string;
-  deliveryCycle: string;
+  warehouseLocation: string;
 };
 
 function difference(systemStock: number, countedQty?: number) {
@@ -77,6 +88,76 @@ function difference(systemStock: number, countedQty?: number) {
 
 function toId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+}
+
+// Bulk Upload template definition. Part Number / Part Name (and Model) are
+// auto-filled from the Uniq, so the template only asks for the fields a
+// counter actually needs to enter.
+const BULK_TEMPLATE_SHEET = "Template";
+const BULK_TEMPLATE_HEADERS = [
+  "Uniq",
+  "Counted Qty",
+  "User Counted",
+  "Warehouse Location",
+] as const;
+
+// Reads the first non-empty value among the provided header aliases so the
+// parser tolerates minor header differences (spaces, casing, snake_case).
+function pickCell(row: Record<string, unknown>, keys: string[]): string {
+  for (const k of keys) {
+    const v = row[k];
+    if (v !== undefined && v !== null && String(v).trim() !== "") {
+      return String(v).trim();
+    }
+  }
+  return "";
+}
+
+function pickNumber(row: Record<string, unknown>, keys: string[]): number {
+  const raw = pickCell(row, keys);
+  if (!raw) return 0;
+  const n = Number(raw.replace(/,/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+// Maps a parsed Excel row (flexible header names) into a BulkRow.
+function mapExcelRow(row: Record<string, unknown>, index: number): BulkRow {
+  return {
+    key: `bulk-${index}-${Math.floor(Math.random() * 1e6)}`,
+    uniq: pickCell(row, ["Uniq", "uniq", "Uniq Code", "uniq_code", "UniqCode"]),
+    partNumber: pickCell(row, ["Part Number", "part_number", "partNumber", "Part No"]),
+    partName: pickCell(row, ["Part Name", "part_name", "partName"]),
+    model: pickCell(row, ["Model", "model"]),
+    countedQty: pickNumber(row, ["Counted Qty", "Counted Quantity", "counted_qty", "countedQty", "Qty"]),
+    userCounted: pickCell(row, ["User Counted", "user_counted", "userCounted", "User Counter", "user_counter"]),
+    warehouseLocation: pickCell(row, ["Warehouse Location", "warehouse_location", "warehouseLocation", "WRH Location", "Warehouse"]),
+  };
+}
+
+// Reads an uploaded Excel file into BulkRow[] fully client-side (the file is
+// never uploaded to the server; only the parsed rows are submitted on Save).
+function readExcelFile(file: File): Promise<BulkRow[]> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        if (!sheetName) {
+          resolve([]);
+          return;
+        }
+        const sheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+        resolve(json.map((row, index) => mapExcelRow(row, index)).filter((row) => row.uniq));
+      } catch (err) {
+        reject(err);
+      }
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(file);
+  });
 }
 
 export default function StockOpnameStartCountPage() {
@@ -98,6 +179,7 @@ function StockOpnameStartCountPageContent() {
     if (tab === "raw") return "Back to Raw Materials";
     if (tab === "indirect") return "Back to Indirect Stock";
     if (tab === "wip") return "Back to Work In-Progress";
+    if (tab === "subcon") return "Back to Subcon Materials";
     return "Back to Finished Goods";
   }, [tab]);
 
@@ -115,6 +197,17 @@ function StockOpnameStartCountPageContent() {
     useLazyGetStockOpnameUniqOptionsQuery();
   const [createStockOpnameSession, { isLoading: saving }] = useCreateStockOpnameSessionMutation();
   const [warehouseLocation, setWarehouseLocation] = useState<string>();
+  const { data: warehouseList = [] } = useListWarehousesQuery(undefined, { skip: !apiEnabled });
+  const warehouseOptions = useMemo(
+    () =>
+      warehouseList
+        .map((w) => ({
+          value: w.warehouse_name ?? w.id ?? "",
+          label: w.type_warehouse ? `${w.warehouse_name ?? w.id ?? "-"} — ${w.type_warehouse}` : w.warehouse_name ?? w.id ?? "-",
+        }))
+        .filter((o) => Boolean(o.value)),
+    [warehouseList]
+  );
   const fallbackUniqOptions = useMemo(
     () => [
       { label: "FG-001", value: "FG-001" },
@@ -202,47 +295,96 @@ function StockOpnameStartCountPageContent() {
     return `${entries.length} entry`;
   }, [bulkRows.length, entries.length, method]);
 
-  function mockLoadBulkRows() {
-    setBulkRows([
-      {
-        key: "b1",
-        uniq: "FG-001",
-        partNumber: "SP-001-A",
-        partName: "Steel Plate",
-        model: "Camry 2024",
-        countedQty: 250,
-        userCounted: "WO-2024-001",
-        deliveryCycle: "XXX",
-      },
-      {
-        key: "b2",
-        uniq: "FG-001",
-        partNumber: "SP-001-A",
-        partName: "Steel Plate",
-        model: "Camry 2024",
-        countedQty: 250,
-        userCounted: "WO-2024-001",
-        deliveryCycle: "XXX",
-      },
-      {
-        key: "b3",
-        uniq: "FG-001",
-        partNumber: "SP-001-A",
-        partName: "Steel Plate",
-        model: "Camry 2024",
-        countedQty: 250,
-        userCounted: "WO-2024-001",
-        deliveryCycle: "XXX",
-      },
-    ]);
+  // Generates and downloads a ready-to-fill .xlsx template with an example row.
+  function handleDownloadTemplate() {
+    const exampleRow: Record<string, string | number> = {
+      Uniq: uniqOptions[0]?.value ?? "FG-001",
+      "Counted Qty": 0,
+      "User Counted": currentUserName,
+      "Warehouse Location": warehouseOptions[0]?.value ?? "",
+    };
+    const worksheet = XLSX.utils.json_to_sheet([exampleRow], {
+      header: [...BULK_TEMPLATE_HEADERS],
+    });
+    worksheet["!cols"] = BULK_TEMPLATE_HEADERS.map((h) => ({ wch: Math.max(14, h.length + 2) }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, BULK_TEMPLATE_SHEET);
+
+    // Second sheet: master warehouse data so counters can copy exact names.
+    const masterHeaders = ["Warehouse Name", "Type", "Plant"];
+    const masterRows =
+      warehouseList.length > 0
+        ? warehouseList.map((w) => ({
+            "Warehouse Name": w.warehouse_name ?? "",
+            Type: w.type_warehouse ?? "",
+            Plant: w.plant_name ?? w.plant_id ?? "",
+          }))
+        : [{ "Warehouse Name": "", Type: "", Plant: "" }];
+    const masterSheet = XLSX.utils.json_to_sheet(masterRows, { header: masterHeaders });
+    masterSheet["!cols"] = [{ wch: 28 }, { wch: 16 }, { wch: 22 }];
+    XLSX.utils.book_append_sheet(workbook, masterSheet, "Master Warehouse");
+
+    XLSX.writeFile(workbook, `stock-opname-template-${tab}.xlsx`);
+    message.success("Template downloaded");
+  }
+
+  // Auto-fills Part Number / Part Name from the Uniq for each row, resolving
+  // any codes not already cached via the uniq options endpoint.
+  async function enrichBulkRows(rows: BulkRow[]): Promise<BulkRow[]> {
+    const details = new Map<string, StockOpnameUniqOption>();
+    if (apiEnabled) {
+      const uniqueCodes = Array.from(new Set(rows.map((row) => row.uniq).filter(Boolean)));
+      await Promise.all(
+        uniqueCodes.map(async (code) => {
+          const cached = uniqLookup.get(code);
+          if (cached) {
+            details.set(code, cached);
+            return;
+          }
+          try {
+            const results = await getUniqOptions({ type: inventoryType, q: code, limit: 5 }).unwrap();
+            const match = results.find((item) => item.uniq_code === code) ?? results[0];
+            if (match) details.set(code, match);
+          } catch {
+            // Leave autofill empty if the code cannot be resolved.
+          }
+        })
+      );
+    }
+    return rows.map((row) => {
+      const detail = details.get(row.uniq);
+      return {
+        ...row,
+        partNumber: detail?.part_number || row.partNumber || "",
+        partName: detail?.part_name || row.partName || "",
+        userCounted: row.userCounted || currentUserName,
+      };
+    });
   }
 
   const bulkUploadProps: UploadProps = {
     multiple: false,
     beforeUpload: (file) => {
+      const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+      if (!isExcel) {
+        message.error("File harus berformat .xlsx atau .xls");
+        return Upload.LIST_IGNORE;
+      }
       setBulkFileName(file.name);
-      mockLoadBulkRows();
-      message.success("Excel uploaded (mock)");
+      setBulkRows([]);
+      readExcelFile(file)
+        .then(async (rows) => {
+          if (rows.length === 0) {
+            message.warning("Tidak ada baris valid. Pastikan kolom Uniq terisi.");
+            return;
+          }
+          // Part Number / Part Name auto-fill from the Uniq; User Counted falls
+          // back to the logged-in user when the sheet omits it.
+          const enriched = await enrichBulkRows(rows);
+          setBulkRows(enriched);
+          message.success(`${enriched.length} baris dimuat dari ${file.name}`);
+        })
+        .catch(() => message.error("Gagal membaca file Excel"));
       return false;
     },
     onRemove: () => {
@@ -337,7 +479,10 @@ function StockOpnameStartCountPageContent() {
         counted_date: countedDate.format("YYYY-MM-DD"),
         remarks: "",
         items,
-        warehouse_location: warehouseLocation,
+        warehouse_location:
+          method === "bulk"
+            ? bulkRows.find((row) => row.warehouseLocation)?.warehouseLocation ?? warehouseLocation ?? null
+            : warehouseLocation ?? null,
       }).unwrap();
 
       message.success("Stock Opname saved successfully");
@@ -470,7 +615,7 @@ function StockOpnameStartCountPageContent() {
                   type="primary"
                   className="!rounded-lg"
                   icon={<PlusOutlined />}
-                  onClick={() => message.info("Download Template (mock)")}
+                  onClick={handleDownloadTemplate}
                 >
                   Download Template
                 </Button>
@@ -515,9 +660,8 @@ function StockOpnameStartCountPageContent() {
                         </label>
 
                         <Select
-                          className="w-full"
-                          size="large"
-                          placeholder="Search Uniq..."
+                          placeholder="Select Uniq"
+                          className="!w-full"
                           value={e.uniq}
                           options={uniqOptions}
                           showSearch
@@ -555,6 +699,7 @@ function StockOpnameStartCountPageContent() {
                                 systemStock: selected?.system_qty ?? 0,
                                 uom: selected?.uom,
                                 weightKg: selected?.weight_kg ?? null,
+                                rawMaterialType: selected?.raw_material_type ?? "",
                               });
 
                               return;
@@ -570,35 +715,11 @@ function StockOpnameStartCountPageContent() {
 
                       {/* System Stock */}
                       <div>
-                        <label className="text-xs font-semibold text-gray-600 mb-2 block">
-                          Current System Stock
-                        </label>
-
+                        <div className="text-xs text-gray-500 mb-1">Counted Quantity</div>
                         <InputNumber
-                          className="w-full"
-                          controls={false}
-                          readOnly
-                          size="large"
-                          value={e.systemStock}
-                          formatter={(v) => `${v ?? 0}`}
-                        />
-
-                        <div className="mt-2 text-lg font-bold text-blue-600">
-                          {e.systemStock ?? 0}
-                        </div>
-                      </div>
-
-                      {/* Counted */}
-                      <div>
-                        <label className="text-xs font-semibold text-gray-600 mb-2 block">
-                          Counted Quantity
-                        </label>
-
-                        <InputNumber
-                          className="w-full"
-                          size="large"
-                          min={0}
+                          className="!w-full"
                           value={e.countedQty}
+                          min={0}
                           onChange={(v) =>
                             setEntry(e.id, {
                               countedQty: typeof v === "number" ? v : undefined,
@@ -617,8 +738,10 @@ function StockOpnameStartCountPageContent() {
                         <Input
                           size="large"
                           readOnly
-                          className="bg-gray-50"
-                          value={e.userCounter || currentUserName}
+                          value={e.userCounter ?? currentUserName}
+                          placeholder="Auto-filled from your account"
+                          title="Auto-filled from the logged-in user"
+                          className="!rounded-lg bg-gray-50 !w-full"
                         />
                       </div>
 
@@ -647,22 +770,34 @@ function StockOpnameStartCountPageContent() {
                           className="w-full"
                           placeholder="Select Warehouse"
                           value={warehouseLocation}
-                          options={[
-                            {
-                              label: "WH-A",
-                              value: "WH-A",
-                            },
-                            {
-                              label: "WH-B",
-                              value: "WH-B",
-                            },
-                          ]}
+                          options={warehouseOptions}
+                          showSearch
+                          optionFilterProp="label"
                           onChange={setWarehouseLocation}
                         />
                       </div>
+
+                      {isWireType(e.rawMaterialType) && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="text-xs text-gray-500">Weight (Kg)</div>
+                            <InfoCircleOutlined className="text-blue-600" />
+                          </div>
+                          <InputNumber
+                            className="w-full"
+                            value={e.weightKg ?? undefined}
+                            min={0}
+                            step={0.0001}
+                            placeholder="Enter weight in kg"
+                            onChange={(v) =>
+                              setEntry(e.id, { weightKg: typeof v === "number" ? v : null })
+                            }
+                          />
+                        </div>
+                      )}
                     </div>
 
-                    <div className="mt-3">
+                    {/* <div className="mt-3">
                       <Alert
                         type="error"
                         showIcon={false}
@@ -673,7 +808,7 @@ function StockOpnameStartCountPageContent() {
                           </div>
                         }
                       />
-                    </div>
+                    </div> */}
                   </div>
                 );
               })}
@@ -770,7 +905,25 @@ function StockOpnameStartCountPageContent() {
                       ),
                     },
                     { title: "User Counted", dataIndex: "userCounted", key: "userCounted", width: 140 },
-                    { title: "Delivery Cycle", dataIndex: "deliveryCycle", key: "deliveryCycle", width: 130 },
+                    {
+                      title: "Warehouse Location",
+                      dataIndex: "warehouseLocation",
+                      key: "warehouseLocation",
+                      width: 200,
+                      render: (_: string, r: BulkRow) => (
+                        <Select
+                          className="w-full"
+                          placeholder="Select Warehouse"
+                          value={r.warehouseLocation || undefined}
+                          options={warehouseOptions}
+                          showSearch
+                          optionFilterProp="label"
+                          onChange={(next) => {
+                            setBulkRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, warehouseLocation: next } : x)));
+                          }}
+                        />
+                      ),
+                    },
                   ]}
                   locale={{ emptyText: bulkFileName ? "No rows loaded" : "Upload an Excel file to preview rows" }}
                 />

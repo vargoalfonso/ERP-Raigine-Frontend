@@ -229,6 +229,47 @@ const toFinishedGoodUniqOption = (raw: unknown): FinishedGoodUniqOption => {
   };
 };
 
+export type FinishedGoodHistoryItem = {
+  id: number;
+  uniq_code: string;
+  movement_type: string;
+  reason: string;
+  qty_change: number;
+  qty_before: number;
+  qty_after: number;
+  wo_number: string;
+  dn_number: string;
+  reference_id: string;
+  notes: string;
+  logged_by: string;
+  logged_at: string;
+};
+
+export type GetFinishedGoodHistoryParams = {
+  uniq_code: string;
+  page?: number;
+  limit?: number;
+};
+
+const toFinishedGoodHistoryItem = (raw: unknown): FinishedGoodHistoryItem => {
+  const record = isRecord(raw) ? raw : {};
+  return {
+    id: getNumber(record, ["id"]) ?? 0,
+    uniq_code: getString(record, ["uniq_code", "uniqCode"]) ?? "",
+    movement_type: getString(record, ["movement_type", "movementType"]) ?? "",
+    reason: getString(record, ["reason"]) ?? "",
+    qty_change: getNumber(record, ["qty_change", "qtyChange"]) ?? 0,
+    qty_before: getNumber(record, ["qty_before", "qtyBefore"]) ?? 0,
+    qty_after: getNumber(record, ["qty_after", "qtyAfter"]) ?? 0,
+    wo_number: getString(record, ["wo_number", "woNumber"]) ?? "",
+    dn_number: getString(record, ["dn_number", "dnNumber"]) ?? "",
+    reference_id: getString(record, ["reference_id", "referenceId"]) ?? "",
+    notes: getString(record, ["notes"]) ?? "",
+    logged_by: getString(record, ["logged_by", "loggedBy"]) ?? "",
+    logged_at: getString(record, ["logged_at", "loggedAt"]) ?? "",
+  };
+};
+
 export const finishedGoodsSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     getFinishedGoods: builder.query<
@@ -313,6 +354,25 @@ export const finishedGoodsSlice = apiSlice.injectEndpoints({
       },
     }),
 
+    getFinishedGoodHistory: builder.query<
+      Paginated<FinishedGoodHistoryItem>,
+      GetFinishedGoodHistoryParams
+    >({
+      query: ({ uniq_code, page, limit }) => ({
+        url: "/finished-goods/history",
+        method: "GET",
+        params: { uniq_code, page: page ?? 1, limit: limit ?? 20 },
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => {
+        const normalized = normalizePaginatedResponse<unknown>(response);
+        return {
+          items: normalized.items.map(toFinishedGoodHistoryItem),
+          pagination: normalized.pagination,
+        };
+      },
+    }),
+
     createFinishedGood: builder.mutation<
       FinishedGoodListItem,
       CreateFinishedGoodRequest
@@ -371,6 +431,7 @@ export const {
   useGetFinishedGoodsQuery,
   useGetFinishedGoodsSummaryQuery,
   useGetFinishedGoodParameterizedSummaryQuery,
+  useGetFinishedGoodHistoryQuery,
   useGetFinishedGoodUniqOptionsQuery,
   useCreateFinishedGoodMutation,
   useUpdateFinishedGoodMutation,

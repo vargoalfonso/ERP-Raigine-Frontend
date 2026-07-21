@@ -43,6 +43,7 @@ const TAB_TO_INVENTORY_TYPE: Record<string, StockInventoryType> = {
   raw: "RM",
   indirect: "IDR",
   wip: "WIP",
+  subcon: "SUBCON",
 };
 
 function inventoryLabelFromType(type: string) {
@@ -55,6 +56,8 @@ function inventoryLabelFromType(type: string) {
       return "Work In Process";
     case "FG":
       return "Finished Goods";
+    case "SUBCON":
+      return "Subcon Materials";
     default:
       return "Finished Goods";
   }
@@ -145,39 +148,32 @@ function StockOpnameDetailPageContent() {
   const inventoryType: StockInventoryType = (session?.inventory_type as StockInventoryType) || tabInventoryType;
   const inventoryLabel = inventoryLabelFromType(inventoryType);
 
-  // History logs are scoped to THIS session. We fetch the logs for the
-  // inventory type once (large page) and then filter client-side to only the
-  // uniq codes that belong to this session's entries. The backend history-logs
-  // endpoint only supports a single uniq_code filter, so scoping by a set of
-  // uniq codes must be done here.
-  const { data: history, isFetching: logsLoading } = useGetStockOpnameHistoryLogsQuery(
-    { type: inventoryType, uniq_code: "", page: 1, limit: 1000 },
-    { skip: !apiEnabled }
-  );
-
-  // Set of uniq codes belonging to this session (defines the history scope).
-  const sessionUniqSet = useMemo(
-    () => new Set(entries.map((e) => (e.uniq_code ?? "").trim()).filter(Boolean)),
+  // A stock opname session is tied to a single uniq (the backend enforces one
+  // item per session). The history logs on this page must therefore be scoped
+  // to THAT uniq — not every history log for the inventory type.
+  const sessionUniqCode = useMemo(
+    () => entries.map((e) => (e.uniq_code ?? "").trim()).find(Boolean) ?? "",
     [entries]
   );
 
-  // Rows limited to this session, then narrowed further by the manual filter.
-  const filteredHistory = useMemo(() => {
-    const all = history?.items ?? [];
-    // If the session has no entries (or is still loading), we should show no history logs,
-    // not ALL history logs for the inventory type.
-    if (sessionUniqSet.size === 0) return [];
-    
-    const scoped = all.filter((r) => sessionUniqSet.has((r.uniq_code ?? "").trim()));
-    const term = uniqCode.trim().toLowerCase();
-    return term ? scoped.filter((r) => (r.uniq_code ?? "").toLowerCase().includes(term)) : scoped;
-  }, [history, sessionUniqSet, uniqCode]);
+  // Keep the manual filter in sync with the session's uniq once it loads.
+  useEffect(() => {
+    if (sessionUniqCode && !uniqCode) setUniqCode(sessionUniqCode);
+  }, [sessionUniqCode, uniqCode]);
 
-  // Client-side pagination over the scoped/filtered rows.
-  const pagedHistory = useMemo(() => {
-    const start = (logsPage - 1) * logsLimit;
-    return filteredHistory.slice(start, start + logsLimit);
-  }, [filteredHistory, logsPage, logsLimit]);
+  // The uniq we ask the backend to filter by. Defaults to the session's uniq,
+  // but the manual input can narrow/override it.
+  const effectiveUniqCode = (uniqCode.trim() || sessionUniqCode).trim();
+
+  // History is fetched ALREADY filtered by uniq_code on the server, with real
+  // server-side pagination — never "all history" for the inventory type.
+  const { data: history, isFetching: logsLoading } = useGetStockOpnameHistoryLogsQuery(
+    { type: inventoryType, uniq_code: effectiveUniqCode, page: logsPage, limit: logsLimit },
+    { skip: !apiEnabled || !effectiveUniqCode }
+  );
+
+  const historyRows = history?.items ?? [];
+  const historyTotal = history?.pagination.total ?? 0;
 
   const { data: audit, isFetching: auditLoading } = useGetStockOpnameAuditLogsQuery(
     { id, page: auditPage, limit: auditLimit },
@@ -420,7 +416,7 @@ function StockOpnameDetailPageContent() {
         </Card>
       </div>
 
-      <Card className="!rounded-xl !border-gray-100 !shadow-sm" bodyStyle={{ padding: 0 }}>
+      <Card className="!rounded-xl !border-gray-100 !shadow-sm" styles={{ body: { padding: 0 } }}>
         <Tabs
           defaultActiveKey="detail"
           className="px-4!"
@@ -476,11 +472,11 @@ function StockOpnameDetailPageContent() {
                       className="max-w-md"
                     />
                     <Tag color="blue">Type: {inventoryType}</Tag>
-                    <Tag color="purple">Sesi ini: {sessionUniqSet.size} uniq</Tag>
+                    <Tag color="purple">Uniq: {sessionUniqCode || "-"}</Tag>
                   </div>
                   <div className="overflow-hidden rounded-xl border border-gray-100">
                     <Table
-                      dataSource={pagedHistory.map((r, idx) => ({ key: `${r.uniq_code}-${idx}`, ...r }))}
+                      dataSource={historyRows.map((r, idx) => ({ key: `${r.uniq_code}-${idx}`, ...r }))}
                       rowKey="key"
                       size="middle"
                       loading={logsLoading}
@@ -489,7 +485,7 @@ function StockOpnameDetailPageContent() {
                       pagination={{
                         current: logsPage,
                         pageSize: logsLimit,
-                        total: filteredHistory.length,
+                        total: historyTotal,
                         showSizeChanger: true,
                         onChange: (p, s) => {
                           setLogsPage(p);

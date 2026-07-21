@@ -1,12 +1,15 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Button, Input, Select, Table, Tag, message } from "antd";
+import { Button, Input, Modal, Popconfirm, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   CalendarOutlined,
   CheckCircleOutlined,
+  CheckOutlined,
+  CloseOutlined,
+  DeleteOutlined,
   EyeOutlined,
   ExportOutlined,
   QrcodeOutlined,
@@ -22,10 +25,12 @@ import { apiBaseUrl } from "@/lib/api/instance";
 import {
   type StockInventoryType,
   type StockOpnameSessionListRecord,
+  useApproveStockOpnameSessionMutation,
+  useDeleteStockOpnameSessionMutation,
   useGetStockOpnameSessionsQuery,
 } from "@/lib/api/stock-opname/api";
 
-type StockTab = "finished" | "raw" | "indirect" | "wip";
+type StockTab = "finished" | "raw" | "indirect" | "wip" | "subcon";
 
 type StockOpnameRow = {
   key: string;
@@ -53,7 +58,14 @@ const TAB_TO_INVENTORY_TYPE: Record<StockTab, StockInventoryType> = {
   raw: "RM",
   indirect: "IDR",
   wip: "WIP",
+  subcon: "SUBCON",
 };
+
+const STOCK_TABS: StockTab[] = ["finished", "raw", "indirect", "wip", "subcon"];
+
+function isStockTab(value: string): value is StockTab {
+  return (STOCK_TABS as string[]).includes(value);
+}
 
 function normalizeStatus(value?: string): StockOpnameRow["status"] {
   const lower = (value ?? "").toLowerCase();
@@ -138,8 +150,20 @@ function StatCard(props: {
 
 export default function StockOpnamePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Respect the ?tab= query param so create redirects and the detail "Back"
+  // button land on the tab whose data was just created (e.g. Subcon), instead
+  // of always defaulting to Finished Goods.
+  const tabParam = (searchParams.get("tab") ?? "").toLowerCase();
   const apiEnabled = Boolean(apiBaseUrl);
-  const [tab, setTab] = useState<StockTab>("finished");
+  const [tab, setTab] = useState<StockTab>(() =>
+    isStockTab(tabParam) ? tabParam : "finished"
+  );
+
+  // Keep the active tab in sync when navigating back with a different ?tab=.
+  useEffect(() => {
+    if (isStockTab(tabParam)) setTab(tabParam);
+  }, [tabParam]);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [scanMode, setScanMode] = useState(false);
@@ -160,18 +184,63 @@ export default function StockOpnamePage() {
     { skip: !apiEnabled }
   );
 
+  const [deleteSession, { isLoading: deleting }] = useDeleteStockOpnameSessionMutation();
+  const [approveSession, { isLoading: approving }] = useApproveStockOpnameSessionMutation();
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approvalAction, setApprovalAction] = useState<"approve" | "reject">("approve");
+  const [approvalRemarks, setApprovalRemarks] = useState<string>("");
+  const [approvalTarget, setApprovalTarget] = useState<StockOpnameRow | null>(null);
+
+  // Approve/reject a session straight from the list table (same backend action
+  // used by the detail page). Falls back gracefully when not connected.
+  const submitApproval = async () => {
+    if (!approvalTarget) return;
+    if (!apiEnabled) {
+      message.info("Approval hanya tersedia saat terhubung ke backend");
+      return;
+    }
+    const targetId = approvalTarget.apiId ?? approvalTarget.key;
+    try {
+      await approveSession({ id: targetId, body: { action: approvalAction, remarks: approvalRemarks } }).unwrap();
+      message.success(approvalAction === "approve" ? "Approved" : "Rejected");
+      setApprovalOpen(false);
+      setApprovalRemarks("");
+      setApprovalTarget(null);
+    } catch {
+      message.error("Gagal mengirim approval");
+    }
+  };
+
+  // Deleting relies on the numeric session id (the backend resolves sessions by
+  // their integer primary key, not by uuid/session_number).
+  const handleDeleteSession = async (r: StockOpnameRow) => {
+    if (!apiEnabled) {
+      message.info("Hapus hanya tersedia saat terhubung ke backend");
+      return;
+    }
+    const targetId = r.apiId ?? r.key;
+    try {
+      await deleteSession({ id: targetId }).unwrap();
+      message.success("Sesi stock opname berhasil dihapus");
+    } catch {
+      message.error("Gagal menghapus sesi stock opname");
+    }
+  };
+
   const tabs = useMemo(
     () => [
       { id: "finished" as const, label: "Finished Goods" },
       { id: "raw" as const, label: "Raw Material" },
       { id: "indirect" as const, label: "Indirect Stock" },
       { id: "wip" as const, label: "WIP Stock" },
+      { id: "subcon" as const, label: "Subcon Materials" },
     ],
     []
   );
 
   const rowsByTab = useMemo<Record<StockTab, StockOpnameRow[]>>(
     () => ({
+      subcon: [],
       finished: [
         {
           key: "fg-1",
@@ -393,15 +462,59 @@ export default function StockOpnamePage() {
         title: "Actions",
         key: "actions",
         align: "center",
-        width: 110,
+        width: 160,
         render: (_, r) => (
           <div className="flex items-center justify-center gap-2">
             <Button
               size="small"
               className="!rounded-lg"
               icon={<EyeOutlined />}
-              onClick={() => router.push(`/stock-opname/detail/${encodeURIComponent(r.key)}?tab=${tab}`)}
+              onClick={() =>
+                router.push(
+                  `/stock-opname/detail/${encodeURIComponent(String(r.apiId ?? r.key))}?tab=${tab}`
+                )
+              }
             />
+            {r.status !== "Completed" && r.approval !== "Approved" && (
+              <>
+                <Button
+                  size="small"
+                  type="primary"
+                  className="!rounded-lg !bg-green-600 hover:!bg-green-700"
+                  icon={<CheckOutlined />}
+                  title="Approve"
+                  onClick={() => {
+                    setApprovalTarget(r);
+                    setApprovalAction("approve");
+                    setApprovalRemarks("");
+                    setApprovalOpen(true);
+                  }}
+                />
+                <Button
+                  size="small"
+                  danger
+                  className="!rounded-lg"
+                  icon={<CloseOutlined />}
+                  title="Reject"
+                  onClick={() => {
+                    setApprovalTarget(r);
+                    setApprovalAction("reject");
+                    setApprovalRemarks("");
+                    setApprovalOpen(true);
+                  }}
+                />
+              </>
+            )}
+            {/* <Popconfirm
+              title="Hapus sesi stock opname?"
+              description="Tindakan ini tidak dapat dibatalkan."
+              okText="Hapus"
+              okButtonProps={{ danger: true, loading: deleting }}
+              cancelText="Batal"
+              onConfirm={() => handleDeleteSession(r)}
+            >
+              <Button size="small" danger className="!rounded-lg" icon={<DeleteOutlined />} />
+            </Popconfirm> */}
           </div>
         ),
       };
@@ -680,7 +793,10 @@ export default function StockOpnamePage() {
                 <button
                   key={t.id}
                   type="button"
-                  onClick={() => setTab(t.id)}
+                  onClick={() => {
+                    setTab(t.id);
+                    router.replace(`/stock-opname?tab=${t.id}`);
+                  }}
                   className={
                     "px-4 py-2 text-sm font-medium rounded-lg transition-colors " +
                     (isActive ? "bg-white shadow-sm text-gray-900" : "text-gray-600 hover:text-gray-900")
@@ -731,7 +847,9 @@ export default function StockOpnamePage() {
               ? "Raw Material Stock Opname"
               : tab === "indirect"
               ? "Indirect Stock Opname"
-              : "WIP Stock Opname"}
+              : tab === "wip"
+              ? "WIP Stock Opname"
+              : "Subcon Materials Stock Opname"}
           </div>
           <Tag className="!rounded-full !px-3 !py-0.5 !text-xs">{itemsCounted} items counted</Tag>
         </div>
@@ -758,6 +876,21 @@ export default function StockOpnamePage() {
           />
         </div>
       </div>
+
+      <Modal
+        title={approvalAction === "approve" ? "Approve Session" : "Reject Session"}
+        open={approvalOpen}
+        onCancel={() => setApprovalOpen(false)}
+        onOk={() => void submitApproval()}
+        okText={approvalAction === "approve" ? "Approve" : "Reject"}
+        okButtonProps={{ danger: approvalAction === "reject", loading: approving }}
+      >
+        <div className="mb-2 text-sm text-slate-600">
+          {approvalTarget ? `Sesi: ${approvalTarget.opnameId}` : ""}
+        </div>
+        <div className="mb-1 text-xs font-semibold text-slate-500">Remarks</div>
+        <Input.TextArea rows={4} value={approvalRemarks} onChange={(e) => setApprovalRemarks(e.target.value)} />
+      </Modal>
     </div>
   );
 }
