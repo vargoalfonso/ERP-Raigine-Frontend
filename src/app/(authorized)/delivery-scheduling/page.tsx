@@ -304,7 +304,12 @@ function DeliverySchedulingPageInner() {
     orders.forEach((order) => {
       order.items.forEach((item, index) => {
         // Target delivery is taken from each order item's delivery date.
-        const dateKey = toDateKey(item.delivery_date ?? "");
+        // Use the item delivery date, falling back to the order-level
+        // delivery date, then the document date, so every PO/DN/SO row can be
+        // placed on the H-3..H+3 timeline even when item dates are missing.
+        const dateKey = toDateKey(
+          item.delivery_date ?? order.delivery_date ?? order.document_date ?? "",
+        );
         if (!dateKey || !isWithinDeliveryWindow(dateKey)) return;
 
         const rowKey = `${order.id}-${item.id || index}`;
