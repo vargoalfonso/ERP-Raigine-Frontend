@@ -324,19 +324,26 @@ export default function DeliverySchedulingDnCreationCreatePage() {
   }, [entries]);
 
   return (
-    <div className="min-h-screen bg-[#EAF3FF] p-6">
-      <div className="mx-auto max-w-6xl">
-        <div className="flex items-center justify-between gap-4 mb-4">
-          <button
-            type="button"
-            className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
-            onClick={() => router.push("/delivery-scheduling?tab=dn")}
-          >
-            <ArrowLeftOutlined />
-            <span>Back to Delivery Scheduling</span>
-          </button>
+    <div className="min-h-screen bg-[#DCEAFF] p-5 md:p-6">
+      <div className="mx-auto max-w-6xl overflow-hidden border border-slate-200 bg-[#F8FAFC] shadow-sm">
+        <header className="flex flex-col gap-4 border-b border-slate-200 bg-white px-5 py-4 md:flex-row md:items-center md:justify-between md:px-6">
+          <div className="flex min-w-0 items-center gap-4">
+            <button
+              type="button"
+              className="inline-flex shrink-0 items-center gap-2 text-sm text-gray-700 transition-colors hover:text-gray-950"
+              onClick={() => router.push("/delivery-scheduling?tab=dn")}
+            >
+              <ArrowLeftOutlined />
+              <span>Back to DN Management</span>
+            </button>
+            <div className="hidden h-6 w-px bg-slate-200 sm:block" />
+            <div className="min-w-0">
+              <div className="truncate text-xl font-semibold tracking-tight text-slate-900">Add Delivery Note</div>
+              <div className="text-xs text-slate-500">Create DN for incoming raw material receipt and tracking <span className="mx-2 text-slate-300">•</span> 1 entry</div>
+            </div>
+          </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <Button className="!rounded-md" onClick={() => router.push("/delivery-scheduling?tab=dn")}>
               Cancel
             </Button>
@@ -347,17 +354,12 @@ export default function DeliverySchedulingDnCreationCreatePage() {
               onClick={() => form.submit()}
               loading={createState.isLoading}
             >
-              Save
+              Save Delivery Note
             </Button>
           </div>
-        </div>
+        </header>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
-          <div className="text-xl font-semibold text-gray-900">Add Delivery Note</div>
-          <div className="text-sm text-gray-500">
-            Create DN for delivery note creation and tracking
-          </div>
-        </div>
+        <main className="p-5 md:p-6">
 
         <Form<FormValues>
           form={form}
@@ -396,14 +398,14 @@ export default function DeliverySchedulingDnCreationCreatePage() {
             {(entryFields, { add: addEntry, remove: removeEntry }) => (
               <>
                 {entryFields.map((entryField, entryIndex) => (
-                  <div key={entryField.key} className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                    <div className="flex items-center justify-between gap-3 mb-4">
+                  <div key={entryField.key} className="rounded-[10px] border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+                    <div className="mb-5 flex items-center justify-between gap-3">
                       <div>
-                        <div className="text-base font-semibold text-gray-900">Add Delivery Note #{entryIndex + 1}</div>
-                        <div className="text-xs text-gray-500">Create DN for delivery note creation and tracking</div>
+                        <div className="text-base font-semibold text-slate-900">Add Delivery Note #{entryIndex + 1}</div>
+                        <div className="text-xs text-slate-500">Create DN for incoming raw material receipt and tracking</div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Tag className="!rounded-md">Entry {entryIndex + 1}</Tag>
+                        <Tag className="!border-slate-200 !bg-slate-50 !text-slate-600 !rounded-md">Entry {entryIndex + 1}</Tag>
                         {entryFields.length > 1 && (
                           <Button danger onClick={() => removeEntry(entryField.name)}>
                             Remove Entry
@@ -569,34 +571,39 @@ export default function DeliverySchedulingDnCreationCreatePage() {
                                 className="mb-0"
                               >
                                 <InputNumber
-                                  className="w-full"
+                                  className="!w-full"
                                   min={0}
                                   onChange={() => updateEntryTotals(entryIndex)}
                                 />
                               </Form.Item>
 
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  type="primary"
-                                  className="w-full"
-                                  onClick={() => {
-                                    add({ item_uniq_code: undefined, product_name: "", part_number: "", model: "", fg_location: "WH-FG-A01", quantity: 0, uom: "" });
-                                  }}
-                                >
-                                  Add More Delivery Items
-                                </Button>
-                                {fields.length > 1 && (
+                              <Form.Item
+                                label={<span className="invisible">Action</span>}
+                                className="mb-0 md:pr-2"
+                              >
+                                <div className="flex w-full gap-2">
                                   <Button
-                                    danger
+                                    type="primary"
+                                    className="!h-8 !min-w-0 !flex-1"
                                     onClick={() => {
-                                      remove(field.name);
-                                      updateEntryTotals(entryIndex);
+                                      add({ item_uniq_code: undefined, product_name: "", part_number: "", model: "", fg_location: "WH-FG-A01", quantity: 0, uom: "" });
                                     }}
                                   >
-                                    Remove
+                                    Add More Delivery Items
                                   </Button>
-                                )}
-                              </div>
+                                  {fields.length > 1 && (
+                                    <Button
+                                      danger
+                                      onClick={() => {
+                                        remove(field.name);
+                                        updateEntryTotals(entryIndex);
+                                      }}
+                                    >
+                                      Remove
+                                    </Button>
+                                  )}
+                                </div>
+                              </Form.Item>
                             </div>
                           ))}
                         </div>
@@ -696,7 +703,7 @@ export default function DeliverySchedulingDnCreationCreatePage() {
             )}
           </Form.List>
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mt-6">
+          <div className="mt-6 rounded-[10px] border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-semibold text-gray-900">Summary</div>
@@ -712,6 +719,7 @@ export default function DeliverySchedulingDnCreationCreatePage() {
             </div>
           </div>
         </Form>
+        </main>
       </div>
     </div>
   );
