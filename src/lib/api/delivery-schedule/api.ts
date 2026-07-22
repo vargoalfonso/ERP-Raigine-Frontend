@@ -736,6 +736,10 @@ export const deliveryScheduleSlice = apiSlice
         invalidatesTags: (_result, _error, { schedule_id }) => [
           { type: TAG, id: "LIST" },
           { type: TAG, id: schedule_id },
+          // Approving generates the customer delivery note (with QR), so refresh
+          // the DN creation list and summary immediately.
+          { type: TAG, id: "DN-CREATION-LIST" },
+          { type: TAG, id: "SUMMARY" },
         ],
       }),
 
@@ -754,6 +758,10 @@ export const deliveryScheduleSlice = apiSlice
         invalidatesTags: (_result, _error, { schedule_ids }) => [
           { type: TAG, id: "LIST" },
           ...schedule_ids.map((id) => ({ type: TAG, id })),
+          // Refresh DN creation list + summary so newly created DNs (with QR)
+          // appear right after bulk approval.
+          { type: TAG, id: "DN-CREATION-LIST" },
+          { type: TAG, id: "SUMMARY" },
         ],
       }),
 

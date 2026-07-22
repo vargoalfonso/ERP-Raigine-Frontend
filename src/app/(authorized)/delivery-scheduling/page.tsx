@@ -30,6 +30,7 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   useApproveDeliveryScheduleMutation,
+  useCreateCustomerDeliveryNoteMutation,
   useCreateDeliveryScheduleMutation,
   useGetCustomerDeliveryNoteByIdQuery,
   useGetDeliveryScheduleDnCreationListQuery,
@@ -202,7 +203,7 @@ function DeliverySchedulingPageInner() {
 
   const schedulesQuery = useGetDeliverySchedulesQuery({ page: 1, limit: 200 });
   const schedulesSummaryQuery = useGetDeliverySchedulesSummaryQuery();
-  const dnCreationQuery = useGetDeliveryScheduleDnCreationListQuery({ page: 1, limit: 20 });
+  const dnCreationQuery = useGetDeliveryScheduleDnCreationListQuery({ page: 1, limit: 200 });
   const selectedDnDetailQuery = useGetCustomerDeliveryNoteByIdQuery(selectedDn?.key ?? "", {
     skip: !selectedDn || (!dnDetailOpen && !dnPrintOpen),
   });
@@ -211,6 +212,7 @@ function DeliverySchedulingPageInner() {
   const soOrdersQuery = useListCustomerOrdersQuery({ document_type: "SO", page: 1, limit: 200 });
   const [approveDeliverySchedule, approveState] = useApproveDeliveryScheduleMutation();
   const [createDeliverySchedule, createState] = useCreateDeliveryScheduleMutation();
+  const [createCustomerDeliveryNote] = useCreateCustomerDeliveryNoteMutation();
   const [scanDeliveryScheduleDnRobot, scanState] = useScanDeliveryScheduleDnRobotMutation();
 
   const [approvedKeys, setApprovedKeys] = useState<Set<string>>(new Set());
@@ -278,6 +280,38 @@ function DeliverySchedulingPageInner() {
       notes: "",
       force_partial: false,
     }).unwrap();
+
+    // Parse the approved schedule straight into a Customer Delivery Note so it
+    // appears in the DN Creation list immediately, without a manual create step.
+    const allOrders: CustomerOrderRecord[] = [
+      ...(poOrdersQuery.data?.items ?? []),
+      ...(dnOrdersQuery.data?.items ?? []),
+      ...(soOrdersQuery.data?.items ?? []),
+    ];
+    const order = allOrders.find((o) => o.id === row.orderId);
+    await createCustomerDeliveryNote({
+      customer_id: row.customerId,
+      customer_name: row.customer === "-" ? "" : row.customer,
+      po_number: row.poDnName === "-" ? "" : row.poDnName,
+      customer_contact_person: order?.contact_person ?? "",
+      delivery_address: order?.delivery_address ?? "",
+      delivery_date: row.deliveryDate,
+      priority: "normal",
+      delivery_instructions: "",
+      remarks: "",
+      items: [
+        {
+          item_uniq_code: row.uniq === "-" ? "" : row.uniq,
+          product_name: row.partName === "-" ? "" : row.partName,
+          part_number: row.partNo === "-" ? "" : row.partNo,
+          model: row.model === "-" ? "" : row.model,
+          fg_location: "WH-FG-A01",
+          quantity: row.quantity,
+          uom: "Pcs",
+        },
+      ],
+    }).unwrap();
+
     setApprovedKeys((prev) => {
       const next = new Set(prev);
       next.add(row.key);
@@ -311,6 +345,13 @@ function DeliverySchedulingPageInner() {
       ) {
         approvedRefSet.add(schedule.poDnName);
       }
+    });
+    // A Customer Delivery Note already exists for these documents, so keep them
+    // marked as approved even after a refresh (the local approvedKeys state is
+    // reset on reload, so we rely on this persisted server signal instead).
+    (dnCreationQuery.data?.data ?? []).forEach((dn) => {
+      if (dn.customerPo) approvedRefSet.add(dn.customerPo);
+      if (dn.poDnName) approvedRefSet.add(dn.poDnName);
     });
 
     const grouped = new Map<string, DayGroup>();
@@ -375,6 +416,7 @@ function DeliverySchedulingPageInner() {
     dnOrdersQuery.data,
     soOrdersQuery.data,
     schedulesQuery.data,
+    dnCreationQuery.data,
     approvedKeys,
   ]);
 
