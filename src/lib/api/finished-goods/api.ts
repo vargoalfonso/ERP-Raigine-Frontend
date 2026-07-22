@@ -482,4 +482,5 @@ export const {
   useDeleteFinishedGoodMutation,
   useLazyGenerateFinishedGoodQRQuery,
   useGetDeliveryNoteByUniqQuery,
+  useLazyGetDeliveryNoteByUniqQuery,
 } = finishedGoodsSlice;
