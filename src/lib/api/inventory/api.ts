@@ -4,7 +4,8 @@ import type { ApiResponse } from "@/types";
 
 type UnknownRecord = Record<string, unknown>;
 
-const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
 
 const toText = (value: unknown): string | undefined => {
   if (typeof value === "string") {
@@ -24,18 +25,29 @@ const toNumber = (value: unknown): number | undefined => {
   return undefined;
 };
 
-const ok = <T,>(data: T, message = "OK", pagination?: ApiResponse<T>["pagination"]): ApiResponse<T> => ({
+const ok = <T>(
+  data: T,
+  message = "OK",
+  pagination?: ApiResponse<T>["pagination"],
+): ApiResponse<T> => ({
   message,
   status: "success",
   data,
   ...(pagination ? { pagination } : {}),
 });
 
-const parsePagination = (response: unknown): ApiResponse<unknown>["pagination"] | undefined => {
+const parsePagination = (
+  response: unknown,
+): ApiResponse<unknown>["pagination"] | undefined => {
   if (!isRecord(response)) return undefined;
 
-  const direct = isRecord(response.pagination) ? response.pagination : undefined;
-  const nested = isRecord(response.data) && isRecord(response.data.pagination) ? response.data.pagination : undefined;
+  const direct = isRecord(response.pagination)
+    ? response.pagination
+    : undefined;
+  const nested =
+    isRecord(response.data) && isRecord(response.data.pagination)
+      ? response.data.pagination
+      : undefined;
   const source = direct ?? nested;
   if (!source) return undefined;
 
@@ -47,26 +59,42 @@ const parsePagination = (response: unknown): ApiResponse<unknown>["pagination"] 
   };
 };
 
-const parseArrayResponse = <T,>(response: unknown): T[] => {
+const parseArrayResponse = <T>(response: unknown): T[] => {
   const unwrapped = unwrapBackendData<unknown>(response);
   if (Array.isArray(unwrapped)) return unwrapped as T[];
-  if (isRecord(unwrapped) && Array.isArray(unwrapped.items)) return unwrapped.items as T[];
-  if (isRecord(unwrapped) && Array.isArray(unwrapped.data)) return unwrapped.data as T[];
-  if (isRecord(response) && Array.isArray(response.data)) return response.data as T[];
-  if (isRecord(response) && isRecord(response.data) && Array.isArray(response.data.items)) return response.data.items as T[];
+  if (isRecord(unwrapped) && Array.isArray(unwrapped.items))
+    return unwrapped.items as T[];
+  if (isRecord(unwrapped) && Array.isArray(unwrapped.data))
+    return unwrapped.data as T[];
+  if (isRecord(response) && Array.isArray(response.data))
+    return response.data as T[];
+  if (
+    isRecord(response) &&
+    isRecord(response.data) &&
+    Array.isArray(response.data.items)
+  )
+    return response.data.items as T[];
   return [];
 };
 
-const parseObjectResponse = <T,>(response: unknown): T | null => {
+const parseObjectResponse = <T>(response: unknown): T | null => {
   const unwrapped = unwrapBackendData<unknown>(response);
   if (isRecord(unwrapped)) return unwrapped as T;
-  if (isRecord(response) && isRecord(response.data) && isRecord(response.data.data)) return response.data.data as T;
+  if (
+    isRecord(response) &&
+    isRecord(response.data) &&
+    isRecord(response.data.data)
+  )
+    return response.data.data as T;
   if (isRecord(response) && isRecord(response.data)) return response.data as T;
   if (isRecord(response)) return response as T;
   return null;
 };
 
-export type InventoryType = "raw-materials" | "indirect-materials" | "subcon-materials";
+export type InventoryType =
+  | "raw-materials"
+  | "indirect-materials"
+  | "subcon-materials";
 
 export type InventoryRecord = {
   id: string;
@@ -147,24 +175,66 @@ export type InventoryMutationRequest = {
   part_name?: string;
   part_number?: string;
 };
+export interface DeliveryNoteItem {
+  dn_number: string;
+  item_uniq_code: string;
+  packing_number: string;
+  quantity: number;
+  check: string;
+}
+
+export interface DeliveryNoteResponse {
+  request_id: string;
+  status: number;
+  message: string;
+  data: DeliveryNoteItem[];
+}
 
 const toInventoryRecord = (raw: unknown): InventoryRecord => {
   const record = isRecord(raw) ? raw : {};
   return {
-    id: toText(record.id ?? record.inventory_id ?? record.ID ?? record.InventoryID) ?? "",
-    uniq_code: toText(record.uniq_code ?? record.uniq ?? record.UniqCode ?? record.Uniq),
-    raw_material_type: toText(record.raw_material_type ?? record.category ?? record.type ?? record.RawMaterialType),
+    id:
+      toText(
+        record.id ?? record.inventory_id ?? record.ID ?? record.InventoryID,
+      ) ?? "",
+    uniq_code: toText(
+      record.uniq_code ?? record.uniq ?? record.UniqCode ?? record.Uniq,
+    ),
+    raw_material_type: toText(
+      record.raw_material_type ??
+        record.category ??
+        record.type ??
+        record.RawMaterialType,
+    ),
     rm_source: toText(record.rm_source ?? record.source ?? record.RMSource),
-    warehouse_location: toText(record.warehouse_location ?? record.warehouse_code ?? record.warehouse ?? record.WarehouseLocation),
-    uom: toText(record.uom ?? record.unit_measurement ?? record.unit ?? record.UOM),
-    stock_qty: toNumber(record.stock_qty ?? record.quantity ?? record.stock ?? record.StockQty),
-    stock_weight_kg: toNumber(record.stock_weight_kg ?? record.weight_kg ?? record.weight ?? record.StockWeightKg),
+    warehouse_location: toText(
+      record.warehouse_location ??
+        record.warehouse_code ??
+        record.warehouse ??
+        record.WarehouseLocation,
+    ),
+    uom: toText(
+      record.uom ?? record.unit_measurement ?? record.unit ?? record.UOM,
+    ),
+    stock_qty: toNumber(
+      record.stock_qty ?? record.quantity ?? record.stock ?? record.StockQty,
+    ),
+    stock_weight_kg: toNumber(
+      record.stock_weight_kg ??
+        record.weight_kg ??
+        record.weight ??
+        record.StockWeightKg,
+    ),
     part_name: toText(record.part_name ?? record.PartName),
-    part_number: toText(record.part_number ?? record.part_no ?? record.PartNumber),
-    item_name: toText(record.item_name ?? record.name ?? record.ItemName ?? record.Name),
+    part_number: toText(
+      record.part_number ?? record.part_no ?? record.PartNumber,
+    ),
+    item_name: toText(
+      record.item_name ?? record.name ?? record.ItemName ?? record.Name,
+    ),
     created_at: toText(record.created_at ?? record.CreatedAt),
     updated_at: toText(record.updated_at ?? record.UpdatedAt),
-        model: toText(record.model ?? record.model),
+    model: toText(record.model ?? record.model),
     material_grade: toText(record.material_grade ?? record.material_grade),
   };
 };
@@ -172,18 +242,62 @@ const toInventoryRecord = (raw: unknown): InventoryRecord => {
 const toInventoryHistoryRecord = (raw: unknown): InventoryHistoryRecord => {
   const record = isRecord(raw) ? raw : {};
   return {
-    id: toText(record.id ?? record.ID) ?? toText(record.history_id ?? record.HistoryID) ?? "",
+    id:
+      toText(record.id ?? record.ID) ??
+      toText(record.history_id ?? record.HistoryID) ??
+      "",
     inventory_id: toText(record.inventory_id ?? record.InventoryID),
-    uniq_code: toText(record.uniq_code ?? record.uniq ?? record.UniqCode ?? record.Uniq),
+    uniq_code: toText(
+      record.uniq_code ?? record.uniq ?? record.UniqCode ?? record.Uniq,
+    ),
     action: toText(record.action ?? record.Action),
-    reason: toText(record.reason ?? record.activity_type ?? record.Reason ?? record.ActivityType),
-    qty: toNumber(record.qty ?? record.quantity ?? record.qty_change ?? record.stock_change ?? record.Qty ?? record.Quantity),
+    reason: toText(
+      record.reason ??
+        record.activity_type ??
+        record.Reason ??
+        record.ActivityType,
+    ),
+    qty: toNumber(
+      record.qty ??
+        record.quantity ??
+        record.qty_change ??
+        record.stock_change ??
+        record.Qty ??
+        record.Quantity,
+    ),
     stock_before: toNumber(record.stock_before ?? record.StockBefore),
-    stock_after: toNumber(record.stock_after ?? record.qty_after ?? record.StockAfter),
-    date_time: toText(record.date_time ?? record.logged_at ?? record.created_at ?? record.updated_at ?? record.DateTime ?? record.LoggedAt ?? record.CreatedAt ?? record.UpdatedAt),
-    created_by: toText(record.created_by ?? record.user_name ?? record.CreatedBy ?? record.UserName),
-    reference_number: toText(record.reference_number ?? record.reference_no ?? record.ReferenceNumber ?? record.ReferenceNo),
-    kanban_number: toText(record.kanban_number ?? record.packing_number ?? record.kanban_packing ?? record.KanbanNumber ?? record.PackingNumber),
+    stock_after: toNumber(
+      record.stock_after ?? record.qty_after ?? record.StockAfter,
+    ),
+    date_time: toText(
+      record.date_time ??
+        record.logged_at ??
+        record.created_at ??
+        record.updated_at ??
+        record.DateTime ??
+        record.LoggedAt ??
+        record.CreatedAt ??
+        record.UpdatedAt,
+    ),
+    created_by: toText(
+      record.created_by ??
+        record.user_name ??
+        record.CreatedBy ??
+        record.UserName,
+    ),
+    reference_number: toText(
+      record.reference_number ??
+        record.reference_no ??
+        record.ReferenceNumber ??
+        record.ReferenceNo,
+    ),
+    kanban_number: toText(
+      record.kanban_number ??
+        record.packing_number ??
+        record.kanban_packing ??
+        record.KanbanNumber ??
+        record.PackingNumber,
+    ),
     packing_number: toText(record.packing_number ?? record.PackingNumber),
   };
 };
@@ -191,41 +305,88 @@ const toInventoryHistoryRecord = (raw: unknown): InventoryHistoryRecord => {
 const toInventoryIncomingRecord = (raw: unknown): InventoryIncomingRecord => {
   const record = isRecord(raw) ? raw : {};
   return {
-    id: toText(record.id ?? record.inventory_id ?? record.ID ?? record.InventoryID) ?? "",
+    id:
+      toText(
+        record.id ?? record.inventory_id ?? record.ID ?? record.InventoryID,
+      ) ?? "",
     inventory_id: toText(record.inventory_id ?? record.InventoryID),
-    uniq_code: toText(record.uniq_code ?? record.uniq ?? record.UniqCode ?? record.Uniq),
+    uniq_code: toText(
+      record.uniq_code ?? record.uniq ?? record.UniqCode ?? record.Uniq,
+    ),
     quantity: toNumber(record.quantity ?? record.Quantity),
-    stock_qty: toNumber(record.stock_qty ?? record.quantity ?? record.StockQty ?? record.Quantity),
+    stock_qty: toNumber(
+      record.stock_qty ?? record.quantity ?? record.StockQty ?? record.Quantity,
+    ),
     weight_kg: toNumber(record.weight_kg ?? record.WeightKg),
-    stock_weight_kg: toNumber(record.stock_weight_kg ?? record.weight_kg ?? record.StockWeightKg ?? record.WeightKg),
-    uom: toText(record.uom ?? record.unit_measurement ?? record.unit ?? record.UOM),
-    warehouse_location: toText(record.warehouse_location ?? record.warehouse_code ?? record.warehouse ?? record.WarehouseLocation),
+    stock_weight_kg: toNumber(
+      record.stock_weight_kg ??
+        record.weight_kg ??
+        record.StockWeightKg ??
+        record.WeightKg,
+    ),
+    uom: toText(
+      record.uom ?? record.unit_measurement ?? record.unit ?? record.UOM,
+    ),
+    warehouse_location: toText(
+      record.warehouse_location ??
+        record.warehouse_code ??
+        record.warehouse ??
+        record.WarehouseLocation,
+    ),
     supplier_name: toText(record.supplier_name ?? record.SupplierName),
     packing_number: toText(record.packing_number ?? record.PackingNumber),
-    reference_number: toText(record.reference_number ?? record.reference_no ?? record.ReferenceNumber ?? record.ReferenceNo),
-    date_incoming: toText(record.date_incoming ?? record.created_at ?? record.DateIncoming ?? record.CreatedAt),
+    reference_number: toText(
+      record.reference_number ??
+        record.reference_no ??
+        record.ReferenceNumber ??
+        record.ReferenceNo,
+    ),
+    date_incoming: toText(
+      record.date_incoming ??
+        record.created_at ??
+        record.DateIncoming ??
+        record.CreatedAt,
+    ),
     created_at: toText(record.created_at ?? record.CreatedAt),
   };
 };
 
 const toInventoryKanbanSummary = (raw: unknown): InventoryKanbanSummary => {
-  const record = isRecord(parseObjectResponse<unknown>(raw)) ? (parseObjectResponse<unknown>(raw) as UnknownRecord) : isRecord(raw) ? raw : {};
+  const record = isRecord(parseObjectResponse<unknown>(raw))
+    ? (parseObjectResponse<unknown>(raw) as UnknownRecord)
+    : isRecord(raw)
+      ? raw
+      : {};
   return {
-    uniq_code: toText(record.uniq_code ?? record.uniq ?? record.UniqCode ?? record.Uniq),
+    uniq_code: toText(
+      record.uniq_code ?? record.uniq ?? record.UniqCode ?? record.Uniq,
+    ),
     stock_qty: toNumber(record.stock_qty ?? record.stock ?? record.StockQty),
     total_kanban: toNumber(record.total_kanban ?? record.TotalKanban),
-    kanbans_needed: toNumber(record.kanbans_needed ?? record.kanban_needed ?? record.KanbansNeeded),
-    stock_to_complete: toNumber(record.stock_to_complete ?? record.StockToComplete),
+    kanbans_needed: toNumber(
+      record.kanbans_needed ?? record.kanban_needed ?? record.KanbansNeeded,
+    ),
+    stock_to_complete: toNumber(
+      record.stock_to_complete ?? record.StockToComplete,
+    ),
     kanban_pkg_qty: toNumber(record.kanban_pkg_qty ?? record.KanbanPkgQty),
-    safety_stock_qty: toNumber(record.safety_stock_qty ?? record.SafetyStockQty),
+    safety_stock_qty: toNumber(
+      record.safety_stock_qty ?? record.SafetyStockQty,
+    ),
     status: toText(record.status ?? record.Status),
-    buy_not_buy: toText(record.buy_not_buy ?? record.buyNotBuy ?? record.BuyNotBuy),
+    buy_not_buy: toText(
+      record.buy_not_buy ?? record.buyNotBuy ?? record.BuyNotBuy,
+    ),
     stock_to_complete_kanban: toNumber(
-      record.stock_to_complete_kanban ?? record.to_complete_kanban ?? record.StockToCompleteKanban
+      record.stock_to_complete_kanban ??
+        record.to_complete_kanban ??
+        record.StockToCompleteKanban,
     ),
     kanban_count: toNumber(record.kanban_count ?? record.KanbanCount),
     stock_days: toNumber(record.stock_days ?? record.StockDays),
-    safety_stock_days: toNumber(record.safety_stock_days ?? record.SafetyStockDays),
+    safety_stock_days: toNumber(
+      record.safety_stock_days ?? record.SafetyStockDays,
+    ),
   };
 };
 
@@ -253,83 +414,129 @@ export const inventoryApiSlice = apiSlice.injectEndpoints({
       }),
     }),
 
-    getInventoryList: builder.query<ApiResponse<InventoryRecord[]>, { type: InventoryType; page?: number; limit?: number }>({
+    getInventoryList: builder.query<
+      ApiResponse<InventoryRecord[]>,
+      { type: InventoryType; page?: number; limit?: number }
+    >({
       query: ({ type, page = 1, limit = 20 }) => ({
         url: `/inventory/${encodeURIComponent(type)}?page=${page}&limit=${limit}`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-   transformResponse: (response: unknown) => {
-  console.log("RAW API RESPONSE", response);
+      transformResponse: (response: unknown) => {
+        console.log("RAW API RESPONSE", response);
 
-  const arr = parseArrayResponse<unknown>(response);
+        const arr = parseArrayResponse<unknown>(response);
 
-  console.log("PARSED ARRAY", arr);
-  console.log(
-    "M09 RAW",
-    arr.find((x: any) => x.uniq_code === "M09")
-  );
+        console.log("PARSED ARRAY", arr);
+        console.log(
+          "M09 RAW",
+          arr.find((x: any) => x.uniq_code === "M09"),
+        );
 
-  return ok(
-    arr.map(toInventoryRecord),
-    "Inventory retrieved",
-    parsePagination(response)
-  );
-},
+        return ok(
+          arr.map(toInventoryRecord),
+          "Inventory retrieved",
+          parsePagination(response),
+        );
+      },
     }),
 
-    getInventoryDetail: builder.query<ApiResponse<InventoryRecord>, { type: InventoryType; id: string | number }>({
+    getInventoryDetail: builder.query<
+      ApiResponse<InventoryRecord>,
+      { type: InventoryType; id: string | number }
+    >({
       query: ({ type, id }) => ({
         url: `/inventory/${encodeURIComponent(type)}/${encodeURIComponent(String(id))}`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(toInventoryRecord(parseObjectResponse<unknown>(response)), "Inventory detail retrieved"),
+      transformResponse: (response: unknown) =>
+        ok(
+          toInventoryRecord(parseObjectResponse<unknown>(response)),
+          "Inventory detail retrieved",
+        ),
     }),
 
     getInventoryHistory: builder.query<
       ApiResponse<InventoryHistoryRecord[]>,
-      { type: InventoryType; id: string | number; page?: number; limit?: number }
+      {
+        type: InventoryType;
+        id: string | number;
+        page?: number;
+        limit?: number;
+      }
     >({
       query: ({ type, id, page = 1, limit = 20 }) => ({
         url: `/inventory/${encodeURIComponent(type)}/${encodeURIComponent(String(id))}/history?page=${page}&limit=${limit}`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(parseArrayResponse<unknown>(response).map(toInventoryHistoryRecord), "Inventory history retrieved", parsePagination(response)),
+      transformResponse: (response: unknown) =>
+        ok(
+          parseArrayResponse<unknown>(response).map(toInventoryHistoryRecord),
+          "Inventory history retrieved",
+          parsePagination(response),
+        ),
     }),
 
-    getInventoryIncoming: builder.query<ApiResponse<InventoryIncomingRecord[]>, { type: InventoryType; page?: number; limit?: number }>({
+    getInventoryIncoming: builder.query<
+      ApiResponse<InventoryIncomingRecord[]>,
+      { type: InventoryType; page?: number; limit?: number }
+    >({
       query: ({ type, page = 1, limit = 20 }) => ({
         url: `/inventory/${encodeURIComponent(type)}/incoming?page=${page}&limit=${limit}`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(parseArrayResponse<unknown>(response).map(toInventoryIncomingRecord), "Inventory incoming retrieved", parsePagination(response)),
+      transformResponse: (response: unknown) =>
+        ok(
+          parseArrayResponse<unknown>(response).map(toInventoryIncomingRecord),
+          "Inventory incoming retrieved",
+          parsePagination(response),
+        ),
     }),
 
-    getInventoryKanbanSummary: builder.query<ApiResponse<InventoryKanbanSummary>, { uniq_code: string }>({
+    getInventoryKanbanSummary: builder.query<
+      ApiResponse<InventoryKanbanSummary>,
+      { uniq_code: string }
+    >({
       query: ({ uniq_code }) => ({
         url: `/inventory/kanban-summary?uniq_code=${encodeURIComponent(uniq_code)}`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(toInventoryKanbanSummary(response), "Inventory kanban summary retrieved"),
+      transformResponse: (response: unknown) =>
+        ok(
+          toInventoryKanbanSummary(response),
+          "Inventory kanban summary retrieved",
+        ),
     }),
 
-    createInventory: builder.mutation<ApiResponse<InventoryRecord>, { type: InventoryType; body: InventoryMutationRequest }>({
+    createInventory: builder.mutation<
+      ApiResponse<InventoryRecord>,
+      { type: InventoryType; body: InventoryMutationRequest }
+    >({
       query: ({ type, body }) => ({
         url: `/inventory/${encodeURIComponent(type)}`,
         method: "POST",
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(toInventoryRecord(parseObjectResponse<unknown>(response)), "Inventory created"),
+      transformResponse: (response: unknown) =>
+        ok(
+          toInventoryRecord(parseObjectResponse<unknown>(response)),
+          "Inventory created",
+        ),
     }),
 
     updateInventory: builder.mutation<
       ApiResponse<InventoryRecord>,
-      { type: InventoryType; id: string | number; body: Partial<InventoryMutationRequest> }
+      {
+        type: InventoryType;
+        id: string | number;
+        body: Partial<InventoryMutationRequest>;
+      }
     >({
       query: ({ type, id, body }) => ({
         url: `/inventory/${encodeURIComponent(type)}/${encodeURIComponent(String(id))}`,
@@ -337,7 +544,22 @@ export const inventoryApiSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(toInventoryRecord(parseObjectResponse<unknown>(response)), "Inventory updated"),
+      transformResponse: (response: unknown) =>
+        ok(
+          toInventoryRecord(parseObjectResponse<unknown>(response)),
+          "Inventory updated",
+        ),
+    }),
+
+    getDeliveryNoteByUniq: builder.query<DeliveryNoteResponse, string>({
+      query: (uniq) => ({
+        url: `/delivery-notes/uniq/${encodeURIComponent(uniq)}`,
+        method: "GET",
+        meta: {
+          useAuthorization: true,
+          contentType: "application/json",
+        },
+      }),
     }),
   }),
 });
@@ -353,4 +575,5 @@ export const {
   useUpdateInventoryMutation,
   useLazyGenerateQRIndirectQuery,
   useLazyGenerateQRSubconQuery,
+  useGetDeliveryNoteByUniqQuery,
 } = inventoryApiSlice;

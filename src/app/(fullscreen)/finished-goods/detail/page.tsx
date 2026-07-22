@@ -87,23 +87,21 @@ function FinishedGoodDetailContent() {
     { skip: !uniqCode },
   );
 
-  const {
-    data: historyRes,
-    isFetching: historyLoading,
-  } = useGetFinishedGoodHistoryQuery(
-    { uniq_code: uniqCode, page: 1, limit: 100 },
-    { skip: !uniqCode },
-  );
+  const { data: historyRes, isFetching: historyLoading } =
+    useGetFinishedGoodHistoryQuery(
+      { uniq_code: uniqCode, page: 1, limit: 100 },
+      { skip: !uniqCode },
+    );
 
   const historyData: FinishedGoodHistoryItem[] = historyRes?.items ?? [];
   const resolvedUniq = detail?.uniq_code || uniqCode || "-";
 
-const { data: deliveryNoteRes, isFetching: deliveryNoteLoading } =
-  useGetDeliveryNoteByUniqQuery(uniqCode, {
-    skip: !uniqCode,
-  });
+  const { data: deliveryNoteRes, isFetching: deliveryNoteLoading } =
+    useGetDeliveryNoteByUniqQuery(uniqCode, {
+      skip: !uniqCode,
+    });
 
-const deliveryNoteData = deliveryNoteRes?.data ?? [];
+  const deliveryNoteData = deliveryNoteRes?.data ?? [];
 
   /* ================= COLUMNS HISTORY ================= */
   const historyColumns: ColumnsType<FinishedGoodHistoryItem> = [
@@ -184,7 +182,8 @@ const deliveryNoteData = deliveryNoteRes?.data ?? [];
 
           {!uniqCode ? (
             <div className="text-gray-500 py-10 text-center">
-              No uniq_code provided. Open this page from the Finished Goods list.
+              No uniq_code provided. Open this page from the Finished Goods
+              list.
             </div>
           ) : (
             <Tabs
@@ -210,7 +209,9 @@ const deliveryNoteData = deliveryNoteRes?.data ?? [];
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                           <div>
                             <p className="text-gray-400">Uniq</p>
-                            <p className="font-semibold">{detail.uniq_code || "-"}</p>
+                            <p className="font-semibold">
+                              {detail.uniq_code || "-"}
+                            </p>
                           </div>
 
                           <div>
@@ -222,18 +223,24 @@ const deliveryNoteData = deliveryNoteRes?.data ?? [];
 
                           <div>
                             <p className="text-gray-400">Model</p>
-                            <p className="font-semibold">{detail.model || "-"}</p>
+                            <p className="font-semibold">
+                              {detail.model || "-"}
+                            </p>
                           </div>
 
                           <div>
-                            <p className="text-gray-400">Working Order Number</p>
+                            <p className="text-gray-400">
+                              Working Order Number
+                            </p>
                             <p className="font-semibold">
                               {detail.wo_number || "-"}
                             </p>
                           </div>
 
                           <div>
-                            <p className="text-gray-400">Warehouse Destination</p>
+                            <p className="text-gray-400">
+                              Warehouse Destination
+                            </p>
                             <p className="font-semibold">
                               {detail.warehouse_location || "-"}
                             </p>
@@ -309,48 +316,52 @@ const deliveryNoteData = deliveryNoteRes?.data ?? [];
           )}
 
           {deliveryNoteData?.length > 0 && (
-  <div className="mt-8">
-    <h3 className="text-lg font-semibold mb-4">Delivery Note History</h3>
+            <div className="mt-8">
+              <h3 className="text-lg font-semibold mb-4">
+                Delivery Note History
+              </h3>
 
-    <Table
-      rowKey={(record) => `${record.dn_number}-${record.packing_number}`}
-      pagination={false}
-      dataSource={deliveryNoteData}
-      columns={[
-        {
-          title: "DN Number",
-          dataIndex: "dn_number",
-          key: "dn_number",
-        },
-        {
-          title: "Packing Number",
-          dataIndex: "packing_number",
-          key: "packing_number",
-        },
-        {
-          title: "Quantity",
-          dataIndex: "quantity",
-          key: "quantity",
-          align: "right",
-        },
-        {
-          title: "Check",
-          dataIndex: "check",
-          key: "check",
-          render: (value: string) => {
-            let color = "default";
+              <Table
+                rowKey={(record) =>
+                  `${record.dn_number}-${record.packing_number}`
+                }
+                pagination={false}
+                dataSource={deliveryNoteData}
+                columns={[
+                  {
+                    title: "DN Number",
+                    dataIndex: "dn_number",
+                    key: "dn_number",
+                  },
+                  {
+                    title: "Packing Number",
+                    dataIndex: "packing_number",
+                    key: "packing_number",
+                  },
+                  {
+                    title: "Quantity",
+                    dataIndex: "quantity",
+                    key: "quantity",
+                    align: "right",
+                  },
+                  {
+                    title: "Check",
+                    dataIndex: "check",
+                    key: "check",
+                    render: (value: string) => {
+                      let color = "default";
 
-            if (value === "progress") color = "processing";
-            else if (value === "done") color = "success";
-            else if (value === "pending") color = "warning";
+                      if (value === "progress") color = "processing";
+                      else if (value === "done") color = "success";
+                      else if (value === "pending") color = "warning";
 
-            return <Tag color={color}>{value}</Tag>;
-          },
-        },
-      ]}
-    />
-  </div>
-)}
+                      return <Tag color={color}>{value}</Tag>;
+                    },
+                  },
+                ]}
+              />
+            </div>
+          )}
         </Card>
       </div>
 

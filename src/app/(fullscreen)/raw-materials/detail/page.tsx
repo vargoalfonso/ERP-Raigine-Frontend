@@ -10,13 +10,16 @@ import {
   useGetInventoryDetailQuery,
   useGetInventoryHistoryQuery,
   useGetInventoryKanbanSummaryQuery,
+  useGetDeliveryNoteByUniqQuery,
 } from "@/lib/api/inventory/api";
 
 type UnknownRecord = Record<string, unknown>;
 
-const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
 
-const isMissingRouteError = (error: unknown): boolean => isRecord(error) && error.status === 404;
+const isMissingRouteError = (error: unknown): boolean =>
+  isRecord(error) && error.status === 404;
 
 type RowHistory = {
   key: string;
@@ -28,7 +31,8 @@ type RowHistory = {
   lastUpdate: string;
 };
 
-const formatNumber = (value: number | undefined) => new Intl.NumberFormat("en-US").format(Number(value ?? 0));
+const formatNumber = (value: number | undefined) =>
+  new Intl.NumberFormat("en-US").format(Number(value ?? 0));
 
 function RawMaterialsDetailPageContent() {
   const router = useRouter();
@@ -38,18 +42,31 @@ function RawMaterialsDetailPageContent() {
   const uniq = searchParams.get("uniq") ?? "LV7-001";
   const apiEnabled = Boolean(apiBaseUrl);
 
-  const detailQuery = useGetInventoryDetailQuery({ type: "raw-materials", id }, { skip: !apiEnabled || !id });
-  const historyQuery = useGetInventoryHistoryQuery({ type: "raw-materials", id, page: 1, limit: 20 }, { skip: !apiEnabled || !id });
-  const summaryQuery = useGetInventoryKanbanSummaryQuery({ uniq_code: uniq }, { skip: !apiEnabled || !uniq });
+  const detailQuery = useGetInventoryDetailQuery(
+    { type: "raw-materials", id },
+    { skip: !apiEnabled || !id },
+  );
+  const historyQuery = useGetInventoryHistoryQuery(
+    { type: "raw-materials", id, page: 1, limit: 20 },
+    { skip: !apiEnabled || !id },
+  );
+  const summaryQuery = useGetInventoryKanbanSummaryQuery(
+    { uniq_code: uniq },
+    { skip: !apiEnabled || !uniq },
+  );
 
   useEffect(() => {
     const error = detailQuery.error ?? historyQuery.error ?? summaryQuery.error;
     if (!apiEnabled || !error) return;
     if (isMissingRouteError(error)) {
-      message.warning("Inventory raw-materials API route is not available yet; showing placeholder data.");
+      message.warning(
+        "Inventory raw-materials API route is not available yet; showing placeholder data.",
+      );
       return;
     }
-    message.error(getApiErrorMessage(error, "Failed to load raw material detail"));
+    message.error(
+      getApiErrorMessage(error, "Failed to load raw material detail"),
+    );
   }, [apiEnabled, detailQuery.error, historyQuery.error, summaryQuery.error]);
 
   const useMock = !apiEnabled || isMissingRouteError(detailQuery.error);
@@ -59,20 +76,26 @@ function RawMaterialsDetailPageContent() {
   const detailInfo = useMemo(
     () => ({
       uniq: detail?.uniq_code ?? uniq,
-      productName: detail?.part_name ?? detail?.item_name ?? detail?.uniq_code ?? "-",
+      productName:
+        detail?.part_name ?? detail?.item_name ?? detail?.uniq_code ?? "-",
       model: detail?.raw_material_type ?? "-",
       woNumber: detail?.rm_source ?? "-",
       warehouse: detail?.warehouse_location ?? "-",
       stock: Number(detail?.stock_qty ?? 0),
       stockKanban: Number(summary?.stock_to_complete_kanban ?? 0),
       kanban: Number(summary?.kanban_count ?? 0),
-      status: Number(detail?.stock_qty ?? 0) > 20 ? "Available" : Number(detail?.stock_qty ?? 0) > 0 ? "Low Stock" : "Out of Stock",
+      status:
+        Number(detail?.stock_qty ?? 0) > 20
+          ? "Available"
+          : Number(detail?.stock_qty ?? 0) > 0
+            ? "Low Stock"
+            : "Out of Stock",
       uom: detail?.uom ?? "-",
       weight: Number(detail?.stock_weight_kg ?? 0),
       stockDays: Number(summary?.stock_days ?? 0),
       safetyStockDays: Number(summary?.safety_stock_days ?? 0),
     }),
-    [detail, summary, uniq]
+    [detail, summary, uniq],
   );
 
   const historyData = useMemo<RowHistory[]>(() => {
@@ -82,13 +105,30 @@ function RawMaterialsDetailPageContent() {
     return (historyQuery.data?.data ?? []).map((item, index) => ({
       key: item.id || `${index}`,
       uniq: item.uniq_code ?? detailInfo.uniq,
-      kanban: item.kanban_number ?? item.packing_number ?? item.reference_number ?? "-",
+      kanban:
+        item.kanban_number ??
+        item.packing_number ??
+        item.reference_number ??
+        "-",
       stock: Number(item.qty ?? 0),
       reason: item.reason ?? item.action ?? "-",
       qty: Number(item.stock_after ?? item.qty ?? 0),
       lastUpdate: item.date_time ?? "-",
     }));
   }, [detailInfo.uniq, historyQuery.data, useMock]);
+
+  const uniqCode =
+    searchParams.get("uniq_code") ??
+    searchParams.get("uniq") ??
+    searchParams.get("uniqCode") ??
+    "";
+
+  const { data: deliveryNoteRes, isFetching: deliveryNoteLoading } =
+    useGetDeliveryNoteByUniqQuery(uniqCode, {
+      skip: !uniqCode,
+    });
+
+  const deliveryNoteData = deliveryNoteRes?.data ?? [];
 
   const historyColumns = [
     { title: "Uniq", dataIndex: "uniq", key: "uniq" },
@@ -98,7 +138,11 @@ function RawMaterialsDetailPageContent() {
       dataIndex: "stock",
       key: "stock",
       render: (value: number) =>
-        value < 0 ? <Tag className="bg-red-100 text-red-600">{value}</Tag> : <Tag className="bg-green-100 text-green-600">+{value}</Tag>,
+        value < 0 ? (
+          <Tag className="bg-red-100 text-red-600">{value}</Tag>
+        ) : (
+          <Tag className="bg-green-100 text-green-600">+{value}</Tag>
+        ),
     },
     { title: "Reason", dataIndex: "reason", key: "reason" },
     {
@@ -114,7 +158,10 @@ function RawMaterialsDetailPageContent() {
     <div className="w-full min-h-screen bg-gray-50">
       <div className="flex items-center justify-between bg-white px-8 py-4 border-b">
         <div className="flex items-center gap-4">
-          <ArrowLeftOutlined className="cursor-pointer" onClick={() => router.back()} />
+          <ArrowLeftOutlined
+            className="cursor-pointer"
+            onClick={() => router.back()}
+          />
           <h1 className="text-2xl font-semibold m-0">Raw Materials Details</h1>
         </div>
 
@@ -124,9 +171,18 @@ function RawMaterialsDetailPageContent() {
       </div>
 
       <div className="p-8">
-        <Card className="rounded-2xl shadow" loading={apiEnabled ? detailQuery.isFetching || summaryQuery.isFetching : false}>
+        <Card
+          className="rounded-2xl shadow"
+          loading={
+            apiEnabled
+              ? detailQuery.isFetching || summaryQuery.isFetching
+              : false
+          }
+        >
           <h2 className="text-xl font-bold">Details & History Log</h2>
-          <p className="text-gray-400">Complete Raw Materials Detail for {detailInfo.uniq}</p>
+          <p className="text-gray-400">
+            Complete Raw Materials Detail for {detailInfo.uniq}
+          </p>
 
           <Tabs
             activeKey={activeTab}
@@ -144,7 +200,9 @@ function RawMaterialsDetailPageContent() {
                       </div>
                       <div>
                         <p className="text-gray-400">Product Name</p>
-                        <p className="font-semibold">{detailInfo.productName}</p>
+                        <p className="font-semibold">
+                          {detailInfo.productName}
+                        </p>
                       </div>
                       <div>
                         <p className="text-gray-400">Raw Material Type</p>
@@ -160,31 +218,53 @@ function RawMaterialsDetailPageContent() {
                       </div>
                       <div>
                         <p className="text-gray-400">Stock</p>
-                        <Tag className="bg-blue-100 text-blue-600">{formatNumber(detailInfo.stock)} {detailInfo.uom}</Tag>
+                        <Tag className="bg-blue-100 text-blue-600">
+                          {formatNumber(detailInfo.stock)} {detailInfo.uom}
+                        </Tag>
                       </div>
                       <div>
                         <p className="text-gray-400">Stock Weight</p>
-                        <p className="font-semibold">{formatNumber(detailInfo.weight)} kg</p>
+                        <p className="font-semibold">
+                          {formatNumber(detailInfo.weight)} kg
+                        </p>
                       </div>
                       <div>
-                        <p className="text-gray-400">Stock to Complete Kanban</p>
-                        <p className="font-semibold">{formatNumber(detailInfo.stockKanban)}</p>
+                        <p className="text-gray-400">
+                          Stock to Complete Kanban
+                        </p>
+                        <p className="font-semibold">
+                          {formatNumber(detailInfo.stockKanban)}
+                        </p>
                       </div>
                       <div>
                         <p className="text-gray-400">Kanban Count</p>
-                        <p className="font-semibold">{formatNumber(detailInfo.kanban)}</p>
+                        <p className="font-semibold">
+                          {formatNumber(detailInfo.kanban)}
+                        </p>
                       </div>
                       <div>
                         <p className="text-gray-400">Stock Days</p>
-                        <p className="font-semibold">{formatNumber(detailInfo.stockDays)}</p>
+                        <p className="font-semibold">
+                          {formatNumber(detailInfo.stockDays)}
+                        </p>
                       </div>
                       <div>
                         <p className="text-gray-400">Safety Stock Days</p>
-                        <p className="font-semibold">{formatNumber(detailInfo.safetyStockDays)}</p>
+                        <p className="font-semibold">
+                          {formatNumber(detailInfo.safetyStockDays)}
+                        </p>
                       </div>
                       <div>
                         <p className="text-gray-400">Status</p>
-                        <Tag className={detailInfo.status === "Available" ? "bg-green-100 text-green-600" : detailInfo.status === "Low Stock" ? "bg-yellow-100 text-yellow-600" : "bg-red-100 text-red-600"}>
+                        <Tag
+                          className={
+                            detailInfo.status === "Available"
+                              ? "bg-green-100 text-green-600"
+                              : detailInfo.status === "Low Stock"
+                                ? "bg-yellow-100 text-yellow-600"
+                                : "bg-red-100 text-red-600"
+                          }
+                        >
                           {detailInfo.status}
                         </Tag>
                       </div>
@@ -194,11 +274,15 @@ function RawMaterialsDetailPageContent() {
               },
               {
                 key: "2",
-                label: <span className="flex items-center gap-2">History Logs</span>,
+                label: (
+                  <span className="flex items-center gap-2">History Logs</span>
+                ),
                 children: (
                   <div className="mt-6">
                     <div className="bg-blue-50 p-4 rounded-xl mb-5">
-                      <p className="text-blue-600 font-semibold">Note: In-Out Activity Log {detailInfo.uniq}</p>
+                      <p className="text-blue-600 font-semibold">
+                        Note: In-Out Activity Log {detailInfo.uniq}
+                      </p>
                     </div>
                     <div style={{ overflowX: "auto" }}>
                       <Table<RowHistory>
@@ -215,11 +299,62 @@ function RawMaterialsDetailPageContent() {
               },
             ]}
           />
+
+          {deliveryNoteData?.length > 0 && (
+            <div className="mt-8">
+              <h3 className="text-lg font-semibold mb-4">
+                Delivery Note History
+              </h3>
+
+              <Table
+                rowKey={(record) =>
+                  `${record.dn_number}-${record.packing_number}`
+                }
+                pagination={false}
+                dataSource={deliveryNoteData}
+                columns={[
+                  {
+                    title: "DN Number",
+                    dataIndex: "dn_number",
+                    key: "dn_number",
+                  },
+                  {
+                    title: "Packing Number",
+                    dataIndex: "packing_number",
+                    key: "packing_number",
+                  },
+                  {
+                    title: "Quantity",
+                    dataIndex: "quantity",
+                    key: "quantity",
+                    align: "right",
+                  },
+                  {
+                    title: "Check",
+                    dataIndex: "check",
+                    key: "check",
+                    render: (value: string) => {
+                      let color = "default";
+
+                      if (value === "progress") color = "processing";
+                      else if (value === "done") color = "success";
+                      else if (value === "pending") color = "warning";
+
+                      return <Tag color={color}>{value}</Tag>;
+                    },
+                  },
+                ]}
+              />
+            </div>
+          )}
         </Card>
       </div>
 
       <div className="flex justify-end px-8 pb-8">
-        <Button className="bg-blue-600 text-white rounded-xl" onClick={() => router.push("/raw-materials")}>
+        <Button
+          className="bg-blue-600 text-white rounded-xl"
+          onClick={() => router.push("/raw-materials")}
+        >
           Back
         </Button>
       </div>
