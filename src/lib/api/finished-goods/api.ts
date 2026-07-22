@@ -136,6 +136,20 @@ export type UpdateFinishedGoodRequest = {
   warehouse_location?: string;
   stock_qty?: number;
 };
+export interface DeliveryNoteItem {
+  dn_number: string;
+  item_uniq_code: string;
+  packing_number: string;
+  quantity: number;
+  check: string;
+}
+
+export interface DeliveryNoteResponse {
+  request_id: string;
+  status: number;
+  message: string;
+  data: DeliveryNoteItem[];
+}
 
 const toFinishedGoodListItem = (raw: unknown): FinishedGoodListItem => {
   const record = isRecord(raw) ? raw : {};
@@ -276,10 +290,7 @@ export const finishedGoodsSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     // Generate (or fetch) the QR for a finished good. The QR carries the kanban
     // list / packing list resolved from the work order. 1 uniq = 1 QR.
-    generateFinishedGoodQR: builder.query<
-      { qr?: string },
-      string
-    >({
+    generateFinishedGoodQR: builder.query<{ qr?: string }, string>({
       query: (code) => ({
         url: `/finished-goods/${encodeURIComponent(code)}/create-qr`,
         method: "GET",
@@ -446,6 +457,17 @@ export const finishedGoodsSlice = apiSlice.injectEndpoints({
         id: arg.id,
       }),
     }),
+
+    getDeliveryNoteByUniq: builder.query<DeliveryNoteResponse, string>({
+      query: (uniq) => ({
+        url: `/delivery-notes/uniq/${encodeURIComponent(uniq)}`,
+        method: "GET",
+        meta: {
+          useAuthorization: true,
+          contentType: "application/json",
+        },
+      }),
+    }),
   }),
 });
 
@@ -459,4 +481,5 @@ export const {
   useUpdateFinishedGoodMutation,
   useDeleteFinishedGoodMutation,
   useLazyGenerateFinishedGoodQRQuery,
+  useGetDeliveryNoteByUniqQuery,
 } = finishedGoodsSlice;

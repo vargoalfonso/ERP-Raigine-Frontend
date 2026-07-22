@@ -8,6 +8,7 @@ import type { ColumnsType } from "antd/es/table";
 import {
   useGetFinishedGoodParameterizedSummaryQuery,
   useGetFinishedGoodHistoryQuery,
+  useGetDeliveryNoteByUniqQuery,
   type FinishedGoodHistoryItem,
 } from "@/lib/api/finished-goods/api";
 
@@ -96,6 +97,13 @@ function FinishedGoodDetailContent() {
 
   const historyData: FinishedGoodHistoryItem[] = historyRes?.items ?? [];
   const resolvedUniq = detail?.uniq_code || uniqCode || "-";
+
+const { data: deliveryNoteRes, isFetching: deliveryNoteLoading } =
+  useGetDeliveryNoteByUniqQuery(uniqCode, {
+    skip: !uniqCode,
+  });
+
+const deliveryNoteData = deliveryNoteRes?.data ?? [];
 
   /* ================= COLUMNS HISTORY ================= */
   const historyColumns: ColumnsType<FinishedGoodHistoryItem> = [
@@ -299,6 +307,50 @@ function FinishedGoodDetailContent() {
               ]}
             />
           )}
+
+          {deliveryNoteData?.length > 0 && (
+  <div className="mt-8">
+    <h3 className="text-lg font-semibold mb-4">Delivery Note History</h3>
+
+    <Table
+      rowKey={(record) => `${record.dn_number}-${record.packing_number}`}
+      pagination={false}
+      dataSource={deliveryNoteData}
+      columns={[
+        {
+          title: "DN Number",
+          dataIndex: "dn_number",
+          key: "dn_number",
+        },
+        {
+          title: "Packing Number",
+          dataIndex: "packing_number",
+          key: "packing_number",
+        },
+        {
+          title: "Quantity",
+          dataIndex: "quantity",
+          key: "quantity",
+          align: "right",
+        },
+        {
+          title: "Check",
+          dataIndex: "check",
+          key: "check",
+          render: (value: string) => {
+            let color = "default";
+
+            if (value === "progress") color = "processing";
+            else if (value === "done") color = "success";
+            else if (value === "pending") color = "warning";
+
+            return <Tag color={color}>{value}</Tag>;
+          },
+        },
+      ]}
+    />
+  </div>
+)}
         </Card>
       </div>
 
