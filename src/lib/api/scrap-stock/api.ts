@@ -151,6 +151,21 @@ export type ScrapStockHistoryLogRecord = {
   raw?: UnknownRecord;
 };
 
+export interface DeliveryNoteItem {
+  dn_number: string;
+  item_uniq_code: string;
+  packing_number: string;
+  quantity: number;
+  check: string;
+}
+
+export interface DeliveryNoteResponse {
+  request_id: string;
+  status: number;
+  message: string;
+  data: DeliveryNoteItem[];
+}
+
 const toScrapStockRecord = (raw: unknown): ScrapStockRecord => {
   const record = isRecord(raw) ? raw : {};
   return {
@@ -315,9 +330,7 @@ export const scrapStockSlice = apiSlice.injectEndpoints({
           ? ((obj as UnknownRecord).items as unknown[])
           : [];
         return {
-          items: rawItems
-            .map(toScrapItemOption)
-            .filter((it) => it.uniq_code),
+          items: rawItems.map(toScrapItemOption).filter((it) => it.uniq_code),
         };
       },
     }),
@@ -372,6 +385,16 @@ export const scrapStockSlice = apiSlice.injectEndpoints({
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
     }),
+    getDeliveryNoteByUniq: builder.query<DeliveryNoteResponse, string>({
+      query: (uniq) => ({
+        url: `/delivery-notes/uniq/${encodeURIComponent(uniq)}`,
+        method: "GET",
+        meta: {
+          useAuthorization: true,
+          contentType: "application/json",
+        },
+      }),
+    }),
   }),
 });
 
@@ -385,4 +408,5 @@ export const {
   useGetScrapItemOptionsQuery,
   useUpdateScrapStockMutation,
   useDeleteScrapStockMutation,
+  useGetDeliveryNoteByUniqQuery,
 } = scrapStockSlice;

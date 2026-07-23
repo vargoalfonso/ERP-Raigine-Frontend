@@ -285,6 +285,89 @@ export interface DeliveryScheduleDnCreationRecord {
   updatedAt: string;
 }
 
+export interface CustomerDeliveryNoteDetailItem {
+  dnItemId: string;
+  itemUniqCode: string;
+  partName: string;
+  partNumber: string;
+  model: string;
+  quantity: number;
+  uom: string;
+  fgLocation: string;
+  packingNumber: string;
+  qr: string;
+}
+
+export interface CustomerDeliveryNoteDetail {
+  dnId: string;
+  dnNumber: string;
+  scheduleId: string;
+  customerId?: number;
+  customerName: string;
+  poNumber: string;
+  customerContactPerson: string;
+  customerPhoneNumber: string;
+  deliveryAddress: string;
+  deliveryDate: string;
+  priority: string;
+  status: string;
+  approvalStatus: string;
+  transportCompany: string;
+  vehicleNumber: string;
+  driverName: string;
+  driverContact: string;
+  departureAt?: string;
+  arrivalAt?: string;
+  deliveryInstructions: string;
+  totalItems: number;
+  totalQuantity: number;
+  createdBy: string;
+  items: CustomerDeliveryNoteDetailItem[];
+}
+
+export interface ApprovedDeliveryScheduleDnItem {
+  itemUniqCode: string;
+  productName: string;
+  partNumber: string;
+  model: string;
+  fgLocation: string;
+  quantity: number;
+  uom: string;
+}
+
+export interface ApprovedDeliveryScheduleDnOption {
+  scheduleId: string;
+  dnId: string;
+  dnNumber: string;
+  scheduleDate: string;
+  deliveryDate: string;
+  customerId?: number;
+  customerName: string;
+  poNumber: string;
+  customerContactPerson: string;
+  customerPhoneNumber: string;
+  deliveryAddress: string;
+  priority: string;
+  transportCompany: string;
+  vehicleNumber: string;
+  driverName: string;
+  driverContact: string;
+  departureAt?: string;
+  arrivalAt?: string;
+  deliveryInstructions: string;
+  items: ApprovedDeliveryScheduleDnItem[];
+}
+
+export interface ApprovedDeliveryScheduleDnAutocompleteResponse {
+  items: ApprovedDeliveryScheduleDnOption[];
+  pagination: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
+}
+
 export interface ScanDnRobotResponse {
   dnNumber: string;
   status: string;
@@ -380,6 +463,108 @@ const toDnCreationRecord = (raw: unknown): DeliveryScheduleDnCreationRecord => {
   };
 };
 
+const toCustomerDeliveryNoteDetail = (raw: unknown): CustomerDeliveryNoteDetail => {
+  const record = isRecord(raw) ? raw : {};
+  const rawItems = Array.isArray(record.items) ? record.items : [];
+
+  return {
+    dnId: getString(record, ["dn_id", "dnId", "id"]) ?? "",
+    dnNumber: getString(record, ["dn_number", "dnNumber"]) ?? "",
+    scheduleId: getString(record, ["schedule_id", "scheduleId"]) ?? "",
+    customerId: getNumber(record, ["customer_id", "customerId"]),
+    customerName: getString(record, ["customer_name", "customerName"]) ?? "",
+    poNumber: getString(record, ["po_number", "poNumber"]) ?? "",
+    customerContactPerson: getString(record, ["customer_contact_person", "customerContactPerson"]) ?? "",
+    customerPhoneNumber: getString(record, ["customer_phone_number", "customerPhoneNumber"]) ?? "",
+    deliveryAddress: getString(record, ["delivery_address", "deliveryAddress"]) ?? "",
+    deliveryDate: getString(record, ["delivery_date", "deliveryDate"]) ?? "",
+    priority: getString(record, ["priority"]) ?? "",
+    status: getString(record, ["status"]) ?? "",
+    approvalStatus: getString(record, ["approval_status", "approvalStatus"]) ?? "",
+    transportCompany: getString(record, ["transport_company", "transportCompany"]) ?? "",
+    vehicleNumber: getString(record, ["vehicle_number", "vehicleNumber"]) ?? "",
+    driverName: getString(record, ["driver_name", "driverName"]) ?? "",
+    driverContact: getString(record, ["driver_contact", "driverContact"]) ?? "",
+    departureAt: getString(record, ["departure_at", "departureAt"]),
+    arrivalAt: getString(record, ["arrival_at", "arrivalAt"]),
+    deliveryInstructions: getString(record, ["delivery_instructions", "deliveryInstructions"]) ?? "",
+    totalItems: getNumber(record, ["total_items", "totalItems"]) ?? 0,
+    totalQuantity: getNumber(record, ["total_quantity", "totalQuantity"]) ?? 0,
+    createdBy: getString(record, ["created_by", "createdBy"]) ?? "",
+    items: rawItems.map((item) => {
+      const itemRecord = isRecord(item) ? item : {};
+      return {
+        dnItemId: getString(itemRecord, ["dn_item_id", "dnItemId", "id"]) ?? "",
+        itemUniqCode: getString(itemRecord, ["item_uniq_code", "itemUniqCode"]) ?? "",
+        partName: getString(itemRecord, ["part_name", "partName", "product_name", "productName"]) ?? "",
+        partNumber: getString(itemRecord, ["part_number", "partNumber", "part_no", "partNo"]) ?? "",
+        model: getString(itemRecord, ["model"]) ?? "",
+        quantity: getNumber(itemRecord, ["quantity", "qty"]) ?? 0,
+        uom: getString(itemRecord, ["uom", "unit"]) ?? "",
+        fgLocation: getString(itemRecord, ["fg_location", "fgLocation"]) ?? "",
+        packingNumber: getString(itemRecord, ["packing_number", "packingNumber"]) ?? "",
+        qr: getString(itemRecord, ["qr", "qr_code", "qrCode"]) ?? "",
+      };
+    }),
+  };
+};
+
+const toApprovedDeliveryScheduleDnOption = (raw: unknown): ApprovedDeliveryScheduleDnOption => {
+  const record = isRecord(raw) ? raw : {};
+  const rawItems = Array.isArray(record.items) ? record.items : [];
+
+  return {
+    scheduleId: getString(record, ["schedule_id", "scheduleId"]) ?? "",
+    dnId: getString(record, ["dn_id", "dnId", "id"]) ?? "",
+    dnNumber: getString(record, ["dn_number", "dnNumber"]) ?? "",
+    scheduleDate: getString(record, ["schedule_date", "scheduleDate"]) ?? "",
+    deliveryDate: getString(record, ["delivery_date", "deliveryDate"]) ?? "",
+    customerId: getNumber(record, ["customer_id", "customerId"]),
+    customerName: getString(record, ["customer_name", "customerName"]) ?? "",
+    poNumber: getString(record, ["po_number", "poNumber"]) ?? "",
+    customerContactPerson: getString(record, ["customer_contact_person", "customerContactPerson"]) ?? "",
+    customerPhoneNumber: getString(record, ["customer_phone_number", "customerPhoneNumber"]) ?? "",
+    deliveryAddress: getString(record, ["delivery_address", "deliveryAddress"]) ?? "",
+    priority: getString(record, ["priority"]) ?? "normal",
+    transportCompany: getString(record, ["transport_company", "transportCompany"]) ?? "",
+    vehicleNumber: getString(record, ["vehicle_number", "vehicleNumber"]) ?? "",
+    driverName: getString(record, ["driver_name", "driverName"]) ?? "",
+    driverContact: getString(record, ["driver_contact", "driverContact"]) ?? "",
+    departureAt: getString(record, ["departure_at", "departureAt"]),
+    arrivalAt: getString(record, ["arrival_at", "arrivalAt"]),
+    deliveryInstructions: getString(record, ["delivery_instructions", "deliveryInstructions"]) ?? "",
+    items: rawItems.map((item) => {
+      const itemRecord = isRecord(item) ? item : {};
+      return {
+        itemUniqCode: getString(itemRecord, ["item_uniq_code", "itemUniqCode"]) ?? "",
+        productName: getString(itemRecord, ["product_name", "productName", "part_name", "partName"]) ?? "",
+        partNumber: getString(itemRecord, ["part_number", "partNumber"]) ?? "",
+        model: getString(itemRecord, ["model"]) ?? "",
+        fgLocation: getString(itemRecord, ["fg_location", "fgLocation"]) ?? "",
+        quantity: getNumber(itemRecord, ["quantity", "qty"]) ?? 0,
+        uom: getString(itemRecord, ["uom", "unit"]) ?? "",
+      };
+    }),
+  };
+};
+
+const normalizeApprovedDeliveryScheduleDnAutocomplete = (response: unknown): ApprovedDeliveryScheduleDnAutocompleteResponse => {
+  const data = normalizeInnerData(response);
+  const record = isRecord(data) ? data : {};
+  const pagination = isRecord(record.pagination) ? record.pagination : {};
+  const rawItems = Array.isArray(record.items) ? record.items : [];
+
+  return {
+    items: rawItems.map(toApprovedDeliveryScheduleDnOption).filter((item) => Boolean(item.dnNumber)),
+    pagination: {
+      total: getNumber(pagination, ["total"]) ?? 0,
+      page: getNumber(pagination, ["page"]) ?? 1,
+      limit: getNumber(pagination, ["limit"]) ?? 20,
+      totalPages: getNumber(pagination, ["total_pages", "totalPages"]) ?? 0,
+    },
+  };
+};
+
 const toScanDnRobotResponse = (raw: unknown): ScanDnRobotResponse => {
   const record = isRecord(raw) ? raw : {};
 
@@ -452,6 +637,26 @@ export const deliveryScheduleSlice = apiSlice
           });
         },
         providesTags: [{ type: TAG, id: "SUMMARY" }],
+      }),
+
+      getApprovedDeliveryScheduleDnAutocomplete: builder.query<
+        ApiResponse<ApprovedDeliveryScheduleDnAutocompleteResponse>,
+        { search?: string; page?: number; limit?: number } | void
+      >({
+        query: (arg) => ({
+          url: "/delivery-schedules/form-options/dn",
+          method: "GET",
+          params: isRecord(arg)
+            ? {
+                search: getString(arg, ["search"]) ?? undefined,
+                page: getNumber(arg, ["page"]) ?? 1,
+                limit: getNumber(arg, ["limit"]) ?? 10,
+              }
+            : { page: 1, limit: 10 },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => ok(normalizeApprovedDeliveryScheduleDnAutocomplete(response)),
+        providesTags: [{ type: TAG, id: "APPROVED-DN-AUTOCOMPLETE" }],
       }),
 
       getDeliveryScheduleDnCreationList: builder.query<
@@ -531,6 +736,10 @@ export const deliveryScheduleSlice = apiSlice
         invalidatesTags: (_result, _error, { schedule_id }) => [
           { type: TAG, id: "LIST" },
           { type: TAG, id: schedule_id },
+          // Approving generates the customer delivery note (with QR), so refresh
+          // the DN creation list and summary immediately.
+          { type: TAG, id: "DN-CREATION-LIST" },
+          { type: TAG, id: "SUMMARY" },
         ],
       }),
 
@@ -549,6 +758,10 @@ export const deliveryScheduleSlice = apiSlice
         invalidatesTags: (_result, _error, { schedule_ids }) => [
           { type: TAG, id: "LIST" },
           ...schedule_ids.map((id) => ({ type: TAG, id })),
+          // Refresh DN creation list + summary so newly created DNs (with QR)
+          // appear right after bulk approval.
+          { type: TAG, id: "DN-CREATION-LIST" },
+          { type: TAG, id: "SUMMARY" },
         ],
       }),
 
@@ -567,13 +780,13 @@ export const deliveryScheduleSlice = apiSlice
         invalidatesTags: [{ type: TAG, id: "DN-CREATION-LIST" }],
       }),
 
-      getCustomerDeliveryNoteById: builder.query<unknown, string>({
+      getCustomerDeliveryNoteById: builder.query<CustomerDeliveryNoteDetail, string>({
         query: (id) => ({
           url: `/customer-delivery-notes/${encodeURIComponent(String(id))}`,
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => normalizeInnerData(response),
+        transformResponse: (response: unknown) => toCustomerDeliveryNoteDetail(normalizeInnerData(response)),
         providesTags: (_res, _err, id) => [{ type: TAG, id: `DN-${id}` }],
       }),
 
@@ -595,6 +808,8 @@ export const deliveryScheduleSlice = apiSlice
 export const {
   useGetDeliverySchedulesQuery,
   useGetDeliverySchedulesSummaryQuery,
+  useGetApprovedDeliveryScheduleDnAutocompleteQuery,
+  useLazyGetApprovedDeliveryScheduleDnAutocompleteQuery,
   useGetDeliveryScheduleDnCreationListQuery,
   useCreateDeliveryScheduleMutation,
   useUpdateDeliveryScheduleMutation,

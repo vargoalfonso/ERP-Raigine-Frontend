@@ -14,7 +14,17 @@ import {
   ScanOutlined,
   QrcodeOutlined,
 } from "@ant-design/icons";
-import { Button, Form, Input, InputNumber, Modal, Select, Table, Tag, message } from "antd";
+import {
+  Button,
+  Form,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
+  Table,
+  Tag,
+  message,
+} from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { BsBoxSeam } from "react-icons/bs";
 import { FiAlertTriangle } from "react-icons/fi";
@@ -33,14 +43,17 @@ import {
   useDeleteFinishedGoodMutation,
   useUpdateFinishedGoodMutation,
   useLazyGenerateFinishedGoodQRQuery,
+  useLazyGetDeliveryNoteByUniqQuery,
 } from "@/lib/api/finished-goods/api";
 import PrintButton from "@/components/PrintButton";
 import type { PrintCardOptions } from "@/lib/utils/printCard";
 
 function StatusTag({ status }: { status?: string }) {
   const normalized = (status ?? "").trim().toLowerCase();
-  if (normalized.includes("low")) return <Tag color="red">{status || "Low"}</Tag>;
-  if (normalized.includes("over")) return <Tag color="orange">{status || "Overstock"}</Tag>;
+  if (normalized.includes("low"))
+    return <Tag color="red">{status || "Low"}</Tag>;
+  if (normalized.includes("over"))
+    return <Tag color="orange">{status || "Overstock"}</Tag>;
   return <Tag color="geekblue">{status || "Normal"}</Tag>;
 }
 
@@ -48,7 +61,7 @@ function CurrentStockCell({ uniqCode }: { uniqCode: string }) {
   const apiEnabled = Boolean(apiBaseUrl);
   const q = useGetFinishedGoodParameterizedSummaryQuery(
     { uniq_code: uniqCode },
-    { skip: !apiEnabled || !uniqCode }
+    { skip: !apiEnabled || !uniqCode },
   );
 
   if (q.isFetching) return <span className="text-gray-400">…</span>;
@@ -56,8 +69,12 @@ function CurrentStockCell({ uniqCode }: { uniqCode: string }) {
 
   return (
     <div className="leading-tight">
-      <div className="text-base font-semibold text-gray-900">{q.data.stock_qty ?? 0}</div>
-      <div className="text-xs text-gray-500">Target: {q.data.target_stock_qty ?? 0}</div>
+      <div className="text-base font-semibold text-gray-900">
+        {q.data.stock_qty ?? 0}
+      </div>
+      <div className="text-xs text-gray-500">
+        Target: {q.data.target_stock_qty ?? 0}
+      </div>
     </div>
   );
 }
@@ -66,29 +83,37 @@ function StockToKanbanCell({ uniqCode }: { uniqCode: string }) {
   const apiEnabled = Boolean(apiBaseUrl);
   const q = useGetFinishedGoodParameterizedSummaryQuery(
     { uniq_code: uniqCode },
-    { skip: !apiEnabled || !uniqCode }
+    { skip: !apiEnabled || !uniqCode },
   );
   if (q.isFetching) return <span className="text-gray-400">…</span>;
   if (q.isError || !q.data) return <span className="text-gray-400">-</span>;
-  return <span className="text-base font-semibold text-gray-900">{q.data.stock_to_kanban_pcs ?? 0}</span>;
+  return (
+    <span className="text-base font-semibold text-gray-900">
+      {q.data.stock_to_kanban_pcs ?? 0}
+    </span>
+  );
 }
 
 function KanbanCell({ uniqCode }: { uniqCode: string }) {
   const apiEnabled = Boolean(apiBaseUrl);
   const q = useGetFinishedGoodParameterizedSummaryQuery(
     { uniq_code: uniqCode },
-    { skip: !apiEnabled || !uniqCode }
+    { skip: !apiEnabled || !uniqCode },
   );
   if (q.isFetching) return <span className="text-gray-400">…</span>;
   if (q.isError || !q.data) return <span className="text-gray-400">-</span>;
-  return <span className="text-sm text-gray-700">{q.data.current_kanban ?? 0} Kanban</span>;
+  return (
+    <span className="text-sm text-gray-700">
+      {q.data.current_kanban ?? 0} Kanban
+    </span>
+  );
 }
 
 function StockStatusCell({ uniqCode }: { uniqCode: string }) {
   const apiEnabled = Boolean(apiBaseUrl);
   const q = useGetFinishedGoodParameterizedSummaryQuery(
     { uniq_code: uniqCode },
-    { skip: !apiEnabled || !uniqCode }
+    { skip: !apiEnabled || !uniqCode },
   );
   if (q.isFetching) return <span className="text-gray-400">…</span>;
   if (q.isError || !q.data) return <span className="text-gray-400">-</span>;
@@ -127,7 +152,7 @@ function FinishedGoodsDetailModal({
 
   const query = useGetFinishedGoodParameterizedSummaryQuery(
     { uniq_code: uniqCode ?? "" },
-    { skip: !apiEnabled || !open || !uniqCode }
+    { skip: !apiEnabled || !open || !uniqCode },
   );
 
   const detail = query.data;
@@ -184,35 +209,49 @@ function FinishedGoodsDetailModal({
         <div className="text-gray-600">No detail found.</div>
       ) : (
         <div className="space-y-4">
-          <div className="text-sm text-gray-500">Complete information for finished goods item</div>
+          <div className="text-sm text-gray-500">
+            Complete information for finished goods item
+          </div>
 
           <div className="rounded-lg border border-blue-100 bg-blue-50 p-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <div className="text-xs text-gray-500">Product UNIQ</div>
-                <div className="text-base font-semibold text-gray-900">{detail.uniq_code}</div>
+                <div className="text-base font-semibold text-gray-900">
+                  {detail.uniq_code}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Part Number</div>
-                <div className="text-base font-semibold text-gray-900">{detail.part_number}</div>
+                <div className="text-base font-semibold text-gray-900">
+                  {detail.part_number}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Status</div>
-                <div className="mt-1">{StatusTag({ status: detail.status })}</div>
+                <div className="mt-1">
+                  {StatusTag({ status: detail.status })}
+                </div>
               </div>
             </div>
           </div>
 
           <div className="rounded-lg border border-gray-200 bg-white p-4">
-            <div className="text-base font-semibold text-gray-900">Product Information</div>
+            <div className="text-base font-semibold text-gray-900">
+              Product Information
+            </div>
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <div className="text-xs text-gray-500">Part Name</div>
-                <div className="text-sm font-medium text-gray-900">{detail.part_name || "-"}</div>
+                <div className="text-sm font-medium text-gray-900">
+                  {detail.part_name || "-"}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Model</div>
-                <div className="text-sm font-medium text-gray-900">{detail.model || "-"}</div>
+                <div className="text-sm font-medium text-gray-900">
+                  {detail.model || "-"}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Work Order Number</div>
@@ -237,22 +276,30 @@ function FinishedGoodsDetailModal({
           </div>
 
           <div className="rounded-lg border border-gray-200 bg-white p-4">
-            <div className="text-base font-semibold text-gray-900">Stock & Kanban Information</div>
+            <div className="text-base font-semibold text-gray-900">
+              Stock & Kanban Information
+            </div>
 
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <div className="text-xs text-gray-500">Current Stock</div>
-                <div className="text-2xl font-bold text-blue-600">{detail.stock_qty ?? 0}</div>
+                <div className="text-2xl font-bold text-blue-600">
+                  {detail.stock_qty ?? 0}
+                </div>
                 <div className="text-xs text-gray-400">units available</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Target Kanban</div>
-                <div className="text-2xl font-bold text-gray-900">{detail.target_stock_qty ?? 0}</div>
+                <div className="text-2xl font-bold text-gray-900">
+                  {detail.target_stock_qty ?? 0}
+                </div>
                 <div className="text-xs text-gray-400">target quantity</div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Stock to Complete</div>
-                <div className="text-2xl font-bold text-orange-600">{detail.stock_to_kanban_pcs ?? 0}</div>
+                <div className="text-2xl font-bold text-orange-600">
+                  {detail.stock_to_kanban_pcs ?? 0}
+                </div>
                 <div className="text-xs text-gray-400">more needed</div>
               </div>
             </div>
@@ -263,12 +310,15 @@ function FinishedGoodsDetailModal({
                 <div>{progress}%</div>
               </div>
               <div className="mt-2 h-3 w-full rounded-full bg-gray-200 overflow-hidden">
-                <div className="h-full rounded-full bg-blue-600" style={{ width: progress + "%" }} />
+                <div
+                  className="h-full rounded-full bg-blue-600"
+                  style={{ width: progress + "%" }}
+                />
               </div>
               <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
                 <div>{detail.current_kanban ?? 0} Kanban Complete</div>
                 <div>
-                  {(detail.stock_qty ?? 0)}/{detail.target_stock_qty ?? 0}
+                  {detail.stock_qty ?? 0}/{detail.target_stock_qty ?? 0}
                 </div>
               </div>
             </div>
@@ -276,37 +326,51 @@ function FinishedGoodsDetailModal({
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="rounded-lg bg-gray-50 p-4">
                 <div className="text-xs text-gray-500">Min Threshold</div>
-                <div className="text-lg font-bold text-gray-900">{detail.min_threshold ?? 0}</div>
+                <div className="text-lg font-bold text-gray-900">
+                  {detail.min_threshold ?? 0}
+                </div>
               </div>
               <div className="rounded-lg bg-gray-50 p-4">
                 <div className="text-xs text-gray-500">Max Threshold</div>
-                <div className="text-lg font-bold text-gray-900">{detail.max_threshold ?? 0}</div>
+                <div className="text-lg font-bold text-gray-900">
+                  {detail.max_threshold ?? 0}
+                </div>
               </div>
             </div>
           </div>
 
           <div className="rounded-lg border border-gray-200 bg-white p-4">
-            <div className="text-base font-semibold text-gray-900">Activity Timeline</div>
+            <div className="text-base font-semibold text-gray-900">
+              Activity Timeline
+            </div>
             <div className="mt-4 space-y-3 text-sm">
               <div className="flex items-start gap-2">
                 <span className="mt-2 h-2 w-2 rounded-full bg-green-500" />
                 <div>
                   <div className="font-medium text-gray-900">Last Updated</div>
-                  <div className="text-xs text-gray-500">{lastUpdatedLabel}</div>
+                  <div className="text-xs text-gray-500">
+                    {lastUpdatedLabel}
+                  </div>
                 </div>
               </div>
               <div className="flex items-start gap-2">
                 <span className="mt-2 h-2 w-2 rounded-full bg-blue-500" />
                 <div>
                   <div className="font-medium text-gray-900">Kanban Status</div>
-                  <div className="text-xs text-gray-500">{kanbanStatusText}</div>
+                  <div className="text-xs text-gray-500">
+                    {kanbanStatusText}
+                  </div>
                 </div>
               </div>
               <div className="flex items-start gap-2">
                 <span className="mt-2 h-2 w-2 rounded-full bg-orange-500" />
                 <div>
-                  <div className="font-medium text-gray-900">Current Status</div>
-                  <div className="text-xs text-gray-500">{currentStatusText}</div>
+                  <div className="font-medium text-gray-900">
+                    Current Status
+                  </div>
+                  <div className="text-xs text-gray-500">
+                    {currentStatusText}
+                  </div>
                 </div>
               </div>
             </div>
@@ -327,13 +391,17 @@ function EditFinishedGoodModal({
   onClose: (saved?: boolean) => void;
 }) {
   const apiEnabled = Boolean(apiBaseUrl);
-  const [form] = Form.useForm<{ uniq_code: string; warehouse_location: string; stock_qty: number }>();
+  const [form] = Form.useForm<{
+    uniq_code: string;
+    warehouse_location: string;
+    stock_qty: number;
+  }>();
   const [updateFinishedGood, updateState] = useUpdateFinishedGoodMutation();
 
   const uniqCode = record?.uniq_code ?? "";
   const summaryQuery = useGetFinishedGoodParameterizedSummaryQuery(
     { uniq_code: uniqCode },
-    { skip: !apiEnabled || !open || !uniqCode }
+    { skip: !apiEnabled || !open || !uniqCode },
   );
 
   useEffect(() => {
@@ -370,7 +438,11 @@ function EditFinishedGoodModal({
       confirmLoading={updateState.isLoading}
     >
       <Form form={form} layout="vertical" requiredMark={false}>
-        <Form.Item name="uniq_code" label="UNIQ" rules={[{ required: true, message: "UNIQ wajib" }]}>
+        <Form.Item
+          name="uniq_code"
+          label="UNIQ"
+          rules={[{ required: true, message: "UNIQ wajib" }]}
+        >
           <Input placeholder="LV8-002" />
         </Form.Item>
         <Form.Item
@@ -395,10 +467,10 @@ function EditFinishedGoodModal({
 
 export default function FinishedGoodsPage() {
   const router = useRouter();
-  const [generateFinishedGoodQR] = useLazyGenerateFinishedGoodQRQuery();
 
-  // Builds the print-card options and fetches the QR (kanban list / packing
-  // list resolved from the work order) on demand. 1 uniq = 1 QR.
+  const [generateFinishedGoodQR] = useLazyGenerateFinishedGoodQRQuery();
+  const [generateDeliveryNote] = useLazyGetDeliveryNoteByUniqQuery();
+
   const handleGenerateQR = async (
     record: FinishedGoodListItem,
   ): Promise<PrintCardOptions | null> => {
@@ -408,31 +480,57 @@ export default function FinishedGoodsPage() {
     }
 
     let qrDataUrl: string | undefined;
-    try {
-      const result = await generateFinishedGoodQR(record.uniq_code).unwrap();
-      const qr = result?.qr ?? "";
-      qrDataUrl = qr
-        ? qr.startsWith("data:image")
-          ? qr
-          : `data:image/png;base64,${qr}`
-        : undefined;
-    } catch (err) {
-      console.error(err);
-    }
 
+    const result = await generateFinishedGoodQR(record.uniq_code).unwrap();
+
+    const qr = result?.qr ?? "";
+
+    qrDataUrl = qr
+      ? qr.startsWith("data:image")
+        ? qr
+        : `data:image/png;base64,${qr}`
+      : undefined;
+
+    const deliveryNoteRes = await generateDeliveryNote(
+      record.uniq_code,
+    ).unwrap();
+
+    const deliveryNoteData = deliveryNoteRes.data ?? [];
+    
     return {
       documentTitle: `Finished Good - ${record.uniq_code}`,
       heading: "FINISHED GOOD",
       subheading: record.uniq_code,
       fields: [
-        { label: "Part Number", value: record.part_number },
-        { label: "Part Name", value: record.part_name, full: true },
-        { label: "Model", value: record.model },
-        { label: "WO Number", value: record.wo_number },
-        { label: "Warehouse", value: record.warehouse_location },
+        {
+          label: "Part Number",
+          value: record.part_number,
+        },
+        {
+          label: "Part Name",
+          value: record.part_name,
+          full: true,
+        },
+        {
+          label: "Model",
+          value: record.model,
+        },
+        {
+          label: "WO Number",
+          value: record.wo_number,
+        },
+        {
+          label: "Warehouse",
+          value: record.warehouse_location,
+        },
       ],
+
+      deliveryNotes: deliveryNoteData,
+
       qrDataUrl,
+
       bottomCode: record.uniq_code,
+
       onError: (msg) => message.error(msg),
     };
   };
@@ -446,15 +544,21 @@ export default function FinishedGoodsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [detailRecord, setDetailRecord] = useState<FinishedGoodListItem | null>(null);
+  const [detailRecord, setDetailRecord] = useState<FinishedGoodListItem | null>(
+    null,
+  );
   const [editOpen, setEditOpen] = useState(false);
-  const [editRecord, setEditRecord] = useState<FinishedGoodListItem | null>(null);
+  const [editRecord, setEditRecord] = useState<FinishedGoodListItem | null>(
+    null,
+  );
 
   const listQuery = useGetFinishedGoodsQuery(
     { page: currentPage, limit: pageSize },
-    { skip: !apiEnabled }
+    { skip: !apiEnabled },
   );
-  const summaryQuery = useGetFinishedGoodsSummaryQuery(undefined, { skip: !apiEnabled });
+  const summaryQuery = useGetFinishedGoodsSummaryQuery(undefined, {
+    skip: !apiEnabled,
+  });
 
   const items = listQuery.data?.items ?? [];
   const total = listQuery.data?.pagination.total ?? items.length;
@@ -463,10 +567,18 @@ export default function FinishedGoodsPage() {
     const q = searchValue.trim().toLowerCase();
     if (!q) return items;
     return items.filter((r) =>
-      [r.uniq_code, r.part_number, r.part_name, r.model, r.wo_number, r.warehouse_location, r.uom]
+      [
+        r.uniq_code,
+        r.part_number,
+        r.part_name,
+        r.model,
+        r.wo_number,
+        r.warehouse_location,
+        r.uom,
+      ]
         .join(" ")
         .toLowerCase()
-        .includes(q)
+        .includes(q),
     );
   }, [items, searchValue]);
 
@@ -513,14 +625,21 @@ export default function FinishedGoodsPage() {
 
   const columns: ColumnsType<FinishedGoodListItem> = [
     { title: "Uniq", dataIndex: "uniq_code", key: "uniq", width: 110 },
-    { title: "Part Number", dataIndex: "part_number", key: "part_number", width: 130 },
+    {
+      title: "Part Number",
+      dataIndex: "part_number",
+      key: "part_number",
+      width: 130,
+    },
     {
       title: "Part Info",
       key: "part_info",
       width: 240,
       render: (_: unknown, record) => (
         <div className="leading-tight">
-          <div className="text-sm font-semibold text-gray-900">{record.part_name || "-"}</div>
+          <div className="text-sm font-semibold text-gray-900">
+            {record.part_name || "-"}
+          </div>
           <div className="text-xs text-gray-500">{record.model || "-"}</div>
         </div>
       ),
@@ -554,25 +673,33 @@ export default function FinishedGoodsPage() {
       title: "Current Stock",
       key: "current_stock",
       width: 140,
-      render: (_: unknown, record) => <CurrentStockCell uniqCode={record.uniq_code} />,
+      render: (_: unknown, record) => (
+        <CurrentStockCell uniqCode={record.uniq_code} />
+      ),
     },
     {
       title: "Stock to Kanban",
       key: "stock_to_kanban",
       width: 150,
-      render: (_: unknown, record) => <StockToKanbanCell uniqCode={record.uniq_code} />,
+      render: (_: unknown, record) => (
+        <StockToKanbanCell uniqCode={record.uniq_code} />
+      ),
     },
     {
       title: "Kanban",
       key: "kanban",
       width: 120,
-      render: (_: unknown, record) => <KanbanCell uniqCode={record.uniq_code} />,
+      render: (_: unknown, record) => (
+        <KanbanCell uniqCode={record.uniq_code} />
+      ),
     },
     {
       title: "Stock Status",
       key: "stock_status",
       width: 150,
-      render: (_: unknown, record) => <StockStatusCell uniqCode={record.uniq_code} />,
+      render: (_: unknown, record) => (
+        <StockStatusCell uniqCode={record.uniq_code} />
+      ),
     },
     {
       title: "Last Updated",
@@ -580,7 +707,9 @@ export default function FinishedGoodsPage() {
       width: 180,
       render: (_: unknown, record) => (
         <span className="text-sm text-gray-600">
-          {record.updated_at ? new Date(record.updated_at).toLocaleString() : "-"}
+          {record.updated_at
+            ? new Date(record.updated_at).toLocaleString()
+            : "-"}
         </span>
       ),
     },
@@ -648,13 +777,20 @@ export default function FinishedGoodsPage() {
           if (detailRecord) openEdit(detailRecord);
         }}
       />
-      <EditFinishedGoodModal open={editOpen} record={editRecord} onClose={closeEdit} />
+      <EditFinishedGoodModal
+        open={editOpen}
+        record={editRecord}
+        onClose={closeEdit}
+      />
 
       <div className="flex items-center justify-between bg-white p-4 rounded-lg shadow-sm">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Finished Goods Database</h1>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">
+            Finished Goods Database
+          </h1>
           <p className="text-gray-600">
-            Track FG by Uniq, linked to WO and warehouse location with real-time status flagging
+            Track FG by Uniq, linked to WO and warehouse location with real-time
+            status flagging
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -785,7 +921,10 @@ export default function FinishedGoodsPage() {
                   { value: "overstock", label: "Overstock" },
                 ]}
               />
-              <Button icon={<DownloadOutlined />} onClick={() => message.info("Export (coming soon)")}>
+              <Button
+                icon={<DownloadOutlined />}
+                onClick={() => message.info("Export (coming soon)")}
+              >
                 Export
               </Button>
             </div>
@@ -794,7 +933,9 @@ export default function FinishedGoodsPage() {
 
         <div className="px-6 py-5">
           <div className="flex items-center justify-between mb-3">
-            <div className="text-lg font-semibold text-gray-900">Finished Goods Inventory</div>
+            <div className="text-lg font-semibold text-gray-900">
+              Finished Goods Inventory
+            </div>
             <div className="text-xs text-gray-500 rounded-full border border-gray-200 px-3 py-1">
               {total} FG items tracked
             </div>

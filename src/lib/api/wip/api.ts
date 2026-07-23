@@ -4,7 +4,8 @@ import type { ApiResponse } from "@/types";
 
 type UnknownRecord = Record<string, unknown>;
 
-const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
 
 const toText = (value: unknown): string | undefined => {
   if (typeof value === "string") {
@@ -24,21 +25,33 @@ const toNumber = (value: unknown): number | undefined => {
   return undefined;
 };
 
-const ok = <T,>(data: T, message = "OK", pagination?: ApiResponse<T>["pagination"]): ApiResponse<T> => ({
+const ok = <T>(
+  data: T,
+  message = "OK",
+  pagination?: ApiResponse<T>["pagination"],
+): ApiResponse<T> => ({
   message,
   status: "success",
   data,
   ...(pagination ? { pagination } : {}),
 });
 
-const parsePagination = (response: unknown): ApiResponse<unknown>["pagination"] | undefined => {
+const parsePagination = (
+  response: unknown,
+): ApiResponse<unknown>["pagination"] | undefined => {
   const unwrapped = unwrapBackendData<unknown>(response);
 
-  const container = isRecord(unwrapped) ? unwrapped : isRecord(response) ? response : undefined;
-  const data = container && isRecord(container.data) ? container.data : container;
+  const container = isRecord(unwrapped)
+    ? unwrapped
+    : isRecord(response)
+      ? response
+      : undefined;
+  const data =
+    container && isRecord(container.data) ? container.data : container;
   if (!data || !isRecord(data)) return undefined;
 
-  const total = toNumber(data.total) ?? toNumber((data as UnknownRecord).count) ?? 0;
+  const total =
+    toNumber(data.total) ?? toNumber((data as UnknownRecord).count) ?? 0;
   const page = toNumber(data.page) ?? 1;
   const perPage = toNumber(data.limit) ?? toNumber(data.perPage) ?? 10;
   const totalPages = perPage > 0 ? Math.max(1, Math.ceil(total / perPage)) : 1;
@@ -100,6 +113,21 @@ export type WipUpdateRequest = {
   status: string;
 };
 
+export interface DeliveryNoteItem {
+  dn_number: string;
+  item_uniq_code: string;
+  packing_number: string;
+  quantity: number;
+  check: string;
+}
+
+export interface DeliveryNoteResponse {
+  request_id: string;
+  status: number;
+  message: string;
+  data: DeliveryNoteItem[];
+}
+
 const toWipListRow = (raw: unknown): WipListRow => {
   const r = isRecord(raw) ? raw : {};
   return {
@@ -110,9 +138,13 @@ const toWipListRow = (raw: unknown): WipListRow => {
     part_info: toText(r.part_info ?? r.part_name ?? r.partName ?? r.PartInfo),
     wo_number: toText(r.wo_number ?? r.woNumber ?? r.WorkOrderNumber),
     stock: toNumber(r.stock ?? r.stock_qty ?? r.Stock),
-    kanban_number: toText(r.kanban_number ?? r.kanbanCode ?? r.packing_number ?? r.PackingNumber),
+    kanban_number: toText(
+      r.kanban_number ?? r.kanbanCode ?? r.packing_number ?? r.PackingNumber,
+    ),
     type: toText(r.type ?? r.wip_type ?? r.status ?? r.Status),
-    stock_to_complete_kanban: toNumber(r.stock_to_complete_kanban ?? r.stockToCompleteKanban),
+    stock_to_complete_kanban: toNumber(
+      r.stock_to_complete_kanban ?? r.stockToCompleteKanban,
+    ),
     kanban: toNumber(r.kanban ?? r.kanban_count ?? r.kanbanCount),
   };
 };
@@ -142,7 +174,11 @@ const toWipDetail = (raw: unknown): WipDetail | null => {
 
 const parseListItems = (response: unknown): WipListRow[] => {
   const unwrapped = unwrapBackendData<unknown>(response);
-  const base = isRecord(unwrapped) ? unwrapped : isRecord(response) ? response : undefined;
+  const base = isRecord(unwrapped)
+    ? unwrapped
+    : isRecord(response)
+      ? response
+      : undefined;
 
   // When `unwrapBackendData` returns `{ items: [...] }` directly.
   if (base && Array.isArray((base as UnknownRecord).items)) {
@@ -163,7 +199,11 @@ const parseListItems = (response: unknown): WipListRow[] => {
   }
 
   // Alternative shapes
-  if (base && isRecord(base.data) && Array.isArray((base.data as UnknownRecord).data)) {
+  if (
+    base &&
+    isRecord(base.data) &&
+    Array.isArray((base.data as UnknownRecord).data)
+  ) {
     return ((base.data as UnknownRecord).data as unknown[]).map(toWipListRow);
   }
   if (Array.isArray(unwrapped)) return unwrapped.map(toWipListRow);
@@ -238,16 +278,27 @@ const parseHistoryItems = (response: unknown): WipMovementLogItem[] => {
 
 export const wipApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
-    getWipList: builder.query<ApiResponse<WipListRow[]>, { page?: number; limit?: number }>({
+    getWipList: builder.query<
+      ApiResponse<WipListRow[]>,
+      { page?: number; limit?: number }
+    >({
       query: ({ page = 1, limit = 10 }) => ({
         url: `/wip?page=${page}&limit=${limit}`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(parseListItems(response), "WIP retrieved", parsePagination(response)),
+      transformResponse: (response: unknown) =>
+        ok(
+          parseListItems(response),
+          "WIP retrieved",
+          parsePagination(response),
+        ),
     }),
 
-    getWipDetail: builder.query<ApiResponse<WipDetail>, { id: string | number }>({
+    getWipDetail: builder.query<
+      ApiResponse<WipDetail>,
+      { id: string | number }
+    >({
       query: ({ id }) => ({
         url: `/wip/${encodeURIComponent(String(id))}`,
         method: "GET",
@@ -255,9 +306,16 @@ export const wipApiSlice = apiSlice.injectEndpoints({
       }),
       transformResponse: (response: unknown, _meta, arg) => {
         const unwrapped = unwrapBackendData<unknown>(response);
-        const obj = isRecord(unwrapped) ? unwrapped : isRecord(response) ? response : {};
+        const obj = isRecord(unwrapped)
+          ? unwrapped
+          : isRecord(response)
+            ? response
+            : {};
         const data = isRecord(obj.data) ? obj.data : obj;
-        return ok(toWipDetail(data) ?? { id: String(arg.id), processes: [] }, "WIP detail retrieved");
+        return ok(
+          toWipDetail(data) ?? { id: String(arg.id), processes: [] },
+          "WIP detail retrieved",
+        );
       },
     }),
 
@@ -268,17 +326,32 @@ export const wipApiSlice = apiSlice.injectEndpoints({
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(unwrapBackendData<unknown>(response), "WIP created"),
+      transformResponse: (response: unknown) =>
+        ok(unwrapBackendData<unknown>(response), "WIP created"),
     }),
 
-    updateWip: builder.mutation<ApiResponse<unknown>, { id: string | number; body: WipUpdateRequest }>({
+    updateWip: builder.mutation<
+      ApiResponse<unknown>,
+      { id: string | number; body: WipUpdateRequest }
+    >({
       query: ({ id, body }) => ({
         url: `/wip/${encodeURIComponent(String(id))}`,
         method: "PUT",
         body,
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
-      transformResponse: (response: unknown) => ok(unwrapBackendData<unknown>(response), "WIP updated"),
+      transformResponse: (response: unknown) =>
+        ok(unwrapBackendData<unknown>(response), "WIP updated"),
+    }),
+    getDeliveryNoteByUniq: builder.query<DeliveryNoteResponse, string>({
+      query: (uniq) => ({
+        url: `/delivery-notes/uniq/${encodeURIComponent(uniq)}`,
+        method: "GET",
+        meta: {
+          useAuthorization: true,
+          contentType: "application/json",
+        },
+      }),
     }),
 
     getWipHistory: builder.query<ApiResponse<WipMovementLogItem[]>, WipHistoryParams>({
@@ -298,4 +371,5 @@ export const {
   useCreateWipMutation,
   useUpdateWipMutation,
   useGetWipHistoryQuery,
+  useGetDeliveryNoteByUniqQuery,
 } = wipApiSlice;

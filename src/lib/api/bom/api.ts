@@ -636,7 +636,8 @@ export const bomSlice = apiSlice.injectEndpoints({
     >({
       query: (params) => {
         const page = params?.page ?? 1;
-        const limit = params?.limit ?? 1000;
+        // Backend clamps any limit > 200 down to 20; request the max allowed.
+        const limit = Math.min(1000, params?.limit ?? 1000);
         const searchParams = new URLSearchParams({
           page: String(page),
           limit: String(limit),
@@ -675,7 +676,8 @@ export const bomSlice = apiSlice.injectEndpoints({
     >({
       query: (params) => {
         const page = params?.page ?? 1;
-        const limit = params?.limit ?? 1000;
+        // Backend clamps any limit > 200 down to 20; request the max allowed.
+        const limit = Math.min(1000, params?.limit ?? 1000);
         const searchParams = new URLSearchParams({
           page: String(page),
           limit: String(limit),

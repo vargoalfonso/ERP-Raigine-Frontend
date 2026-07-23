@@ -1,10 +1,15 @@
-
-
 export type PrintCardField = {
   label: string;
   value: string | number | null | undefined;
   /** When true the field spans both grid columns (useful for long text). */
   full?: boolean;
+};
+
+export type DeliveryNotePrint = {
+  dn_number: string;
+  packing_number: string;
+  quantity: number;
+  check: string;
 };
 
 export type PrintCardOptions = {
@@ -16,6 +21,8 @@ export type PrintCardOptions = {
   subheading?: string;
   /** Two-column field grid. */
   fields: PrintCardField[];
+
+  deliveryNotes?: DeliveryNotePrint[];
   /** QR image source (canvas data URL or https URL). Optional. */
   qrDataUrl?: string;
   /** Centered code shown under the QR. Optional. */
@@ -42,9 +49,16 @@ const formatValue = (value: string | number | null | undefined) => {
 };
 
 const buildCardHtml = (opts: PrintCardOptions) => {
-  const { documentTitle, heading, subheading, fields, qrDataUrl, bottomCode } =
-    opts;
-
+  const {
+    documentTitle,
+    heading,
+    subheading,
+    fields,
+    deliveryNotes,
+    qrDataUrl,
+    bottomCode,
+  } = opts;
+  
   const fieldsHtml = fields
     .map(
       (f) => `
@@ -54,6 +68,37 @@ const buildCardHtml = (opts: PrintCardOptions) => {
         </div>`,
     )
     .join("");
+
+  const deliveryNotesHtml =
+    deliveryNotes && deliveryNotes.length
+      ? `
+      <div class="divider"></div>
+
+      <table class="dn-table">
+        <thead>
+          <tr>
+            <th>DN Number</th>
+            <th>Packing List</th>
+            <th>Qty</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          ${deliveryNotes
+            .map(
+              (x) => `
+              <tr>
+                <td>${escapeHtml(x.dn_number)}</td>
+                <td>${escapeHtml(x.packing_number)}</td>
+                <td>${escapeHtml(x.quantity)}</td>
+              </tr>
+            `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    `
+      : "";
 
   return `<!doctype html>
 <html>
@@ -77,6 +122,9 @@ const buildCardHtml = (opts: PrintCardOptions) => {
       .qr { display: flex; justify-content: center; align-items: center; padding: 12px 0 6px; }
       .qr img { width: 180px; height: 180px; image-rendering: pixelated; object-fit: contain; }
       .bottom-code { text-align: center; font-size: 12px; color: #111827; margin-top: 6px; font-weight: 600; }
+      .dn-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 11px; }
+      .dn-table th { background: #f3f4f6; border: 1px solid #d1d5db; padding: 6px; text-align: left; }
+      .dn-table td { border: 1px solid #d1d5db; padding: 6px; }
       @media print {
         body { padding: 0; }
         .card { border: none; }
@@ -89,6 +137,7 @@ const buildCardHtml = (opts: PrintCardOptions) => {
       <div class="center-title">${escapeHtml(heading)}</div>
       ${subheading ? `<div class="center-sub">${escapeHtml(subheading)}</div>` : ""}
       <div class="grid">${fieldsHtml}</div>
+      ${deliveryNotesHtml}
       ${
         qrDataUrl
           ? `<div class="divider"></div>
@@ -164,7 +213,9 @@ export function openPrintCard(opts: PrintCardOptions): boolean {
       const img = frameDoc.querySelector("img");
       if (img && !img.complete) {
         img.addEventListener("load", () => window.setTimeout(triggerPrint, 50));
-        img.addEventListener("error", () => window.setTimeout(triggerPrint, 50));
+        img.addEventListener("error", () =>
+          window.setTimeout(triggerPrint, 50),
+        );
         // Safety fallback in case the image never fires an event.
         window.setTimeout(triggerPrint, 1500);
       } else {

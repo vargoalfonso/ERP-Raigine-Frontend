@@ -312,11 +312,6 @@ export default function CreateCustomerOrderPage() {
     return `SO-${code}-${year}-001`;
   }, [customerName, orderType]);
 
-  const displayOrderNumber = useMemo(() => {
-    const ext = String(externalOrderNumberWatch ?? "").trim();
-    return ext || orderNumber;
-  }, [externalOrderNumberWatch, orderNumber]);
-
   const summary = useMemo(() => {
     const totalQty = rows.reduce((acc, r) => acc + (r.qty ?? 0), 0);
     const uniqSet = new Set(rows.map((r) => r.uniq));
@@ -790,15 +785,10 @@ export default function CreateCustomerOrderPage() {
                 onChange={(v) => {
                   setEntryUniq(v);
                   const bomUom = bomIndex.uomByUniq[v];
-                  if (
-                    !entryUom &&
-                    typeof bomUom === "string" &&
-                    bomUom.trim()
-                  ) {
-                    const hasUom = uomOptions.some(
-                      (o) => o.value === bomUom.trim(),
-                    );
-                    if (hasUom) setEntryUom(bomUom.trim());
+                  if (typeof bomUom === "string" && bomUom.trim()) {
+                    const candidate = bomUom.trim();
+                    const hasUom = uomOptions.some((o) => String(o.value) === candidate);
+                    if (hasUom) setEntryUom(candidate);
                   }
                 }}
                 options={uniqOptions}
@@ -841,11 +831,11 @@ export default function CreateCustomerOrderPage() {
             </div>
             <div className="lg:col-span-3">
               <label className="block mb-2 font-medium text-gray-700">
-                Customer PO / DN / SO Number
+                No. Manual (Customer PO / DN / SO)
               </label>
 
               <Form.Item name="externalOrderNumber" noStyle>
-                <Input placeholder="Masukkan nomor PO/DN/SO (free-text) — akan menggantikan nomor yang digenerate" />
+                <Input placeholder="Isi nomor manual (opsional). Nomor Auto tetap dibuat sistem." />
               </Form.Item>
             </div>
 
@@ -863,7 +853,7 @@ export default function CreateCustomerOrderPage() {
             {orderNumber}
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
             <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
               <div className="text-xs text-gray-500">Total Qty</div>
               <div className="text-lg font-bold text-gray-900">
@@ -871,9 +861,15 @@ export default function CreateCustomerOrderPage() {
               </div>
             </div>
             <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
-              <div className="text-xs text-gray-500">{orderNumberLabel}</div>
+              <div className="text-xs text-gray-500">{orderNumberLabel} (Auto)</div>
               <div className="text-sm font-semibold text-gray-900">
-                {displayOrderNumber}
+                {orderNumber}
+              </div>
+            </div>
+            <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">
+              <div className="text-xs text-gray-500">No. Manual</div>
+              <div className="text-sm font-semibold text-gray-900">
+                {String(externalOrderNumberWatch ?? "").trim() || "-"}
               </div>
             </div>
             <div className="bg-gray-50 rounded-xl border border-gray-100 p-4">

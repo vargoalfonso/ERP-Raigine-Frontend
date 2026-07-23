@@ -42,7 +42,11 @@ import {
   useListCustomersQuery,
   type CustomerRecord,
 } from "@/lib/api/customers/api";
-import { useListPrlsQuery, type PrlRecord, type PrlType } from "@/lib/api/prl/api";
+import {
+  useListPrlsQuery,
+  type PrlRecord,
+  type PrlType,
+} from "@/lib/api/prl/api";
 import { useListCustomerPosQuery } from "@/lib/api/customer-orders/api";
 import {
   useGetGlobalWorkingDaysQuery,
@@ -215,7 +219,6 @@ function dedupeSupplierOptions(options: SupplierOption[]): SupplierOption[] {
   return result;
 }
 
-
 function normalizeSupplierItemType(value: unknown): BudgetTabId | null {
   const raw = String(value ?? "")
     .trim()
@@ -244,12 +247,20 @@ function isIntegerId(value: string) {
 }
 
 function collectMaterialGrades(node: Record<string, any>) {
-  const out: Array<{ id?: number; uniq?: string; material_grade?: string | null }> = [];
+  const out: Array<{
+    id?: number;
+    uniq?: string;
+    material_grade?: string | null;
+  }> = [];
 
   function walk(n: Record<string, any>) {
     if (!n || typeof n !== "object") return;
     const ms = (n.material_spec ?? {}) as Record<string, any>;
-    out.push({ id: n.id, uniq: n.uniq ?? n.uniq_code, material_grade: ms.material_grade ?? null });
+    out.push({
+      id: n.id,
+      uniq: n.uniq ?? n.uniq_code,
+      material_grade: ms.material_grade ?? null,
+    });
     if (Array.isArray(n.children)) {
       for (const c of n.children) walk(c);
     }
@@ -341,7 +352,8 @@ function StatCard(props: {
         className={
           "h-10 w-10 rounded-lg flex items-center justify-center " +
           (accent ?? "bg-blue-50 text-blue-600")
-        }>
+        }
+      >
         {icon}
       </div>
     </div>
@@ -361,41 +373,45 @@ export default function PoBudgetPage() {
     return [];
   }, [bomTreeRes?.data]);
   const materialGrades = useMemo(() => {
-    const all: Array<{ id?: number; uniq?: string; material_grade?: string | null }> = [];
+    const all: Array<{
+      id?: number;
+      uniq?: string;
+      material_grade?: string | null;
+    }> = [];
     for (const node of bomTreeNodes) {
       all.push(...collectMaterialGrades(node as Record<string, any>));
     }
     return all;
   }, [bomTreeNodes]);
-function resolveSupplierName(
-  supplierValue: unknown,
-  supplierNameByCode: Map<string, string>,
-) {
-  if (typeof supplierValue === "string") {
-    return supplierNameByCode.get(supplierValue) ?? supplierValue;
-  }
-
-  if (isRecord(supplierValue)) {
-    if (
-      typeof supplierValue.supplier_name === "string" &&
-      supplierValue.supplier_name.trim()
-    ) {
-      return supplierValue.supplier_name;
+  function resolveSupplierName(
+    supplierValue: unknown,
+    supplierNameByCode: Map<string, string>,
+  ) {
+    if (typeof supplierValue === "string") {
+      return supplierNameByCode.get(supplierValue) ?? supplierValue;
     }
 
-    if (
-      typeof supplierValue.supplier_code === "string" &&
-      supplierValue.supplier_code.trim()
-    ) {
-      return (
-        supplierNameByCode.get(supplierValue.supplier_code) ??
-        supplierValue.supplier_code
-      );
-    }
-  }
+    if (isRecord(supplierValue)) {
+      if (
+        typeof supplierValue.supplier_name === "string" &&
+        supplierValue.supplier_name.trim()
+      ) {
+        return supplierValue.supplier_name;
+      }
 
-  return "-";
-}
+      if (
+        typeof supplierValue.supplier_code === "string" &&
+        supplierValue.supplier_code.trim()
+      ) {
+        return (
+          supplierNameByCode.get(supplierValue.supplier_code) ??
+          supplierValue.supplier_code
+        );
+      }
+    }
+
+    return "-";
+  }
 
   useEffect(() => {
     if (materialGrades.length > 0) {
@@ -591,10 +607,16 @@ function resolveSupplierName(
   const [bulkPo1Pct, setBulkPo1Pct] = useState<number>(60);
   const [bulkPo2Pct, setBulkPo2Pct] = useState<number>(40);
   const [addBudgetType, setAddBudgetType] = useState<BulkBudgetType>("adhoc");
-  const [selectedSinglePrlId, setSelectedSinglePrlId] = useState<string | undefined>(undefined);
+  const [selectedSinglePrlId, setSelectedSinglePrlId] = useState<
+    string | undefined
+  >(undefined);
   const [singleChildRows, setSingleChildRows] = useState<BulkItemRow[]>([]);
-  const [bulkPrlDetailCache, setBulkPrlDetailCache] = useState<Record<string, PoBudgetPrlDetail>>({});
-  const [expandedBudgetRowKeys, setExpandedBudgetRowKeys] = useState<string[]>([]);
+  const [bulkPrlDetailCache, setBulkPrlDetailCache] = useState<
+    Record<string, PoBudgetPrlDetail>
+  >({});
+  const [expandedBudgetRowKeys, setExpandedBudgetRowKeys] = useState<string[]>(
+    [],
+  );
   const [, setExpandedBulkRowKeys] = useState<string[]>([]);
   // Material tree in the list: tracks EXPANDED keys (default = collapsed).
   const [expandedStoredParentKeys, setExpandedStoredParentKeys] = useState<
@@ -1075,6 +1097,33 @@ function resolveSupplierName(
     return grouped;
   }, [activeTab, supplierItems]);
 
+  // Tab-agnostic index of every active supplier item, keyed by BOTH its
+  // uniq_code and sebango_code. Child rows (raw-material / indirect budgets)
+  // can contain items of any procurement type — e.g. a subcon part registered
+  // under its sebango code like "BC48-A" — so their registered suppliers must
+  // resolve regardless of the currently active budget tab.
+  const supplierItemsByCode = useMemo(() => {
+    const grouped = new Map<string, SupplierItemRecord[]>();
+    supplierItems.forEach((item) => {
+      const status = String(item.status ?? "active").toLowerCase();
+      if (status && status !== "active") return;
+      const keys = Array.from(
+        new Set(
+          [
+            normalizeLookupValue(item.uniq_code),
+            normalizeLookupValue(item.sebango_code),
+          ].filter(Boolean),
+        ),
+      );
+      keys.forEach((key) => {
+        const current = grouped.get(key) ?? [];
+        current.push(item);
+        grouped.set(key, current);
+      });
+    });
+    return grouped;
+  }, [supplierItems]);
+
   const supplierItemsByLookupKey = useMemo(() => {
     const grouped = new Map<string, SupplierItemRecord[]>();
 
@@ -1083,7 +1132,10 @@ function resolveSupplierName(
       const itemTab = normalizeSupplierItemType(
         item.type ?? item.material_type,
       );
-      if ((status && status !== "active") || (itemTab && itemTab !== activeTab)) {
+      if (
+        (status && status !== "active") ||
+        (itemTab && itemTab !== activeTab)
+      ) {
         return;
       }
 
@@ -1108,13 +1160,17 @@ function resolveSupplierName(
   ) => {
     const matches = [
       ...(supplierItemsByLookupKey.get(normalizeLookupValue(uniqCode)) ?? []),
-      ...(supplierItemsByLookupKey.get(normalizeLookupValue(sebangoCode)) ?? []),
+      ...(supplierItemsByLookupKey.get(normalizeLookupValue(sebangoCode)) ??
+        []),
     ];
 
     const deduped = new Map<string, SupplierItemRecord>();
     matches.forEach((item, index) => {
       const key = String(
-        item.id ?? item.supplier_item_uuid ?? item.row_id ?? `${uniqCode ?? ""}-${sebangoCode ?? ""}-${index}`,
+        item.id ??
+          item.supplier_item_uuid ??
+          item.row_id ??
+          `${uniqCode ?? ""}-${sebangoCode ?? ""}-${index}`,
       );
       if (!deduped.has(key)) deduped.set(key, item);
     });
@@ -1335,19 +1391,25 @@ function resolveSupplierName(
   // useListPrlsQuery sends prl_type derived from whichever modal (bulk or
   // single Add) is open — see activePrlTypeFilter.
   const bulkPrlOptions = useMemo(() => {
-    const prlGroups = new Map<string, { customerName: string; uniqs: string[] }>();
+    const prlGroups = new Map<
+      string,
+      { customerName: string; uniqs: string[] }
+    >();
     for (const item of approvedPrls) {
       const prlId = String(item.prl_id ?? item.id ?? "");
       if (!prlId) continue;
       const customerName = String(
         item.customer?.customer_name ?? item.customer_name ?? "-",
       );
-      const uniqCode = String(item.uniq_code ?? item.item_uniq_code ?? "").trim();
+      const uniqCode = String(
+        item.uniq_code ?? item.item_uniq_code ?? "",
+      ).trim();
       if (!prlGroups.has(prlId)) {
         prlGroups.set(prlId, { customerName, uniqs: [] });
       }
       const group = prlGroups.get(prlId)!;
-      if (uniqCode && !group.uniqs.includes(uniqCode)) group.uniqs.push(uniqCode);
+      if (uniqCode && !group.uniqs.includes(uniqCode))
+        group.uniqs.push(uniqCode);
     }
     return Array.from(prlGroups.entries()).map(([prlId, group]) => {
       const uniqSummary = group.uniqs.length > 0 ? group.uniqs.join(", ") : "-";
@@ -1451,7 +1513,11 @@ function resolveSupplierName(
   }, [approvedPrls, bulkPrlIds]);
 
   useEffect(() => {
-    if (!useApi || !selectedSinglePrlId || !isChildBudgetType(getApiType(activeTab))) {
+    if (
+      !useApi ||
+      !selectedSinglePrlId ||
+      !isChildBudgetType(getApiType(activeTab))
+    ) {
       setSingleChildRows([]);
       return;
     }
@@ -1477,7 +1543,12 @@ function resolveSupplierName(
   }, [activeTab, loadPoBudgetPrlDetail, selectedSinglePrlId]);
 
   useEffect(() => {
-    if (!useApi || !bulkOpen || !isChildBudgetType(getApiType(activeTab)) || bulkPrlIds.length === 0) {
+    if (
+      !useApi ||
+      !bulkOpen ||
+      !isChildBudgetType(getApiType(activeTab)) ||
+      bulkPrlIds.length === 0
+    ) {
       return;
     }
 
@@ -1558,6 +1629,126 @@ function resolveSupplierName(
       });
   };
 
+  // Resolve the supplier-items registered for a specific child row by matching
+  // on ANY of the row's codes (UNIQ or sebango/material code), ignoring the
+  // active tab so subcon parts registered under their sebango still resolve.
+  const getChildSupplierItems = (
+    row: PoBudgetChildRow,
+  ): SupplierItemRecord[] => {
+    const codes = Array.from(
+      new Set(
+        [
+          normalizeLookupValue(getChildSupplierLookupUniq(row)),
+          normalizeLookupValue(row.uniq),
+          normalizeLookupValue(row.childUniqCode),
+        ].filter(Boolean),
+      ),
+    );
+    const deduped = new Map<string, SupplierItemRecord>();
+    codes.forEach((code) => {
+      (supplierItemsByCode.get(code) ?? []).forEach((item, index) => {
+        const key = String(
+          item.id ??
+            item.supplier_item_uuid ??
+            item.row_id ??
+            `${code}-${index}`,
+        );
+        if (!deduped.has(key)) deduped.set(key, item);
+      });
+    });
+    return Array.from(deduped.values()).sort(
+      (a, b) => Number(a.row_id ?? 0) - Number(b.row_id ?? 0),
+    );
+  };
+
+  const buildSupplierOptionsFromItems = (
+    items: SupplierItemRecord[],
+  ): SupplierOption[] => {
+    const deduped = new Map<string, SupplierOption>();
+    items.forEach((item) => {
+      const supplierName =
+        typeof item.supplier_name === "string" ? item.supplier_name.trim() : "";
+      if (!supplierName) return;
+      const supplierId = resolveSupplierRowId({
+        supplierUuid: item.supplier_uuid,
+        supplierCode: item.supplier_code,
+        supplierName,
+        fallbackValue: item.supplier_uuid,
+      });
+      const supplierValue =
+        item.supplier_uuid == null ? supplierName : String(item.supplier_uuid);
+      const key = supplierValue || supplierName.toLowerCase();
+      if (deduped.has(key)) return;
+      deduped.set(key, {
+        value: supplierValue || supplierName,
+        label: supplierName,
+        supplierName,
+        supplierId,
+        uniqCode:
+          typeof item.uniq_code === "string"
+            ? item.uniq_code.trim() || undefined
+            : undefined,
+        uom: typeof item.uom === "string" ? item.uom.trim() : undefined,
+        weight:
+          typeof item.weight === "number"
+            ? item.weight
+            : Number(item.weight ?? 0) || undefined,
+        description:
+          typeof item.description === "string"
+            ? item.description.trim()
+            : undefined,
+        percentage:
+          typeof item.percentage === "number" ? item.percentage : undefined,
+      });
+    });
+    return Array.from(deduped.values()).sort((a, b) =>
+      a.label.localeCompare(b.label),
+    );
+  };
+
+  const getChildSupplierOptions = (row: PoBudgetChildRow): SupplierOption[] =>
+    dedupeSupplierOptions(
+      buildSupplierOptionsFromItems(getChildSupplierItems(row)),
+    );
+
+  // Auto-fill suppliers for a child row from its registered supplier-items.
+  const buildChildAutoSuppliers = (
+    row: PoBudgetChildRow,
+  ): BulkSupplierLine[] => {
+    const totalQty = Number(row.quantity || 0);
+    const usable = getChildSupplierItems(row).filter((si) =>
+      Boolean(si.supplier_name || si.supplier_uuid),
+    );
+    if (usable.length === 0) {
+      return [
+        {
+          id: `auto-1`,
+          supplier: "Tidak ada data",
+          qty: totalQty,
+          percentage: 100,
+        },
+      ];
+    }
+    return usable.map((si, idx) => {
+      const pct = Number(si.percentage ?? 0);
+      const supplierValue = String(
+        si.supplier_uuid ?? si.supplier_name ?? "",
+      ).trim();
+      const qty =
+        pct > 0
+          ? Math.round((totalQty * pct) / 100)
+          : usable.length === 1
+            ? totalQty
+            : 0;
+      return {
+        id: `auto-${idx + 1}`,
+        supplier: supplierValue,
+        qty,
+        percentage: pct > 0 ? pct : undefined,
+      };
+    });
+  };
+
   const buildBulkItemsFromPrl = (
     selection?: string | string[],
   ): BulkItemRow[] => {
@@ -1583,7 +1774,9 @@ function resolveSupplierName(
         if (!po || !Array.isArray(po.items)) continue;
         rows.push(
           ...(po.items as any[]).map((it: any, index: number) => {
-            const uniqCode = String(it.uniq_code ?? it.item_uniq_code ?? it.item_uniq ?? "");
+            const uniqCode = String(
+              it.uniq_code ?? it.item_uniq_code ?? it.item_uniq ?? "",
+            );
             const partNumber = String(
               it.part_number ?? bomIndex.partNumberByUniq[uniqCode] ?? "",
             );
@@ -1633,13 +1826,12 @@ function resolveSupplierName(
         usedChildPrlIds.add(parsed.prlId);
         const detail = bulkPrlDetailCache[parsed.prlId];
         if (!detail) continue;
-        const childRows = buildBulkChildRowsFromPrlDetail(detail).map((row) => ({
-          ...row,
-          suppliers: buildAutoSuppliers(
-            getChildSupplierLookupUniq(row),
-            Number(row.quantity || 0),
-          ),
-        }));
+        const childRows = buildBulkChildRowsFromPrlDetail(detail).map(
+          (row) => ({
+            ...row,
+            suppliers: buildChildAutoSuppliers(row),
+          }),
+        );
         rows.push(...childRows);
         continue;
       }
@@ -1745,7 +1937,9 @@ function resolveSupplierName(
         partNumber: String(child.part_number ?? "-"),
         quantityPerUniq: Number(child.quantity ?? child.qty_per_uniq ?? 0),
         uom: String(child.uom ?? ""),
-        weightKg: Number(child.weight_kg ?? child.material_spec?.weight_kg ?? 0),
+        weightKg: Number(
+          child.weight_kg ?? child.material_spec?.weight_kg ?? 0,
+        ),
         level,
       };
       const descendants = flattenStoredChildTree(
@@ -1760,7 +1954,9 @@ function resolveSupplierName(
   const uniqueTextValues = (values: string[]) => {
     const seen = new Set<string>();
     const result: string[] = [];
-    for (const value of values.map((v) => String(v || "").trim()).filter(Boolean)) {
+    for (const value of values
+      .map((v) => String(v || "").trim())
+      .filter(Boolean)) {
       const key = value.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1883,7 +2079,9 @@ function resolveSupplierName(
       .filter(Boolean)
       .map((group) => ({
         ...group!,
-        childLabels: group!.rows.map((row) => row.uniq || row.childUniqCode).filter(Boolean),
+        childLabels: group!.rows
+          .map((row) => row.uniq || row.childUniqCode)
+          .filter(Boolean),
         totalChildQty: group!.rows.reduce(
           (sum, row) => sum + Number(row.quantity || 0),
           0,
@@ -2017,7 +2215,7 @@ function resolveSupplierName(
     const uniq = String(
       isChildBudgetType(getApiType(activeTab))
         ? getChildSupplierLookupUniq(activeAddSupplierItem)
-        : activeAddSupplierItem.uniq ?? "",
+        : (activeAddSupplierItem.uniq ?? ""),
     ).trim();
     let related = supplierItemsByUniq.get(uniq) ?? [];
     if (!related.length) {
@@ -2117,13 +2315,16 @@ function resolveSupplierName(
         render: (value: string, record) => (
           <div
             className="text-sm text-gray-700"
-            style={{ paddingLeft: `${Math.max(0, (record.level - 1) * 16)}px` }}>
-            {record.level > 1 ? <span className="text-gray-400 mr-1">↳</span> : null}
+            style={{ paddingLeft: `${Math.max(0, (record.level - 1) * 16)}px` }}
+          >
+            {record.level > 1 ? (
+              <span className="text-gray-400 mr-1">↳</span>
+            ) : null}
             {value}
           </div>
         ),
       },
-       
+
       {
         title: "Part Number",
         dataIndex: "partNumber",
@@ -2211,15 +2412,14 @@ function resolveSupplierName(
           return (
             <div
               key={`stored-parent-${pIdx}`}
-              className="border-b border-gray-100 last:border-b-0">
+              className="border-b border-gray-100 last:border-b-0"
+            >
               <div
                 className="flex items-center justify-between gap-3 px-4 py-2.5 bg-blue-50/40 cursor-pointer select-none"
                 onClick={() =>
-                  toggleExpandedRowKey(
-                    collapseKey,
-                    setExpandedStoredParentKeys,
-                  )
-                }>
+                  toggleExpandedRowKey(collapseKey, setExpandedStoredParentKeys)
+                }
+              >
                 <div className="flex items-center gap-2 min-w-0">
                   <Tag color="blue" className="!m-0">
                     {parent.uniq_code || "-"}
@@ -2328,7 +2528,10 @@ function resolveSupplierName(
       prev.map((it) =>
         it.key !== itemKey
           ? it
-          : { ...it, suppliers: it.suppliers.filter((s) => s.id !== supplierId) },
+          : {
+              ...it,
+              suppliers: it.suppliers.filter((s) => s.id !== supplierId),
+            },
       ),
     );
   };
@@ -2343,7 +2546,10 @@ function resolveSupplierName(
     const remaining = Math.max(0, target.quantity - allocated);
     setAddSupplierItemKey(itemKey);
     // Kalau remaining=0 (semua ter-alokasi), set qty undefined agar user input sendiri
-    setAddSupplierForm({ supplier: undefined, qty: remaining > 0 ? remaining : undefined });
+    setAddSupplierForm({
+      supplier: undefined,
+      qty: remaining > 0 ? remaining : undefined,
+    });
     setAddSupplierOpen(true);
   };
 
@@ -2502,7 +2708,9 @@ function resolveSupplierName(
       customerIdByName.get(normalizeCustomerName(addForm.customer)) ??
       toIntegerId(addForm.customer) ??
       // fallback: if matchedAddPrl exists, try to resolve from it
-      (matchedAddPrl ? resolvePrlCustomerId(matchedAddPrl as Record<string, unknown>) : null) ??
+      (matchedAddPrl
+        ? resolvePrlCustomerId(matchedAddPrl as Record<string, unknown>)
+        : null) ??
       null;
 
     const effectiveSupplierId =
@@ -2522,8 +2730,7 @@ function resolveSupplierName(
       // customer text so the backend can attempt resolution and return
       // a helpful error if necessary.
       customer_id: (effectiveCustomerId ?? addForm.customer ?? "") as
-        | string
-        | number,
+        string | number,
       customer_name: addForm.customer,
       uniq_code: addForm.uniq,
       product_model: addForm.productModel,
@@ -2533,8 +2740,7 @@ function resolveSupplierName(
       weight_kg: Number(addForm.weightKg || 0),
       description: addForm.description,
       supplier_id: (effectiveSupplierId ?? addForm.supplier ?? "") as
-        | string
-        | number,
+        string | number,
       supplier_name: addForm.supplier,
       period: normalizePeriodForApi(addForm.period),
       sales_plan: Number(addForm.salesPlan || 0),
@@ -2622,10 +2828,14 @@ function resolveSupplierName(
     };
 
     const unresolvedSupplier = nonHeaderItems.find((item) =>
-      item.suppliers.some((supplier) => !supplierDisplayName(supplier.supplier)),
+      item.suppliers.some(
+        (supplier) => !supplierDisplayName(supplier.supplier),
+      ),
     );
 
-    const unresolvedPrlItem = nonHeaderItems.find((item) => item.prlItemId == null);
+    const unresolvedPrlItem = nonHeaderItems.find(
+      (item) => item.prlItemId == null,
+    );
 
     if (unresolvedSupplier) {
       message.warning(
@@ -2643,7 +2853,10 @@ function resolveSupplierName(
 
     const body = {
       prl_id: String(
-        nonHeaderItems[0]?.prlId || selectedPrl?.prl_id || selectedPrl?.id || "",
+        nonHeaderItems[0]?.prlId ||
+          selectedPrl?.prl_id ||
+          selectedPrl?.id ||
+          "",
       ),
       budget_subtype: bulkBudgetType === "adhoc" ? "adhoc" : "regular",
       period: normalizePeriodForApi(bulkPeriod),
@@ -2694,9 +2907,14 @@ function resolveSupplierName(
           );
           return;
         }
-        const result = await addBulk({ type: getApiType(activeTab), body }).unwrap();
+        const result = await addBulk({
+          type: getApiType(activeTab),
+          body,
+        }).unwrap();
         created = Number(result.data?.created ?? 0);
-        const errors = Array.isArray(result.data?.errors) ? result.data.errors.filter(Boolean) : [];
+        const errors = Array.isArray(result.data?.errors)
+          ? result.data.errors.filter(Boolean)
+          : [];
 
         if (errors.length > 0) {
           message.error(errors.join("; "));
@@ -2720,8 +2938,7 @@ function resolveSupplierName(
 
   const addSubtitle = `Enter the PO budget details for ${getBudgetTypeLabel(activeTab).toLowerCase()}`;
   const groupedDetail = detailQuery.data?.data as
-    | PoBudgetGroupedDetail
-    | undefined;
+    PoBudgetGroupedDetail | undefined;
 
   const openDetail = (row: PoBudgetRow) => {
     if (!row.id && useApi) {
@@ -2786,7 +3003,8 @@ function resolveSupplierName(
         render: (value: string, record) => {
           const parentCount = getStoredParents(record.detailJson).length;
           const childCount = getStoredParents(record.detailJson).reduce(
-            (sum, p) => sum + (Array.isArray(p.children) ? p.children.length : 0),
+            (sum, p) =>
+              sum + (Array.isArray(p.children) ? p.children.length : 0),
             0,
           );
           const displayValue =
@@ -2807,12 +3025,14 @@ function resolveSupplierName(
               className="text-left group"
               onClick={() =>
                 toggleExpandedRowKey(record.key, setExpandedBudgetRowKeys)
-              }>
+              }
+            >
               <div className="text-sm font-semibold text-blue-700 group-hover:text-blue-800">
                 {displayValue}
               </div>
               <div className="text-[11px] text-blue-500 mt-0.5">
-                {expanded ? "Hide" : "Show"} {parentCount} parent group{parentCount > 1 ? "s" : ""}
+                {expanded ? "Hide" : "Show"} {parentCount} parent group
+                {parentCount > 1 ? "s" : ""}
               </div>
             </button>
           );
@@ -2858,7 +3078,8 @@ function resolveSupplierName(
           v ? (
             <Tag
               color="purple"
-              className="!rounded-md !px-2 !py-0.5 !text-xs !font-semibold">
+              className="!rounded-md !px-2 !py-0.5 !text-xs !font-semibold"
+            >
               {v === "adhoc" ? "Additional" : v}
             </Tag>
           ) : (
@@ -2871,7 +3092,9 @@ function resolveSupplierName(
         key: "salesPlan",
         align: "right",
         render: (v: number) => (
-          <span className="text-sm text-gray-700">{formatNumber(Math.ceil(Number(v) || 0))}</span>
+          <span className="text-sm text-gray-700">
+            {formatNumber(Math.ceil(Number(v) || 0))}
+          </span>
         ),
       },
       {
@@ -2880,7 +3103,9 @@ function resolveSupplierName(
         key: "pr",
         align: "right",
         render: (v: number) => (
-          <span className="text-sm text-gray-700">{formatNumber(Math.ceil(Number(v) || 0))}</span>
+          <span className="text-sm text-gray-700">
+            {formatNumber(Math.ceil(Number(v) || 0))}
+          </span>
         ),
       },
       {
@@ -2889,7 +3114,9 @@ function resolveSupplierName(
         key: "po1",
         align: "right",
         render: (v: number) => (
-          <span className="text-sm text-gray-700">{formatNumber(Math.ceil(Number(v) || 0))}</span>
+          <span className="text-sm text-gray-700">
+            {formatNumber(Math.ceil(Number(v) || 0))}
+          </span>
         ),
       },
       {
@@ -2898,7 +3125,9 @@ function resolveSupplierName(
         key: "po2",
         align: "right",
         render: (v: number) => (
-          <span className="text-sm text-gray-700">{formatNumber(Math.ceil(Number(v) || 0))}</span>
+          <span className="text-sm text-gray-700">
+            {formatNumber(Math.ceil(Number(v) || 0))}
+          </span>
         ),
       },
       {
@@ -2907,7 +3136,9 @@ function resolveSupplierName(
         key: "prl",
         align: "right",
         render: (v: number) => (
-          <span className="text-sm text-gray-700">{formatNumber(Math.ceil(Number(v) || 0))}</span>
+          <span className="text-sm text-gray-700">
+            {formatNumber(Math.ceil(Number(v) || 0))}
+          </span>
         ),
       },
       {
@@ -2916,7 +3147,9 @@ function resolveSupplierName(
         key: "totalPo",
         align: "right",
         render: (v: number) => (
-          <span className="text-sm text-gray-700">{formatNumber(Math.ceil(Number(v) || 0))}</span>
+          <span className="text-sm text-gray-700">
+            {formatNumber(Math.ceil(Number(v) || 0))}
+          </span>
         ),
       },
       {
@@ -2945,7 +3178,8 @@ function resolveSupplierName(
         render: (v: PoBudgetRow["status"]) => (
           <Tag
             color={v === "approved" ? "green" : "gold"}
-            className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+            className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+          >
             {v}
           </Tag>
         ),
@@ -2989,14 +3223,16 @@ function resolveSupplierName(
               size="small"
               icon={<EyeOutlined />}
               className="!rounded-lg"
-              onClick={() => openDetail(r)}>
+              onClick={() => openDetail(r)}
+            >
               Detail
             </Button>
             <Button
               size="small"
               className="!rounded-lg"
               disabled={!r.id || r.status === "approved"}
-              onClick={() => openEdit(r)}>
+              onClick={() => openEdit(r)}
+            >
               Edit
             </Button>
           </div>
@@ -3036,7 +3272,8 @@ function resolveSupplierName(
             {isChildBudgetType(getApiType(activeTab)) ? (
               <Tag
                 color="blue"
-                className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+                className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+              >
                 {value || "-"}
               </Tag>
             ) : (
@@ -3139,14 +3376,15 @@ function resolveSupplierName(
                   <Select
                     value={s.supplier}
                     onChange={(v) => {
-                      const supplierLookupUniq = isChildBudgetType(
-                        getApiType(activeTab),
-                      )
-                        ? getChildSupplierLookupUniq(r)
-                        : r.uniq;
-                      const opts =
-                        supplierOptionsByUniq.get(supplierLookupUniq) ??
-                        supplierOptions;
+                      const childOpts = isChildBudgetType(getApiType(activeTab))
+                        ? getChildSupplierOptions(r)
+                        : [];
+                      const opts = isChildBudgetType(getApiType(activeTab))
+                        ? childOpts.length
+                          ? childOpts
+                          : supplierOptions
+                        : (supplierOptionsByUniq.get(r.uniq) ??
+                          supplierOptions);
                       const opt = opts.find((o) => o.value === v);
                       const pct = opt?.percentage;
                       const autoQty =
@@ -3159,20 +3397,24 @@ function resolveSupplierName(
                         percentage: pct,
                       });
                     }}
-                    options={dedupeSupplierOptions(
-                      supplierOptionsByUniq.get(
-                        isChildBudgetType(getApiType(activeTab))
-                          ? getChildSupplierLookupUniq(r)
-                          : r.uniq,
-                      ) ?? supplierOptions,
-                    )
+                    options={(() => {
+                      const childOpts = isChildBudgetType(getApiType(activeTab))
+                        ? getChildSupplierOptions(r)
+                        : [];
+                      const source = isChildBudgetType(getApiType(activeTab))
+                        ? childOpts.length
+                          ? childOpts
+                          : supplierOptions
+                        : (supplierOptionsByUniq.get(r.uniq) ??
+                          supplierOptions);
+                      return dedupeSupplierOptions(source);
+                    })()
                       .filter(
                         (opt) =>
                           opt.value === s.supplier ||
                           !r.suppliers.some(
                             (other) =>
-                              other.id !== s.id &&
-                              other.supplier === opt.value,
+                              other.id !== s.id && other.supplier === opt.value,
                           ),
                       )
                       .map((opt) => ({
@@ -3219,7 +3461,8 @@ function resolveSupplierName(
               <div
                 className={
                   "text-[11px] " + (over ? "text-red-600" : "text-gray-500")
-                }>
+                }
+              >
                 Total: {formatNumber(total)} / {formatNumber(r.quantity)}
               </div>
             </div>
@@ -3234,7 +3477,8 @@ function resolveSupplierName(
           <Button
             size="small"
             className="!rounded-lg"
-            onClick={() => bulkAddSupplierLine(r.key)}>
+            onClick={() => bulkAddSupplierLine(r.key)}
+          >
             + Supplier
           </Button>
         ),
@@ -3269,7 +3513,8 @@ function resolveSupplierName(
               type="primary"
               className="!rounded-lg"
               icon={<PlusOutlined />}
-              onClick={openAddBudget}>
+              onClick={openAddBudget}
+            >
               Add Budget Entry
             </Button>
           </div>
@@ -3301,7 +3546,7 @@ function resolveSupplierName(
           icon={<MdQueryStats size={18} />}
           accent="bg-purple-50 text-purple-600"
         />
-      {/* <div className="mb-6"> */}
+        {/* <div className="mb-6"> */}
         {/* <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
           <div className="text-sm text-gray-600 mb-2">Material Grades</div>
           <div className="text-xs text-gray-400 mb-2">Found {uniqueMaterialGrades.length} grades from {bomTreeNodes.length} BOM nodes</div>
@@ -3317,9 +3562,9 @@ function resolveSupplierName(
             )}
           </div>
         </div> */}
-      {/* </div> */}
-          <StatCard
-            label="APO - PRL"
+        {/* </div> */}
+        <StatCard
+          label="APO - PRL"
           value={formatNumber(summary.delta_apo_prl)}
           icon={<MdInventory2 size={18} />}
           accent="bg-orange-50 text-orange-600"
@@ -3413,11 +3658,13 @@ function resolveSupplierName(
             <Button
               type="primary"
               className="!rounded-lg"
-              onClick={saveAddBudget}>
+              onClick={saveAddBudget}
+            >
               Save Budget Entry
             </Button>
           </div>
-        }>
+        }
+      >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <div className="text-xs text-gray-600 mb-1">PO Budget Type</div>
@@ -3438,7 +3685,7 @@ function resolveSupplierName(
           </div>
           <div>
             <div className="text-xs text-gray-600 mb-1">PRL (Select)</div>
-              <Select
+            <Select
               showSearch
               allowClear
               value={addForm.prl ?? undefined}
@@ -3497,8 +3744,13 @@ function resolveSupplierName(
                 setAddForm((prev) => ({
                   ...prev,
                   prl: raw,
-                  customer: matched.customer_name ?? matched.customer?.customer_name ?? "",
-                  customerId: resolvePrlCustomerId(matched as Record<string, unknown>) ?? null,
+                  customer:
+                    matched.customer_name ??
+                    matched.customer?.customer_name ??
+                    "",
+                  customerId:
+                    resolvePrlCustomerId(matched as Record<string, unknown>) ??
+                    null,
                   uniq: uniqCode || "",
                   productModel: matched.product_model ?? "",
                   partName: matched.part_name ?? "",
@@ -3512,11 +3764,12 @@ function resolveSupplierName(
                       ? ""
                       : String(supplierItemMatch.weight)),
                   supplier: String(supplierItemMatch?.supplier_name ?? ""),
-                  supplierId: resolveSupplierRowId({
-                    supplierUuid: supplierItemMatch?.supplier_uuid,
-                    supplierCode: supplierItemMatch?.supplier_code,
-                    supplierName: supplierItemMatch?.supplier_name,
-                  }) ?? null,
+                  supplierId:
+                    resolveSupplierRowId({
+                      supplierUuid: supplierItemMatch?.supplier_uuid,
+                      supplierCode: supplierItemMatch?.supplier_code,
+                      supplierName: supplierItemMatch?.supplier_name,
+                    }) ?? null,
                 }));
               }}
             />
@@ -3577,27 +3830,36 @@ function resolveSupplierName(
                   customerId: selectedCustomerId,
                   customer: String(selected?.label ?? ""),
                   uniq: matchedPrl
-                    ? String(matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "")
+                    ? String(
+                        matchedPrl.uniq_code ?? matchedPrl.item_uniq_code ?? "",
+                      )
                     : prev.uniq,
                   productModel: matchedPrl?.product_model ?? prev.productModel,
                   partName: matchedPrl?.part_name ?? prev.partName,
                   partNumber: matchedPrl?.part_number ?? prev.partNumber,
                   period: getPrlPeriodValue(matchedPrl) || prev.period,
-                  salesPlan: Number(matchedPrl?.quantity ?? prev.salesPlan ?? 0),
-                  supplier: String(supplierItemMatch?.supplier_name ?? prev.supplier ?? ""),
+                  salesPlan: Number(
+                    matchedPrl?.quantity ?? prev.salesPlan ?? 0,
+                  ),
+                  supplier: String(
+                    supplierItemMatch?.supplier_name ?? prev.supplier ?? "",
+                  ),
                   supplierId:
                     resolveSupplierRowId({
                       supplierUuid: supplierItemMatch?.supplier_uuid,
                       supplierCode: supplierItemMatch?.supplier_code,
                       supplierName: supplierItemMatch?.supplier_name,
                     }) ?? prev.supplierId,
-                  uom: bomDefaults.uom || String(supplierItemMatch?.uom ?? prev.uom ?? ""),
+                  uom:
+                    bomDefaults.uom ||
+                    String(supplierItemMatch?.uom ?? prev.uom ?? ""),
                   weightKg:
                     bomDefaults.weightKg ||
                     (supplierItemMatch?.weight == null
                       ? prev.weightKg
                       : String(supplierItemMatch.weight)),
-                  description: supplierItemMatch?.description ?? prev.description,
+                  description:
+                    supplierItemMatch?.description ?? prev.description,
                 }));
               }}
             />
@@ -3671,7 +3933,9 @@ function resolveSupplierName(
                   productModel,
                   partName,
                   partNumber,
-                  uom: bomDefaults.uom || String(supplierItemMatch?.uom ?? prev.uom ?? ""),
+                  uom:
+                    bomDefaults.uom ||
+                    String(supplierItemMatch?.uom ?? prev.uom ?? ""),
                   weightKg:
                     bomDefaults.weightKg ||
                     (supplierItemMatch?.weight == null
@@ -3682,7 +3946,9 @@ function resolveSupplierName(
                   ),
                   description:
                     supplierItemMatch?.description ?? prev.description,
-                  supplier: String(supplierItemMatch?.supplier_name ?? prev.supplier ?? ""),
+                  supplier: String(
+                    supplierItemMatch?.supplier_name ?? prev.supplier ?? "",
+                  ),
                   supplierId:
                     resolveSupplierRowId({
                       supplierUuid: supplierItemMatch?.supplier_uuid,
@@ -3897,7 +4163,6 @@ function resolveSupplierName(
               format={(value) => (value ? value.format("MMMM YYYY") : "")}
             />
           </div>
-
         </div>
       </Modal>
 
@@ -3929,7 +4194,8 @@ function resolveSupplierName(
               Save PO Budget
             </Button>
           </div>
-        }>
+        }
+      >
         <div className="space-y-4">
           <div className="rounded-xl border border-blue-200 bg-white p-4">
             <div className="flex items-start justify-between gap-3">
@@ -3952,7 +4218,10 @@ function resolveSupplierName(
                 <Select
                   value={bulkSource}
                   onChange={(v) => setBulkSource(v as "prl" | "po")}
-                  options={[{ label: "PRL", value: "prl" }, { label: "Customer PO", value: "po" }]}
+                  options={[
+                    { label: "PRL", value: "prl" },
+                    { label: "Customer PO", value: "po" },
+                  ]}
                   className="w-full mb-3"
                 />
 
@@ -3981,22 +4250,37 @@ function resolveSupplierName(
                   </>
                 ) : (
                   <>
-                    <div className="text-xs text-gray-600 mb-1">Select Customer PO</div>
+                    <div className="text-xs text-gray-600 mb-1">
+                      Select Customer PO
+                    </div>
                     <Select
                       mode="multiple"
                       showSearch
                       allowClear
-                      options={(customerPos || []).map((p) => ({ label: `${p.po_number} — ${p.customer?.customer_name ?? ""}`, value: String(p.id) }))}
+                      options={(customerPos || []).map((p) => ({
+                        label: `${p.po_number} — ${p.customer?.customer_name ?? ""}`,
+                        value: String(p.id),
+                      }))}
                       className="w-full"
                       placeholder="Search and select one or more Customer PO"
                       optionFilterProp="label"
-                      filterOption={(input, option) => String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())}
+                      filterOption={(input, option) =>
+                        String(option?.label ?? "")
+                          .toLowerCase()
+                          .includes(input.toLowerCase())
+                      }
                       value={bulkPoIds}
                       onChange={(value) => {
-                        const values = value ? (Array.isArray(value) ? value : [value]) : [];
+                        const values = value
+                          ? Array.isArray(value)
+                            ? value
+                            : [value]
+                          : [];
                         setBulkPoIds(values as string[]);
                         // call sync with po:<id> tokens so existing builder handles PO items
-                        const mapped = (values as string[]).map((v) => `po:${v}`);
+                        const mapped = (values as string[]).map(
+                          (v) => `po:${v}`,
+                        );
                         syncBulkItemsFromPrl(mapped);
                       }}
                     />
@@ -4046,7 +4330,8 @@ function resolveSupplierName(
                 {bulkPrlGroups.map((prlGroup) => (
                   <div
                     key={prlGroup.prlId}
-                    className="rounded-lg border border-gray-200 overflow-hidden">
+                    className="rounded-lg border border-gray-200 overflow-hidden"
+                  >
                     <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-gray-50 border-b border-gray-100">
                       <div className="min-w-0 truncate">
                         <span className="text-sm font-semibold text-gray-800">
@@ -4069,7 +4354,8 @@ function resolveSupplierName(
                       return (
                         <div
                           key={group.key}
-                          className="border-b border-gray-100 last:border-b-0">
+                          className="border-b border-gray-100 last:border-b-0"
+                        >
                           <div
                             className="flex items-center justify-between gap-3 px-4 py-2 bg-blue-50/40 cursor-pointer select-none"
                             onClick={() =>
@@ -4077,7 +4363,8 @@ function resolveSupplierName(
                                 group.key,
                                 setCollapsedBulkGroupKeys,
                               )
-                            }>
+                            }
+                          >
                             <div className="flex items-center gap-2 min-w-0">
                               <Tag color="blue" className="!m-0">
                                 {group.parentUniqCode || "-"}
@@ -4098,7 +4385,8 @@ function resolveSupplierName(
                             </div>
                             <div
                               className="flex items-center gap-2 shrink-0"
-                              onClick={(e) => e.stopPropagation()}>
+                              onClick={(e) => e.stopPropagation()}
+                            >
                               <span className="text-xs text-gray-500">
                                 Total Qty:
                               </span>
@@ -4168,7 +4456,8 @@ function resolveSupplierName(
               </div>
               <Tag
                 color="purple"
-                className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+                className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+              >
                 Final Step
               </Tag>
             </div>
@@ -4258,7 +4547,8 @@ function resolveSupplierName(
               Grouped detail for {detailState.row?.uniq ?? "selected budget"}
             </div>
           </div>
-        }>
+        }
+      >
         <div className="space-y-4 text-sm text-gray-700">
           <div className="rounded-2xl border border-gray-200 bg-white p-5">
             <div className="text-sm font-semibold text-gray-900 mb-4">
@@ -4622,17 +4912,20 @@ function resolveSupplierName(
               onClick={() => {
                 setEditOpen(false);
                 setEditRow(null);
-              }}>
+              }}
+            >
               Cancel
             </Button>
             <Button
               type="primary"
               className="!rounded-lg"
-              onClick={saveEditBudget}>
+              onClick={saveEditBudget}
+            >
               Save Changes
             </Button>
           </div>
-        }>
+        }
+      >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div>
             <div className="text-xs text-gray-600 mb-1">Purchase Request</div>
@@ -4728,17 +5021,20 @@ function resolveSupplierName(
           <div className="flex items-center justify-end gap-2">
             <Button
               className="!rounded-lg"
-              onClick={() => setAddSupplierOpen(false)}>
+              onClick={() => setAddSupplierOpen(false)}
+            >
               Cancel
             </Button>
             <Button
               type="primary"
               className="!rounded-lg"
-              onClick={confirmAddSupplier}>
+              onClick={confirmAddSupplier}
+            >
               Add Supplier
             </Button>
           </div>
-        }>
+        }
+      >
         <div className="space-y-3">
           <div>
             <div className="text-xs text-gray-600 mb-1">Supplier Name</div>
@@ -4751,8 +5047,8 @@ function resolveSupplierName(
                   pct != null && pct > 0 && addSupplierBudget > 0
                     ? Math.round((addSupplierBudget * pct) / 100)
                     : addSupplierRemaining > 0
-                    ? addSupplierRemaining
-                    : undefined; // remaining=0 → biarkan user input sendiri
+                      ? addSupplierRemaining
+                      : undefined; // remaining=0 → biarkan user input sendiri
                 setAddSupplierForm((p) => ({
                   ...p,
                   supplier: v,
@@ -4773,7 +5069,8 @@ function resolveSupplierName(
             />
             {activeAddSupplierItem ? (
               <div className="text-[11px] text-gray-500 mt-1">
-                Showing suppliers for UNIQ {isChildBudgetType(getApiType(activeTab))
+                Showing suppliers for UNIQ{" "}
+                {isChildBudgetType(getApiType(activeTab))
                   ? getChildSupplierLookupUniq(activeAddSupplierItem)
                   : activeAddSupplierItem.uniq}
               </div>
@@ -4785,7 +5082,8 @@ function resolveSupplierName(
               Quantity
               {(addSupplierForm as any).percentage != null && (
                 <span className="ml-2 text-blue-600">
-                  (auto: {(addSupplierForm as any).percentage}% of {formatNumber(addSupplierBudget)})
+                  (auto: {(addSupplierForm as any).percentage}% of{" "}
+                  {formatNumber(addSupplierBudget)})
                 </span>
               )}
             </div>
@@ -4794,7 +5092,10 @@ function resolveSupplierName(
               max={addSupplierBudget || undefined}
               value={addSupplierForm.qty}
               onChange={(v) =>
-                setAddSupplierForm((p) => ({ ...p, qty: v != null ? Number(v) : undefined }))
+                setAddSupplierForm((p) => ({
+                  ...p,
+                  qty: v != null ? Number(v) : undefined,
+                }))
               }
               placeholder="Enter quantity"
               className="w-full"

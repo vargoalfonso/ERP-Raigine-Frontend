@@ -103,6 +103,47 @@ export default function PrintButton({
                 </div>
               ))}
             </div>
+
+            {current.deliveryNotes?.length ? (
+              <div className="mt-4">
+                <div className="text-sm font-semibold mb-2">
+                  Delivery Note History
+                </div>
+
+                <table className="w-full border border-gray-200 border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th className="border border-gray-200 p-2 text-left">
+                        DN Number
+                      </th>
+                      <th className="border border-gray-200 p-2 text-left">
+                        Packing Number
+                      </th>
+                      <th className="border border-gray-200 p-2 text-center">
+                        Qty
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {current.deliveryNotes.map((dn, index) => (
+                      <tr key={index}>
+                        <td className="border border-gray-200 p-2">
+                          {dn.dn_number}
+                        </td>
+                        <td className="border border-gray-200 p-2">
+                          {dn.packing_number}
+                        </td>
+                        <td className="border border-gray-200 p-2 text-center">
+                          {dn.quantity}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
             {current.qrDataUrl ? (
               <>
                 <div className="h-px bg-gray-200 my-3" />
