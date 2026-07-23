@@ -2,7 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Drawer, Form, Input, Modal, Select, Table, Tag, message } from "antd";
+import {
+  Button,
+  Drawer,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Table,
+  Tag,
+  message,
+} from "antd";
 import {
   DownloadOutlined,
   EyeOutlined,
@@ -15,7 +25,11 @@ import type { ColumnType } from "antd/es/table";
 import StatsCard from "@/components/StatsCard";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
-import { type WipListRow, useGetWipListQuery, useUpdateWipMutation } from "@/lib/api/wip/api";
+import {
+  type WipListRow,
+  useGetWipListQuery,
+  useUpdateWipMutation,
+} from "@/lib/api/wip/api";
 import { BsBoxSeam } from "react-icons/bs";
 import { HiOutlineArchiveBox } from "react-icons/hi2";
 import { LuChartColumn } from "react-icons/lu";
@@ -37,8 +51,10 @@ type WipRecord = {
 };
 
 type UnknownRecord = Record<string, unknown>;
-const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
-const isMissingRouteError = (error: unknown): boolean => isRecord(error) && error.status === 404;
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
+const isMissingRouteError = (error: unknown): boolean =>
+  isRecord(error) && error.status === 404;
 
 const dummyWipData: WipRecord[] = [
   {
@@ -120,7 +136,10 @@ export default function WorkInProgressPage() {
   const [processFilter, setProcessFilter] = useState<string>("all");
 
   const apiEnabled = Boolean(apiBaseUrl);
-  const listQuery = useGetWipListQuery({ page: 1, limit: 10 }, { skip: !apiEnabled });
+  const listQuery = useGetWipListQuery(
+    { page: 1, limit: 10 },
+    { skip: !apiEnabled },
+  );
   const [updateWip] = useUpdateWipMutation();
 
   const [wipData, setWipData] = useState<WipRecord[]>(dummyWipData);
@@ -135,10 +154,14 @@ export default function WorkInProgressPage() {
   useEffect(() => {
     if (!apiEnabled || !listQuery.error) return;
     if (isMissingRouteError(listQuery.error)) {
-      messageApi.warning("WIP API route is not available yet; showing mock data.");
+      messageApi.warning(
+        "WIP API route is not available yet; showing mock data.",
+      );
       return;
     }
-    messageApi.error(getApiErrorMessage(listQuery.error, "Failed to load WIP inventory"));
+    messageApi.error(
+      getApiErrorMessage(listQuery.error, "Failed to load WIP inventory"),
+    );
   }, [apiEnabled, listQuery.error, messageApi]);
 
   const mapApiRowToRecord = (row: WipListRow, index: number): WipRecord => {
@@ -167,16 +190,10 @@ export default function WorkInProgressPage() {
   }, [apiEnabled, listQuery.data, listQuery.error, wipData]);
 
   const openWipDetail = (record: WipRecord) => {
-    const fromApi = apiEnabled && !isMissingRouteError(listQuery.error);
-    if (fromApi) {
-      if (!record.id) {
-        messageApi.warning("WIP id is missing; cannot open detail.");
-        return;
-      }
-      router.push(`/work-in-progress/detail?id=${encodeURIComponent(record.id)}&uniq=${encodeURIComponent(record.uniq)}`);
-      return;
-    }
-    router.push(`/work-in-progress/detail?uniq=${encodeURIComponent(record.uniq)}`);
+    const params = new URLSearchParams();
+    if (record.apiId) params.set("id", record.apiId);
+    if (record.uniq && record.uniq !== "-") params.set("uniq", record.uniq);
+    router.push(`/work-in-progress/detail?${params.toString()}`);
   };
 
   const openEditDrawer = (record: WipRecord) => {
@@ -204,14 +221,21 @@ export default function WorkInProgressPage() {
 
       const fromApi = apiEnabled && !isMissingRouteError(listQuery.error);
       if (fromApi && editingWip.apiId) {
-        await updateWip({ id: editingWip.apiId, body: { status: nextStatus } }).unwrap();
+        await updateWip({
+          id: editingWip.apiId,
+          body: { status: nextStatus },
+        }).unwrap();
         messageApi.success("Status updated");
         listQuery.refetch();
         closeEditDrawer();
         return;
       }
 
-      setWipData((prev) => prev.map((row) => (row.id === editingWip.id ? { ...row, type: nextStatus } : row)));
+      setWipData((prev) =>
+        prev.map((row) =>
+          row.id === editingWip.id ? { ...row, type: nextStatus } : row,
+        ),
+      );
       messageApi.success("Saved");
       closeEditDrawer();
     } catch {
@@ -267,8 +291,13 @@ export default function WorkInProgressPage() {
   });
 
   const summaryStats = useMemo(() => {
-    const totalQuantity = tableRows.reduce((sum, row) => sum + Number(row.stock ?? 0), 0);
-    const activeStations = new Set(tableRows.map((r) => r.process).filter(Boolean)).size;
+    const totalQuantity = tableRows.reduce(
+      (sum, row) => sum + Number(row.stock ?? 0),
+      0,
+    );
+    const activeStations = new Set(
+      tableRows.map((r) => r.process).filter(Boolean),
+    ).size;
     return {
       activeWip: tableRows.length,
       totalQuantity,
@@ -395,7 +424,10 @@ export default function WorkInProgressPage() {
 
   const processOptions = useMemo(() => {
     const values = new Set(tableRows.map((row) => row.process).filter(Boolean));
-    return [{ label: "All Process", value: "all" }, ...Array.from(values).map((p) => ({ label: p, value: p }))];
+    return [
+      { label: "All Process", value: "all" },
+      ...Array.from(values).map((p) => ({ label: p, value: p })),
+    ];
   }, [tableRows]);
 
   return (
@@ -412,7 +444,9 @@ export default function WorkInProgressPage() {
         onCancel={closeDeleteModal}
       >
         <p>
-          This will remove <span className="font-semibold">{deletingWip?.uniq}</span> from the list.
+          This will remove{" "}
+          <span className="font-semibold">{deletingWip?.uniq}</span> from the
+          list.
         </p>
       </Modal>
 
@@ -432,11 +466,7 @@ export default function WorkInProgressPage() {
           </div>
         }
       >
-        <Form
-          form={editForm}
-          layout="vertical"
-          requiredMark={false}
-        >
+        <Form form={editForm} layout="vertical" requiredMark={false}>
           <Form.Item
             label="Status"
             name="status"
@@ -457,7 +487,9 @@ export default function WorkInProgressPage() {
       {/* Page header */}
       <div className="flex items-start justify-between">
         <div>
-          <div className="text-2xl font-semibold text-gray-900">Work In-Progress Database</div>
+          <div className="text-2xl font-semibold text-gray-900">
+            Work In-Progress Database
+          </div>
           <div className="mt-1 flex items-center gap-2 text-sm text-gray-500">
             <span>Tuesday, September 23, 2025</span>
             <span className="text-gray-300">•</span>
@@ -475,9 +507,12 @@ export default function WorkInProgressPage() {
       <div className="bg-white rounded-xl shadow-sm p-5 border border-gray-100">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <div className="text-lg font-semibold text-gray-900">Work In-Progress Database</div>
+            <div className="text-lg font-semibold text-gray-900">
+              Work In-Progress Database
+            </div>
             <div className="text-sm text-gray-500">
-              Track WIP by Uniq, Packing Number, Type and Process with real-time aging and station visibility
+              Track WIP by Uniq, Packing Number, Type and Process with real-time
+              aging and station visibility
             </div>
           </div>
 
@@ -559,7 +594,10 @@ export default function WorkInProgressPage() {
               allowClear
             />
 
-            <Button icon={<DownloadOutlined />} className="flex items-center gap-2">
+            <Button
+              icon={<DownloadOutlined />}
+              className="flex items-center gap-2"
+            >
               Export
             </Button>
           </div>
@@ -593,7 +631,9 @@ export default function WorkInProgressPage() {
               </div>
             </div>
           ) : (
-            <div className="py-10 text-center text-gray-500">No station data</div>
+            <div className="py-10 text-center text-gray-500">
+              No station data
+            </div>
           )}
         </div>
       </div>

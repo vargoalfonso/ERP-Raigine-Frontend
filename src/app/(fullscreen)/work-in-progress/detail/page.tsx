@@ -11,6 +11,7 @@ import {
   useGetWipHistoryQuery,
   type WipMovementLogItem,
 } from "@/lib/api/wip/api";
+import { useGetInventoryKanbanSummaryQuery } from "@/lib/api/inventory/api";
 
 type UnknownRecord = Record<string, unknown>;
 const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
@@ -163,6 +164,26 @@ function WorkInProgressDetailPageContent() {
     },
   ];
 
+  const kanbanSummaryQuery = useGetInventoryKanbanSummaryQuery(
+    { uniq_code: uniqCode },
+    { skip: !apiEnabled || !uniqCode },
+  );
+  const kanbanSummary = kanbanSummaryQuery.data?.data;
+
+  const packingCurrentQty = Number(kanbanSummary?.stock_qty ?? 0);
+  const packingTargetQty =
+    packingCurrentQty + Number(kanbanSummary?.stock_to_complete ?? 0);
+  const packingProgress =
+    packingTargetQty > 0
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round((packingCurrentQty / packingTargetQty) * 100),
+          ),
+        )
+      : 0;
+
   return (
     <div className="w-full min-h-screen bg-gray-50">
       <div className="flex items-center justify-between bg-white px-8 py-4 border-b">
@@ -253,6 +274,73 @@ function WorkInProgressDetailPageContent() {
               },
             ]}
           />
+
+          {deliveryNoteData?.length > 0 && (
+            <div className="mt-8">
+              <h3 className="text-lg font-semibold mb-4">
+                Delivery Note History
+              </h3>
+
+              <Table
+                rowKey={(record) =>
+                  `${record.dn_number}-${record.packing_number}`
+                }
+                pagination={false}
+                dataSource={deliveryNoteData}
+                columns={[
+                  {
+                    title: "DN Number",
+                    dataIndex: "dn_number",
+                    key: "dn_number",
+                    render: (value: string) => value || "-",
+                  },
+                  {
+                    title: "Packing Number",
+                    dataIndex: "packing_number",
+                    key: "packing_number",
+                    render: (value: string) => value || "-",
+                  },
+                  {
+                    title: "Quantity",
+                    dataIndex: "quantity",
+                    key: "quantity",
+                    align: "right",
+                    render: (value: number) => formatNumber(Number(value ?? 0)),
+                  },
+                  {
+                    title: "Progress",
+                    key: "progress",
+                    width: 220,
+                    render: () => (
+                      <div>
+                        <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-200">
+                          <div
+                            className="h-full rounded-full bg-blue-600"
+                            style={{ width: `${packingProgress}%` }}
+                          />
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {packingProgress}% tercapai
+                        </p>
+                      </div>
+                    ),
+                  },
+                  {
+                    title: "Qty saat ini",
+                    key: "current_qty",
+                    align: "right",
+                    render: () => formatNumber(packingCurrentQty),
+                  },
+                  {
+                    title: "Qty maksimal",
+                    key: "target_qty",
+                    align: "right",
+                    render: () => formatNumber(packingTargetQty),
+                  },
+                ]}
+              />
+            </div>
+          )}
         </Card>
       </div>
 

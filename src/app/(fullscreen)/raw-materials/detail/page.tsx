@@ -2,8 +2,8 @@
 
 import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeftOutlined } from "@ant-design/icons";
-import { Table, Tabs, Card, Tag, Button, message } from "antd";
+import { ArrowLeftOutlined, BarcodeOutlined } from "@ant-design/icons";
+import { Table, Tabs, Card, Tag, Button, message, Modal, QRCode } from "antd";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
@@ -25,6 +25,7 @@ type RowHistory = {
   key: string;
   uniq: string;
   kanban: string;
+  dnNumber: string;
   stock: number;
   reason: string;
   qty: number;
@@ -38,6 +39,10 @@ function RawMaterialsDetailPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = useState("1");
+  const [barcodeModal, setBarcodeModal] = useState<{
+    dn: string;
+    packing: string;
+  } | null>(null);
   const id = searchParams.get("id") ?? "";
   const uniq = searchParams.get("uniq") ?? "LV7-001";
   const apiEnabled = Boolean(apiBaseUrl);
@@ -110,6 +115,7 @@ function RawMaterialsDetailPageContent() {
         item.packing_number ??
         item.reference_number ??
         "-",
+      dnNumber: item.dn_number ?? item.kanban_number ?? "-",
       stock: Number(item.qty ?? 0),
       reason: item.reason ?? item.action ?? "-",
       qty: Number(item.stock_after ?? item.qty ?? 0),
@@ -130,9 +136,45 @@ function RawMaterialsDetailPageContent() {
 
   const deliveryNoteData = deliveryNoteRes?.data ?? [];
 
+  const deliveryDnNumbers = Array.from(
+    new Set(
+      deliveryNoteData
+        .map((item) => item.dn_number)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+  const deliveryPackingNumbers = Array.from(
+    new Set(
+      deliveryNoteData
+        .map((item) => item.packing_number)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+  const deliveryDnText = deliveryDnNumbers.length
+    ? deliveryDnNumbers.join(", ")
+    : "-";
+  const deliveryPackingText = deliveryPackingNumbers.length
+    ? deliveryPackingNumbers.join(", ")
+    : "-";
+
+  const packingCurrentQty = Number(summary?.stock_qty ?? detailInfo.stock ?? 0);
+  const packingTargetQty =
+    packingCurrentQty + Number(summary?.stock_to_complete ?? 0);
+  const packingProgress =
+    packingTargetQty > 0
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round((packingCurrentQty / packingTargetQty) * 100),
+          ),
+        )
+      : 0;
+
   const historyColumns = [
     { title: "Uniq", dataIndex: "uniq", key: "uniq" },
     { title: "Kanban / Packing List", dataIndex: "kanban", key: "kanban" },
+    { title: "DN Number", dataIndex: "dnNumber", key: "dnNumber" },
     {
       title: "Stock",
       dataIndex: "stock",
@@ -255,6 +297,36 @@ function RawMaterialsDetailPageContent() {
                         </p>
                       </div>
                       <div>
+                        <p className="text-gray-400 flex items-center gap-1">
+                          <BarcodeOutlined
+                            className="cursor-pointer text-blue-600"
+                            onClick={() =>
+                              setBarcodeModal({
+                                dn: deliveryDnText,
+                                packing: deliveryPackingText,
+                              })
+                            }
+                          />{" "}
+                          DN Number
+                        </p>
+                        <p className="font-semibold">{deliveryDnText}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400 flex items-center gap-1">
+                          <BarcodeOutlined
+                            className="cursor-pointer text-blue-600"
+                            onClick={() =>
+                              setBarcodeModal({
+                                dn: deliveryDnText,
+                                packing: deliveryPackingText,
+                              })
+                            }
+                          />{" "}
+                          Packing List
+                        </p>
+                        <p className="font-semibold">{deliveryPackingText}</p>
+                      </div>
+                      <div>
                         <p className="text-gray-400">Status</p>
                         <Tag
                           className={
@@ -317,31 +389,66 @@ function RawMaterialsDetailPageContent() {
                     title: "DN Number",
                     dataIndex: "dn_number",
                     key: "dn_number",
+                    render: (
+                      value: string,
+                      record: { dn_number?: string; packing_number?: string },
+                    ) => (
+                      <span className="flex items-center gap-1">
+                        <BarcodeOutlined
+                          className="cursor-pointer text-blue-600"
+                          onClick={() =>
+                            setBarcodeModal({
+                              dn: value || "-",
+                              packing: record.packing_number || "-",
+                            })
+                          }
+                        />{" "}
+                        {value || "-"}
+                      </span>
+                    ),
                   },
                   {
                     title: "Packing Number",
                     dataIndex: "packing_number",
                     key: "packing_number",
+                    render: (value: string) => value || "-",
                   },
                   {
                     title: "Quantity",
                     dataIndex: "quantity",
                     key: "quantity",
                     align: "right",
+                    render: (value: number) => formatNumber(Number(value ?? 0)),
                   },
                   {
-                    title: "Check",
-                    dataIndex: "check",
-                    key: "check",
-                    render: (value: string) => {
-                      let color = "default";
-
-                      if (value === "progress") color = "processing";
-                      else if (value === "done") color = "success";
-                      else if (value === "pending") color = "warning";
-
-                      return <Tag color={color}>{value}</Tag>;
-                    },
+                    title: "Progress",
+                    key: "progress",
+                    width: 220,
+                    render: () => (
+                      <div>
+                        <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-200">
+                          <div
+                            className="h-full rounded-full bg-blue-600"
+                            style={{ width: `${packingProgress}%` }}
+                          />
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {packingProgress}% tercapai
+                        </p>
+                      </div>
+                    ),
+                  },
+                  {
+                    title: "Qty saat ini",
+                    key: "current_qty",
+                    align: "right",
+                    render: () => formatNumber(packingCurrentQty),
+                  },
+                  {
+                    title: "Qty maksimal",
+                    key: "target_qty",
+                    align: "right",
+                    render: () => formatNumber(packingTargetQty),
                   },
                 ]}
               />
@@ -349,6 +456,28 @@ function RawMaterialsDetailPageContent() {
           )}
         </Card>
       </div>
+
+      <Modal
+        open={!!barcodeModal}
+        onCancel={() => setBarcodeModal(null)}
+        footer={null}
+        centered
+        title="Barcode DN & Packing List"
+      >
+        <div className="flex flex-col items-center gap-4 py-2">
+          <QRCode
+            value={`DN:${barcodeModal?.dn ?? "-"} | PACKING:${barcodeModal?.packing ?? "-"}`}
+          />
+          <div className="w-full text-center">
+            <p className="m-0 text-gray-400 text-sm">DN Number</p>
+            <p className="m-0 font-semibold">{barcodeModal?.dn ?? "-"}</p>
+          </div>
+          <div className="w-full text-center">
+            <p className="m-0 text-gray-400 text-sm">Packing List</p>
+            <p className="m-0 font-semibold">{barcodeModal?.packing ?? "-"}</p>
+          </div>
+        </div>
+      </Modal>
 
       <div className="flex justify-end px-8 pb-8">
         <Button
