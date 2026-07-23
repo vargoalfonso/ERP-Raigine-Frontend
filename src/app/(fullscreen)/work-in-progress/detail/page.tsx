@@ -9,6 +9,7 @@ import { getApiErrorMessage } from "@/lib/api/error";
 import {
   useGetWipDetailQuery,
   useGetWipHistoryQuery,
+  useGetDeliveryNoteByUniqQuery,
   type WipMovementLogItem,
 } from "@/lib/api/wip/api";
 import { useGetInventoryKanbanSummaryQuery } from "@/lib/api/inventory/api";
@@ -165,10 +166,15 @@ function WorkInProgressDetailPageContent() {
   ];
 
   const kanbanSummaryQuery = useGetInventoryKanbanSummaryQuery(
-    { uniq_code: uniqCode },
-    { skip: !apiEnabled || !uniqCode },
+    { uniq_code: uniq },
+    { skip: !apiEnabled || !uniq },
   );
   const kanbanSummary = kanbanSummaryQuery.data?.data;
+
+  const { data: deliveryNoteRes } = useGetDeliveryNoteByUniqQuery(uniq, {
+    skip: !apiEnabled || !uniq,
+  });
+  const deliveryNoteData = deliveryNoteRes?.data ?? [];
 
   const packingCurrentQty = Number(kanbanSummary?.stock_qty ?? 0);
   const packingTargetQty =
@@ -282,7 +288,7 @@ function WorkInProgressDetailPageContent() {
               </h3>
 
               <Table
-                rowKey={(record) =>
+                rowKey={(record: any) =>
                   `${record.dn_number}-${record.packing_number}`
                 }
                 pagination={false}
