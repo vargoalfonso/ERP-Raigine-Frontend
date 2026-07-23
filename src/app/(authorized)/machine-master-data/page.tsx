@@ -121,7 +121,7 @@ export default function MachineMasterDataPage() {
     skip: !apiEnabled,
   });
   const { data: machineParameters } = useGetMachineParametersQuery(
-    { page: 1, limit: 100 },
+    { page: 1, limit: 1000 },
     { skip: !apiEnabled },
   );
   const { data: processes = [] } = useGetProcessesQuery(undefined, {
@@ -210,6 +210,7 @@ export default function MachineMasterDataPage() {
 
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [popupLoading, setPopupLoading] = useState(false);
   const [barcodeOpen, setBarcodeOpen] = useState(false);
   const [activeRow, setActiveRow] = useState<MachineRow | null>(null);
   const [barcodeRow, setBarcodeRow] = useState<MachineRow | null>(null);
@@ -271,11 +272,15 @@ export default function MachineMasterDataPage() {
     // exclude machines that are already present in the master list (rows)
     const existingNames = new Set<string>(rows.map((r) => String(r.machineName ?? "").trim()).filter(Boolean));
 
+    // Deduplicate machine names (backend may return duplicates)
+    const seen = new Set<string>();
     return (machineParameters?.items ?? [])
       .map((machine) => {
         const name = String(machine.machine_name ?? "").trim();
         if (!name) return null;
         if (existingNames.has(name)) return null;
+        if (seen.has(name)) return null;
+        seen.add(name);
         return { label: name, value: name };
       })
       .filter((option): option is { label: string; value: string } => Boolean(option));
@@ -834,6 +839,11 @@ export default function MachineMasterDataPage() {
                 placeholder="Select machine name"
                 showSearch
                 optionFilterProp="label"
+                loading={popupLoading}
+                onPopupScroll={() => {
+                  setPopupLoading(true);
+                  window.setTimeout(() => setPopupLoading(false), 300);
+                }}
               />
             </Form.Item>
             <Form.Item
@@ -976,6 +986,11 @@ export default function MachineMasterDataPage() {
                 placeholder="Select machine name"
                 showSearch
                 optionFilterProp="label"
+                loading={popupLoading}
+                onPopupScroll={() => {
+                  setPopupLoading(true);
+                  window.setTimeout(() => setPopupLoading(false), 300);
+                }}
               />
             </Form.Item>
             <Form.Item

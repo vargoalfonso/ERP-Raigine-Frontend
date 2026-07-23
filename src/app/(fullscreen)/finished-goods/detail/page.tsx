@@ -2,8 +2,8 @@
 
 import React, { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeftOutlined } from "@ant-design/icons";
-import { Table, Tabs, Card, Tag, Button, Spin } from "antd";
+import { ArrowLeftOutlined, BarcodeOutlined } from "@ant-design/icons";
+import { Table, Tabs, Card, Tag, Button, Spin, Modal, QRCode } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   useGetFinishedGoodParameterizedSummaryQuery,
@@ -71,6 +71,10 @@ function FinishedGoodDetailContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [activeTab, setActiveTab] = React.useState("1");
+  const [barcodeModal, setBarcodeModal] = React.useState<{
+    dn: string;
+    packing: string;
+  } | null>(null);
 
   const uniqCode =
     searchParams.get("uniq_code") ??
@@ -102,6 +106,44 @@ function FinishedGoodDetailContent() {
     });
 
   const deliveryNoteData = deliveryNoteRes?.data ?? [];
+
+  const deliveryDnNumbers = Array.from(
+    new Set(
+      deliveryNoteData
+        .map((item) => item.dn_number)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+  const deliveryPackingNumbers = Array.from(
+    new Set(
+      deliveryNoteData
+        .map((item) => item.packing_number)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+  const deliveryDnText = deliveryDnNumbers.length
+    ? deliveryDnNumbers.join(", ")
+    : "-";
+  const deliveryPackingText = deliveryPackingNumbers.length
+    ? deliveryPackingNumbers.join(", ")
+    : "-";
+
+  const packingCurrentQty = Number(detail?.stock_qty ?? 0);
+  const packingTargetQty =
+    detail?.target_stock_qty && detail.target_stock_qty > 0
+      ? Number(detail.target_stock_qty)
+      : packingCurrentQty + Number(detail?.stock_to_kanban_pcs ?? 0);
+  const packingStdQty = Number(detail?.kanban_standard_qty ?? 0);
+  const packingProgress =
+    packingTargetQty > 0
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round((packingCurrentQty / packingTargetQty) * 100),
+          ),
+        )
+      : 0;
 
   /* ================= COLUMNS HISTORY ================= */
   const historyColumns: ColumnsType<FinishedGoodHistoryItem> = [
@@ -179,6 +221,40 @@ function FinishedGoodDetailContent() {
           <p className="text-gray-400">
             Complete Finished Good Detail for {resolvedUniq}
           </p>
+
+          {uniqCode && detail ? (
+            <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <p className="m-0 font-semibold text-blue-700">
+                  Progress Qty vs Qty Seharusnya (Packing)
+                </p>
+                <p className="m-0 text-sm text-gray-600">
+                  Qty saat ini{" "}
+                  <span className="font-semibold">
+                    {packingCurrentQty.toLocaleString("en-US")}
+                  </span>{" "}
+                  / Qty seharusnya{" "}
+                  <span className="font-semibold">
+                    {packingTargetQty.toLocaleString("en-US")}
+                  </span>
+                </p>
+              </div>
+              <div className="h-3 w-full overflow-hidden rounded-full bg-gray-200">
+                <div
+                  className="h-full rounded-full bg-blue-600"
+                  style={{ width: `${packingProgress}%` }}
+                />
+              </div>
+              <p className="mt-1 text-xs text-gray-500">
+                {packingProgress}% tercapai
+                {packingStdQty > 0
+                  ? ` • Standar per packing: ${packingStdQty.toLocaleString(
+                      "en-US",
+                    )}`
+                  : ""}
+              </p>
+            </div>
+          ) : null}
 
           {!uniqCode ? (
             <div className="text-gray-500 py-10 text-center">
@@ -270,6 +346,40 @@ function FinishedGoodDetailContent() {
                           </div>
 
                           <div>
+                            <p className="text-gray-400 flex items-center gap-1">
+                              <BarcodeOutlined
+                                className="cursor-pointer text-blue-600"
+                                onClick={() =>
+                                  setBarcodeModal({
+                                    dn: deliveryDnText,
+                                    packing: deliveryPackingText,
+                                  })
+                                }
+                              />{" "}
+                              DN Number
+                            </p>
+                            <p className="font-semibold">{deliveryDnText}</p>
+                          </div>
+
+                          <div>
+                            <p className="text-gray-400 flex items-center gap-1">
+                              <BarcodeOutlined
+                                className="cursor-pointer text-blue-600"
+                                onClick={() =>
+                                  setBarcodeModal({
+                                    dn: deliveryDnText,
+                                    packing: deliveryPackingText,
+                                  })
+                                }
+                              />{" "}
+                              Packing List
+                            </p>
+                            <p className="font-semibold">
+                              {deliveryPackingText}
+                            </p>
+                          </div>
+
+                          <div>
                             <p className="text-gray-400">Status</p>
                             <Tag className={statusTagClass(detail.status)}>
                               {statusLabel(detail.status)}
@@ -332,6 +442,23 @@ function FinishedGoodDetailContent() {
                     title: "DN Number",
                     dataIndex: "dn_number",
                     key: "dn_number",
+                    render: (
+                      value: string,
+                      record: { dn_number?: string; packing_number?: string },
+                    ) => (
+                      <span className="flex items-center gap-1">
+                        <BarcodeOutlined
+                          className="cursor-pointer text-blue-600"
+                          onClick={() =>
+                            setBarcodeModal({
+                              dn: value || "-",
+                              packing: record.packing_number || "-",
+                            })
+                          }
+                        />{" "}
+                        {value || "-"}
+                      </span>
+                    ),
                   },
                   {
                     title: "Packing Number",
@@ -364,6 +491,28 @@ function FinishedGoodDetailContent() {
           )}
         </Card>
       </div>
+
+      <Modal
+        open={!!barcodeModal}
+        onCancel={() => setBarcodeModal(null)}
+        footer={null}
+        centered
+        title="Barcode DN & Packing List"
+      >
+        <div className="flex flex-col items-center gap-4 py-2">
+          <QRCode
+            value={`DN:${barcodeModal?.dn ?? "-"} | PACKING:${barcodeModal?.packing ?? "-"}`}
+          />
+          <div className="w-full text-center">
+            <p className="m-0 text-gray-400 text-sm">DN Number</p>
+            <p className="m-0 font-semibold">{barcodeModal?.dn ?? "-"}</p>
+          </div>
+          <div className="w-full text-center">
+            <p className="m-0 text-gray-400 text-sm">Packing List</p>
+            <p className="m-0 font-semibold">{barcodeModal?.packing ?? "-"}</p>
+          </div>
+        </div>
+      </Modal>
 
       {/* ================= FOOTER ACTION ================= */}
       <div className="flex justify-end px-8 pb-8">

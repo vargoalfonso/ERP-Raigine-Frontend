@@ -92,9 +92,7 @@ const parseObjectResponse = <T>(response: unknown): T | null => {
 };
 
 export type InventoryType =
-  | "raw-materials"
-  | "indirect-materials"
-  | "subcon-materials";
+  "raw-materials" | "indirect-materials" | "subcon-materials";
 
 export type InventoryRecord = {
   id: string;
@@ -129,6 +127,7 @@ export type InventoryHistoryRecord = {
   reference_number?: string;
   kanban_number?: string;
   packing_number?: string;
+  dn_number?: string;
 };
 
 export type InventoryIncomingRecord = {
@@ -144,6 +143,7 @@ export type InventoryIncomingRecord = {
   supplier_name?: string;
   packing_number?: string;
   reference_number?: string;
+  dn_number?: string;
   date_incoming?: string;
   created_at?: string;
 };
@@ -299,6 +299,13 @@ const toInventoryHistoryRecord = (raw: unknown): InventoryHistoryRecord => {
         record.PackingNumber,
     ),
     packing_number: toText(record.packing_number ?? record.PackingNumber),
+    dn_number: toText(
+      record.dn_number ??
+        record.dnNumber ??
+        record.DNNumber ??
+        record.kanban_packing ??
+        record.KanbanPacking,
+    ),
   };
 };
 
@@ -341,6 +348,7 @@ const toInventoryIncomingRecord = (raw: unknown): InventoryIncomingRecord => {
         record.ReferenceNumber ??
         record.ReferenceNo,
     ),
+    dn_number: toText(record.dn_number ?? record.dnNumber ?? record.DNNumber),
     date_incoming: toText(
       record.date_incoming ??
         record.created_at ??

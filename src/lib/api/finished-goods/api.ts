@@ -475,6 +475,7 @@ export const {
   useGetFinishedGoodsQuery,
   useGetFinishedGoodsSummaryQuery,
   useGetFinishedGoodParameterizedSummaryQuery,
+  useLazyGetFinishedGoodParameterizedSummaryQuery,
   useGetFinishedGoodHistoryQuery,
   useGetFinishedGoodUniqOptionsQuery,
   useCreateFinishedGoodMutation,

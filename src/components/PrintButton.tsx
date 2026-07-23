@@ -104,6 +104,37 @@ export default function PrintButton({
               ))}
             </div>
 
+            {current.progress ? (
+              <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Qty saat ini</span>
+                  <span className="font-semibold text-gray-900">
+                    {current.progress.currentQty.toLocaleString("en-US")}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-center justify-between text-sm">
+                  <span className="text-gray-600">
+                    Qty seharusnya (packing)
+                  </span>
+                  <span className="font-semibold text-gray-900">
+                    {current.progress.targetQty.toLocaleString("en-US")}
+                  </span>
+                </div>
+                <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-gray-200">
+                  <div
+                    className="h-full rounded-full bg-blue-600"
+                    style={{ width: `${current.progress.percent}%` }}
+                  />
+                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  {current.progress.percent}% tercapai
+                  {current.progress.stdQty && current.progress.stdQty > 0
+                    ? ` \u2022 Standar per packing: ${current.progress.stdQty.toLocaleString("en-US")}`
+                    : ""}
+                </p>
+              </div>
+            ) : null}
+
             {current.deliveryNotes?.length ? (
               <div className="mt-4">
                 <div className="text-sm font-semibold mb-2">
