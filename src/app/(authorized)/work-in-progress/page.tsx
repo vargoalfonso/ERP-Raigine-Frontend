@@ -169,11 +169,11 @@ export default function WorkInProgressPage() {
   const openWipDetail = (record: WipRecord) => {
     const fromApi = apiEnabled && !isMissingRouteError(listQuery.error);
     if (fromApi) {
-      if (!record.apiId) {
+      if (!record.id) {
         messageApi.warning("WIP id is missing; cannot open detail.");
         return;
       }
-      router.push(`/work-in-progress/detail?id=${encodeURIComponent(record.apiId)}&uniq=${encodeURIComponent(record.uniq)}`);
+      router.push(`/work-in-progress/detail?id=${encodeURIComponent(record.id)}&uniq=${encodeURIComponent(record.uniq)}`);
       return;
     }
     router.push(`/work-in-progress/detail?uniq=${encodeURIComponent(record.uniq)}`);

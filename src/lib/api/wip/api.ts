@@ -171,6 +171,71 @@ const parseListItems = (response: unknown): WipListRow[] => {
   return [];
 };
 
+export type WipMovementLogItem = {
+  id?: string | number;
+  uniq_code?: string;
+  movement_type?: string;
+  reason?: string;
+  qty_change?: number;
+  qty_before?: number;
+  qty_after?: number;
+  wo_number?: string | null;
+  dn_number?: string | null;
+  reference_id?: string | null;
+  notes?: string | null;
+  logged_by?: string | null;
+  logged_at?: string;
+};
+
+export type WipHistoryParams = {
+  uniq_code: string;
+  page?: number;
+  limit?: number;
+};
+
+const toWipMovementLogItem = (raw: unknown): WipMovementLogItem => {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    id: toText(r.id ?? r.ID),
+    uniq_code: toText(r.uniq_code ?? r.uniq ?? r.UniqCode),
+    movement_type: toText(r.movement_type ?? r.action ?? r.MovementType),
+    reason: toText(r.reason ?? r.Reason ?? r.notes ?? r.Notes),
+    qty_change: toNumber(r.qty_change ?? r.qty ?? r.QtyChange) ?? 0,
+    qty_before: toNumber(r.qty_before ?? r.QtyBefore),
+    qty_after: toNumber(r.qty_after ?? r.QtyAfter),
+    wo_number: toText(r.wo_number ?? r.WONumber ?? r.reference_id ?? r.ReferenceID) ?? null,
+    dn_number: toText(r.dn_number ?? r.DNNumber) ?? null,
+    reference_id: toText(r.reference_id ?? r.reference ?? r.ReferenceID) ?? null,
+    notes: toText(r.notes ?? r.Notes) ?? null,
+    logged_by: toText(r.logged_by ?? r.LoggedBy) ?? null,
+    logged_at: toText(r.logged_at ?? r.created_at ?? r.LoggedAt),
+  };
+};
+
+const parseHistoryItems = (response: unknown): WipMovementLogItem[] => {
+  const unwrapped = unwrapBackendData<unknown>(response);
+  const base = isRecord(unwrapped) ? unwrapped : isRecord(response) ? response : undefined;
+
+  const pickArray = (obj: unknown): unknown[] | undefined => {
+    if (!isRecord(obj)) return undefined;
+    if (Array.isArray(obj.items)) return obj.items as unknown[];
+    if (isRecord(obj.data)) {
+      if (Array.isArray(obj.data.items)) return obj.data.items as unknown[];
+      if (Array.isArray((obj.data as UnknownRecord).data))
+        return (obj.data as UnknownRecord).data as unknown[];
+    }
+    return undefined;
+  };
+
+  const arr =
+    pickArray(base) ??
+    pickArray(response) ??
+    (Array.isArray(unwrapped) ? (unwrapped as unknown[]) : undefined) ??
+    [];
+
+  return arr.map(toWipMovementLogItem);
+};
+
 export const wipApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     getWipList: builder.query<ApiResponse<WipListRow[]>, { page?: number; limit?: number }>({
@@ -215,6 +280,15 @@ export const wipApiSlice = apiSlice.injectEndpoints({
       }),
       transformResponse: (response: unknown) => ok(unwrapBackendData<unknown>(response), "WIP updated"),
     }),
+
+    getWipHistory: builder.query<ApiResponse<WipMovementLogItem[]>, WipHistoryParams>({
+      query: ({ uniq_code, page = 1, limit = 100 }) => ({
+        url: `/wip/history?uniq_code=${encodeURIComponent(uniq_code)}&page=${page}&limit=${limit}`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => ok(parseHistoryItems(response), "WIP history retrieved", parsePagination(response)),
+    }),
   }),
 });
 
@@ -223,4 +297,5 @@ export const {
   useGetWipDetailQuery,
   useCreateWipMutation,
   useUpdateWipMutation,
+  useGetWipHistoryQuery,
 } = wipApiSlice;
