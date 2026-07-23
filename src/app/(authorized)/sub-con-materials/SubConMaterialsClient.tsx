@@ -610,7 +610,7 @@ export default function SubConMaterialsClient() {
             icon={<EyeOutlined />}
             className="text-blue-600 hover:text-blue-800"
             onClick={() =>
-              router.push(`/sub-con-materials/detail?uniq=${encodeURIComponent(r.uniq)}`)
+              router.push(`/sub-con-materials/detail?id=${encodeURIComponent(String(r.id))}&uniq=${encodeURIComponent(r.uniq)}`)
             }
           />
           <PrintButton
@@ -760,7 +760,7 @@ export default function SubConMaterialsClient() {
             icon={<EyeOutlined />}
             className="text-blue-600 hover:text-blue-800"
             onClick={() =>
-              router.push(`/sub-con-materials/detail?uniq=${encodeURIComponent(r.uniq)}`)
+              router.push(`/sub-con-materials/detail?id=${encodeURIComponent(String(r.id))}&uniq=${encodeURIComponent(r.uniq)}`)
             }
           />
           <PrintButton
