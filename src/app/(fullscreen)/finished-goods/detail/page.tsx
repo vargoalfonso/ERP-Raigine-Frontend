@@ -133,7 +133,6 @@ function FinishedGoodDetailContent() {
     detail?.target_stock_qty && detail.target_stock_qty > 0
       ? Number(detail.target_stock_qty)
       : packingCurrentQty + Number(detail?.stock_to_kanban_pcs ?? 0);
-  const packingStdQty = Number(detail?.kanban_standard_qty ?? 0);
   const packingProgress =
     packingTargetQty > 0
       ? Math.max(
@@ -221,40 +220,6 @@ function FinishedGoodDetailContent() {
           <p className="text-gray-400">
             Complete Finished Good Detail for {resolvedUniq}
           </p>
-
-          {uniqCode && detail ? (
-            <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                <p className="m-0 font-semibold text-blue-700">
-                  Progress Qty vs Qty Seharusnya (Packing)
-                </p>
-                <p className="m-0 text-sm text-gray-600">
-                  Qty saat ini{" "}
-                  <span className="font-semibold">
-                    {packingCurrentQty.toLocaleString("en-US")}
-                  </span>{" "}
-                  / Qty seharusnya{" "}
-                  <span className="font-semibold">
-                    {packingTargetQty.toLocaleString("en-US")}
-                  </span>
-                </p>
-              </div>
-              <div className="h-3 w-full overflow-hidden rounded-full bg-gray-200">
-                <div
-                  className="h-full rounded-full bg-blue-600"
-                  style={{ width: `${packingProgress}%` }}
-                />
-              </div>
-              <p className="mt-1 text-xs text-gray-500">
-                {packingProgress}% tercapai
-                {packingStdQty > 0
-                  ? ` • Standar per packing: ${packingStdQty.toLocaleString(
-                      "en-US",
-                    )}`
-                  : ""}
-              </p>
-            </div>
-          ) : null}
 
           {!uniqCode ? (
             <div className="text-gray-500 py-10 text-center">
@@ -464,26 +429,45 @@ function FinishedGoodDetailContent() {
                     title: "Packing Number",
                     dataIndex: "packing_number",
                     key: "packing_number",
+                    render: (value: string) => value || "-",
                   },
                   {
                     title: "Quantity",
                     dataIndex: "quantity",
                     key: "quantity",
                     align: "right",
+                    render: (value: number) =>
+                      Number(value ?? 0).toLocaleString("en-US"),
                   },
                   {
-                    title: "Check",
-                    dataIndex: "check",
-                    key: "check",
-                    render: (value: string) => {
-                      let color = "default";
-
-                      if (value === "progress") color = "processing";
-                      else if (value === "done") color = "success";
-                      else if (value === "pending") color = "warning";
-
-                      return <Tag color={color}>{value}</Tag>;
-                    },
+                    title: "Progress",
+                    key: "progress",
+                    width: 220,
+                    render: () => (
+                      <div>
+                        <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-200">
+                          <div
+                            className="h-full rounded-full bg-blue-600"
+                            style={{ width: `${packingProgress}%` }}
+                          />
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {packingProgress}% tercapai
+                        </p>
+                      </div>
+                    ),
+                  },
+                  {
+                    title: "Qty saat ini",
+                    key: "current_qty",
+                    align: "right",
+                    render: () => packingCurrentQty.toLocaleString("en-US"),
+                  },
+                  {
+                    title: "Qty maksimal",
+                    key: "target_qty",
+                    align: "right",
+                    render: () => packingTargetQty.toLocaleString("en-US"),
                   },
                 ]}
               />

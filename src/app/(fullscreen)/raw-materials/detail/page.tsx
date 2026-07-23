@@ -160,7 +160,6 @@ function RawMaterialsDetailPageContent() {
   const packingCurrentQty = Number(summary?.stock_qty ?? detailInfo.stock ?? 0);
   const packingTargetQty =
     packingCurrentQty + Number(summary?.stock_to_complete ?? 0);
-  const packingStdQty = Number(summary?.kanban_pkg_qty ?? 0);
   const packingProgress =
     packingTargetQty > 0
       ? Math.max(
@@ -226,36 +225,6 @@ function RawMaterialsDetailPageContent() {
           <p className="text-gray-400">
             Complete Raw Materials Detail for {detailInfo.uniq}
           </p>
-
-          <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-              <p className="m-0 font-semibold text-blue-700">
-                Progress Qty vs Qty Seharusnya (Packing)
-              </p>
-              <p className="m-0 text-sm text-gray-600">
-                Qty saat ini{" "}
-                <span className="font-semibold">
-                  {formatNumber(packingCurrentQty)}
-                </span>{" "}
-                / Qty seharusnya{" "}
-                <span className="font-semibold">
-                  {formatNumber(packingTargetQty)}
-                </span>
-              </p>
-            </div>
-            <div className="h-3 w-full overflow-hidden rounded-full bg-gray-200">
-              <div
-                className="h-full rounded-full bg-blue-600"
-                style={{ width: `${packingProgress}%` }}
-              />
-            </div>
-            <p className="mt-1 text-xs text-gray-500">
-              {packingProgress}% tercapai
-              {packingStdQty > 0
-                ? ` • Standar per packing: ${formatNumber(packingStdQty)}`
-                : ""}
-            </p>
-          </div>
 
           <Tabs
             activeKey={activeTab}
@@ -442,26 +411,44 @@ function RawMaterialsDetailPageContent() {
                     title: "Packing Number",
                     dataIndex: "packing_number",
                     key: "packing_number",
+                    render: (value: string) => value || "-",
                   },
                   {
                     title: "Quantity",
                     dataIndex: "quantity",
                     key: "quantity",
                     align: "right",
+                    render: (value: number) => formatNumber(Number(value ?? 0)),
                   },
                   {
-                    title: "Check",
-                    dataIndex: "check",
-                    key: "check",
-                    render: (value: string) => {
-                      let color = "default";
-
-                      if (value === "progress") color = "processing";
-                      else if (value === "done") color = "success";
-                      else if (value === "pending") color = "warning";
-
-                      return <Tag color={color}>{value}</Tag>;
-                    },
+                    title: "Progress",
+                    key: "progress",
+                    width: 220,
+                    render: () => (
+                      <div>
+                        <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-200">
+                          <div
+                            className="h-full rounded-full bg-blue-600"
+                            style={{ width: `${packingProgress}%` }}
+                          />
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {packingProgress}% tercapai
+                        </p>
+                      </div>
+                    ),
+                  },
+                  {
+                    title: "Qty saat ini",
+                    key: "current_qty",
+                    align: "right",
+                    render: () => formatNumber(packingCurrentQty),
+                  },
+                  {
+                    title: "Qty maksimal",
+                    key: "target_qty",
+                    align: "right",
+                    render: () => formatNumber(packingTargetQty),
                   },
                 ]}
               />

@@ -186,6 +186,16 @@ function SubConMaterialsDetailPageContent() {
 
   const deliveryNoteData = deliveryNoteRes?.data ?? [];
 
+  const subconCurrentQty = detailInfo.totalStock;
+  const subconTargetQty = detailInfo.totalPo;
+  const subconProgress =
+    subconTargetQty > 0
+      ? Math.max(
+          0,
+          Math.min(100, Math.round((subconCurrentQty / subconTargetQty) * 100)),
+        )
+      : 0;
+
   return (
     <div className="w-full min-h-screen bg-gray-50">
       <div className="flex items-center justify-between bg-white px-8 py-4 border-b">
@@ -363,31 +373,50 @@ function SubConMaterialsDetailPageContent() {
                     title: "DN Number",
                     dataIndex: "dn_number",
                     key: "dn_number",
+                    render: (value: string) => value || "-",
                   },
                   {
                     title: "Packing Number",
                     dataIndex: "packing_number",
                     key: "packing_number",
+                    render: (value: string) => value || "-",
                   },
                   {
                     title: "Quantity",
                     dataIndex: "quantity",
                     key: "quantity",
                     align: "right",
+                    render: (value: number) => formatNumber(Number(value ?? 0)),
                   },
                   {
-                    title: "Check",
-                    dataIndex: "check",
-                    key: "check",
-                    render: (value: string) => {
-                      let color = "default";
-
-                      if (value === "progress") color = "processing";
-                      else if (value === "done") color = "success";
-                      else if (value === "pending") color = "warning";
-
-                      return <Tag color={color}>{value}</Tag>;
-                    },
+                    title: "Progress",
+                    key: "progress",
+                    width: 220,
+                    render: () => (
+                      <div>
+                        <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-200">
+                          <div
+                            className="h-full rounded-full bg-blue-600"
+                            style={{ width: `${subconProgress}%` }}
+                          />
+                        </div>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {subconProgress}% tercapai
+                        </p>
+                      </div>
+                    ),
+                  },
+                  {
+                    title: "Qty saat ini",
+                    key: "current_qty",
+                    align: "right",
+                    render: () => formatNumber(subconCurrentQty),
+                  },
+                  {
+                    title: "Qty maksimal",
+                    key: "target_qty",
+                    align: "right",
+                    render: () => formatNumber(subconTargetQty),
                   },
                 ]}
               />
