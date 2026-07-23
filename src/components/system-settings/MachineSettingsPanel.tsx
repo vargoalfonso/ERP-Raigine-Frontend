@@ -205,10 +205,10 @@ export default function MachineSettingsPanel() {
 
   const machineParametersQuery = useGetMachineParametersQuery(
     { page: 1, limit: 1000 },
-    { skip: !apiEnabled, refetchOnMountOrArgChange: true }
+    { skip: !apiEnabled },
   );
   const machinePatternsQuery = useGetMachinePatternsQuery(
-    { page: 1, limit: 20 },
+    { page: 1, limit: 1000 },
     { skip: !apiEnabled, refetchOnMountOrArgChange: true }
   );
   const [createMachineParameter, createState] = useCreateMachineParameterMutation();

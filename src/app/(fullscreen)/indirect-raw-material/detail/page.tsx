@@ -2,8 +2,8 @@
 
 import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeftOutlined } from "@ant-design/icons";
-import { Button, Card, Table, Tabs, Tag, message } from "antd";
+import { ArrowLeftOutlined, BarcodeOutlined } from "@ant-design/icons";
+import { Button, Card, Table, Tabs, Tag, message, Modal, QRCode } from "antd";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
@@ -24,6 +24,8 @@ const isMissingRouteError = (error: unknown): boolean =>
 type DeliveryNoteLogRow = {
   key: string;
   jobNumber: string;
+  dnNumber: string;
+  packingList: string;
   receivedDate: string;
   quantity: number;
   kanban: number;
@@ -42,6 +44,10 @@ function IndirectRawMaterialDetailPageContent() {
   const apiEnabled = Boolean(apiBaseUrl);
 
   const [activeTab, setActiveTab] = useState("details");
+  const [barcodeModal, setBarcodeModal] = useState<{
+    dn: string;
+    packing: string;
+  } | null>(null);
   const detailQuery = useGetInventoryDetailQuery(
     { type: "indirect-materials", id },
     { skip: !apiEnabled || !id },
@@ -103,6 +109,8 @@ function IndirectRawMaterialDetailPageContent() {
       .map((item, index) => ({
         key: item.id || `${index}`,
         jobNumber: item.reference_number ?? item.packing_number ?? item.id,
+        dnNumber: item.dn_number ?? "-",
+        packingList: item.packing_number ?? item.reference_number ?? "-",
         receivedDate: item.date_incoming ?? item.created_at ?? "-",
         quantity: Number(item.quantity ?? item.stock_qty ?? 0),
         kanban: Number(summary?.kanban_count ?? 0),
@@ -116,6 +124,8 @@ function IndirectRawMaterialDetailPageContent() {
 
   const logColumns = [
     { title: "Job Number", dataIndex: "jobNumber", key: "jobNumber" },
+    { title: "DN Number", dataIndex: "dnNumber", key: "dnNumber" },
+    { title: "Packing List", dataIndex: "packingList", key: "packingList" },
     { title: "Received Date", dataIndex: "receivedDate", key: "receivedDate" },
     {
       title: "Quantity",
@@ -148,6 +158,44 @@ function IndirectRawMaterialDetailPageContent() {
 
   const deliveryNoteData = deliveryNoteRes?.data ?? [];
 
+  const deliveryDnNumbers = Array.from(
+    new Set(
+      deliveryNoteData
+        .map((item) => item.dn_number)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+  const deliveryPackingNumbers = Array.from(
+    new Set(
+      deliveryNoteData
+        .map((item) => item.packing_number)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+  const deliveryDnText = deliveryDnNumbers.length
+    ? deliveryDnNumbers.join(", ")
+    : "-";
+  const deliveryPackingText = deliveryPackingNumbers.length
+    ? deliveryPackingNumbers.join(", ")
+    : "-";
+
+  const packingCurrentQty = Number(
+    summary?.stock_qty ?? detailInfo.quantity ?? 0,
+  );
+  const packingTargetQty =
+    packingCurrentQty + Number(summary?.stock_to_complete ?? 0);
+  const packingStdQty = Number(summary?.kanban_pkg_qty ?? 0);
+  const packingProgress =
+    packingTargetQty > 0
+      ? Math.max(
+          0,
+          Math.min(
+            100,
+            Math.round((packingCurrentQty / packingTargetQty) * 100),
+          ),
+        )
+      : 0;
+
   return (
     <div className="w-full min-h-screen bg-gray-50">
       <div className="flex items-center justify-between bg-white px-8 py-4 border-b">
@@ -179,6 +227,36 @@ function IndirectRawMaterialDetailPageContent() {
           <p className="text-gray-400">
             Complete Indirect Raw Material Detail for {detailInfo.uniq}
           </p>
+
+          <div className="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <p className="m-0 font-semibold text-blue-700">
+                Progress Qty vs Qty Seharusnya (Packing)
+              </p>
+              <p className="m-0 text-sm text-gray-600">
+                Qty saat ini{" "}
+                <span className="font-semibold">
+                  {formatNumber(packingCurrentQty)}
+                </span>{" "}
+                / Qty seharusnya{" "}
+                <span className="font-semibold">
+                  {formatNumber(packingTargetQty)}
+                </span>
+              </p>
+            </div>
+            <div className="h-3 w-full overflow-hidden rounded-full bg-gray-200">
+              <div
+                className="h-full rounded-full bg-blue-600"
+                style={{ width: `${packingProgress}%` }}
+              />
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              {packingProgress}% tercapai
+              {packingStdQty > 0
+                ? ` • Standar per packing: ${formatNumber(packingStdQty)}`
+                : ""}
+            </p>
+          </div>
 
           <Tabs
             activeKey={activeTab}
@@ -269,6 +347,36 @@ function IndirectRawMaterialDetailPageContent() {
                         <p className="text-gray-400">Last Update</p>
                         <p className="font-semibold">{detailInfo.lastUpdate}</p>
                       </div>
+                      <div>
+                        <p className="text-gray-400 flex items-center gap-1">
+                          <BarcodeOutlined
+                            className="cursor-pointer text-blue-600"
+                            onClick={() =>
+                              setBarcodeModal({
+                                dn: deliveryDnText,
+                                packing: deliveryPackingText,
+                              })
+                            }
+                          />{" "}
+                          DN Number
+                        </p>
+                        <p className="font-semibold">{deliveryDnText}</p>
+                      </div>
+                      <div>
+                        <p className="text-gray-400 flex items-center gap-1">
+                          <BarcodeOutlined
+                            className="cursor-pointer text-blue-600"
+                            onClick={() =>
+                              setBarcodeModal({
+                                dn: deliveryDnText,
+                                packing: deliveryPackingText,
+                              })
+                            }
+                          />{" "}
+                          Packing List
+                        </p>
+                        <p className="font-semibold">{deliveryPackingText}</p>
+                      </div>
                     </div>
                   </Card>
                 ),
@@ -348,6 +456,23 @@ function IndirectRawMaterialDetailPageContent() {
                     title: "DN Number",
                     dataIndex: "dn_number",
                     key: "dn_number",
+                    render: (
+                      value: string,
+                      record: { dn_number?: string; packing_number?: string },
+                    ) => (
+                      <span className="flex items-center gap-1">
+                        <BarcodeOutlined
+                          className="cursor-pointer text-blue-600"
+                          onClick={() =>
+                            setBarcodeModal({
+                              dn: value || "-",
+                              packing: record.packing_number || "-",
+                            })
+                          }
+                        />{" "}
+                        {value || "-"}
+                      </span>
+                    ),
                   },
                   {
                     title: "Packing Number",
@@ -380,6 +505,28 @@ function IndirectRawMaterialDetailPageContent() {
           )}
         </Card>
       </div>
+
+      <Modal
+        open={!!barcodeModal}
+        onCancel={() => setBarcodeModal(null)}
+        footer={null}
+        centered
+        title="Barcode DN & Packing List"
+      >
+        <div className="flex flex-col items-center gap-4 py-2">
+          <QRCode
+            value={`DN:${barcodeModal?.dn ?? "-"} | PACKING:${barcodeModal?.packing ?? "-"}`}
+          />
+          <div className="w-full text-center">
+            <p className="m-0 text-gray-400 text-sm">DN Number</p>
+            <p className="m-0 font-semibold">{barcodeModal?.dn ?? "-"}</p>
+          </div>
+          <div className="w-full text-center">
+            <p className="m-0 text-gray-400 text-sm">Packing List</p>
+            <p className="m-0 font-semibold">{barcodeModal?.packing ?? "-"}</p>
+          </div>
+        </div>
+      </Modal>
 
       <div className="flex justify-end px-8 pb-8">
         <Button

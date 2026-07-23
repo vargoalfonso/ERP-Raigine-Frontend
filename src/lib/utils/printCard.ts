@@ -22,6 +22,14 @@ export type PrintCardOptions = {
   /** Two-column field grid. */
   fields: PrintCardField[];
 
+  /** Optional progress bar (target vs current qty), like the detail page. */
+  progress?: {
+    currentQty: number;
+    targetQty: number;
+    stdQty?: number;
+    percent: number;
+  };
+
   deliveryNotes?: DeliveryNotePrint[];
   /** QR image source (canvas data URL or https URL). Optional. */
   qrDataUrl?: string;
@@ -54,11 +62,12 @@ const buildCardHtml = (opts: PrintCardOptions) => {
     heading,
     subheading,
     fields,
+    progress,
     deliveryNotes,
     qrDataUrl,
     bottomCode,
   } = opts;
-  
+
   const fieldsHtml = fields
     .map(
       (f) => `
@@ -68,6 +77,28 @@ const buildCardHtml = (opts: PrintCardOptions) => {
         </div>`,
     )
     .join("");
+
+  const formatQty = (n: number) => Number(n || 0).toLocaleString("en-US");
+  const clampPercent = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
+  const progressHtml = progress
+    ? `
+      <div class="progress-card">
+        <div class="progress-row"><span>Qty saat ini</span><span>${formatQty(
+          progress.currentQty,
+        )}</span></div>
+        <div class="progress-row"><span>Qty seharusnya (packing)</span><span>${formatQty(
+          progress.targetQty,
+        )}</span></div>
+        <div class="progress-track"><div class="progress-fill" style="width:${clampPercent(
+          progress.percent,
+        )}%"></div></div>
+        <div class="progress-sub">${clampPercent(progress.percent)}% tercapai${
+          progress.stdQty && progress.stdQty > 0
+            ? ` &bull; Standar per packing: ${formatQty(progress.stdQty)}`
+            : ""
+        }</div>
+      </div>`
+    : "";
 
   const deliveryNotesHtml =
     deliveryNotes && deliveryNotes.length
@@ -119,6 +150,12 @@ const buildCardHtml = (opts: PrintCardOptions) => {
       .label { font-size: 11px; color: #6b7280; margin-bottom: 3px; }
       .value { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
       .divider { height: 1px; background: #e5e7eb; margin: 12px 0; }
+      .progress-card { border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 12px; padding: 12px 14px; margin: 10px 0 14px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .progress-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
+      .progress-row span:last-child { font-weight: 700; }
+      .progress-track { height: 10px; width: 100%; background: #e5e7eb; border-radius: 9999px; overflow: hidden; }
+      .progress-fill { height: 100%; background: #2563eb; border-radius: 9999px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .progress-sub { font-size: 11px; color: #6b7280; margin-top: 6px; }
       .qr { display: flex; justify-content: center; align-items: center; padding: 12px 0 6px; }
       .qr img { width: 180px; height: 180px; image-rendering: pixelated; object-fit: contain; }
       .bottom-code { text-align: center; font-size: 12px; color: #111827; margin-top: 6px; font-weight: 600; }
@@ -137,6 +174,7 @@ const buildCardHtml = (opts: PrintCardOptions) => {
       <div class="center-title">${escapeHtml(heading)}</div>
       ${subheading ? `<div class="center-sub">${escapeHtml(subheading)}</div>` : ""}
       <div class="grid">${fieldsHtml}</div>
+      ${progressHtml}
       ${deliveryNotesHtml}
       ${
         qrDataUrl
