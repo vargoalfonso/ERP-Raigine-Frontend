@@ -101,7 +101,9 @@ function WipDetailContent() {
       title: "Stock",
       dataIndex: "stock",
       key: "stock",
-      render: (v?: number) => <Tag color="blue">{typeof v === "number" ? v : 0}</Tag>,
+      render: (v?: number) => (
+        <Tag color="blue">{typeof v === "number" ? v : 0}</Tag>
+      ),
     },
   ];
 

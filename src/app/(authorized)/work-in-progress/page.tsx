@@ -144,7 +144,7 @@ export default function WorkInProgressPage() {
   const mapApiRowToRecord = (row: WipListRow, index: number): WipRecord => {
     const fallbackId = `${row.wo_number ?? "-"}-${row.uniq ?? "-"}-${row.process ?? "-"}-${index}`;
     return {
-      id: row.id ?? fallbackId,
+      id: fallbackId, // uniqueRowKey: wips.id shared across processes
       apiId: row.id,
       process: row.process ?? "-",
       uniq: row.uniq ?? "-",
