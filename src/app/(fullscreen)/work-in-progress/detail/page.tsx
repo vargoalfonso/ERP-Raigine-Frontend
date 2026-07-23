@@ -8,18 +8,43 @@ import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
   useGetWipDetailQuery,
+  useGetWipHistoryQuery,
   useGetDeliveryNoteByUniqQuery,
+  type WipMovementLogItem,
 } from "@/lib/api/wip/api";
 import { useGetInventoryKanbanSummaryQuery } from "@/lib/api/inventory/api";
 
 type UnknownRecord = Record<string, unknown>;
-const isRecord = (value: unknown): value is UnknownRecord =>
-  typeof value === "object" && value !== null;
-const isMissingRouteError = (error: unknown): boolean =>
-  isRecord(error) && error.status === 404;
+const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+const isMissingRouteError = (error: unknown): boolean => isRecord(error) && error.status === 404;
 
-const formatNumber = (value: number | undefined) =>
-  new Intl.NumberFormat("en-US").format(Number(value ?? 0));
+const formatNumber = (value: number | undefined) => new Intl.NumberFormat("en-US").format(Number(value ?? 0));
+
+const formatDateTime = (value: string | null | undefined): string => {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const wipReasonLabel = (item: WipMovementLogItem): string => {
+  const raw = String(item.reason ?? item.movement_type ?? "").trim();
+  if (!raw) return "-";
+  const map: Record<string, string> = {
+    QC_FINISH: "Selesai QC \u2192 Finished Goods",
+    qc_finish: "Selesai QC \u2192 Finished Goods",
+    MOVE_TO_FG: "Pindah ke Finished Goods",
+    incoming: "Masuk",
+    outgoing: "Keluar",
+  };
+  return map[raw] ?? raw;
+};
 
 interface RowProcess {
   key: string;
@@ -36,22 +61,15 @@ function WorkInProgressDetailPageContent() {
 
   const [activeTab, setActiveTab] = useState("1");
 
-  const detailQuery = useGetWipDetailQuery(
-    { id },
-    { skip: !apiEnabled || !id },
-  );
+  const detailQuery = useGetWipDetailQuery({ id }, { skip: !apiEnabled || !id });
 
   useEffect(() => {
     if (!apiEnabled || !detailQuery.error) return;
     if (isMissingRouteError(detailQuery.error)) {
-      message.warning(
-        "WIP detail API route is not available yet; showing placeholder data.",
-      );
+      message.warning("WIP detail API route is not available yet; showing placeholder data.");
       return;
     }
-    message.error(
-      getApiErrorMessage(detailQuery.error, "Failed to load WIP detail"),
-    );
+    message.error(getApiErrorMessage(detailQuery.error, "Failed to load WIP detail"));
   }, [apiEnabled, detailQuery.error]);
 
   const useMock = !apiEnabled || !id || isMissingRouteError(detailQuery.error);
@@ -65,7 +83,7 @@ function WorkInProgressDetailPageContent() {
       partName: detail?.part_name ?? "-",
       woNumber: detail?.wo_number ?? "-",
     }),
-    [detail, id, uniq],
+    [detail, id, uniq]
   );
 
   const processRows = useMemo<RowProcess[]>(() => {
@@ -77,6 +95,16 @@ function WorkInProgressDetailPageContent() {
     }));
   }, [detail?.processes, useMock]);
 
+  const historyQuery = useGetWipHistoryQuery(
+    { uniq_code: uniq, page: 1, limit: 100 },
+    { skip: !apiEnabled || !uniq },
+  );
+
+  const historyRows = useMemo<WipMovementLogItem[]>(() => {
+    if (useMock) return [];
+    return historyQuery.data?.data ?? [];
+  }, [historyQuery.data, useMock]);
+
   const processColumns = [
     { title: "Process", dataIndex: "process", key: "process" },
     {
@@ -84,30 +112,69 @@ function WorkInProgressDetailPageContent() {
       dataIndex: "stock",
       key: "stock",
       align: "right" as const,
-      render: (v: number) => (
-        <Tag className="bg-blue-100 text-blue-600">{formatNumber(v)}</Tag>
-      ),
+      render: (v: number) => <Tag className="bg-blue-100 text-blue-600">{formatNumber(v)}</Tag>,
     },
   ];
 
-  const uniqCode =
-    searchParams.get("uniq_code") ??
-    searchParams.get("uniq") ??
-    searchParams.get("uniqCode") ??
-    "";
-
-  const { data: deliveryNoteRes, isFetching: deliveryNoteLoading } =
-    useGetDeliveryNoteByUniqQuery(uniqCode, {
-      skip: !uniqCode,
-    });
-
-  const deliveryNoteData = deliveryNoteRes?.data ?? [];
+  const historyColumns = [
+    {
+      title: "Uniq",
+      dataIndex: "uniq_code",
+      key: "uniq_code",
+      render: (v: string | undefined) => v ?? "-",
+    },
+    {
+      title: "WO Number",
+      dataIndex: "wo_number",
+      key: "wo_number",
+      render: (v: string | null | undefined) => v ?? "-",
+    },
+    {
+      title: "DN Number",
+      dataIndex: "dn_number",
+      key: "dn_number",
+      render: (v: string | null | undefined) => v ?? "-",
+    },
+    {
+      title: "Stock",
+      dataIndex: "qty_change",
+      key: "qty_change",
+      align: "right" as const,
+      render: (v: number | undefined) => {
+        const n = Number(v ?? 0);
+        const cls = n < 0 ? "bg-red-100 text-red-600" : "bg-green-100 text-green-600";
+        return <Tag className={cls}>{n > 0 ? `+${formatNumber(n)}` : formatNumber(n)}</Tag>;
+      },
+    },
+    {
+      title: "Reason",
+      key: "reason",
+      render: (_: unknown, row: WipMovementLogItem) => wipReasonLabel(row),
+    },
+    {
+      title: "By",
+      dataIndex: "logged_by",
+      key: "logged_by",
+      render: (v: string | null | undefined) => v ?? "-",
+    },
+    {
+      title: "Last Update",
+      dataIndex: "logged_at",
+      key: "logged_at",
+      render: (v: string | undefined) => formatDateTime(v),
+    },
+  ];
 
   const kanbanSummaryQuery = useGetInventoryKanbanSummaryQuery(
-    { uniq_code: uniqCode },
-    { skip: !apiEnabled || !uniqCode },
+    { uniq_code: uniq },
+    { skip: !apiEnabled || !uniq },
   );
   const kanbanSummary = kanbanSummaryQuery.data?.data;
+
+  const { data: deliveryNoteRes } = useGetDeliveryNoteByUniqQuery(uniq, {
+    skip: !apiEnabled || !uniq,
+  });
+  const deliveryNoteData = deliveryNoteRes?.data ?? [];
 
   const packingCurrentQty = Number(kanbanSummary?.stock_qty ?? 0);
   const packingTargetQty =
@@ -127,13 +194,8 @@ function WorkInProgressDetailPageContent() {
     <div className="w-full min-h-screen bg-gray-50">
       <div className="flex items-center justify-between bg-white px-8 py-4 border-b">
         <div className="flex items-center gap-4">
-          <ArrowLeftOutlined
-            className="cursor-pointer"
-            onClick={() => router.back()}
-          />
-          <h1 className="text-2xl font-semibold m-0">
-            Work In-Progress Details
-          </h1>
+          <ArrowLeftOutlined className="cursor-pointer" onClick={() => router.back()} />
+          <h1 className="text-2xl font-semibold m-0">Work In-Progress Details</h1>
         </div>
 
         {/* <div>
@@ -142,14 +204,9 @@ function WorkInProgressDetailPageContent() {
       </div>
 
       <div className="p-8">
-        <Card
-          className="rounded-2xl shadow"
-          loading={apiEnabled ? detailQuery.isFetching : false}
-        >
+        <Card className="rounded-2xl shadow" loading={apiEnabled ? detailQuery.isFetching : false}>
           <h2 className="text-xl font-bold">Details & History Log</h2>
-          <p className="text-gray-400">
-            Complete Work In-Progress Detail for {detailInfo.uniq}
-          </p>
+          <p className="text-gray-400">Complete Work In-Progress Detail for {detailInfo.uniq}</p>
 
           <Tabs
             activeKey={activeTab}
@@ -157,9 +214,7 @@ function WorkInProgressDetailPageContent() {
             items={[
               {
                 key: "1",
-                label: (
-                  <span className="flex items-center gap-2">📦 Details</span>
-                ),
+                label: <span className="flex items-center gap-2">📦 Details</span>,
                 children: (
                   <Card className="mt-5 bg-gray-50 rounded-2xl">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -188,15 +243,11 @@ function WorkInProgressDetailPageContent() {
               },
               {
                 key: "2",
-                label: (
-                  <span className="flex items-center gap-2">🧾 Processes</span>
-                ),
+                label: <span className="flex items-center gap-2">🧾 Processes</span>,
                 children: (
                   <div className="mt-6">
                     <div className="bg-blue-50 p-4 rounded-xl mb-5">
-                      <p className="text-blue-600 font-semibold">
-                        Note: Process stock breakdown for {detailInfo.uniq}
-                      </p>
+                      <p className="text-blue-600 font-semibold">Note: Process stock breakdown for {detailInfo.uniq}</p>
                     </div>
 
                     <div style={{ overflowX: "auto" }}>
@@ -211,6 +262,22 @@ function WorkInProgressDetailPageContent() {
                   </div>
                 ),
               },
+              {
+                key: "3",
+                label: <span className="flex items-center gap-2">🧾 History Logs</span>,
+                children: (
+                  <div className="mt-6" style={{ overflowX: "auto" }}>
+                    <Table<WipMovementLogItem>
+                      columns={historyColumns}
+                      dataSource={historyRows}
+                      loading={apiEnabled ? historyQuery.isFetching : false}
+                      pagination={false}
+                      rowKey={(row) => String(row.id ?? `${row.logged_at ?? ""}-${row.reference_id ?? ""}`)}
+                      locale={{ emptyText: "No history data" }}
+                    />
+                  </div>
+                ),
+              },
             ]}
           />
 
@@ -221,7 +288,7 @@ function WorkInProgressDetailPageContent() {
               </h3>
 
               <Table
-                rowKey={(record) =>
+                rowKey={(record: any) =>
                   `${record.dn_number}-${record.packing_number}`
                 }
                 pagination={false}
@@ -284,9 +351,7 @@ function WorkInProgressDetailPageContent() {
       </div>
 
       <div className="flex justify-end px-8 pb-8">
-        <Button
-          className="bg-blue-600 text-white rounded-xl"
-          onClick={() => router.push("/work-in-progress")}
+        <Button className="bg-blue-600 text-white rounded-xl" onClick={() => router.push("/work-in-progress")}
         >
           Back
         </Button>
