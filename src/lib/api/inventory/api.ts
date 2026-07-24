@@ -584,4 +584,5 @@ export const {
   useLazyGenerateQRIndirectQuery,
   useLazyGenerateQRSubconQuery,
   useGetDeliveryNoteByUniqQuery,
+  useLazyGetDeliveryNoteByUniqQuery,
 } = inventoryApiSlice;

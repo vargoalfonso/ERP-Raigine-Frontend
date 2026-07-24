@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   Drawer,
@@ -47,7 +47,8 @@ import { useListPrlsQuery, type PrlRecord } from "@/lib/api/prl/api";
 const { TextArea } = Input;
 
 type UnknownRecord = Record<string, unknown>;
-const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
 const isMissingRouteError = (error: unknown): boolean => {
   if (!isRecord(error)) return false;
   const status = error["status"];
@@ -57,7 +58,8 @@ const isMissingRouteError = (error: unknown): boolean => {
 type TabKey = "workOrder" | "bulkWo" | "rmProcessing" | "robotTask";
 
 type RobotUserApproval = "Pending" | "Approved (User)" | "Rejected";
-type RobotManagerApproval = "Not Started" | "Awaiting Manager" | "Approved (Manager)" | "N/A";
+type RobotManagerApproval =
+  "Not Started" | "Awaiting Manager" | "Approved (Manager)" | "N/A";
 
 type ApprovalStatus = "Approved" | "Pending Approval" | "Rejected";
 
@@ -145,9 +147,23 @@ type BulkWoRow = {
 
 const bulkApprovalTag = (s: string) => {
   const v = (s ?? "").toLowerCase();
-  if (v.includes("approve")) return <Tag color="blue" className="!rounded-md">Approved</Tag>;
-  if (v.includes("reject")) return <Tag color="red" className="!rounded-md">Rejected</Tag>;
-  return <Tag color="default" className="!rounded-md">Pending</Tag>;
+  if (v.includes("approve"))
+    return (
+      <Tag color="blue" className="!rounded-md">
+        Approved
+      </Tag>
+    );
+  if (v.includes("reject"))
+    return (
+      <Tag color="red" className="!rounded-md">
+        Rejected
+      </Tag>
+    );
+  return (
+    <Tag color="default" className="!rounded-md">
+      Pending
+    </Tag>
+  );
 };
 
 const tabButtonClass = (on: boolean) =>
@@ -157,30 +173,89 @@ const tabButtonClass = (on: boolean) =>
     : "bg-transparent text-gray-600 border-transparent hover:bg-white");
 
 const approvalTag = (s: ApprovalStatus) => {
-  if (s === "Approved") return <Tag color="blue" className="!rounded-md">Approved</Tag>;
-  if (s === "Rejected") return <Tag color="red" className="!rounded-md">Rejected</Tag>;
-  return <Tag color="default" className="!rounded-md">Pending Approval</Tag>;
+  if (s === "Approved")
+    return (
+      <Tag color="blue" className="!rounded-md">
+        Approved
+      </Tag>
+    );
+  if (s === "Rejected")
+    return (
+      <Tag color="red" className="!rounded-md">
+        Rejected
+      </Tag>
+    );
+  return (
+    <Tag color="default" className="!rounded-md">
+      Pending Approval
+    </Tag>
+  );
 };
 
 const typeTag = (t: WorkOrderRow["type"]) => {
-  if (t === "New") return <Tag color="default" className="!rounded-md">New</Tag>;
-  if (t === "Additional") return <Tag color="purple" className="!rounded-md">Additional</Tag>;
-  if (t === "Assembly") return <Tag color="blue" className="!rounded-md">Assembly</Tag>;
-  return <Tag color="red" className="!rounded-md">Rework</Tag>;
+  if (t === "New")
+    return (
+      <Tag color="default" className="!rounded-md">
+        New
+      </Tag>
+    );
+  if (t === "Additional")
+    return (
+      <Tag color="purple" className="!rounded-md">
+        Additional
+      </Tag>
+    );
+  if (t === "Assembly")
+    return (
+      <Tag color="blue" className="!rounded-md">
+        Assembly
+      </Tag>
+    );
+  return (
+    <Tag color="red" className="!rounded-md">
+      Rework
+    </Tag>
+  );
 };
 
 const statusTag = (s: WorkOrderStatus) => {
-  if (s === "Completed") return <Tag color="green" className="!rounded-md">Completed</Tag>;
-  if (s === "In Progress") return <Tag color="blue" className="!rounded-md">In Progress</Tag>;
-  return <Tag color="default" className="!rounded-md">Pending</Tag>;
+  if (s === "Completed")
+    return (
+      <Tag color="green" className="!rounded-md">
+        Completed
+      </Tag>
+    );
+  if (s === "In Progress")
+    return (
+      <Tag color="blue" className="!rounded-md">
+        In Progress
+      </Tag>
+    );
+  return (
+    <Tag color="default" className="!rounded-md">
+      Pending
+    </Tag>
+  );
 };
 
 const uniqStatusTag = (s: UniqStatus) => {
-  if (s === "Closed") return <Tag color="blue" className="!rounded-md">Closed</Tag>;
-  return <Tag color="default" className="!rounded-md">In Progress</Tag>;
+  if (s === "Closed")
+    return (
+      <Tag color="blue" className="!rounded-md">
+        Closed
+      </Tag>
+    );
+  return (
+    <Tag color="default" className="!rounded-md">
+      In Progress
+    </Tag>
+  );
 };
 
-const withQuery = (path: string, params: Record<string, string | number | undefined | null>) => {
+const withQuery = (
+  path: string,
+  params: Record<string, string | number | undefined | null>,
+) => {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
     if (value === undefined || value === null || value === "") return;
@@ -191,16 +266,49 @@ const withQuery = (path: string, params: Record<string, string | number | undefi
 };
 
 const robotUserApprovalTag = (s: RobotUserApproval) => {
-  if (s === "Approved (User)") return <Tag color="green" className="!rounded-md">Approved (User)</Tag>;
-  if (s === "Rejected") return <Tag color="red" className="!rounded-md">Rejected</Tag>;
-  return <Tag color="default" className="!rounded-md">Pending</Tag>;
+  if (s === "Approved (User)")
+    return (
+      <Tag color="green" className="!rounded-md">
+        Approved (User)
+      </Tag>
+    );
+  if (s === "Rejected")
+    return (
+      <Tag color="red" className="!rounded-md">
+        Rejected
+      </Tag>
+    );
+  return (
+    <Tag color="default" className="!rounded-md">
+      Pending
+    </Tag>
+  );
 };
 
 const robotManagerApprovalTag = (s: RobotManagerApproval) => {
-  if (s === "Approved (Manager)") return <Tag color="green" className="!rounded-md">Approved (Manager)</Tag>;
-  if (s === "Awaiting Manager") return <Tag color="gold" className="!rounded-md">Awaiting Manager</Tag>;
-  if (s === "N/A") return <Tag color="default" className="!rounded-md">N/A</Tag>;
-  return <Tag color="default" className="!rounded-md">Not Started</Tag>;
+  if (s === "Approved (Manager)")
+    return (
+      <Tag color="green" className="!rounded-md">
+        Approved (Manager)
+      </Tag>
+    );
+  if (s === "Awaiting Manager")
+    return (
+      <Tag color="gold" className="!rounded-md">
+        Awaiting Manager
+      </Tag>
+    );
+  if (s === "N/A")
+    return (
+      <Tag color="default" className="!rounded-md">
+        N/A
+      </Tag>
+    );
+  return (
+    <Tag color="default" className="!rounded-md">
+      Not Started
+    </Tag>
+  );
 };
 
 const INITIAL_ROBOT_TASKS: RobotTaskRow[] = [
@@ -351,7 +459,9 @@ const formatDisplayDate = (value?: string) => {
 };
 
 const normalizeType = (value?: string): WorkOrderRow["type"] => {
-  const lower = String(value ?? "").trim().toLowerCase();
+  const lower = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (lower === "assembly") return "Assembly";
   if (lower === "rework") return "Rework";
   if (lower === "additional") return "Additional";
@@ -359,26 +469,36 @@ const normalizeType = (value?: string): WorkOrderRow["type"] => {
 };
 
 const normalizeStatus = (value?: string): WorkOrderStatus => {
-  const lower = String(value ?? "").trim().toLowerCase();
+  const lower = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (lower.includes("complete")) return "Completed";
-  if (lower.includes("progress") || lower.includes("process")) return "In Progress";
+  if (lower.includes("progress") || lower.includes("process"))
+    return "In Progress";
   return "Draft";
 };
 
 const normalizeApproval = (value?: string): ApprovalStatus => {
-  const lower = String(value ?? "").trim().toLowerCase();
+  const lower = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (lower.includes("reject")) return "Rejected";
   if (lower.includes("approve")) return "Approved";
   return "Pending Approval";
 };
 
 const normalizeUniqItemStatus = (value?: string): UniqStatus => {
-  const lower = String(value ?? "").trim().toLowerCase();
+  const lower = String(value ?? "")
+    .trim()
+    .toLowerCase();
   if (lower.includes("close") || lower.includes("complete")) return "Closed";
   return "In Progress";
 };
 
-const toWorkOrderRow = (record: WorkOrderRecord, bomIndex: BomUniqIndex): WorkOrderRow => {
+const toWorkOrderRow = (
+  record: WorkOrderRecord,
+  bomIndex: BomUniqIndex,
+): WorkOrderRow => {
   const uniqDetails = record.items.map((item, index) => ({
     key: item.id || `${record.id}-item-${index}`,
     uniq: item.item_uniq_code,
@@ -404,14 +524,18 @@ const toWorkOrderRow = (record: WorkOrderRecord, bomIndex: BomUniqIndex): WorkOr
     targetDate: formatDisplayDate(record.target_date),
     operator: record.operator_name || "Not Assigned",
     uniqTotal:
-      typeof record.uniq_total === "number" ? record.uniq_total : uniqDetails.length,
+      typeof record.uniq_total === "number"
+        ? record.uniq_total
+        : uniqDetails.length,
     uniqClosed,
     agingDays: Number(record.aging_days ?? 0),
     uniqDetails,
   };
 };
 
-const toRmProcessingRow = (record: RmProcessingWorkOrderRecord): RmProcessingRow => ({
+const toRmProcessingRow = (
+  record: RmProcessingWorkOrderRecord,
+): RmProcessingRow => ({
   key: record.id,
   id: record.id,
   woNumber: formatWorkOrderDisplayNumber(record.wo_number) || "-",
@@ -456,6 +580,21 @@ const toBulkWoRow = (record: BulkWorkOrderRecordApi): BulkWoRow => ({
 export default function WorkOrdersPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabKey>("workOrder");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    const validTabs: TabKey[] = [
+      "workOrder",
+      "bulkWo",
+      "rmProcessing",
+      "robotTask",
+    ];
+    if (tab && (validTabs as string[]).includes(tab)) {
+      setActiveTab(tab as TabKey);
+    }
+  }, []);
+
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
@@ -473,21 +612,25 @@ export default function WorkOrdersPage() {
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkNote, setBulkNote] = useState("");
 
-  const [bulkApproveWorkOrders, bulkApproveState] = useBulkApproveWorkOrdersMutation();
+  const [bulkApproveWorkOrders, bulkApproveState] =
+    useBulkApproveWorkOrdersMutation();
 
-  const [bulkWoSelectedRowKeys, setBulkWoSelectedRowKeys] = useState<Array<string>>([]);
+  const [bulkWoSelectedRowKeys, setBulkWoSelectedRowKeys] = useState<
+    Array<string>
+  >([]);
   const [bulkWoSelectedRows, setBulkWoSelectedRows] = useState<BulkWoRow[]>([]);
   const [bulkWoBulkOpen, setBulkWoBulkOpen] = useState(false);
   const [bulkWoBulkNote, setBulkWoBulkNote] = useState("");
 
   const bulkWoListQuery = useListBulkWorkOrdersQuery(
     { page: bulkWoPage, limit: bulkWoLimit },
-    { skip: !apiEnabled || activeTab !== "bulkWo" }
+    { skip: !apiEnabled || activeTab !== "bulkWo" },
   );
   const bulkWoSummaryQuery = useGetBulkWorkOrdersSummaryQuery(undefined, {
     skip: !apiEnabled || activeTab !== "bulkWo",
   });
-  const [bulkApproveBulkWos, bulkApproveBulkWosState] = useBulkApproveBulkWorkOrdersMutation();
+  const [bulkApproveBulkWos, bulkApproveBulkWosState] =
+    useBulkApproveBulkWorkOrdersMutation();
 
   // Fallback enrichment: the running backend may not yet return
   // source_document_id/customer_name on the bulk list. Derive PRL Reference and
@@ -495,23 +638,35 @@ export default function WorkOrdersPage() {
   // columns populate on the frontend. Backend-provided values always win.
   const bulkWoPrlQuery = useListPrlsQuery(
     { page: 1, limit: 1000 },
-    { skip: !apiEnabled || activeTab !== "bulkWo" }
+    { skip: !apiEnabled || activeTab !== "bulkWo" },
   );
 
   const bulkWoPrlIndex = useMemo(() => {
-    const list: PrlRecord[] = Array.isArray(bulkWoPrlQuery.data) ? bulkWoPrlQuery.data : [];
+    const list: PrlRecord[] = Array.isArray(bulkWoPrlQuery.data)
+      ? bulkWoPrlQuery.data
+      : [];
     const byUniq = new Map<string, { prlId: string; customer: string }>();
-    const byModel = new Map<string, { prlIds: Set<string>; customers: Set<string> }>();
+    const byModel = new Map<
+      string,
+      { prlIds: Set<string>; customers: Set<string> }
+    >();
     for (const p of list) {
       const prlId = (p.prl_id ?? "").trim();
-      const customer = (p.customer_name ?? p.customer?.customer_name ?? "").trim();
+      const customer = (
+        p.customer_name ??
+        p.customer?.customer_name ??
+        ""
+      ).trim();
       for (const u of [p.uniq_code, p.item_uniq_code]) {
         const key = (u ?? "").trim().toLowerCase();
         if (key) byUniq.set(key, { prlId, customer });
       }
       const model = (p.product_model ?? "").trim().toLowerCase();
       if (model) {
-        const entry = byModel.get(model) ?? { prlIds: new Set<string>(), customers: new Set<string>() };
+        const entry = byModel.get(model) ?? {
+          prlIds: new Set<string>(),
+          customers: new Set<string>(),
+        };
         if (prlId) entry.prlIds.add(prlId);
         if (customer) entry.customers.add(customer);
         byModel.set(model, entry);
@@ -524,7 +679,10 @@ export default function WorkOrdersPage() {
     const rows = bulkWoListQuery.data?.items?.map(toBulkWoRow) ?? [];
     const { byUniq, byModel } = bulkWoPrlIndex;
     return rows.map((row) => {
-      let prlId = row.sourceDocumentId && row.sourceDocumentId !== "-" ? row.sourceDocumentId : "";
+      let prlId =
+        row.sourceDocumentId && row.sourceDocumentId !== "-"
+          ? row.sourceDocumentId
+          : "";
       let customer = row.customer && row.customer !== "-" ? row.customer : "";
       if (!prlId || !customer) {
         for (const u of row.sourceUniqs) {
@@ -541,10 +699,15 @@ export default function WorkOrdersPage() {
         const entry = model ? byModel.get(model) : undefined;
         if (entry) {
           if (!prlId && entry.prlIds.size === 1) prlId = [...entry.prlIds][0];
-          if (!customer && entry.customers.size === 1) customer = [...entry.customers][0];
+          if (!customer && entry.customers.size === 1)
+            customer = [...entry.customers][0];
         }
       }
-      return { ...row, sourceDocumentId: prlId || "-", customer: customer || "-" };
+      return {
+        ...row,
+        sourceDocumentId: prlId || "-",
+        customer: customer || "-",
+      };
     });
   }, [bulkWoListQuery.data, bulkWoPrlIndex]);
 
@@ -552,26 +715,36 @@ export default function WorkOrdersPage() {
     const q = bulkWoSearch.trim().toLowerCase();
     if (!q) return bulkWoRowsAll;
     return bulkWoRowsAll.filter((r) =>
-      [r.woNumber, r.sourceDocumentType, r.sourceDocumentId, r.woType, r.status, r.approvalStatus]
+      [
+        r.woNumber,
+        r.sourceDocumentType,
+        r.sourceDocumentId,
+        r.woType,
+        r.status,
+        r.approvalStatus,
+      ]
         .filter(Boolean)
-        .some((v) => v.toLowerCase().includes(q))
+        .some((v) => v.toLowerCase().includes(q)),
     );
   }, [bulkWoRowsAll, bulkWoSearch]);
-  const [robotTasks, setRobotTasks] = useState<RobotTaskRow[]>(INITIAL_ROBOT_TASKS);
-  const [mockRmProcessingRows] = useState<RmProcessingRow[]>(INITIAL_RM_PROCESSING_ROWS);
+  const [robotTasks, setRobotTasks] =
+    useState<RobotTaskRow[]>(INITIAL_ROBOT_TASKS);
+  const [mockRmProcessingRows] = useState<RmProcessingRow[]>(
+    INITIAL_RM_PROCESSING_ROWS,
+  );
 
   const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
     skip: !apiEnabled,
   });
   const bomIndex = useMemo(
     () => buildBomUniqIndex(bomTreeRes?.data ?? []),
-    [bomTreeRes?.data]
+    [bomTreeRes?.data],
   );
   const workOrdersPagedQuery = useGetWorkOrdersQuery(
     { page, limit },
     {
       skip: !apiEnabled,
-    }
+    },
   );
   const workOrdersSummaryQuery = useGetWorkOrdersSummaryQuery(undefined, {
     skip: !apiEnabled,
@@ -580,15 +753,21 @@ export default function WorkOrdersPage() {
     { page: rmPage, limit: rmLimit },
     {
       skip: !apiEnabled,
-    }
+    },
   );
-  const rmProcessingSummaryQuery = useGetRmProcessingWorkOrdersSummaryQuery(undefined, {
-    skip: !apiEnabled,
-  });
+  const rmProcessingSummaryQuery = useGetRmProcessingWorkOrdersSummaryQuery(
+    undefined,
+    {
+      skip: !apiEnabled,
+    },
+  );
 
   const liveWorkOrders = useMemo(
-    () => workOrdersPagedQuery.data?.items.map((item) => toWorkOrderRow(item, bomIndex)) ?? [],
-    [bomIndex, workOrdersPagedQuery.data]
+    () =>
+      workOrdersPagedQuery.data?.items.map((item) =>
+        toWorkOrderRow(item, bomIndex),
+      ) ?? [],
+    [bomIndex, workOrdersPagedQuery.data],
   );
 
   const workOrders = useMemo(() => {
@@ -596,20 +775,33 @@ export default function WorkOrdersPage() {
       return liveWorkOrders;
     }
     return mockWorkOrders;
-  }, [apiEnabled, liveWorkOrders, mockWorkOrders, workOrdersPagedQuery.isError]);
+  }, [
+    apiEnabled,
+    liveWorkOrders,
+    mockWorkOrders,
+    workOrdersPagedQuery.isError,
+  ]);
 
   const rmProcessingRows = useMemo(() => {
     if (apiEnabled && !rmProcessingQuery.isError) {
       return rmProcessingQuery.data?.items?.map(toRmProcessingRow) ?? [];
     }
     return mockRmProcessingRows;
-  }, [apiEnabled, mockRmProcessingRows, rmProcessingQuery.data, rmProcessingQuery.isError]);
+  }, [
+    apiEnabled,
+    mockRmProcessingRows,
+    rmProcessingQuery.data,
+    rmProcessingQuery.isError,
+  ]);
 
-  console.log(workOrders,"AKSJDN");
-  
+  console.log(workOrders, "AKSJDN");
 
   const openPrintDetail = (url: string) => {
-    window.open(withQuery(url, { autoPrint: 1 }), "_blank", "noopener,noreferrer");
+    window.open(
+      withQuery(url, { autoPrint: 1 }),
+      "_blank",
+      "noopener,noreferrer",
+    );
   };
 
   const buildBulkWoDetailUrl = (row: BulkWoRow) =>
@@ -626,24 +818,27 @@ export default function WorkOrdersPage() {
     });
 
   const buildRmProcessingDetailUrl = (row: RmProcessingRow) =>
-    withQuery(`/work-orders/rm-processing/detail/${encodeURIComponent(row.id)}`, {
-      woNumber: row.woNumber,
-      approvalStatus: row.approvalStatus,
-      createdDate: row.createdDate,
-      createdByName: row.createdByName,
-      sourceMaterialUniq: row.sourceMaterialUniq,
-      targetMaterialUniq: row.targetMaterialUniq,
-      model: row.model,
-      gradeSize: row.gradeSize,
-      inputQty: row.inputQty,
-      inputUom: row.inputUom,
-      outputQty: row.outputQty,
-      outputUom: row.outputUom,
-      dateIssued: row.dateIssued,
-      remarks: row.remarks,
-      status: row.status,
-      agingDays: row.agingDays,
-    });
+    withQuery(
+      `/work-orders/rm-processing/detail/${encodeURIComponent(row.id)}`,
+      {
+        woNumber: row.woNumber,
+        approvalStatus: row.approvalStatus,
+        createdDate: row.createdDate,
+        createdByName: row.createdByName,
+        sourceMaterialUniq: row.sourceMaterialUniq,
+        targetMaterialUniq: row.targetMaterialUniq,
+        model: row.model,
+        gradeSize: row.gradeSize,
+        inputQty: row.inputQty,
+        inputUom: row.inputUom,
+        outputQty: row.outputQty,
+        outputUom: row.outputUom,
+        dateIssued: row.dateIssued,
+        remarks: row.remarks,
+        status: row.status,
+        agingDays: row.agingDays,
+      },
+    );
 
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -655,7 +850,9 @@ export default function WorkOrdersPage() {
 
     if (!q) return byTab;
     return byTab.filter((r) =>
-      [r.woNumber, r.operator, r.type, r.status, r.approvalStatus].some((v) => v.toLowerCase().includes(q))
+      [r.woNumber, r.operator, r.type, r.status, r.approvalStatus].some((v) =>
+        v.toLowerCase().includes(q),
+      ),
     );
   }, [activeTab, search, workOrders]);
 
@@ -672,10 +869,18 @@ export default function WorkOrdersPage() {
         };
       }
 
-      const completed = rmProcessingRows.filter((r) => r.status.toLowerCase() === "completed").length;
-      const pending = rmProcessingRows.filter((r) => r.status.toLowerCase() === "draft" || r.status.toLowerCase() === "pending").length;
+      const completed = rmProcessingRows.filter(
+        (r) => r.status.toLowerCase() === "completed",
+      ).length;
+      const pending = rmProcessingRows.filter(
+        (r) =>
+          r.status.toLowerCase() === "draft" ||
+          r.status.toLowerCase() === "pending",
+      ).length;
       const active = Math.max(0, rmProcessingRows.length - completed - pending);
-      const uniqs = new Set(rmProcessingRows.map((r) => r.sourceMaterialUniq).filter(Boolean)).size;
+      const uniqs = new Set(
+        rmProcessingRows.map((r) => r.sourceMaterialUniq).filter(Boolean),
+      ).size;
       return { active, completed, pending, uniqs };
     }
 
@@ -692,11 +897,18 @@ export default function WorkOrdersPage() {
     const pending = workOrders.filter((r) => r.status === "Draft").length;
     const uniqs = workOrders.reduce((acc, r) => acc + r.uniqTotal, 0);
     return { active, completed, pending, uniqs };
-  }, [activeTab, apiEnabled, rmProcessingRows, rmProcessingSummaryQuery.data, workOrders, workOrdersSummaryQuery.data]);
+  }, [
+    activeTab,
+    apiEnabled,
+    rmProcessingRows,
+    rmProcessingSummaryQuery.data,
+    workOrders,
+    workOrdersSummaryQuery.data,
+  ]);
 
   const bulkTotalUniqs = useMemo(
     () => selectedRows.reduce((acc, r) => acc + r.uniqTotal, 0),
-    [selectedRows]
+    [selectedRows],
   );
 
   const applyBulk = async (nextStatus: ApprovalStatus) => {
@@ -710,8 +922,8 @@ export default function WorkOrdersPage() {
                 ...w,
                 approvalStatus: nextStatus,
               }
-            : w
-        )
+            : w,
+        ),
       );
 
       message.success(`Bulk ${nextStatus.toLowerCase()} applied (mock)`);
@@ -753,7 +965,9 @@ export default function WorkOrdersPage() {
       return;
     }
 
-    const wo_numbers = bulkWoSelectedRows.map((r) => r.woNumber).filter(Boolean);
+    const wo_numbers = bulkWoSelectedRows
+      .map((r) => r.woNumber)
+      .filter(Boolean);
     if (!wo_numbers.length) {
       message.error("No WO selected");
       return;
@@ -781,12 +995,20 @@ export default function WorkOrdersPage() {
   const isRobotTaskTab = activeTab === "robotTask";
 
   const robotMetrics = useMemo(() => {
-    const pendingUser = robotTasks.filter((r) => r.userApproval === "Pending").length;
-    const pendingManager = robotTasks.filter((r) => r.managerApproval === "Awaiting Manager").length;
-    const fullyApproved = robotTasks.filter(
-      (r) => r.userApproval === "Approved (User)" && r.managerApproval === "Approved (Manager)"
+    const pendingUser = robotTasks.filter(
+      (r) => r.userApproval === "Pending",
     ).length;
-    const rejected = robotTasks.filter((r) => r.userApproval === "Rejected").length;
+    const pendingManager = robotTasks.filter(
+      (r) => r.managerApproval === "Awaiting Manager",
+    ).length;
+    const fullyApproved = robotTasks.filter(
+      (r) =>
+        r.userApproval === "Approved (User)" &&
+        r.managerApproval === "Approved (Manager)",
+    ).length;
+    const rejected = robotTasks.filter(
+      (r) => r.userApproval === "Rejected",
+    ).length;
     return { pendingUser, pendingManager, fullyApproved, rejected };
   }, [robotTasks]);
 
@@ -798,9 +1020,12 @@ export default function WorkOrdersPage() {
           : {
               ...r,
               userApproval: "Approved (User)",
-              managerApproval: r.managerApproval === "N/A" ? "Not Started" : "Awaiting Manager",
-            }
-      )
+              managerApproval:
+                r.managerApproval === "N/A"
+                  ? "Not Started"
+                  : "Awaiting Manager",
+            },
+      ),
     );
     message.success("User approval applied (mock)");
   };
@@ -814,8 +1039,8 @@ export default function WorkOrdersPage() {
               ...r,
               userApproval: "Rejected",
               managerApproval: "N/A",
-            }
-      )
+            },
+      ),
     );
     message.success("Rejected (mock)");
   };
@@ -828,8 +1053,8 @@ export default function WorkOrdersPage() {
           : {
               ...r,
               managerApproval: "Approved (Manager)",
-            }
-      )
+            },
+      ),
     );
     message.success("Manager approval applied (mock)");
   };
@@ -837,7 +1062,10 @@ export default function WorkOrdersPage() {
   const moveRobotWoToMain = (key: string) => {
     const row = robotTasks.find((r) => r.key === key);
     if (!row) return;
-    if (row.userApproval !== "Approved (User)" || row.managerApproval !== "Approved (Manager)") {
+    if (
+      row.userApproval !== "Approved (User)" ||
+      row.managerApproval !== "Approved (Manager)"
+    ) {
       message.warning("WO must be fully approved first");
       return;
     }
@@ -870,7 +1098,9 @@ export default function WorkOrdersPage() {
       dataIndex: "uniq",
       key: "uniq",
       width: 120,
-      render: (v: string) => <span className="text-sm font-semibold text-gray-900">{v}</span>,
+      render: (v: string) => (
+        <span className="text-sm font-semibold text-gray-900">{v}</span>
+      ),
     },
     {
       title: "Product Name",
@@ -921,16 +1151,26 @@ export default function WorkOrdersPage() {
       key: "progress",
       width: 170,
       render: (_: unknown, r) => {
-        const pct = r.uniqTotal ? Math.round((r.uniqClosed / r.uniqTotal) * 100) : 0;
+        const pct = r.uniqTotal
+          ? Math.round((r.uniqClosed / r.uniqTotal) * 100)
+          : 0;
         return (
           <div className="min-w-[160px]">
             <div className="flex items-center justify-between text-xs text-gray-600">
               <span>
-                <span className="font-semibold text-gray-900">{r.uniqClosed}</span>/{r.uniqTotal} Closed
+                <span className="font-semibold text-gray-900">
+                  {r.uniqClosed}
+                </span>
+                /{r.uniqTotal} Closed
               </span>
               <span className="text-gray-500">{pct}%</span>
             </div>
-            <Progress percent={pct} showInfo={false} strokeColor="#3b82f6" trailColor="#e5e7eb" />
+            <Progress
+              percent={pct}
+              showInfo={false}
+              strokeColor="#3b82f6"
+              trailColor="#e5e7eb"
+            />
           </div>
         );
       },
@@ -1000,7 +1240,9 @@ export default function WorkOrdersPage() {
             type="text"
             icon={<EyeOutlined />}
             onClick={() => {
-              const target = r.id ? `/work-orders/detail/${encodeURIComponent(r.id)}` : undefined;
+              const target = r.id
+                ? `/work-orders/detail/${encodeURIComponent(r.id)}`
+                : undefined;
               if (target) {
                 router.push(target);
                 return;
@@ -1017,7 +1259,9 @@ export default function WorkOrdersPage() {
                 message.info(`Print ${r.woNumber} (mock)`);
                 return;
               }
-              openPrintDetail(`/work-orders/detail/${encodeURIComponent(r.id)}`);
+              openPrintDetail(
+                `/work-orders/detail/${encodeURIComponent(r.id)}`,
+              );
             }}
           />
         </div>
@@ -1104,36 +1348,62 @@ export default function WorkOrdersPage() {
       fixed: "right",
       render: (_: unknown, r) => {
         const canUserApprove = r.userApproval === "Pending";
-        const canManagerApprove = r.userApproval === "Approved (User)" && r.managerApproval === "Awaiting Manager";
-        const canMove = r.userApproval === "Approved (User)" && r.managerApproval === "Approved (Manager)";
+        const canManagerApprove =
+          r.userApproval === "Approved (User)" &&
+          r.managerApproval === "Awaiting Manager";
+        const canMove =
+          r.userApproval === "Approved (User)" &&
+          r.managerApproval === "Approved (Manager)";
 
         return (
           <div className="flex items-center justify-end gap-2">
             {canUserApprove ? (
               <>
-                <Button size="small" type="primary" className="!rounded-lg" onClick={() => approveRobotUser(r.key)}>
+                <Button
+                  size="small"
+                  type="primary"
+                  className="!rounded-lg"
+                  onClick={() => approveRobotUser(r.key)}
+                >
                   Approve
                 </Button>
-                <Button size="small" danger className="!rounded-lg" onClick={() => rejectRobotUser(r.key)}>
+                <Button
+                  size="small"
+                  danger
+                  className="!rounded-lg"
+                  onClick={() => rejectRobotUser(r.key)}
+                >
                   Reject
                 </Button>
               </>
             ) : null}
 
             {canManagerApprove ? (
-              <Button size="small" className="!rounded-lg" onClick={() => approveRobotManager(r.key)}>
+              <Button
+                size="small"
+                className="!rounded-lg"
+                onClick={() => approveRobotManager(r.key)}
+              >
                 Manager Review
               </Button>
             ) : null}
 
             {canMove ? (
-              <Button size="small" className="!rounded-lg" onClick={() => moveRobotWoToMain(r.key)}>
+              <Button
+                size="small"
+                className="!rounded-lg"
+                onClick={() => moveRobotWoToMain(r.key)}
+              >
                 Move to Main WO
               </Button>
             ) : null}
 
             {!canUserApprove && !canManagerApprove && !canMove ? (
-              <Button size="small" type="text" onClick={() => message.info(`View ${r.woNumber} (mock)`)}>
+              <Button
+                size="small"
+                type="text"
+                onClick={() => message.info(`View ${r.woNumber} (mock)`)}
+              >
                 View
               </Button>
             ) : null}
@@ -1145,8 +1415,18 @@ export default function WorkOrdersPage() {
 
   const rmProcessingColumns: ColumnsType<RmProcessingRow> = [
     { title: "WO Number", dataIndex: "woNumber", key: "woNumber", width: 170 },
-    { title: "Created Date", dataIndex: "createdDate", key: "createdDate", width: 120 },
-    { title: "Created By", dataIndex: "createdByName", key: "createdByName", width: 140 },
+    {
+      title: "Created Date",
+      dataIndex: "createdDate",
+      key: "createdDate",
+      width: 120,
+    },
+    {
+      title: "Created By",
+      dataIndex: "createdByName",
+      key: "createdByName",
+      width: 140,
+    },
     {
       title: "Approval",
       dataIndex: "approvalStatus",
@@ -1155,40 +1435,87 @@ export default function WorkOrdersPage() {
       render: (value: string) => {
         const v = String(value || "-");
         const lowered = v.toLowerCase();
-        const color = lowered.includes("approved") ? "green" : lowered.includes("reject") ? "red" : "gold";
-        return <Tag color={color} className="!rounded-md">{v}</Tag>;
+        const color = lowered.includes("approved")
+          ? "green"
+          : lowered.includes("reject")
+            ? "red"
+            : "gold";
+        return (
+          <Tag color={color} className="!rounded-md">
+            {v}
+          </Tag>
+        );
       },
     },
-    { title: "Source UNIQ", dataIndex: "sourceMaterialUniq", key: "sourceMaterialUniq", width: 150 },
-    { title: "Target UNIQ", dataIndex: "targetMaterialUniq", key: "targetMaterialUniq", width: 150 },
+    {
+      title: "Source UNIQ",
+      dataIndex: "sourceMaterialUniq",
+      key: "sourceMaterialUniq",
+      width: 150,
+    },
+    {
+      title: "Target UNIQ",
+      dataIndex: "targetMaterialUniq",
+      key: "targetMaterialUniq",
+      width: 150,
+    },
     { title: "Model", dataIndex: "model", key: "model", width: 160 },
-    { title: "Grade / Size", dataIndex: "gradeSize", key: "gradeSize", width: 200 },
+    {
+      title: "Grade / Size",
+      dataIndex: "gradeSize",
+      key: "gradeSize",
+      width: 200,
+    },
     {
       title: "Input",
       key: "input",
       width: 120,
-      render: (_: unknown, r) => <span className="text-sm text-gray-800">{r.inputQty} {r.inputUom}</span>,
+      render: (_: unknown, r) => (
+        <span className="text-sm text-gray-800">
+          {r.inputQty} {r.inputUom}
+        </span>
+      ),
     },
     {
       title: "Output",
       key: "output",
       width: 120,
-      render: (_: unknown, r) => <span className="text-sm text-gray-800">{r.outputQty} {r.outputUom}</span>,
+      render: (_: unknown, r) => (
+        <span className="text-sm text-gray-800">
+          {r.outputQty} {r.outputUom}
+        </span>
+      ),
     },
-    { title: "Date Issued", dataIndex: "dateIssued", key: "dateIssued", width: 120 },
-    { title: "Aging (Days)", dataIndex: "agingDays", key: "agingDays", width: 110 },
+    {
+      title: "Date Issued",
+      dataIndex: "dateIssued",
+      key: "dateIssued",
+      width: 120,
+    },
+    {
+      title: "Aging (Days)",
+      dataIndex: "agingDays",
+      key: "agingDays",
+      width: 110,
+    },
     {
       title: "Status",
       dataIndex: "status",
       key: "status",
       width: 120,
-      render: (value: string) => <Tag color="blue" className="!rounded-md">{value}</Tag>,
+      render: (value: string) => (
+        <Tag color="blue" className="!rounded-md">
+          {value}
+        </Tag>
+      ),
     },
     {
       title: "Remarks",
       dataIndex: "remarks",
       key: "remarks",
-      render: (value: string) => <span className="text-sm text-gray-700">{value}</span>,
+      render: (value: string) => (
+        <span className="text-sm text-gray-700">{value}</span>
+      ),
     },
     {
       title: "Actions",
@@ -1197,8 +1524,18 @@ export default function WorkOrdersPage() {
       fixed: "right",
       render: (_: unknown, row) => (
         <div className="flex items-center justify-end gap-1">
-          <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => setRmQrModal(row)} />
-          <Button size="small" type="text" icon={<PrinterOutlined />} onClick={() => openPrintDetail(buildRmProcessingDetailUrl(row))} />
+          <Button
+            size="small"
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => setRmQrModal(row)}
+          />
+          <Button
+            size="small"
+            type="text"
+            icon={<PrinterOutlined />}
+            onClick={() => openPrintDetail(buildRmProcessingDetailUrl(row))}
+          />
         </div>
       ),
     },
@@ -1208,7 +1545,8 @@ export default function WorkOrdersPage() {
     const low = (v || "").toLowerCase();
     let cls = "text-gray-600";
     if (low.includes("progress")) cls = "text-blue-600";
-    else if (low.includes("complete") || low.includes("done")) cls = "text-green-600";
+    else if (low.includes("complete") || low.includes("done"))
+      cls = "text-green-600";
     else if (low.includes("generat")) cls = "text-blue-600";
     return <span className={`text-sm ${cls}`}>{v || "-"}</span>;
   };
@@ -1230,21 +1568,27 @@ export default function WorkOrdersPage() {
       dataIndex: "sourceDocumentId",
       key: "prlReference",
       width: 150,
-      render: (v: string) => <span className="text-sm font-medium text-blue-600">{v || "-"}</span>,
+      render: (v: string) => (
+        <span className="text-sm font-medium text-blue-600">{v || "-"}</span>
+      ),
     },
     {
       title: "Customer",
       dataIndex: "customer",
       key: "customer",
       width: 130,
-      render: (v: string) => <span className="text-sm text-gray-800">{v || "-"}</span>,
+      render: (v: string) => (
+        <span className="text-sm text-gray-800">{v || "-"}</span>
+      ),
     },
     {
       title: "Model",
       dataIndex: "model",
       key: "model",
       width: 140,
-      render: (v: string) => <span className="text-sm text-gray-800">{v || "-"}</span>,
+      render: (v: string) => (
+        <span className="text-sm text-gray-800">{v || "-"}</span>
+      ),
     },
     {
       title: "UNIQs",
@@ -1273,7 +1617,11 @@ export default function WorkOrdersPage() {
       dataIndex: "totalQty",
       key: "totalQty",
       width: 110,
-      render: (v: number) => <span className="text-sm font-medium text-gray-900">{Number(v || 0).toLocaleString()}</span>,
+      render: (v: number) => (
+        <span className="text-sm font-medium text-gray-900">
+          {Number(v || 0).toLocaleString()}
+        </span>
+      ),
     },
     {
       title: "Type",
@@ -1300,7 +1648,12 @@ export default function WorkOrdersPage() {
       width: 130,
       render: (value: string) => bulkApprovalTag(value),
     },
-    { title: "Created", dataIndex: "createdDate", key: "createdDate", width: 110 },
+    {
+      title: "Created",
+      dataIndex: "createdDate",
+      key: "createdDate",
+      width: 110,
+    },
     { title: "Target", dataIndex: "targetDate", key: "targetDate", width: 110 },
     {
       title: "Actions",
@@ -1309,8 +1662,18 @@ export default function WorkOrdersPage() {
       fixed: "right",
       render: (_: unknown, row) => (
         <div className="flex items-center justify-end gap-1">
-          <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => router.push(buildBulkWoDetailUrl(row))} />
-          <Button size="small" type="text" icon={<PrinterOutlined />} onClick={() => openPrintDetail(buildBulkWoDetailUrl(row))} />
+          <Button
+            size="small"
+            type="text"
+            icon={<EyeOutlined />}
+            onClick={() => router.push(buildBulkWoDetailUrl(row))}
+          />
+          <Button
+            size="small"
+            type="text"
+            icon={<PrinterOutlined />}
+            onClick={() => openPrintDetail(buildBulkWoDetailUrl(row))}
+          />
         </div>
       ),
     },
@@ -1321,8 +1684,13 @@ export default function WorkOrdersPage() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-2xl font-bold text-gray-900">Work Order Management</div>
-            <div className="text-sm text-gray-500 mt-1">Create, print, and track work orders with inventory effects and Kanban integration</div>
+            <div className="text-2xl font-bold text-gray-900">
+              Work Order Management
+            </div>
+            <div className="text-sm text-gray-500 mt-1">
+              Create, print, and track work orders with inventory effects and
+              Kanban integration
+            </div>
             {activeTab === "workOrder" && apiEnabled ? (
               <div className="text-xs text-gray-400 mt-2">
                 {workOrdersPagedQuery.isFetching
@@ -1331,7 +1699,11 @@ export default function WorkOrdersPage() {
               </div>
             ) : null}
           </div>
-          <Button className="!rounded-lg" icon={<PrinterOutlined />} onClick={() => message.info("Print Kanban (mock)")}> 
+          <Button
+            className="!rounded-lg"
+            icon={<PrinterOutlined />}
+            onClick={() => message.info("Print Kanban (mock)")}
+          >
             Print Kanban
           </Button>
         </div>
@@ -1339,45 +1711,77 @@ export default function WorkOrdersPage() {
         <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
             <div>
-              <div className="text-xs font-semibold text-gray-500">Active WOs</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">{metrics.active}</div>
+              <div className="text-xs font-semibold text-gray-500">
+                Active WOs
+              </div>
+              <div className="text-2xl font-bold text-gray-900 mt-1">
+                {metrics.active}
+              </div>
             </div>
             <PlayCircleOutlined className="text-green-500 text-xl" />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
             <div>
-              <div className="text-xs font-semibold text-gray-500">Completed</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">{metrics.completed}</div>
+              <div className="text-xs font-semibold text-gray-500">
+                Completed
+              </div>
+              <div className="text-2xl font-bold text-gray-900 mt-1">
+                {metrics.completed}
+              </div>
             </div>
             <CheckCircleOutlined className="text-blue-500 text-xl" />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
             <div>
-              <div className="text-xs font-semibold text-gray-500">Pending WOs</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">{metrics.pending}</div>
+              <div className="text-xs font-semibold text-gray-500">
+                Pending WOs
+              </div>
+              <div className="text-2xl font-bold text-gray-900 mt-1">
+                {metrics.pending}
+              </div>
             </div>
             <ClockCircleOutlined className="text-orange-500 text-xl" />
           </div>
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
             <div>
-              <div className="text-xs font-semibold text-gray-500">Total UNIQs</div>
-              <div className="text-2xl font-bold text-gray-900 mt-1">{metrics.uniqs}</div>
+              <div className="text-xs font-semibold text-gray-500">
+                Total UNIQs
+              </div>
+              <div className="text-2xl font-bold text-gray-900 mt-1">
+                {metrics.uniqs}
+              </div>
             </div>
             <AppstoreOutlined className="text-purple-500 text-xl" />
           </div>
         </div>
 
         <div className="mt-6 flex items-center gap-2 rounded-xl bg-gray-50 p-2 w-fit">
-          <button type="button" className={tabButtonClass(activeTab === "workOrder")} onClick={() => setActiveTab("workOrder")}>
+          <button
+            type="button"
+            className={tabButtonClass(activeTab === "workOrder")}
+            onClick={() => setActiveTab("workOrder")}
+          >
             Work Order
           </button>
-          <button type="button" className={tabButtonClass(activeTab === "bulkWo")} onClick={() => setActiveTab("bulkWo")}>
+          <button
+            type="button"
+            className={tabButtonClass(activeTab === "bulkWo")}
+            onClick={() => setActiveTab("bulkWo")}
+          >
             Bulk WO
           </button>
-          <button type="button" className={tabButtonClass(activeTab === "rmProcessing")} onClick={() => setActiveTab("rmProcessing")}>
+          <button
+            type="button"
+            className={tabButtonClass(activeTab === "rmProcessing")}
+            onClick={() => setActiveTab("rmProcessing")}
+          >
             RM Processing
           </button>
-          <button type="button" className={tabButtonClass(activeTab === "robotTask")} onClick={() => setActiveTab("robotTask")}>
+          <button
+            type="button"
+            className={tabButtonClass(activeTab === "robotTask")}
+            onClick={() => setActiveTab("robotTask")}
+          >
             Robot Task
           </button>
         </div>
@@ -1386,8 +1790,13 @@ export default function WorkOrdersPage() {
           <div className="mt-6 rounded-xl border border-gray-100 bg-white p-6">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-gray-900">Bulk Work Orders from Production Planning</div>
-                <div className="text-xs text-gray-500 mt-1">Create multiple WOs from PRL with editable UNIQs and quantities</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Bulk Work Orders from Production Planning
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Create multiple WOs from PRL with editable UNIQs and
+                  quantities
+                </div>
               </div>
               <Button
                 type="primary"
@@ -1400,14 +1809,17 @@ export default function WorkOrdersPage() {
             </div>
 
             <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
-              <span className="font-semibold">Workflow:</span> Select PRL → View PRL items → Edit UNIQ & Qty → Set target dates → Generate WOs (1 UNIQ = 1 Kanban)
+              <span className="font-semibold">Workflow:</span> Select PRL → View
+              PRL items → Edit UNIQ & Qty → Set target dates → Generate WOs (1
+              UNIQ = 1 Kanban)
             </div>
 
             {apiEnabled ? (
               <div className="mt-4 text-xs text-gray-400">
                 {bulkWoListQuery.isFetching
                   ? "Loading data from /working-order/bulk/work-orders..."
-                  : bulkWoListQuery.isError && isMissingRouteError(bulkWoListQuery.error)
+                  : bulkWoListQuery.isError &&
+                      isMissingRouteError(bulkWoListQuery.error)
                     ? "Bulk WO API route not found (404): /working-order/bulk/work-orders"
                     : "Live data connected to /working-order/bulk/work-orders"}
               </div>
@@ -1420,44 +1832,76 @@ export default function WorkOrdersPage() {
             <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
               {(() => {
                 const s = bulkWoSummaryQuery.data;
-                const total = typeof s?.total === "number" ? s.total : bulkWoRowsAll.length;
-                const pending = typeof s?.pending === "number"
-                  ? s.pending
-                  : bulkWoRowsAll.filter((r) => (r.approvalStatus ?? "").toLowerCase().includes("pending")).length;
-                const approved = typeof s?.approved === "number"
-                  ? s.approved
-                  : bulkWoRowsAll.filter((r) => (r.approvalStatus ?? "").toLowerCase().includes("approve")).length;
-                const rejected = typeof s?.rejected === "number"
-                  ? s.rejected
-                  : bulkWoRowsAll.filter((r) => (r.approvalStatus ?? "").toLowerCase().includes("reject")).length;
+                const total =
+                  typeof s?.total === "number" ? s.total : bulkWoRowsAll.length;
+                const pending =
+                  typeof s?.pending === "number"
+                    ? s.pending
+                    : bulkWoRowsAll.filter((r) =>
+                        (r.approvalStatus ?? "")
+                          .toLowerCase()
+                          .includes("pending"),
+                      ).length;
+                const approved =
+                  typeof s?.approved === "number"
+                    ? s.approved
+                    : bulkWoRowsAll.filter((r) =>
+                        (r.approvalStatus ?? "")
+                          .toLowerCase()
+                          .includes("approve"),
+                      ).length;
+                const rejected =
+                  typeof s?.rejected === "number"
+                    ? s.rejected
+                    : bulkWoRowsAll.filter((r) =>
+                        (r.approvalStatus ?? "")
+                          .toLowerCase()
+                          .includes("reject"),
+                      ).length;
 
                 return (
                   <>
                     <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
                       <div>
-                        <div className="text-xs font-semibold text-gray-500">Total Bulk WOs</div>
-                        <div className="text-2xl font-bold text-gray-900 mt-1">{total}</div>
+                        <div className="text-xs font-semibold text-gray-500">
+                          Total Bulk WOs
+                        </div>
+                        <div className="text-2xl font-bold text-gray-900 mt-1">
+                          {total}
+                        </div>
                       </div>
                       <AppstoreOutlined className="text-purple-500 text-xl" />
                     </div>
                     <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
                       <div>
-                        <div className="text-xs font-semibold text-gray-500">Pending</div>
-                        <div className="text-2xl font-bold text-gray-900 mt-1">{pending}</div>
+                        <div className="text-xs font-semibold text-gray-500">
+                          Pending
+                        </div>
+                        <div className="text-2xl font-bold text-gray-900 mt-1">
+                          {pending}
+                        </div>
                       </div>
                       <ClockCircleOutlined className="text-orange-500 text-xl" />
                     </div>
                     <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
                       <div>
-                        <div className="text-xs font-semibold text-gray-500">Approved</div>
-                        <div className="text-2xl font-bold text-gray-900 mt-1">{approved}</div>
+                        <div className="text-xs font-semibold text-gray-500">
+                          Approved
+                        </div>
+                        <div className="text-2xl font-bold text-gray-900 mt-1">
+                          {approved}
+                        </div>
                       </div>
                       <CheckCircleOutlined className="text-blue-500 text-xl" />
                     </div>
                     <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center justify-between">
                       <div>
-                        <div className="text-xs font-semibold text-gray-500">Rejected</div>
-                        <div className="text-2xl font-bold text-gray-900 mt-1">{rejected}</div>
+                        <div className="text-xs font-semibold text-gray-500">
+                          Rejected
+                        </div>
+                        <div className="text-2xl font-bold text-gray-900 mt-1">
+                          {rejected}
+                        </div>
                       </div>
                       <ClockCircleOutlined className="text-red-500 text-xl" />
                     </div>
@@ -1503,7 +1947,9 @@ export default function WorkOrdersPage() {
                 pagination={{
                   current: bulkWoPage,
                   pageSize: bulkWoLimit,
-                  total: bulkWoListQuery.data?.pagination?.total ?? bulkWoRowsAll.length,
+                  total:
+                    bulkWoListQuery.data?.pagination?.total ??
+                    bulkWoRowsAll.length,
                   showSizeChanger: true,
                   pageSizeOptions: [10, 20, 50, 100],
                   onChange: (nextPage, nextPageSize) => {
@@ -1520,8 +1966,12 @@ export default function WorkOrdersPage() {
                 <div className="h-10 w-10 rounded-xl border border-gray-200 bg-white flex items-center justify-center text-gray-500">
                   <AppstoreOutlined />
                 </div>
-                <div className="text-sm font-semibold text-gray-700 mt-3">No bulk work orders found.</div>
-                <div className="text-xs text-gray-400 mt-1">Create one using “Create Bulk WO”.</div>
+                <div className="text-sm font-semibold text-gray-700 mt-3">
+                  No bulk work orders found.
+                </div>
+                <div className="text-xs text-gray-400 mt-1">
+                  Create one using “Create Bulk WO”.
+                </div>
               </div>
             ) : null}
           </div>
@@ -1529,8 +1979,12 @@ export default function WorkOrdersPage() {
           <div className="mt-6 rounded-xl border border-gray-100 bg-white p-6">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-gray-900">Raw Material Processing Work Orders</div>
-                <div className="text-xs text-gray-500 mt-1">Transform base raw materials into semi-finished materials</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Raw Material Processing Work Orders
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Transform base raw materials into semi-finished materials
+                </div>
               </div>
               <Button
                 type="primary"
@@ -1543,7 +1997,9 @@ export default function WorkOrdersPage() {
             </div>
 
             <div className="mt-4 rounded-xl border border-purple-200 bg-purple-50 px-4 py-3 text-xs text-purple-700">
-              <span className="font-semibold">Process:</span> Select source RM → Define output semi-RM → Set quantities → Complete processing → Update inventory
+              <span className="font-semibold">Process:</span> Select source RM →
+              Define output semi-RM → Set quantities → Complete processing →
+              Update inventory
             </div>
 
             {apiEnabled ? (
@@ -1563,7 +2019,9 @@ export default function WorkOrdersPage() {
                   pagination={{
                     current: rmPage,
                     pageSize: rmLimit,
-                    total: rmProcessingQuery.data?.pagination?.total ?? rmProcessingRows.length,
+                    total:
+                      rmProcessingQuery.data?.pagination?.total ??
+                      rmProcessingRows.length,
                     showSizeChanger: true,
                     pageSizeOptions: [10, 20, 50, 100],
                     onChange: (nextPage, nextPageSize) => {
@@ -1579,20 +2037,32 @@ export default function WorkOrdersPage() {
                 <div className="h-10 w-10 rounded-xl border border-gray-200 bg-white flex items-center justify-center text-gray-500">
                   <AppstoreOutlined />
                 </div>
-                <div className="text-sm font-semibold text-gray-700 mt-3">No RM processing work orders created yet.</div>
-                <div className="text-xs text-gray-400 mt-1">Click “Create RM Processing WO” to start material transformation.</div>
+                <div className="text-sm font-semibold text-gray-700 mt-3">
+                  No RM processing work orders created yet.
+                </div>
+                <div className="text-xs text-gray-400 mt-1">
+                  Click “Create RM Processing WO” to start material
+                  transformation.
+                </div>
               </div>
             )}
           </div>
         ) : isRobotTaskTab ? (
           <div className="mt-6 rounded-xl border border-gray-100 bg-white p-6">
             <div>
-              <div className="text-sm font-semibold text-gray-900">Robot-Created Work Orders</div>
-              <div className="text-xs text-gray-500 mt-1">Review and approve work orders created by automation robots (2-layer approval required)</div>
+              <div className="text-sm font-semibold text-gray-900">
+                Robot-Created Work Orders
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                Review and approve work orders created by automation robots
+                (2-layer approval required)
+              </div>
             </div>
 
             <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
-              <span className="font-semibold">Approval Workflow:</span> Robot creates WO → User approval → Manager approval → Moves to main Work Order table
+              <span className="font-semibold">Approval Workflow:</span> Robot
+              creates WO → User approval → Manager approval → Moves to main Work
+              Order table
             </div>
 
             <div className="mt-4">
@@ -1607,20 +2077,32 @@ export default function WorkOrdersPage() {
 
             <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4 grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
               <div>
-                <div className="text-xs text-gray-500">Pending User Approval</div>
-                <div className="text-lg font-bold text-gray-900">{robotMetrics.pendingUser}</div>
+                <div className="text-xs text-gray-500">
+                  Pending User Approval
+                </div>
+                <div className="text-lg font-bold text-gray-900">
+                  {robotMetrics.pendingUser}
+                </div>
               </div>
               <div>
-                <div className="text-xs text-gray-500">Pending Manager Approval</div>
-                <div className="text-lg font-bold text-gray-900">{robotMetrics.pendingManager}</div>
+                <div className="text-xs text-gray-500">
+                  Pending Manager Approval
+                </div>
+                <div className="text-lg font-bold text-gray-900">
+                  {robotMetrics.pendingManager}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Fully Approved</div>
-                <div className="text-lg font-bold text-gray-900">{robotMetrics.fullyApproved}</div>
+                <div className="text-lg font-bold text-gray-900">
+                  {robotMetrics.fullyApproved}
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500">Rejected</div>
-                <div className="text-lg font-bold text-gray-900">{robotMetrics.rejected}</div>
+                <div className="text-lg font-bold text-gray-900">
+                  {robotMetrics.rejected}
+                </div>
               </div>
             </div>
           </div>
@@ -1628,8 +2110,12 @@ export default function WorkOrdersPage() {
           <div className="mt-6 rounded-xl border border-gray-100 bg-white p-5">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <div className="text-lg font-semibold text-gray-900">All Work Orders</div>
-                <div className="text-xs text-gray-500 mt-1">{rows.length} work orders</div>
+                <div className="text-lg font-semibold text-gray-900">
+                  All Work Orders
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {rows.length} work orders
+                </div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -1647,7 +2133,10 @@ export default function WorkOrdersPage() {
                     disabled={!selectedRowKeys.length}
                     onClick={() => setBulkOpen(true)}
                   >
-                    Bulk Approval {selectedRowKeys.length ? `(${selectedRowKeys.length})` : ""}
+                    Bulk Approval{" "}
+                    {selectedRowKeys.length
+                      ? `(${selectedRowKeys.length})`
+                      : ""}
                   </Button>
                 ) : null}
                 <Button
@@ -1699,7 +2188,9 @@ export default function WorkOrdersPage() {
                 expandable={{
                   expandedRowRender: (record) => (
                     <div className="p-4 bg-white">
-                      <div className="text-sm font-semibold text-gray-900">UNIQ Details ({record.uniqDetails.length} items)</div>
+                      <div className="text-sm font-semibold text-gray-900">
+                        UNIQ Details ({record.uniqDetails.length} items)
+                      </div>
                       <div className="mt-3 overflow-hidden rounded-xl border border-gray-100">
                         <Table<UniqRow>
                           columns={uniqColumns}
@@ -1749,7 +2240,9 @@ export default function WorkOrdersPage() {
           </div>
         }
       >
-        <div className="text-xs text-gray-500">{selectedRows.length} items selected</div>
+        <div className="text-xs text-gray-500">
+          {selectedRows.length} items selected
+        </div>
 
         <div className="mt-3 rounded-xl border border-gray-100 bg-white p-3">
           <div className="text-xs font-semibold text-gray-700">WO Number</div>
@@ -1763,20 +2256,29 @@ export default function WorkOrdersPage() {
               </span>
             ))}
             {!selectedRows.length ? (
-              <div className="text-xs text-gray-400">Select rows to bulk approve/reject</div>
+              <div className="text-xs text-gray-400">
+                Select rows to bulk approve/reject
+              </div>
             ) : null}
           </div>
 
           <div className="mt-3 flex items-center justify-between text-xs text-gray-600">
             <span>Total UNIQs</span>
-            <span className="font-semibold text-gray-900">{bulkTotalUniqs}</span>
+            <span className="font-semibold text-gray-900">
+              {bulkTotalUniqs}
+            </span>
           </div>
 
           {selectedRows.length ? (
             <div className="mt-4 space-y-2">
               {selectedRows.map((row) => (
-                <div key={row.key} className="rounded-lg border border-gray-100 px-3 py-2 text-xs text-gray-600">
-                  <div className="font-semibold text-gray-900">{row.woNumber}</div>
+                <div
+                  key={row.key}
+                  className="rounded-lg border border-gray-100 px-3 py-2 text-xs text-gray-600"
+                >
+                  <div className="font-semibold text-gray-900">
+                    {row.woNumber}
+                  </div>
                   <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
                     <span>Type: {row.type}</span>
                     <span>Status: {row.status}</span>
@@ -1791,7 +2293,9 @@ export default function WorkOrdersPage() {
         </div>
 
         <div className="mt-4">
-          <div className="text-xs font-semibold text-gray-700">Approval Note</div>
+          <div className="text-xs font-semibold text-gray-700">
+            Approval Note
+          </div>
           <TextArea
             className="!rounded-lg mt-2"
             rows={4}
@@ -1810,7 +2314,10 @@ export default function WorkOrdersPage() {
         onClose={() => setBulkWoBulkOpen(false)}
         footer={
           <div className="flex items-center justify-end gap-2">
-            <Button className="!rounded-lg" onClick={() => setBulkWoBulkOpen(false)}>
+            <Button
+              className="!rounded-lg"
+              onClick={() => setBulkWoBulkOpen(false)}
+            >
               Cancel
             </Button>
             <Button
@@ -1834,7 +2341,9 @@ export default function WorkOrdersPage() {
           </div>
         }
       >
-        <div className="text-xs text-gray-500">{bulkWoSelectedRows.length} items selected</div>
+        <div className="text-xs text-gray-500">
+          {bulkWoSelectedRows.length} items selected
+        </div>
 
         <div className="mt-3 rounded-xl border border-gray-100 bg-white p-3">
           <div className="text-xs font-semibold text-gray-700">WO Number</div>
@@ -1848,15 +2357,22 @@ export default function WorkOrdersPage() {
               </span>
             ))}
             {!bulkWoSelectedRows.length ? (
-              <div className="text-xs text-gray-400">Select rows to bulk approve/reject</div>
+              <div className="text-xs text-gray-400">
+                Select rows to bulk approve/reject
+              </div>
             ) : null}
           </div>
 
           {bulkWoSelectedRows.length ? (
             <div className="mt-4 space-y-2">
               {bulkWoSelectedRows.map((row) => (
-                <div key={row.key} className="rounded-lg border border-gray-100 px-3 py-2 text-xs text-gray-600">
-                  <div className="font-semibold text-gray-900">{row.woNumber}</div>
+                <div
+                  key={row.key}
+                  className="rounded-lg border border-gray-100 px-3 py-2 text-xs text-gray-600"
+                >
+                  <div className="font-semibold text-gray-900">
+                    {row.woNumber}
+                  </div>
                   <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
                     <span>Source: {row.sourceDocumentType}</span>
                     <span>Document: {row.sourceDocumentId}</span>
@@ -1872,7 +2388,9 @@ export default function WorkOrdersPage() {
         </div>
 
         <div className="mt-4">
-          <div className="text-xs font-semibold text-gray-700">Approval Note</div>
+          <div className="text-xs font-semibold text-gray-700">
+            Approval Note
+          </div>
           <TextArea
             className="!rounded-lg mt-2"
             rows={4}
@@ -1899,7 +2417,8 @@ export default function WorkOrdersPage() {
             key="print"
             icon={<PrinterOutlined />}
             onClick={() => {
-              if (rmQrModal) openPrintDetail(buildRmProcessingDetailUrl(rmQrModal));
+              if (rmQrModal)
+                openPrintDetail(buildRmProcessingDetailUrl(rmQrModal));
             }}
           >
             Print
@@ -1923,7 +2442,9 @@ export default function WorkOrdersPage() {
               <div className="text-sm text-gray-500">QR belum tersedia</div>
             )}
             <div className="text-center">
-              <div className="text-sm font-semibold text-gray-900">{rmQrModal.woNumber}</div>
+              <div className="text-sm font-semibold text-gray-900">
+                {rmQrModal.woNumber}
+              </div>
               <div className="text-xs text-gray-500">
                 {rmQrModal.model} · {rmQrModal.gradeSize}
               </div>
@@ -1933,7 +2454,9 @@ export default function WorkOrdersPage() {
             </div>
             {rmQrModal.qrDataUrl ? (
               <details className="w-full">
-                <summary className="cursor-pointer text-xs text-gray-500">Detail base64</summary>
+                <summary className="cursor-pointer text-xs text-gray-500">
+                  Detail base64
+                </summary>
                 <textarea
                   readOnly
                   value={rmQrModal.qrDataUrl}
