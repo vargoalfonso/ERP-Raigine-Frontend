@@ -219,10 +219,10 @@ export default function MasterSupplierPage() {
 
   const itemTypeFilter = sectionToItemType(activeSection);
   const supplierItemsQuery = useListSupplierItemsQuery(
-    itemTypeFilter != null ? { type: itemTypeFilter } : undefined,
+    itemTypeFilter != null ? { type: itemTypeFilter, page: 1, limit: 1000 } : { page: 1, limit: 1000 },
     { skip: !apiEnabled || activeSection === "supplier-only" }
   );
-  const suppliersQuery = useListSuppliersQuery(undefined, { skip: !apiEnabled });
+  const suppliersQuery = useListSuppliersQuery({ page: 1, limit: 1000 }, { skip: !apiEnabled });
   const [deleteSupplierItem, deleteSupplierItemState] = useDeleteSupplierItemMutation();
   const [deleteSupplier, deleteSupplierState] = useDeleteSupplierMutation();
 

@@ -117,6 +117,7 @@ export type ListSuppliersParams = {
   search?: string;
   uniq_code?: string;
   limit?: number;
+  page?: number;
 };
 
 const buildQueryString = (params: Record<string, string | undefined>): string => {
