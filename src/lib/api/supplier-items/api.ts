@@ -267,6 +267,8 @@ export type ListSupplierItemsParams = {
   type?: string;
   status?: string;
   search?: string;
+  page?: number;
+  limit?: number;
 };
 
 const buildQueryString = (params: Record<string, string | undefined>): string => {

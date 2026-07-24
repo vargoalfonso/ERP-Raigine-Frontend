@@ -690,10 +690,21 @@ export default function MachineMasterDataPage() {
                 className="!rounded-lg"
                 icon={<PlusOutlined />}
                 onClick={() => {
-                  form.resetFields();
-                  form.setFieldsValue({ status: "Active" });
-                  setIsCustomProductionLine(false);
-                  setAddOpen(true);
+                    form.resetFields();
+                      // generate next sequential machine number as zero-padded 3 digits
+                      const candidates = [
+                        ...rows.map((r) => String(r.machineNumber ?? "").trim()),
+                        ...mockRows.map((r) => String(r.machineNumber ?? "").trim()),
+                      ];
+                      const numericValues = candidates
+                        .map((s) => (s.match(/^\d+$/) ? Number(s) : null))
+                        .filter((n): n is number => n !== null && Number.isFinite(n) && n > 0);
+                      const maxExisting = numericValues.length ? Math.max(...numericValues) : 0;
+                      const nextNum = maxExisting ? maxExisting + 1 : 1;
+                      const nextNumber = String(nextNum).padStart(3, "0");
+                      form.setFieldsValue({ status: "Active", machineNumber: nextNumber });
+                    setIsCustomProductionLine(false);
+                    setAddOpen(true);
                 }}
                 loading={createMachineState.isLoading}
               >
@@ -851,7 +862,7 @@ export default function MachineMasterDataPage() {
               label="Machine Number"
               rules={[{ required: true, message: "Required" }]}
             >
-              <Input className="!rounded-lg" placeholder="e.g PM-A1-001" />
+              <Input className="!rounded-lg" placeholder="this number is auto fill" disabled />
             </Form.Item>
           </div>
 
@@ -998,7 +1009,7 @@ export default function MachineMasterDataPage() {
               label="Machine Number"
               rules={[{ required: true, message: "Required" }]}
             >
-              <Input className="!rounded-lg" disabled />
+              <Input className="!rounded-lg" placeholder="this number is auto fill" disabled />
             </Form.Item>
           </div>
 
