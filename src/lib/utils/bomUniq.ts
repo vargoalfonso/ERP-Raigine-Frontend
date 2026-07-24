@@ -36,7 +36,8 @@ type BomNodeLike = {
   children?: unknown;
 };
 
-const isRecord = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === "object";
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  Boolean(v) && typeof v === "object";
 
 const asNodeLike = (v: unknown): BomNodeLike | null => {
   if (!isRecord(v)) return null;
@@ -56,6 +57,7 @@ export type BomUniqIndex = {
   rawMaterialTypeByUniq: Record<string, string>;
   rmSourceByUniq: Record<string, string>;
   weightKgByUniq: Record<string, number>;
+  childUniqsByUniq: Record<string, string[]>;
 };
 
 export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
@@ -70,6 +72,7 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
   const rawMaterialTypeByUniq: Record<string, string> = {};
   const rmSourceByUniq: Record<string, string> = {};
   const weightKgByUniq: Record<string, number> = {};
+  const childUniqsByUniq: Record<string, string[]> = {};
 
   const pickString = (...values: unknown[]): string => {
     for (const v of values) {
@@ -102,7 +105,8 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
           : "";
     const uniq = typeof uniqCandidate === "string" ? uniqCandidate.trim() : "";
     const partName = typeof n.part_name === "string" ? n.part_name.trim() : "";
-    const partNumber = typeof n.part_number === "string" ? n.part_number.trim() : "";
+    const partNumber =
+      typeof n.part_number === "string" ? n.part_number.trim() : "";
     const modelCandidate =
       typeof n.model === "string" && n.model.trim()
         ? n.model
@@ -111,9 +115,17 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
           : typeof n.assembly_code === "string"
             ? n.assembly_code
             : "";
-    const model = typeof modelCandidate === "string" ? modelCandidate.trim() : "";
-    const assemblyCode = typeof n.assembly_code === "string" ? n.assembly_code.trim() : "";
-    const gradeSize = pickString(n.grade_size, n.gradeSize, n.model_grade, n.modelGrade, n.size);
+    const model =
+      typeof modelCandidate === "string" ? modelCandidate.trim() : "";
+    const assemblyCode =
+      typeof n.assembly_code === "string" ? n.assembly_code.trim() : "";
+    const gradeSize = pickString(
+      n.grade_size,
+      n.gradeSize,
+      n.model_grade,
+      n.modelGrade,
+      n.size,
+    );
     const packingNumberCandidate = [
       n.packing_number,
       n.packingNumber,
@@ -122,7 +134,9 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
       n.kanban,
     ].find((value) => typeof value === "string" && value.trim());
     const packingNumber =
-      typeof packingNumberCandidate === "string" ? packingNumberCandidate.trim() : "";
+      typeof packingNumberCandidate === "string"
+        ? packingNumberCandidate.trim()
+        : "";
 
     const uom = pickString(
       n.uom,
@@ -130,7 +144,7 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
       n.unitMeasurement,
       n.unit,
       n.uom_id,
-      n.uomId
+      n.uomId,
     );
     const rmType = pickString(n.raw_material_type, n.rawMaterialType);
     const rmSource = pickString(n.rm_source, n.rmSource);
@@ -139,27 +153,47 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
       n.stockWeightKg,
       n.weight_kg,
       n.weightKg,
-      n.weight
+      n.weight,
     );
     if (uniq) {
       uniqSet.add(uniq);
       if (partName && !partNameByUniq[uniq]) partNameByUniq[uniq] = partName;
-      if (partNumber && !partNumberByUniq[uniq]) partNumberByUniq[uniq] = partNumber;
+      if (partNumber && !partNumberByUniq[uniq])
+        partNumberByUniq[uniq] = partNumber;
       if (model && !modelByUniq[uniq]) modelByUniq[uniq] = model;
-      if (assemblyCode && !assemblyCodeByUniq[uniq]) assemblyCodeByUniq[uniq] = assemblyCode;
+      if (assemblyCode && !assemblyCodeByUniq[uniq])
+        assemblyCodeByUniq[uniq] = assemblyCode;
       if (model && !assemblyCodeByUniq[uniq]) assemblyCodeByUniq[uniq] = model;
-      if (gradeSize && !gradeSizeByUniq[uniq]) gradeSizeByUniq[uniq] = gradeSize;
+      if (gradeSize && !gradeSizeByUniq[uniq])
+        gradeSizeByUniq[uniq] = gradeSize;
       if (packingNumber && !packingNumberByUniq[uniq]) {
         packingNumberByUniq[uniq] = packingNumber;
       }
       if (uom && !uomByUniq[uniq]) uomByUniq[uniq] = uom;
-      if (rmType && !rawMaterialTypeByUniq[uniq]) rawMaterialTypeByUniq[uniq] = rmType;
+      if (rmType && !rawMaterialTypeByUniq[uniq])
+        rawMaterialTypeByUniq[uniq] = rmType;
       if (rmSource && !rmSourceByUniq[uniq]) rmSourceByUniq[uniq] = rmSource;
-      if (typeof weightKg === "number" && !(uniq in weightKgByUniq)) weightKgByUniq[uniq] = weightKg;
+      if (typeof weightKg === "number" && !(uniq in weightKgByUniq))
+        weightKgByUniq[uniq] = weightKg;
     }
 
     const children = n.children;
     if (Array.isArray(children)) {
+      if (uniq && !childUniqsByUniq[uniq]) {
+        const childUniqs: string[] = [];
+        for (const child of children) {
+          const cn = asNodeLike(child);
+          if (!cn) continue;
+          const cu =
+            typeof cn.uniq === "string" && cn.uniq.trim()
+              ? cn.uniq.trim()
+              : typeof cn.uniq_code === "string"
+                ? cn.uniq_code.trim()
+                : "";
+          if (cu) childUniqs.push(cu);
+        }
+        if (childUniqs.length) childUniqsByUniq[uniq] = childUniqs;
+      }
       for (const child of children) visit(child);
     }
   };
@@ -175,7 +209,10 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
       }
       const data = (input as { data?: unknown }).data;
       if (Array.isArray(data)) return data;
-      if (isRecord(data) && Array.isArray((data as { items?: unknown }).items)) {
+      if (
+        isRecord(data) &&
+        Array.isArray((data as { items?: unknown }).items)
+      ) {
         return (data as { items: unknown[] }).items;
       }
       return [input];
@@ -200,5 +237,6 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
     rawMaterialTypeByUniq,
     rmSourceByUniq,
     weightKgByUniq,
+    childUniqsByUniq,
   };
 };

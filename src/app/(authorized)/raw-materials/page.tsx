@@ -45,15 +45,16 @@ import {
   type InventoryRecord,
   useGetInventoryListQuery,
   useLazyGetInventoryKanbanSummaryQuery,
+  useLazyGetDeliveryNoteByUniqQuery,
 } from "@/lib/api/inventory/api";
 import {
   formatNumber,
   getStatusStockColor,
 } from "@/lib/api/raw-materials/utils";
 
-import {
-  useLazyGenerateQRRawmaterialQuery,
-} from "@/lib/api/raw-materials/api";
+import { useLazyGenerateQRRawmaterialQuery } from "@/lib/api/raw-materials/api";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 
 // Mock data untuk demo
 const MOCK_RAW_MATERIALS: RawMaterialRecord[] = [
@@ -83,7 +84,7 @@ const MOCK_RAW_MATERIALS: RawMaterialRecord[] = [
     updated_at: "",
     current_stock: undefined,
     master_list: undefined,
-    qr:"",
+    qr: "",
   },
   {
     id: "2",
@@ -111,7 +112,7 @@ const MOCK_RAW_MATERIALS: RawMaterialRecord[] = [
     updated_at: "",
     current_stock: undefined,
     master_list: undefined,
-    qr:"",
+    qr: "",
   },
 ];
 
@@ -458,6 +459,13 @@ export default function RawMaterialsPage() {
     { type: "raw-materials", page: currentPage, limit: pageSize },
     { skip: !apiEnabled },
   );
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomTreeRes?.data ?? []),
+    [bomTreeRes?.data],
+  );
 
   const [triggerKanbanSummary] = useLazyGetInventoryKanbanSummaryQuery();
   const [kanbanSummaryByUniq, setKanbanSummaryByUniq] = useState<
@@ -632,6 +640,7 @@ export default function RawMaterialsPage() {
   };
 
   const [generateQR] = useLazyGenerateQRRawmaterialQuery();
+  const [generateDeliveryNote] = useLazyGetDeliveryNoteByUniqQuery();
 
   const handleGenerateQR = async (
     record: RawMaterialRecord,
@@ -654,6 +663,35 @@ export default function RawMaterialsPage() {
       console.error(err);
     }
 
+    let progress: PrintCardOptions["progress"];
+    try {
+      const summaryRes = await triggerKanbanSummary({
+        uniq_code: record.uniq,
+      }).unwrap();
+      const summary = summaryRes?.data;
+      const currentQty = Number(summary?.stock_qty ?? record.stock ?? 0);
+      const targetQty = currentQty + Number(summary?.stock_to_complete ?? 0);
+      const stdQty = Number(summary?.kanban_pkg_qty ?? 0);
+      const percent =
+        targetQty > 0
+          ? Math.max(
+              0,
+              Math.min(100, Math.round((currentQty / targetQty) * 100)),
+            )
+          : 0;
+      progress = { currentQty, targetQty, stdQty, percent };
+    } catch (err) {
+      console.error(err);
+    }
+
+    let deliveryNotes: PrintCardOptions["deliveryNotes"];
+    try {
+      const dnRes = await generateDeliveryNote(record.uniq).unwrap();
+      deliveryNotes = dnRes?.data ?? undefined;
+    } catch (err) {
+      console.error(err);
+    }
+
     return {
       documentTitle: `Raw Material - ${record.uniq}`,
       heading: "RAW MATERIAL",
@@ -666,6 +704,8 @@ export default function RawMaterialsPage() {
         { label: "Stock", value: formatNumber(record.stock ?? 0) },
         { label: "Status", value: record.status },
       ],
+      progress,
+      deliveryNotes,
       qrDataUrl,
       bottomCode: record.uniq,
       onError: (msg) => message.error(msg),
@@ -680,6 +720,27 @@ export default function RawMaterialsPage() {
       render: (record: RawMaterialRecord) => (
         <span className="font-mono text-sm">{record.uniq || "-"}</span>
       ),
+    },
+    {
+      title: "Child Uniq",
+      key: "child_uniq",
+      width: 140,
+      render: (record: RawMaterialRecord) => {
+        const children =
+          bomIndex.childUniqsByUniq[String(record.uniq ?? "").trim()] ?? [];
+        if (!children.length) {
+          return <span className="text-sm text-gray-400">-</span>;
+        }
+        const [first, ...rest] = children;
+        return (
+          <span className="font-mono text-sm">
+            {first}
+            {rest.length ? (
+              <span className="text-gray-400"> (+{rest.length} lagi)</span>
+            ) : null}
+          </span>
+        );
+      },
     },
     {
       title: "Part Name",
