@@ -16,6 +16,7 @@ import {
   useGetInventoryIncomingQuery,
   useGetInventoryKanbanSummaryQuery,
   useGetDeliveryNoteByUniqQuery,
+  type DeliveryNoteItem as ApiDeliveryNoteItem,
 } from "@/lib/api/inventory/api";
 
 type DeliveryNoteLogRow = {
@@ -184,7 +185,7 @@ function SubConMaterialsDetailPageContent() {
       skip: !uniqCode,
     });
 
-  const deliveryNoteData = deliveryNoteRes?.data ?? [];
+  const deliveryNoteData: ApiDeliveryNoteItem[] = deliveryNoteRes?.data ?? [];
 
   const subconCurrentQty = detailInfo.totalStock;
   const subconTargetQty = detailInfo.totalPo;
@@ -394,7 +395,7 @@ function SubConMaterialsDetailPageContent() {
                     width: 220,
                     // [packing-qty] Dihitung PER BARIS: qty_opname / quantity.
                     // quantity = rencana DN (batas), qty_opname = hasil stock opname.
-                    render: (_: unknown, record: { quantity?: number; qty_opname?: number | null }) => {
+                    render: (_: unknown, record: import("@/lib/api/inventory/api").DeliveryNoteItem) => {
                       const rowMax = Number(record?.quantity ?? subconTargetQty);
                       const rowCur = Number(
                         record?.qty_opname ?? record?.quantity ?? subconCurrentQty,
@@ -425,14 +426,14 @@ function SubConMaterialsDetailPageContent() {
                     title: "Qty saat ini",
                     key: "current_qty",
                     align: "right",
-                    render: (_: unknown, record: { quantity?: number; qty_opname?: number | null }) =>
+                    render: (_: unknown, record: import("@/lib/api/inventory/api").DeliveryNoteItem) =>
                       formatNumber(Number(record?.qty_opname ?? record?.quantity ?? subconCurrentQty)),
                   },
                   {
                     title: "Qty maksimal",
                     key: "target_qty",
                     align: "right",
-                    render: (_: unknown, record: { quantity?: number; qty_opname?: number | null }) =>
+                    render: (_: unknown, record: import("@/lib/api/inventory/api").DeliveryNoteItem) =>
                       formatNumber(Number(record?.quantity ?? subconTargetQty)),
                   },
                 ]}

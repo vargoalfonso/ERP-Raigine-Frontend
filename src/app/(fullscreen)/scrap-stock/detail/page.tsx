@@ -11,6 +11,7 @@ import {
   useGetScrapStockByIdQuery,
   useGetScrapStockHistoryLogsQuery,
   useGetDeliveryNoteByUniqQuery,
+  type DeliveryNoteItem as ApiDeliveryNoteItem,
 } from "@/lib/api/scrap-stock/api";
 
 function ScrapStockDetailPageContent() {
@@ -50,7 +51,7 @@ function ScrapStockDetailPageContent() {
       skip: !uniqCode,
     });
 
-  const deliveryNoteData = deliveryNoteRes?.data ?? [];
+  const deliveryNoteData: ApiDeliveryNoteItem[] = deliveryNoteRes?.data ?? [];
 
   return (
     <div className="w-full min-h-screen bg-gray-50">
@@ -276,6 +277,40 @@ function ScrapStockDetailPageContent() {
                         />
                       </div>
                     </div>
+                  </div>
+                ),
+              },
+              {
+                key: "3",
+                label: (
+                  <span className="flex items-center gap-2">Delivery Notes</span>
+                ),
+                children: (
+                  <div className="mt-6">
+                    <Table<ApiDeliveryNoteItem>
+                      rowKey={(record) =>
+                        `${record.dn_number ?? "-"}-${record.packing_number ?? "-"}`
+                      }
+                      pagination={false}
+                      dataSource={deliveryNoteData}
+                      columns={[
+                        {
+                          title: "DN Number",
+                          dataIndex: "dn_number",
+                          key: "dn_number",
+                        },
+                        {
+                          title: "Packing Number",
+                          dataIndex: "packing_number",
+                          key: "packing_number",
+                        },
+                        {
+                          title: "Quantity",
+                          dataIndex: "quantity",
+                          key: "quantity",
+                        },
+                      ]}
+                    />
                   </div>
                 ),
               },
