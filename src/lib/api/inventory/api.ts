@@ -179,7 +179,10 @@ export interface DeliveryNoteItem {
   dn_number: string;
   item_uniq_code: string;
   packing_number: string;
+  /** Rencana kirim DN. Ini yang dipakai sebagai "Qty maksimal". */
   quantity: number;
+  /** Qty aktual hasil stock opname. null = belum pernah diopname. */
+  qty_opname?: number | null;
   check: string;
 }
 

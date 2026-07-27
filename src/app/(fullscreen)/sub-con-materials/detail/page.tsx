@@ -392,31 +392,48 @@ function SubConMaterialsDetailPageContent() {
                     title: "Progress",
                     key: "progress",
                     width: 220,
-                    render: () => (
-                      <div>
-                        <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-200">
-                          <div
-                            className="h-full rounded-full bg-blue-600"
-                            style={{ width: `${subconProgress}%` }}
-                          />
+                    // [packing-qty] Dihitung PER BARIS: qty_opname / quantity.
+                    // quantity = rencana DN (batas), qty_opname = hasil stock opname.
+                    render: (_: unknown, record: { quantity?: number; qty_opname?: number | null }) => {
+                      const rowMax = Number(record?.quantity ?? subconTargetQty);
+                      const rowCur = Number(
+                        record?.qty_opname ?? record?.quantity ?? subconCurrentQty,
+                      );
+                      const rowPct =
+                        rowMax > 0
+                          ? Math.max(
+                              0,
+                              Math.min(100, Math.round((rowCur / rowMax) * 100)),
+                            )
+                          : subconProgress;
+                      return (
+                        <div>
+                          <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-200">
+                            <div
+                              className="h-full rounded-full bg-blue-600"
+                              style={{ width: `${rowPct}%` }}
+                            />
+                          </div>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {rowPct}% tercapai
+                          </p>
                         </div>
-                        <p className="mt-1 text-xs text-gray-500">
-                          {subconProgress}% tercapai
-                        </p>
-                      </div>
-                    ),
+                      );
+                    },
                   },
                   {
                     title: "Qty saat ini",
                     key: "current_qty",
                     align: "right",
-                    render: () => formatNumber(subconCurrentQty),
+                    render: (_: unknown, record: { quantity?: number; qty_opname?: number | null }) =>
+                      formatNumber(Number(record?.qty_opname ?? record?.quantity ?? subconCurrentQty)),
                   },
                   {
                     title: "Qty maksimal",
                     key: "target_qty",
                     align: "right",
-                    render: () => formatNumber(subconTargetQty),
+                    render: (_: unknown, record: { quantity?: number; qty_opname?: number | null }) =>
+                      formatNumber(Number(record?.quantity ?? subconTargetQty)),
                   },
                 ]}
               />

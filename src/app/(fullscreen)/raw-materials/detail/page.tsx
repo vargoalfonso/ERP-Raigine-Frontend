@@ -424,31 +424,48 @@ function RawMaterialsDetailPageContent() {
                     title: "Progress",
                     key: "progress",
                     width: 220,
-                    render: () => (
-                      <div>
-                        <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-200">
-                          <div
-                            className="h-full rounded-full bg-blue-600"
-                            style={{ width: `${packingProgress}%` }}
-                          />
+                    // [packing-qty] Dihitung PER BARIS: qty_opname / quantity.
+                    // quantity = rencana DN (batas), qty_opname = hasil stock opname.
+                    render: (_: unknown, record: { quantity?: number; qty_opname?: number | null }) => {
+                      const rowMax = Number(record?.quantity ?? packingTargetQty);
+                      const rowCur = Number(
+                        record?.qty_opname ?? record?.quantity ?? packingCurrentQty,
+                      );
+                      const rowPct =
+                        rowMax > 0
+                          ? Math.max(
+                              0,
+                              Math.min(100, Math.round((rowCur / rowMax) * 100)),
+                            )
+                          : packingProgress;
+                      return (
+                        <div>
+                          <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-200">
+                            <div
+                              className="h-full rounded-full bg-blue-600"
+                              style={{ width: `${rowPct}%` }}
+                            />
+                          </div>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {rowPct}% tercapai
+                          </p>
                         </div>
-                        <p className="mt-1 text-xs text-gray-500">
-                          {packingProgress}% tercapai
-                        </p>
-                      </div>
-                    ),
+                      );
+                    },
                   },
                   {
                     title: "Qty saat ini",
                     key: "current_qty",
                     align: "right",
-                    render: () => formatNumber(packingCurrentQty),
+                    render: (_: unknown, record: { quantity?: number; qty_opname?: number | null }) =>
+                      formatNumber(Number(record?.qty_opname ?? record?.quantity ?? packingCurrentQty)),
                   },
                   {
                     title: "Qty maksimal",
                     key: "target_qty",
                     align: "right",
-                    render: () => formatNumber(packingTargetQty),
+                    render: (_: unknown, record: { quantity?: number; qty_opname?: number | null }) =>
+                      formatNumber(Number(record?.quantity ?? packingTargetQty)),
                   },
                 ]}
               />
