@@ -11,6 +11,7 @@ import {
   useGetInventoryIncomingQuery,
   useGetInventoryKanbanSummaryQuery,
   useGetDeliveryNoteByUniqQuery,
+  type DeliveryNoteItem as ApiDeliveryNoteItem,
 } from "@/lib/api/inventory/api";
 
 type UnknownRecord = Record<string, unknown>;
@@ -156,7 +157,7 @@ function IndirectRawMaterialDetailPageContent() {
       skip: !uniqCode,
     });
 
-  const deliveryNoteData = deliveryNoteRes?.data ?? [];
+  const deliveryNoteData: ApiDeliveryNoteItem[] = deliveryNoteRes?.data ?? [];
 
   const deliveryDnNumbers = Array.from(
     new Set(
@@ -414,9 +415,9 @@ function IndirectRawMaterialDetailPageContent() {
                 Delivery Note History
               </h3>
 
-              <Table
+              <Table<ApiDeliveryNoteItem>
                 rowKey={(record) =>
-                  `${record.dn_number}-${record.packing_number}`
+                  `${record.dn_number ?? "-"}-${record.packing_number ?? "-"}`
                 }
                 pagination={false}
                 dataSource={deliveryNoteData}

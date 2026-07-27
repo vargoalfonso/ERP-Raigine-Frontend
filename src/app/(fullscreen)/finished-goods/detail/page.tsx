@@ -10,6 +10,7 @@ import {
   useGetFinishedGoodHistoryQuery,
   useGetDeliveryNoteByUniqQuery,
   type FinishedGoodHistoryItem,
+  type DeliveryNoteItem as ApiDeliveryNoteItem,
 } from "@/lib/api/finished-goods/api";
 
 /* ================= HELPERS ================= */
@@ -105,7 +106,7 @@ function FinishedGoodDetailContent() {
       skip: !uniqCode,
     });
 
-  const deliveryNoteData = deliveryNoteRes?.data ?? [];
+  const deliveryNoteData: ApiDeliveryNoteItem[] = deliveryNoteRes?.data ?? [];
 
   const deliveryDnNumbers = Array.from(
     new Set(
@@ -396,9 +397,9 @@ function FinishedGoodDetailContent() {
                 Delivery Note History
               </h3>
 
-              <Table
+              <Table<ApiDeliveryNoteItem>
                 rowKey={(record) =>
-                  `${record.dn_number}-${record.packing_number}`
+                  `${record.dn_number ?? "-"}-${record.packing_number ?? "-"}`
                 }
                 pagination={false}
                 dataSource={deliveryNoteData}
