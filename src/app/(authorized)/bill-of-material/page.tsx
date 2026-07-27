@@ -27,6 +27,7 @@ import {
   InboxOutlined,
   PlusOutlined,
   RightOutlined,
+  SearchOutlined,
   UploadOutlined,
   UserOutlined,
 } from "@ant-design/icons";
@@ -623,6 +624,117 @@ const filterBomRowsByUniq = (rows: BomRow[], query: string): BomRow[] => {
   }, []);
 };
 
+type WhereUsedRow = {
+  key: string;
+  parentCode: string;
+  parentName: string;
+  type: string;
+  qtyUse: string;
+  yieldValue: string;
+  scrap: string;
+  position: string;
+  substitution: string;
+  rev: string;
+  status: BomStatus;
+  note: string;
+  targetBomId?: string;
+};
+
+// "Where Used" = reverse BOM lookup. Given a MATERIAL CODE, walk the whole BOM
+// tree and return every PARENT node that has a direct child whose material_code
+// matches. Matching is restricted to the material_code field only (per spec).
+const collectWhereUsedRows = (
+  nodes: BackendBomNode[],
+  rawCode: string,
+): WhereUsedRow[] => {
+  const q = rawCode.trim().toLowerCase();
+  if (!q) return [];
+
+  const rows: WhereUsedRow[] = [];
+  let counter = 0;
+
+  const walk = (node: BackendBomNode, parent: BackendBomNode | null) => {
+    const spec = isRecord((node as UnknownRecord).material_specifications)
+      ? ((node as UnknownRecord).material_specifications as UnknownRecord)
+      : isRecord((node as UnknownRecord).material_spec)
+        ? ((node as UnknownRecord).material_spec as UnknownRecord)
+        : undefined;
+    // A material code (e.g. an RM/CP code like "BR50") can live directly on the
+    // node OR inside material specifications (material_code / material_grade).
+    const materialCode = String(
+      node.material_code ??
+        spec?.material_code ??
+        spec?.material_grade ??
+        "",
+    ).trim();
+    if (parent && materialCode && materialCode.toLowerCase().includes(q)) {
+      const parentCode =
+        String(parent.uniq_code ?? parent.uniq ?? "").trim() || "-";
+      const parentName = String(parent.part_name ?? "").trim() || "-";
+      const type =
+        String(
+          (node as UnknownRecord).type_material ??
+            (parent as UnknownRecord).type_material ??
+            "",
+        ).trim() || "-";
+      const qtyNum = asNumber(
+        node.qpu ?? node.quantity ?? (node as UnknownRecord).qty_per_uniq,
+      );
+      const yieldNum = asNumber(
+        (node as UnknownRecord).yield ??
+          (node as UnknownRecord).yield_factor ??
+          spec?.yield ??
+          spec?.yield_factor ??
+          1,
+      );
+      const scrapNum = asNumber(
+        (node as UnknownRecord).scrap_factor ??
+          (node as UnknownRecord).scrap ??
+          spec?.scrap_factor ??
+          spec?.scrap ??
+          0,
+      );
+      const rev = String(parent.version ?? node.version ?? "").trim() || "-";
+      const status = toStatusLabel(
+        (isRecord(parent) ? parent.bom_status : undefined) ?? parent.status,
+      );
+      const note = String(node.description ?? "").trim() || "-";
+      const targetBomId =
+        String(parent.bom_id ?? parent.id ?? parent.uuid ?? "").trim() ||
+        undefined;
+
+      counter += 1;
+      rows.push({
+        key: `${parentCode}-${materialCode}-${counter}`,
+        parentCode,
+        parentName,
+        type,
+        qtyUse: qtyNum ? String(qtyNum) : "-",
+        yieldValue: yieldNum ? String(yieldNum) : "-",
+        scrap: String(scrapNum),
+        position:
+          String((node as UnknownRecord).position ?? "").trim() || "-",
+        substitution:
+          String(
+            (node as UnknownRecord).substitution ??
+              (node as UnknownRecord).substitute ??
+              "",
+          ).trim() || "-",
+        rev,
+        status,
+        note,
+        targetBomId,
+      });
+    }
+    if (Array.isArray(node.children)) {
+      node.children.forEach((child) => walk(child, node));
+    }
+  };
+
+  nodes.forEach((n) => walk(n, null));
+  return rows;
+};
+
 const fetchBomIdByAnyId = async (anyId: string): Promise<string> => {
   const token = getCookiesFromBrowser("Authorization");
   if (!apiBaseUrl || !anyId) return "";
@@ -675,6 +787,8 @@ export default function BillOfMaterialPage() {
     null,
   );
   const [uniqSearch, setUniqSearch] = useState("");
+  const [whereUsedOpen, setWhereUsedOpen] = useState(false);
+  const [whereUsedCode, setWhereUsedCode] = useState("");
   const [historyPreviewRows, setHistoryPreviewRows] = useState<
     ImportPreviewRow[]
   >([]);
@@ -746,6 +860,11 @@ export default function BillOfMaterialPage() {
   const filteredBomRows = useMemo(
     () => filterBomRowsByUniq(bomRows, uniqSearch),
     [bomRows, uniqSearch],
+  );
+
+  const whereUsedRows = useMemo(
+    () => collectWhereUsedRows(bomListRes?.data ?? [], whereUsedCode),
+    [bomListRes?.data, whereUsedCode],
   );
 
   const [tablePage, setTablePage] = useState(1);
@@ -1118,6 +1237,74 @@ export default function BillOfMaterialPage() {
     },
   ];
 
+  const whereUsedColumns: ColumnsType<WhereUsedRow> = [
+    {
+      title: "Parent Code",
+      dataIndex: "parentCode",
+      key: "parentCode",
+      width: 130,
+      render: (v: string) => (
+        <span className="font-semibold text-blue-600">{v}</span>
+      ),
+    },
+    {
+      title: "Parent Name",
+      dataIndex: "parentName",
+      key: "parentName",
+      width: 200,
+    },
+    { title: "Type", dataIndex: "type", key: "type", width: 120 },
+    { title: "Qty/Use", dataIndex: "qtyUse", key: "qtyUse", width: 90 },
+    { title: "Yield", dataIndex: "yieldValue", key: "yieldValue", width: 80 },
+    { title: "Scrap %", dataIndex: "scrap", key: "scrap", width: 90 },
+    { title: "Posisi", dataIndex: "position", key: "position", width: 90 },
+    {
+      title: "Substitusi",
+      dataIndex: "substitution",
+      key: "substitution",
+      width: 110,
+    },
+    { title: "Rev", dataIndex: "rev", key: "rev", width: 80 },
+    {
+      title: "Status",
+      dataIndex: "status",
+      key: "status",
+      width: 100,
+      render: (v: string) => <Tag color={statusToColor(v)}>{v}</Tag>,
+    },
+    {
+      title: "Note",
+      dataIndex: "note",
+      key: "note",
+      width: 280,
+      render: (v: string) => (
+        <span className="text-xs text-gray-500">{v}</span>
+      ),
+    },
+    {
+      title: "Aksi",
+      key: "action",
+      width: 140,
+      fixed: "right",
+      render: (_: unknown, record: WhereUsedRow) => (
+        <Button
+          size="small"
+          onClick={() => {
+            if (!record.targetBomId) {
+              messageApi.error("Missing BOM id");
+              return;
+            }
+            router.push(
+              `/bill-of-material/${encodeURIComponent(record.targetBomId)}`,
+            );
+          }}
+        >
+          Buka Struktur
+        </Button>
+      ),
+    },
+  ];
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between bg-white p-4 rounded-lg shadow-sm mb-10">
@@ -1143,6 +1330,14 @@ export default function BillOfMaterialPage() {
           </Button>
 
           <Button
+            icon={<SearchOutlined />}
+            className="flex items-center gap-2"
+            onClick={() => setWhereUsedOpen(true)}
+          >
+            Where Used
+          </Button>
+
+          <Button
             type="primary"
             icon={<PlusOutlined />}
             className="flex items-center gap-2"
@@ -1153,6 +1348,70 @@ export default function BillOfMaterialPage() {
         </div>
       </div>
       {contextHolder}
+      <Modal
+        open={whereUsedOpen}
+        onCancel={() => setWhereUsedOpen(false)}
+        footer={null}
+        title={null}
+        width={1120}
+        destroyOnHidden
+      >
+        <div className="pr-6">
+          <h2 className="text-xl font-bold text-gray-900">Where Used</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Cari parent yang memakai material code, lalu klik untuk buka
+            struktur BOM utama.
+          </p>
+        </div>
+
+        <div className="mt-4">
+          <Input
+            allowClear
+            size="large"
+            prefix={<SearchOutlined className="text-gray-400" />}
+            value={whereUsedCode}
+            onChange={(event) => setWhereUsedCode(event.target.value)}
+            placeholder="Ketik material code (mis. BR50)"
+            className="w-full md:w-[420px]"
+          />
+        </div>
+
+        {whereUsedCode.trim() ? (
+          <p className="mt-4 text-sm text-gray-600">
+            <span className="font-semibold text-gray-900">
+              {whereUsedCode.trim()}
+            </span>{" "}
+            dipakai di {whereUsedRows.length} baris BOM.
+          </p>
+        ) : (
+          <p className="mt-4 text-sm text-gray-400">
+            Masukkan material code untuk melihat semua parent/uniq yang
+            memakainya.
+          </p>
+        )}
+
+        <Table<WhereUsedRow>
+          className="mt-3"
+          columns={whereUsedColumns}
+          dataSource={whereUsedRows}
+          rowKey="key"
+          size="small"
+          bordered
+          loading={isBomLoading}
+          pagination={{
+            pageSize: 10,
+            showSizeChanger: true,
+            pageSizeOptions: ["10", "20", "50", "100"],
+            showTotal: (total, range) => `(${range[1]} of ${total}) baris`,
+          }}
+          scroll={{ x: "max-content", y: 420 }}
+          locale={{
+            emptyText: whereUsedCode.trim()
+              ? "Tidak ada parent yang memakai material code ini."
+              : "Belum ada pencarian.",
+          }}
+        />
+      </Modal>
       <Modal
         open={excelModalOpen}
         title="Upload Bill Of Material"
