@@ -102,6 +102,11 @@ type SupplierOption = {
   supplierCode: string;
   queryValue: string;
   matchValues: string[];
+  // [supplier-search] kategori dipakai untuk URUTAN, bukan untuk memfilter.
+  // WAJIB (bukan opsional) supaya tipenya identik dengan objek hasil
+  // .map(); kalau opsional, type predicate `option is SupplierOption`
+  // pada .filter() ditolak dan hasilnya tetap dianggap `| null`.
+  category: string;
 };
 
 const SECTION_OPTIONS: Array<{ label: string; value: SupplierSection }> = [
@@ -606,7 +611,9 @@ function MasterSupplierCreatePageContent() {
   const { data: suppliers = [], isLoading: suppliersLoading } =
     useListSuppliersQuery(
       {
-        material_category: sectionToMaterialCategory(section),
+        // [supplier-search] semua supplier aktif ditampilkan. Filter
+        // kategori dihapus supaya supplier lintas kategori tetap
+        // ketemu saat dicari; urutannya diatur di supplierOptions.
         status: "Active",
         limit: 1000,
       },
@@ -639,10 +646,20 @@ function MasterSupplierCreatePageContent() {
 
   // Accumulate pages — replace on page 1, append on subsequent pages
   useEffect(() => {
-    const newItems = flattenBomTree(bomPageResult?.data?.items ?? []).filter(
-      (node) => sectionMatchesTypeMaterial(section, node.type_material),
+    const allItems = flattenBomTree(bomPageResult?.data?.items ?? []);
+    // [supplier-search] hasil server jangan dibuang hanya karena
+    // type_material kosong atau beda penamaan. Kalau filter section
+    // menyisakan nol padahal server mengembalikan data, pakai apa adanya.
+    const sectionItems = allItems.filter((node) =>
+      sectionMatchesTypeMaterial(section, node.type_material),
     );
-    if (newItems.length === 0) return;
+    const newItems = sectionItems.length > 0 ? sectionItems : allItems;
+    if (newItems.length === 0) {
+      // Hasil pencarian benar-benar kosong -> kosongkan daftar supaya
+      // sisa hasil pencarian sebelumnya tidak ikut tampil.
+      if (uniqPage === 1) setAccumulatedBomItems([]);
+      return;
+    }
     setAccumulatedBomItems((prev) => {
       if (uniqPage === 1) return newItems;
       const existingCodes = new Set(
@@ -691,11 +708,27 @@ function MasterSupplierCreatePageContent() {
               ? `${supplierCode} — ${supplierName}`
               : pickText(supplierName, supplierCode);
           if (!value || !label) return null;
-          return { value, label, supplierCode, queryValue: value, matchValues };
+          return {
+            value,
+            label,
+            supplierCode,
+            queryValue: value,
+            matchValues,
+            category: pickText(supplier.material_category),
+          };
         })
         .filter((option): option is SupplierOption => Boolean(option))
-        .sort((left, right) => left.label.localeCompare(right.label)),
-    [suppliers],
+        .sort((left, right) => {
+          // [supplier-search] kategori yang cocok dengan section naik ke
+          // atas, sisanya tetap bisa dipilih dan dicari.
+          const wanted = sectionToMaterialCategory(section).toLowerCase();
+          const leftRank = left.category.toLowerCase() === wanted ? 0 : 1;
+          const rightRank =
+            right.category.toLowerCase() === wanted ? 0 : 1;
+          if (leftRank !== rightRank) return leftRank - rightRank;
+          return left.label.localeCompare(right.label);
+        }),
+    [suppliers, section],
   );
 
   const selectedSupplier = useMemo(
@@ -1285,7 +1318,26 @@ function MasterSupplierCreatePageContent() {
                             showSearch
                             placeholder="Select supplier"
                             options={supplierOptions}
-                            optionFilterProp="label"
+                            // [supplier-search] supplier bisa dicari lewat nama,
+                            // kode (SUP-0034), maupun uuid-nya.
+                            filterOption={(input, option) => {
+                              const needle = input.trim().toLowerCase();
+                              if (!needle) return true;
+                              const opt = option as
+                                | Partial<SupplierOption>
+                                | undefined;
+                              if (!opt) return false;
+                              if (
+                                (opt.matchValues ?? []).some((entry) =>
+                                  entry.includes(needle),
+                                )
+                              ) {
+                                return true;
+                              }
+                              return String(opt.label ?? "")
+                                .toLowerCase()
+                                .includes(needle);
+                            }}
                             onChange={handleSupplierChange}
                           />
                         </Form.Item>
@@ -1317,7 +1369,17 @@ function MasterSupplierCreatePageContent() {
                             showSearch
                             placeholder="Select warehouse"
                             options={warehouseOptions}
-                            optionFilterProp="label"
+                            // [supplier-search] warehouse: nama atau tipe gudang.
+                            filterOption={(input, option) => {
+                              const needle = input.trim().toLowerCase();
+                              if (!needle) return true;
+                              const opt = option as
+                                | { label?: string; type?: string }
+                                | undefined;
+                              return `${opt?.label ?? ""} ${opt?.type ?? ""}`
+                                .toLowerCase()
+                                .includes(needle);
+                            }}
                           />
                         </Form.Item>
                       </div>
@@ -1356,7 +1418,17 @@ function MasterSupplierCreatePageContent() {
                               <Select
                                 size="large"
                                 showSearch
-                                filterOption={false}
+                                // [supplier-search] uniq: server tetap mencari,
+                                // tapi daftar juga menyempit saat mengetik.
+                                filterOption={(input, option) => {
+                                  const needle = input.trim().toLowerCase();
+                                  if (!needle) return true;
+                                  return String(
+                                    (option as { label?: string })?.label ?? "",
+                                  )
+                                    .toLowerCase()
+                                    .includes(needle);
+                                }}
                                 placeholder="Search or scroll to browse..."
                                 options={(() => {
                                   const toSelectOpt = (
@@ -1447,6 +1519,7 @@ function MasterSupplierCreatePageContent() {
                               label="Width (mm)"
                               name="width_mm">
                               <InputNumber
+                                style={{ width: "100%" }}
                                 size="large"
                                 className="w-full"
                                 placeholder="Auto-filled from material spec"
@@ -1458,6 +1531,7 @@ function MasterSupplierCreatePageContent() {
                               label="Diameter (mm)"
                               name="diameter_mm">
                               <InputNumber
+                                style={{ width: "100%" }}
                                 size="large"
                                 className="w-full"
                                 placeholder="Auto-filled from material spec"
@@ -1469,6 +1543,7 @@ function MasterSupplierCreatePageContent() {
                               label="Thickness (mm)"
                               name="thickness_mm">
                               <InputNumber
+                                style={{ width: "100%" }}
                                 size="large"
                                 className="w-full"
                                 placeholder="Auto-filled from material spec"
@@ -1480,6 +1555,7 @@ function MasterSupplierCreatePageContent() {
                               label="Length (mm)"
                               name="length_mm">
                               <InputNumber
+                                style={{ width: "100%" }}
                                 size="large"
                                 className="w-full"
                                 placeholder="Auto-filled from material spec"
@@ -1491,6 +1567,7 @@ function MasterSupplierCreatePageContent() {
                               label="Weight (kg)"
                               name="weight">
                               <InputNumber
+                                style={{ width: "100%" }}
                                 size="large"
                                 className="w-full"
                                 placeholder="Auto-filled from material spec"
@@ -1508,6 +1585,7 @@ function MasterSupplierCreatePageContent() {
                                 },
                               ]}>
                               <InputNumber
+                                style={{ width: "100%" }}
                                 min={0}
                                 size="large"
                                 className="w-full"
@@ -1529,6 +1607,7 @@ function MasterSupplierCreatePageContent() {
                                 },
                               ]}>
                               <InputNumber
+                                style={{ width: "100%" }}
                                 min={0}
                                 max={100}
                                 precision={2}
@@ -1553,6 +1632,9 @@ function MasterSupplierCreatePageContent() {
                               initialValue="active">
                               <Select
                                 size="large"
+                                showSearch
+                                // [supplier-search] status-1
+                                optionFilterProp="label"
                                 options={[
                                   { label: "Active", value: "active" },
                                   { label: "Inactive", value: "inactive" },
@@ -1593,7 +1675,17 @@ function MasterSupplierCreatePageContent() {
                               <Select
                                 size="large"
                                 showSearch
-                                filterOption={false}
+                                // [supplier-search] uniq: server tetap mencari,
+                                // tapi daftar juga menyempit saat mengetik.
+                                filterOption={(input, option) => {
+                                  const needle = input.trim().toLowerCase();
+                                  if (!needle) return true;
+                                  return String(
+                                    (option as { label?: string })?.label ?? "",
+                                  )
+                                    .toLowerCase()
+                                    .includes(needle);
+                                }}
                                 placeholder="Search or scroll to browse..."
                                 options={(() => {
                                   const toSelectOpt = (
@@ -1726,6 +1818,9 @@ function MasterSupplierCreatePageContent() {
                             <Form.Item label="Type" name="type">
                               <Select
                                 size="large"
+                                showSearch
+                                // [supplier-search] type
+                                optionFilterProp="label"
                                 placeholder="Select Type"
                                 options={[
                                   { label: "Steel Bar", value: "steel_bar" },
@@ -1751,6 +1846,7 @@ function MasterSupplierCreatePageContent() {
                                 },
                               ]}>
                               <InputNumber
+                                style={{ width: "100%" }}
                                 min={0}
                                 size="large"
                                 className="w-full"
@@ -1760,6 +1856,7 @@ function MasterSupplierCreatePageContent() {
 
                             <Form.Item label="Weight" name="weight">
                               <InputNumber
+                                style={{ width: "100%" }}
                                 min={0}
                                 size="large"
                                 className="w-full"
@@ -1785,6 +1882,7 @@ function MasterSupplierCreatePageContent() {
                               },
                             ]}>
                             <InputNumber
+                              style={{ width: "100%" }}
                               min={0}
                               max={100}
                               precision={2}
@@ -1830,6 +1928,9 @@ function MasterSupplierCreatePageContent() {
                             initialValue="active">
                             <Select
                               size="large"
+                              showSearch
+                              // [supplier-search] status-2
+                              optionFilterProp="label"
                               options={[
                                 { label: "Active", value: "active" },
                                 { label: "Inactive", value: "inactive" },
