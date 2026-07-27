@@ -94,6 +94,34 @@ type BomOption = {
   materialCode?: string;
 };
 
+// [bom-label] Format label dropdown UNIQ Code yang distandarkan:
+//   raw material : uniq — partno — partname (spec material)
+//   indirect     : uniq — partno — partname
+//   FG           : uniq — partno — partname
+//   CP           : uniq — partno — partname
+//
+// Sengaja hanya memakai field yang juga dicari di server
+// (items.uniq_code, items.part_number, items.part_name) supaya tidak ada
+// segmen yang tampil di label tapi tidak bisa dicari.
+const buildBomOptionLabel = (option: BomOption): string => {
+  const base = [option.value, option.partNumber, option.partName]
+    .map((part) => (part ?? "").trim())
+    .filter(Boolean)
+    .join(" — ");
+
+  const typeMaterial = (option.type ?? "").toLowerCase();
+  // cocok untuk "raw", "raw_material", maupun "raw material"
+  if (!typeMaterial.startsWith("raw")) return base;
+
+  // Spec material khusus raw material, mis. "SWMB550 6.0 x 100".
+  const spec = [option.grade || option.materialCode, option.size]
+    .map((part) => (part ?? "").trim())
+    .filter(Boolean)
+    .join(" ");
+
+  return spec ? `${base} (${spec})` : base;
+};
+
 type JsonMap = Record<string, unknown>;
 
 type SupplierOption = {
@@ -1447,16 +1475,7 @@ function MasterSupplierCreatePageContent() {
                                     option: BomOption & { _isParent?: boolean },
                                   ) => ({
                                     ...option,
-                                    label: [
-                                      option.materialCode
-                                        ? `${option.materialCode}`
-                                        : "",
-                                      option.value,
-                                      option.partName,
-                                      option.productModel,
-                                    ]
-                                      .filter(Boolean)
-                                      .join(" — "),
+                                    label: buildBomOptionLabel(option),
                                   });
 
                                   const list = bomOptions.map(toSelectOpt);
@@ -1714,25 +1733,7 @@ function MasterSupplierCreatePageContent() {
                                     option: BomOption & { _isParent?: boolean },
                                   ) => ({
                                     ...option,
-                                    label:
-                                      section === "subcon"
-                                        ? [
-                                            option.label,
-                                            option.partName,
-                                            option.productModel,
-                                          ]
-                                            .filter(Boolean)
-                                            .join(" — ")
-                                        : [
-                                            option.materialCode
-                                              ? `${option.materialCode}`
-                                              : "",
-                                            option.value,
-                                            option.partName,
-                                            option.productModel,
-                                          ]
-                                            .filter(Boolean)
-                                            .join(" — "),
+                                    label: buildBomOptionLabel(option),
                                   });
 
                                   const list = bomOptions
