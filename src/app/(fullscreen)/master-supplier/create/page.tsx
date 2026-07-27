@@ -529,10 +529,12 @@ const toBomOption = (node: BackendBomNode): BomOption | null => {
       (node as Record<string, unknown>).status,
       (node as Record<string, unknown>).bom_status,
     ),
+    // [supplier-search] utamakan material_code asli supaya field "UNIQ Code"
+    // bisa dicari dari materialCode; grade tetap tersimpan di field `grade`.
     materialCode: pickText(
-      materialSpec?.material_grade,
       materialSpec?.material_code,
       (node as Record<string, unknown>).material_code,
+      materialSpec?.material_grade,
     ),
   };
 };
@@ -655,9 +657,11 @@ function MasterSupplierCreatePageContent() {
     );
     const newItems = sectionItems.length > 0 ? sectionItems : allItems;
     if (newItems.length === 0) {
-      // Hasil pencarian benar-benar kosong -> kosongkan daftar supaya
-      // sisa hasil pencarian sebelumnya tidak ikut tampil.
-      if (uniqPage === 1) setAccumulatedBomItems([]);
+      // [supplier-search] Kalau server balik kosong TAPI ada kata kunci aktif
+      // (mis. user mengetik materialCode padahal server hanya mencari uniq),
+      // jangan kosongkan daftar—biarkan filterOption di client menyaring dari
+      // item yang sudah termuat. Kosongkan hanya ketika tanpa kata kunci.
+      if (uniqPage === 1 && !debouncedUniqSearch) setAccumulatedBomItems([]);
       return;
     }
     setAccumulatedBomItems((prev) => {
@@ -1423,11 +1427,19 @@ function MasterSupplierCreatePageContent() {
                                 filterOption={(input, option) => {
                                   const needle = input.trim().toLowerCase();
                                   if (!needle) return true;
-                                  return String(
-                                    (option as { label?: string })?.label ?? "",
-                                  )
-                                    .toLowerCase()
-                                    .includes(needle);
+                                  const opt = option as unknown as BomOption & {
+                                    materialCode?: string;
+                                  } & { label?: string; value?: string };
+                                  const label = String(opt.label ?? "").toLowerCase();
+                                  const material = String(opt.materialCode ?? "").toLowerCase();
+                                  const grade = String((opt as BomOption).grade ?? "").toLowerCase();
+                                  const value = String(opt.value ?? "").toLowerCase();
+                                  return (
+                                    label.includes(needle) ||
+                                    material.includes(needle) ||
+                                    grade.includes(needle) ||
+                                    value.includes(needle)
+                                  );
                                 }}
                                 placeholder="Search or scroll to browse..."
                                 options={(() => {
@@ -1677,14 +1689,24 @@ function MasterSupplierCreatePageContent() {
                                 showSearch
                                 // [supplier-search] uniq: server tetap mencari,
                                 // tapi daftar juga menyempit saat mengetik.
+                                // [supplier-search] cari dari material code + uniq
+                                // (+ label/part name/model yang sudah ada di label).
                                 filterOption={(input, option) => {
                                   const needle = input.trim().toLowerCase();
                                   if (!needle) return true;
-                                  return String(
-                                    (option as { label?: string })?.label ?? "",
-                                  )
-                                    .toLowerCase()
-                                    .includes(needle);
+                                  const opt = option as unknown as BomOption & {
+                                    materialCode?: string;
+                                  } & { label?: string; value?: string };
+                                  const label = String(opt.label ?? "").toLowerCase();
+                                  const material = String(opt.materialCode ?? "").toLowerCase();
+                                  const grade = String((opt as BomOption).grade ?? "").toLowerCase();
+                                  const value = String(opt.value ?? "").toLowerCase();
+                                  return (
+                                    label.includes(needle) ||
+                                    material.includes(needle) ||
+                                    grade.includes(needle) ||
+                                    value.includes(needle)
+                                  );
                                 }}
                                 placeholder="Search or scroll to browse..."
                                 options={(() => {
