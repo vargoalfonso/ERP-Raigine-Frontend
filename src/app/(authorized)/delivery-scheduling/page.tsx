@@ -197,6 +197,7 @@ function DeliverySchedulingPageInner() {
 
   const [dnDetailOpen, setDnDetailOpen] = useState(false);
   const [dnPrintOpen, setDnPrintOpen] = useState(false);
+  const [dnQrOpen, setDnQrOpen] = useState(false);
   const [selectedDn, setSelectedDn] = useState<DnRow | null>(null);
   const [scanOpen, setScanOpen] = useState(false);
   const [scanDnNumber, setScanDnNumber] = useState("");
@@ -205,7 +206,7 @@ function DeliverySchedulingPageInner() {
   const schedulesSummaryQuery = useGetDeliverySchedulesSummaryQuery();
   const dnCreationQuery = useGetDeliveryScheduleDnCreationListQuery({ page: 1, limit: 200 });
   const selectedDnDetailQuery = useGetCustomerDeliveryNoteByIdQuery(selectedDn?.key ?? "", {
-    skip: !selectedDn || (!dnDetailOpen && !dnPrintOpen),
+    skip: !selectedDn || (!dnDetailOpen && !dnPrintOpen && !dnQrOpen),
   });
   const poOrdersQuery = useListCustomerOrdersQuery({ document_type: "PO", page: 1, limit: 200 });
   const dnOrdersQuery = useListCustomerOrdersQuery({ document_type: "DN", page: 1, limit: 200 });
@@ -661,6 +662,16 @@ function DeliverySchedulingPageInner() {
       fixed: "right",
       render: (_: unknown, record) => (
         <div className="flex items-center justify-end gap-1">
+          <Button
+            size="small"
+            type="text"
+            icon={<QrcodeOutlined />}
+            aria-label={`Show QR & packing list for ${record.dnNumber}`}
+            onClick={() => {
+              setSelectedDn(record);
+              setDnQrOpen(true);
+            }}
+          />
           <Button
             size="small"
             type="text"
@@ -1177,6 +1188,83 @@ function DeliverySchedulingPageInner() {
                   <div><div className="text-xs font-medium text-slate-500">Created By</div><div className="mt-1 text-slate-800">{selectedDnDetail?.createdBy || "-"}</div></div>
                 </div>
               </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={dnQrOpen}
+        width={560}
+        footer={null}
+        title={null}
+        onCancel={() => {
+          setDnQrOpen(false);
+          setSelectedDn(null);
+        }}
+        styles={{ body: { padding: "20px 24px 24px" } }}
+      >
+        {selectedDn && (
+          <div className="text-slate-800">
+            <div className="pr-8 text-lg font-semibold tracking-tight text-slate-900">QR Code &amp; Packing List</div>
+            <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-xs text-slate-500">DN Number</div>
+              <div className="text-base font-semibold tracking-tight text-slate-900">{selectedDnDetail?.dnNumber || selectedDn.dnNumber}</div>
+            </div>
+            {selectedDnDetailQuery.isFetching ? (
+              <div className="py-12 text-center text-sm text-slate-400">Loading packing list...</div>
+            ) : (
+              <>
+                <div className="py-6 text-center">
+                  {normalizeQrSrc(selectedDnItems[0]?.qr || selectedDn.qrCode) ? (
+                    <img
+                      src={normalizeQrSrc(selectedDnItems[0]?.qr || selectedDn.qrCode)}
+                      alt="DN QR code"
+                      className="mx-auto h-44 w-44 border-[3px] border-slate-900 bg-white p-1 object-contain"
+                    />
+                  ) : (
+                    <div className="mx-auto flex h-44 w-44 items-center justify-center border-[3px] border-dashed border-slate-300 px-2 text-center text-xs text-slate-400">QR belum tersedia untuk DN ini</div>
+                  )}
+                  <div className="mt-3 text-sm text-slate-600">Scan untuk konfirmasi pengiriman</div>
+                </div>
+                <div className="text-sm font-semibold text-slate-900">Packing List Detail</div>
+                <div className="mt-2 overflow-hidden rounded-md border border-slate-200">
+                  <table className="w-full border-collapse text-left text-xs">
+                    <thead className="bg-slate-50 text-slate-600">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">Packing No</th>
+                        <th className="px-3 py-2 font-medium">Uniq Code</th>
+                        <th className="px-3 py-2 font-medium">Part Name</th>
+                        <th className="px-3 py-2 font-medium">Part No</th>
+                        <th className="px-3 py-2 text-right font-medium">Qty</th>
+                        <th className="px-3 py-2 font-medium">UOM</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedDnItems.length ? (
+                        selectedDnItems.map((item, index) => (
+                          <tr key={item.dnItemId || `${item.itemUniqCode}-${index}`} className="border-t border-slate-100">
+                            <td className="px-3 py-2">{item.packingNumber || "-"}</td>
+                            <td className="px-3 py-2">{item.itemUniqCode || "-"}</td>
+                            <td className="px-3 py-2">{item.partName || "-"}</td>
+                            <td className="px-3 py-2">{item.partNumber || "-"}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">{formatNumber(item.quantity)}</td>
+                            <td className="px-3 py-2">{item.uom || "-"}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={6} className="px-3 py-8 text-center text-slate-400">Belum ada packing list untuk DN ini</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-5 flex justify-end gap-2">
+                  <Button className="!rounded-md" onClick={() => { setDnQrOpen(false); setSelectedDn(null); }}>Close</Button>
+                  <Button type="primary" className="!rounded-md" icon={<PrinterOutlined />} onClick={() => { setDnQrOpen(false); setDnPrintOpen(true); }}>Print Packing List</Button>
+                </div>
+              </>
             )}
           </div>
         )}
