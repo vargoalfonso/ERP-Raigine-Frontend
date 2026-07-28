@@ -635,8 +635,12 @@ function MasterSupplierCreatePageContent() {
   // Reset pagination whenever search term or supplier changes
   useEffect(() => {
     setUniqPage(1);
+  }, [debouncedUniqSearch]);
+
+  useEffect(() => {
+    setUniqPage(1);
     setAccumulatedBomItems([]);
-  }, [debouncedUniqSearch, selectedSupplierId]);
+  }, [selectedSupplierId, section]);
 
   const { data: suppliers = [], isLoading: suppliersLoading } =
     useListSuppliersQuery(
@@ -693,7 +697,6 @@ function MasterSupplierCreatePageContent() {
       return;
     }
     setAccumulatedBomItems((prev) => {
-      if (uniqPage === 1) return newItems;
       const existingCodes = new Set(
         prev.map((n) => pickText(n.uniq_code, n.uniq)),
       );
