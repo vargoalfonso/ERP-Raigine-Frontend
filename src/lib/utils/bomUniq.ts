@@ -33,6 +33,9 @@ type BomNodeLike = {
   model_grade?: unknown;
   modelGrade?: unknown;
   size?: unknown;
+  material_code?: unknown;
+  material_specifications?: unknown;
+  material_spec?: unknown;
   children?: unknown;
 };
 
@@ -58,6 +61,9 @@ export type BomUniqIndex = {
   rmSourceByUniq: Record<string, string>;
   weightKgByUniq: Record<string, number>;
   childUniqsByUniq: Record<string, string[]>;
+  // uniq-uniq yang dikelompokkan per material code (dari material specification
+  // di BOM). Key = material code (lowercase), value = daftar uniq_code.
+  uniqsByMaterialCode: Record<string, string[]>;
 };
 
 export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
@@ -73,6 +79,7 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
   const rmSourceByUniq: Record<string, string> = {};
   const weightKgByUniq: Record<string, number> = {};
   const childUniqsByUniq: Record<string, string[]> = {};
+  const uniqsByMaterialCode: Record<string, string[]> = {};
 
   const pickString = (...values: unknown[]): string => {
     for (const v of values) {
@@ -177,6 +184,29 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
         weightKgByUniq[uniq] = weightKg;
     }
 
+    // "Child Uniq" = uniq-uniq yang material code-nya (di material specification)
+    // sama dengan material code baris ini. Ambil langsung dari BOM: cek
+    // material_code / material_grade di material spec tiap node, lalu
+    // kelompokkan uniq_code-nya per material code.
+    const specRecord = isRecord(n.material_specifications)
+      ? (n.material_specifications as Record<string, unknown>)
+      : isRecord(n.material_spec)
+        ? (n.material_spec as Record<string, unknown>)
+        : undefined;
+    const materialCode = pickString(
+      n.material_code,
+      specRecord?.material_code,
+      specRecord?.material_grade,
+      specRecord?.grade,
+    );
+    if (uniq && materialCode) {
+      const key = materialCode.toLowerCase();
+      if (!uniqsByMaterialCode[key]) uniqsByMaterialCode[key] = [];
+      if (!uniqsByMaterialCode[key].includes(uniq)) {
+        uniqsByMaterialCode[key].push(uniq);
+      }
+    }
+
     const children = n.children;
     if (Array.isArray(children)) {
       if (uniq && !childUniqsByUniq[uniq]) {
@@ -238,5 +268,6 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
     rmSourceByUniq,
     weightKgByUniq,
     childUniqsByUniq,
+    uniqsByMaterialCode,
   };
 };
