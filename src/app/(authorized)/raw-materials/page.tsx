@@ -714,9 +714,9 @@ export default function RawMaterialsPage() {
 
   const columns: ColumnType<RawMaterialRecord>[] = [
     {
-      title: "Uniq",
+      title: "Material Code",
       key: "uniq",
-      width: 100,
+      width: 120,
       render: (record: RawMaterialRecord) => (
         <span className="font-mono text-sm">{record.uniq || "-"}</span>
       ),
@@ -724,22 +724,35 @@ export default function RawMaterialsPage() {
     {
       title: "Child Uniq",
       key: "child_uniq",
-      width: 140,
+      width: 200,
       render: (record: RawMaterialRecord) => {
-        const children =
-          bomIndex.childUniqsByUniq[String(record.uniq ?? "").trim()] ?? [];
+        const key = String(record.uniq ?? "")
+          .trim()
+          .toLowerCase();
+        const children = bomIndex.uniqsByMaterialCode[key] ?? [];
         if (!children.length) {
           return <span className="text-sm text-gray-400">-</span>;
         }
-        const [first, ...rest] = children;
-        return (
-          <span className="font-mono text-sm">
-            {first}
-            {rest.length ? (
-              <span className="text-gray-400"> (+{rest.length} lagi)</span>
-            ) : null}
-          </span>
-        );
+        // Cocokkan berdasarkan part name: uniq yang part name-nya SAMA dengan
+        // part name baris ini adalah uniq spesifik yang diambil.
+        const rowPartName = String(record.name ?? "")
+          .trim()
+          .toLowerCase();
+        const matched = rowPartName
+          ? children.find(
+              (u) =>
+                String(bomIndex.partNameByUniq[u] ?? "")
+                  .trim()
+                  .toLowerCase() === rowPartName,
+            )
+          : undefined;
+        // Fallback: kalau hanya ada 1 uniq untuk material code ini, pakai itu.
+        const finalUniq =
+          matched ?? (children.length === 1 ? children[0] : undefined);
+        if (!finalUniq) {
+          return <span className="text-sm text-gray-400">-</span>;
+        }
+        return <span className="font-mono text-sm">{finalUniq}</span>;
       },
     },
     {
