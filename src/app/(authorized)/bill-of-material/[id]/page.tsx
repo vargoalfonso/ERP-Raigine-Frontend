@@ -260,7 +260,7 @@ const MaterialSpecDesc = ({ spec }: { spec: MaterialSpec | null | undefined }) =
   return (
     <Descriptions size="small" column={{ xs: 2, md: 4 }} bordered>
       {/* <Descriptions.Item label="Material Code">{spec.material_code ?? "—"}</Descriptions.Item> */}
-      <Descriptions.Item label="Material Grade">{spec.material_grade ?? "—"}</Descriptions.Item>
+      <Descriptions.Item label="Material Code">{spec.material_grade ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Grade">{spec.grade ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Type Material">{spec.type_material ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Form">{spec.form ?? "—"}</Descriptions.Item>
