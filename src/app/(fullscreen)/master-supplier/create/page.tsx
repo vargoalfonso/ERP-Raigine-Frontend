@@ -605,8 +605,12 @@ function MasterSupplierCreatePageContent() {
   // Reset pagination whenever search term or supplier changes
   useEffect(() => {
     setUniqPage(1);
+  }, [debouncedUniqSearch]);
+
+  useEffect(() => {
+    setUniqPage(1);
     setAccumulatedBomItems([]);
-  }, [debouncedUniqSearch, selectedSupplierId]);
+  }, [selectedSupplierId, section]);
 
   const { data: suppliers = [], isLoading: suppliersLoading } =
     useListSuppliersQuery(
@@ -654,14 +658,8 @@ function MasterSupplierCreatePageContent() {
       sectionMatchesTypeMaterial(section, node.type_material),
     );
     const newItems = sectionItems.length > 0 ? sectionItems : allItems;
-    if (newItems.length === 0) {
-      // Hasil pencarian benar-benar kosong -> kosongkan daftar supaya
-      // sisa hasil pencarian sebelumnya tidak ikut tampil.
-      if (uniqPage === 1) setAccumulatedBomItems([]);
-      return;
-    }
+    if (newItems.length === 0) return;
     setAccumulatedBomItems((prev) => {
-      if (uniqPage === 1) return newItems;
       const existingCodes = new Set(
         prev.map((n) => pickText(n.uniq_code, n.uniq)),
       );
@@ -1436,12 +1434,9 @@ function MasterSupplierCreatePageContent() {
                                   ) => ({
                                     ...option,
                                     label: [
-                                      option.materialCode
-                                        ? `${option.materialCode}`
-                                        : "",
                                       option.value,
+                                      option.partNumber || option.productModel,
                                       option.partName,
-                                      option.productModel,
                                     ]
                                       .filter(Boolean)
                                       .join(" — "),
