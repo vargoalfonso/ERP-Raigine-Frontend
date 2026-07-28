@@ -55,9 +55,10 @@ export default function MasterCustomerPage() {
   const router = useRouter();
   const apiEnabled = Boolean(apiBaseUrl);
 
-  const { data: customers = [], refetch } = useListCustomersQuery(undefined, {
-    skip: !apiEnabled,
-  });
+  const { data: customers = [], refetch } = useListCustomersQuery(
+    { limit: 1000 },
+    { skip: !apiEnabled }
+  );
 
   const [deleteCustomer, deleteState] = useDeleteCustomerMutation();
 

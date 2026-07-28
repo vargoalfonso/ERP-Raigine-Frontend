@@ -79,10 +79,11 @@ export const customerApiSlice = apiSlice
   .enhanceEndpoints({ addTagTypes: [TAG] })
   .injectEndpoints({
     endpoints: (builder) => ({
-      listCustomers: builder.query<CustomerRecord[], void>({
-        query: () => ({
+      listCustomers: builder.query<CustomerRecord[], Record<string, unknown> | void>({
+        query: (params) => ({
           url: "/customers",
           method: "GET",
+          params: params ? params : undefined,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) => parseArrayResponse<CustomerRecord>(response),
