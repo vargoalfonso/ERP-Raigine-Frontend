@@ -559,18 +559,23 @@ export default function MachineMasterDataPage() {
   const handlePrintBarcode = () => {
     if (!barcodeRow) return;
 
-    const canvas = qrWrapperRef.current?.querySelector(
-      "canvas",
-    ) as HTMLCanvasElement | null;
-    const dataUrl = canvas?.toDataURL("image/png");
+    // antd QRCode dirender sebagai <canvas>. Ambil PNG-nya untuk disisipkan
+    // ke dokumen cetak. Dibungkus try/catch karena toDataURL dapat melempar
+    // SecurityError bila canvas ter-taint.
+    let dataUrl = "";
+    try {
+      const canvas = qrWrapperRef.current?.querySelector(
+        "canvas",
+      ) as HTMLCanvasElement | null;
+      dataUrl = canvas?.toDataURL("image/png") ?? "";
+    } catch {
+      dataUrl = "";
+    }
 
-    const w = window.open(
-      "",
-      "_blank",
-      "noopener,noreferrer,width=680,height=880",
-    );
-    if (!w) {
-      message.error("Popup blocked. Please allow popups to print.");
+    if (!dataUrl) {
+      message.error(
+        "QR code belum selesai dirender. Tunggu sebentar, lalu coba lagi.",
+      );
       return;
     }
 
@@ -584,8 +589,7 @@ export default function MachineMasterDataPage() {
         .replace(/\"/g, "&quot;")
         .replace(/'/g, "&#39;");
 
-    w.document.open();
-    w.document.write(`<!doctype html>
+    const printHtml = `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
@@ -642,14 +646,76 @@ export default function MachineMasterDataPage() {
       <div class="bottom-code">${escapeHtml(barcodeRow.machineNumber)}</div>
     </div>
   </body>
-</html>`);
-    w.document.close();
-    w.focus();
+</html>`;
 
-    setTimeout(() => {
-      w.print();
-      w.close();
-    }, 250);
+    // Cetak lewat hidden iframe, bukan window.open.
+    //
+    // Penyebab error sebelumnya: window.open dipanggil dengan fitur
+    // "noopener,noreferrer". Sesuai spesifikasi HTML, window.open() dengan
+    // noopener SELALU mengembalikan null, sehingga cabang `if (!w)` selalu
+    // terpenuhi dan pengguna selalu melihat pesan "Popup blocked" meskipun
+    // popup sebenarnya diizinkan browser. Iframe menghindari popup blocker
+    // sepenuhnya sekaligus menghilangkan jendela yang berkedip.
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
+
+    const cleanup = () => {
+      if (iframe.parentNode) {
+        iframe.parentNode.removeChild(iframe);
+      }
+    };
+
+    const frameWindow = iframe.contentWindow;
+    const frameDoc = frameWindow?.document;
+    if (!frameWindow || !frameDoc) {
+      cleanup();
+      message.error("Gagal menyiapkan dokumen cetak.");
+      return;
+    }
+
+    frameDoc.open();
+    frameDoc.write(printHtml);
+    frameDoc.close();
+
+    let printed = false;
+    const runPrint = () => {
+      if (printed) return;
+      printed = true;
+
+      try {
+        frameWindow.focus();
+        frameWindow.print();
+      } catch {
+        message.error("Gagal membuka dialog cetak.");
+        cleanup();
+        return;
+      }
+
+      // Jangan menutup iframe tepat setelah print(). Pada sebagian browser
+      // dialog cetak masih membaca dokumennya, dan menutup terlalu cepat
+      // membuat hasil cetak kosong - inilah sebabnya `w.close()` lama
+      // berisiko. Tutup setelah dialog selesai, dengan timer cadangan bila
+      // onafterprint tidak pernah menyala.
+      frameWindow.onafterprint = cleanup;
+      setTimeout(cleanup, 60000);
+    };
+
+    // Tunggu gambar QR benar-benar termuat agar tidak tercetak kosong.
+    const qrImage = frameDoc.querySelector("img");
+    if (qrImage && !qrImage.complete) {
+      qrImage.addEventListener("load", runPrint, { once: true });
+      qrImage.addEventListener("error", runPrint, { once: true });
+      setTimeout(runPrint, 2000);
+    } else {
+      setTimeout(runPrint, 50);
+    }
   };
 
   return (
@@ -1170,7 +1236,11 @@ export default function MachineMasterDataPage() {
                 ref={qrWrapperRef}
                 className="rounded-lg border border-gray-200 p-3"
               >
+                {/* type="canvas" ditulis eksplisit karena handlePrintBarcode
+                    mengambil gambar QR lewat querySelector("canvas"). Bila
+                    suatu saat diganti ke "svg", pencetakan akan gagal. */}
                 <QRCode
+                  type="canvas"
                   value={barcodeRow.machineNumber}
                   size={180}
                   bordered={false}
