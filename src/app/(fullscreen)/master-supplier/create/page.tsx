@@ -860,7 +860,8 @@ function MasterSupplierCreatePageContent() {
       );
     const deduped = new Map<string, BomOption>();
     mapped.forEach((option) => {
-      if (!deduped.has(option.value)) deduped.set(option.value, option);
+      const key = option.materialCode ? option.materialCode : option.value;
+      if (!deduped.has(key)) deduped.set(key, option);
     });
     return Array.from(deduped.values());
   }, [accumulatedBomItems]);
@@ -877,6 +878,7 @@ function MasterSupplierCreatePageContent() {
   };
 
   const selectedWarehouseId = Form.useWatch("warehouse_uuid", form);
+  const formUniqCode = Form.useWatch("uniq_code", form);
 
   const selectedWarehouse = useMemo(
     () =>
@@ -2053,7 +2055,7 @@ function MasterSupplierCreatePageContent() {
                         </div>
                         <div className="mt-1 text-sm font-semibold text-[#1f2d3d]">
                           {selectedUniqCode ||
-                            form.getFieldValue("uniq_code") ||
+                            formUniqCode ||
                             "-"}
                         </div>
                       </div>
