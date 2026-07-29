@@ -203,8 +203,9 @@ export default function MachineSettingsPanel() {
   const machineMasterAccess = useMemo(() => getModuleAccess(permissions, ["machine_parameter", "machine"]), [permissions]);
   const machinePatternAccess = useMemo(() => getModuleAccess(permissions, ["machine_pattern", "machine"]), [permissions]);
 
+  // Ambil seluruh daftar machine dalam satu request (batas backend: 10000).
   const machineParametersQuery = useGetMachineParametersQuery(
-    { page: 1, limit: 1000 },
+    { page: 1, limit: 10000 },
     { skip: !apiEnabled },
   );
   const machinePatternsQuery = useGetMachinePatternsQuery(
@@ -510,6 +511,12 @@ export default function MachineSettingsPanel() {
           <div>
             <div className="text-base font-semibold text-gray-900">
               {machineTab === "master" ? "Machine - Master" : "Machine - Pattern"}
+              <span className="ml-3 text-sm text-gray-500">
+                {machineTab === "master" ? filteredMachineMasterRows.length : filteredMachinePatternRows.length}
+                {" / "}
+                {machineTab === "master" ? machineParametersQuery.data?.pagination?.total ?? "-" : machinePatternsQuery.data?.pagination?.total ?? "-"}
+                {" items"}
+              </span>
             </div>
             <div className="text-sm text-gray-500">
               {machineTab === "master" ? "Manage machine names, counts, and operating hours for the master machine list." : "Define machine pattern configurations using the master machine list."}

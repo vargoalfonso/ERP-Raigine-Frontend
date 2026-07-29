@@ -833,10 +833,20 @@ export default function BillOfMaterialPage() {
   const handleDownloadTemplate = async () => {
     try {
       const token = getCookiesFromBrowser("Authorization");
-      const res = await fetch(`${apiBaseUrl}/products/bom/import/template`, {
-        method: "GET",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      });
+      // Cache-busting: template selalu di-generate ulang dari master data
+      // terbaru, jadi jangan sampai browser/proxy menyajikan salinan lama.
+      const res = await fetch(
+        `${apiBaseUrl}/products/bom/import/template?t=${Date.now()}`,
+        {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            "Cache-Control": "no-cache",
+            Pragma: "no-cache",
+          },
+        },
+      );
       if (!res.ok) throw new Error(`(${res.status})`);
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
@@ -1781,17 +1791,11 @@ export default function BillOfMaterialPage() {
                     onClick={handleDownloadTemplate}
                     className="font-medium text-[#2563eb] underline hover:opacity-80"
                   >
-                    CSV
+                    XLSX
                   </button>{" "}
-                  or{" "}
-                  <button
-                    type="button"
-                    onClick={handleDownloadTemplate}
-                    className="font-medium text-[#2563eb] underline hover:opacity-80"
-                  >
-                    XLS
-                  </button>{" "}
-                  template as a guide to upload your Inventory.
+                  template as a guide to upload your BOM. Sheet{" "}
+                  <span className="font-medium">Master Data</span> berisi daftar
+                  process, machine, UOM, dan supplier aktif terbaru dari sistem.
                 </p>
               </div>
               <div className="mt-3 flex items-start gap-2">
