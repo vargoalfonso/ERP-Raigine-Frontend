@@ -144,6 +144,8 @@ export type InventoryIncomingRecord = {
   packing_number?: string;
   reference_number?: string;
   dn_number?: string;
+  // [subcon-dnlog] arah pergerakan DN Subcon dari backend
+  scan_ref?: string;
   date_incoming?: string;
   created_at?: string;
 };
@@ -317,15 +319,25 @@ const toInventoryIncomingRecord = (raw: unknown): InventoryIncomingRecord => {
   return {
     id:
       toText(
-        record.id ?? record.inventory_id ?? record.ID ?? record.InventoryID,
+        record.id ??
+          record.scan_id ??
+          record.inventory_id ??
+          record.ID ??
+          record.InventoryID,
       ) ?? "",
     inventory_id: toText(record.inventory_id ?? record.InventoryID),
     uniq_code: toText(
       record.uniq_code ?? record.uniq ?? record.UniqCode ?? record.Uniq,
     ),
-    quantity: toNumber(record.quantity ?? record.Quantity),
+    quantity: toNumber(
+      record.quantity ?? record.incoming_qty ?? record.Quantity,
+    ),
     stock_qty: toNumber(
-      record.stock_qty ?? record.quantity ?? record.StockQty ?? record.Quantity,
+      record.stock_qty ??
+        record.quantity ??
+        record.incoming_qty ??
+        record.StockQty ??
+        record.Quantity,
     ),
     weight_kg: toNumber(record.weight_kg ?? record.WeightKg),
     stock_weight_kg: toNumber(
@@ -354,10 +366,12 @@ const toInventoryIncomingRecord = (raw: unknown): InventoryIncomingRecord => {
     dn_number: toText(record.dn_number ?? record.dnNumber ?? record.DNNumber),
     date_incoming: toText(
       record.date_incoming ??
+        record.scan_date ??
         record.created_at ??
         record.DateIncoming ??
         record.CreatedAt,
     ),
+    scan_ref: toText(record.scan_ref ?? record.ScanRef),
     created_at: toText(record.created_at ?? record.CreatedAt),
   };
 };
