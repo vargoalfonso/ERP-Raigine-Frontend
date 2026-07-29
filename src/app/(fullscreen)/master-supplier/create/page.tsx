@@ -103,18 +103,38 @@ type BomOption = {
 // Sengaja hanya memakai field yang juga dicari di server
 // (items.uniq_code, items.part_number, items.part_name) supaya tidak ada
 // segmen yang tampil di label tapi tidak bisa dicari.
+// [bom-label-matcode] Label dropdown UNIQ Code.
+//
+//   raw material : <material code> — <uniq> — <part no> — <part name> (<grade> <ukuran>)
+//   lainnya      : <uniq> — <part no> — <part name>
+//
+// "Material Code" pada page detail BOM sebenarnya berasal dari kolom
+// item_material_specs.material_grade, dan nilai itulah yang sudah
+// dipetakan ke option.materialCode di toBomOption().
 const buildBomOptionLabel = (option: BomOption): string => {
-  const base = [option.value, option.partNumber, option.partName]
+  const typeMaterial = (option.type ?? "").toLowerCase();
+  // cocok untuk "raw", "raw_material", maupun "raw material"
+  const isRaw = typeMaterial.startsWith("raw");
+
+  const segments = isRaw
+    ? [option.materialCode, option.value, option.partNumber, option.partName]
+    : [option.value, option.partNumber, option.partName];
+
+  const base = segments
     .map((part) => (part ?? "").trim())
     .filter(Boolean)
     .join(" — ");
 
-  const typeMaterial = (option.type ?? "").toLowerCase();
-  // cocok untuk "raw", "raw_material", maupun "raw material"
-  if (!typeMaterial.startsWith("raw")) return base;
+  if (!isRaw) return base;
 
-  // Spec material khusus raw material, mis. "SWMB550 6.0 x 100".
-  const spec = [option.grade || option.materialCode, option.size]
+  // Grade + ukuran, mis. "SWM-B 4.5 mm". Material code tidak diulang
+  // karena sudah menjadi segmen pertama.
+  const matCode = (option.materialCode ?? "").trim().toLowerCase();
+  const gradeText = (option.grade ?? "").trim();
+  const spec = [
+    gradeText.toLowerCase() === matCode ? "" : gradeText,
+    option.size,
+  ]
     .map((part) => (part ?? "").trim())
     .filter(Boolean)
     .join(" ");
@@ -664,7 +684,7 @@ function MasterSupplierCreatePageContent() {
     },
   );
 
-  const BOM_PAGE_SIZE = 10;
+  const BOM_PAGE_SIZE = 500;
 
   const { data: bomPageResult, isFetching: bomSearchFetching } =
     useGetBomTreeQuery(
@@ -1465,11 +1485,25 @@ function MasterSupplierCreatePageContent() {
                                   const material = String(opt.materialCode ?? "").toLowerCase();
                                   const grade = String((opt as BomOption).grade ?? "").toLowerCase();
                                   const value = String(opt.value ?? "").toLowerCase();
+                                  // [bom-label-matcode] part number / part name / model ikut dicocokkan
+                                  // walau tidak selalu tampil di label.
+                                  const partNumber = String(
+                                    (opt as BomOption).partNumber ?? "",
+                                  ).toLowerCase();
+                                  const partName = String(
+                                    (opt as BomOption).partName ?? "",
+                                  ).toLowerCase();
+                                  const model = String(
+                                    (opt as BomOption).productModel ?? "",
+                                  ).toLowerCase();
                                   return (
                                     label.includes(needle) ||
                                     material.includes(needle) ||
                                     grade.includes(needle) ||
-                                    value.includes(needle)
+                                    value.includes(needle) ||
+                                    partNumber.includes(needle) ||
+                                    partName.includes(needle) ||
+                                    model.includes(needle)
                                   );
                                 }}
                                 placeholder="Search or scroll to browse..."
@@ -1723,11 +1757,25 @@ function MasterSupplierCreatePageContent() {
                                   const material = String(opt.materialCode ?? "").toLowerCase();
                                   const grade = String((opt as BomOption).grade ?? "").toLowerCase();
                                   const value = String(opt.value ?? "").toLowerCase();
+                                  // [bom-label-matcode] part number / part name / model ikut dicocokkan
+                                  // walau tidak selalu tampil di label.
+                                  const partNumber = String(
+                                    (opt as BomOption).partNumber ?? "",
+                                  ).toLowerCase();
+                                  const partName = String(
+                                    (opt as BomOption).partName ?? "",
+                                  ).toLowerCase();
+                                  const model = String(
+                                    (opt as BomOption).productModel ?? "",
+                                  ).toLowerCase();
                                   return (
                                     label.includes(needle) ||
                                     material.includes(needle) ||
                                     grade.includes(needle) ||
-                                    value.includes(needle)
+                                    value.includes(needle) ||
+                                    partNumber.includes(needle) ||
+                                    partName.includes(needle) ||
+                                    model.includes(needle)
                                   );
                                 }}
                                 placeholder="Search or scroll to browse..."

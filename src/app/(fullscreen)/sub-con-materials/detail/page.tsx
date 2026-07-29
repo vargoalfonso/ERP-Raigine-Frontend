@@ -38,6 +38,15 @@ const isMissingRouteError = (error: unknown): boolean =>
 const formatNumber = (value: number | undefined) =>
   new Intl.NumberFormat("en-US").format(Number(value ?? 0));
 
+// [subcon-dnlog] Backend mengirim scan_ref berisi arah pergerakan
+// (SUBCON-OUT / SUBCON-IN) untuk tiap scan DN Subcon.
+const subconLogSource = (item: UnknownRecord): string => {
+  const ref = String(item?.scan_ref ?? "").toUpperCase();
+  if (ref.startsWith("SUBCON-OUT")) return "DN Subcon OUT";
+  if (ref.startsWith("SUBCON-IN")) return "DN Subcon IN";
+  return String(item?.rm_source ?? "-");
+};
+
 function SubConMaterialsDetailPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -124,10 +133,14 @@ function SubConMaterialsDetailPageContent() {
       .filter((item) => !item.uniq_code || item.uniq_code === detailInfo.uniq)
       .map((item, index) => ({
         key: item.id || `${index}`,
-        dnNumber: item.reference_number ?? item.packing_number ?? item.id,
+        dnNumber:
+          item.dn_number ??
+          item.reference_number ??
+          item.packing_number ??
+          item.id,
         receivedDate: item.date_incoming ?? item.created_at ?? "-",
         quantity: Number(item.quantity ?? item.stock_qty ?? 0),
-        source: String((item as UnknownRecord).rm_source ?? "XXX"),
+        source: subconLogSource(item as UnknownRecord),
         kanban: Number(summary?.kanban_count ?? 0),
         vendorName: item.supplier_name ?? "-",
       }));
