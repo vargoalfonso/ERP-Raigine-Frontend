@@ -147,7 +147,11 @@ function SubConMaterialsDetailPageContent() {
   }, [detailInfo.uniq, incomingQuery.data, summary?.kanban_count, useMock]);
 
   const totalDeliveryNotes = logs.length;
-  const totalQuantity = logs.reduce((sum, r) => sum + r.quantity, 0);
+  // [subcon-del] Hanya baris DN Subcon IN yang dijumlahkan. Baris OUT adalah
+  // barang yang keluar ke vendor, sehingga tidak boleh ikut menambah total.
+  const totalQuantity = logs
+    .filter((r) => r.source === "DN Subcon IN")
+    .reduce((sum, r) => sum + r.quantity, 0);
   const latestDn = logs.length ? logs[0].dnNumber : "-";
 
   const logColumns = [

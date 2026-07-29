@@ -33,12 +33,12 @@ import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import {
-  useDeleteSubconRawMaterialMutation,
   useGetAllSubconRawMaterialQuery,
   useUpdateSubconRawMaterialMutation,
 } from "@/lib/api/subcon-raw-material/api";
 import {
   useApproveSubconInventoryMutation,
+  useDeleteSubconInventoryMutation,
   useGetSubconInventoryQuery,
   useGetSubconReceivedQuery,
   useRejectSubconInventoryMutation,
@@ -215,7 +215,7 @@ export default function SubConMaterialsClient() {
     refetch: refetchReceivedRows,
   } = useGetSubconReceivedQuery({ page: 1, limit: 100 }, { skip: !useApi });
 
-  const [deleteSubcon] = useDeleteSubconRawMaterialMutation();
+  const [deleteSubconInventory] = useDeleteSubconInventoryMutation();
   const [updateSubcon] = useUpdateSubconRawMaterialMutation();
 
   // Stock In Vendor is auto-populated from subcon PO on the backend and requires approval.
@@ -383,10 +383,14 @@ export default function SubConMaterialsClient() {
 
   const confirmDelete = () => {
     if (!deletingRow) return;
-    if (useApi && deletingMode === "Stock Received from Vendor") {
-      deleteSubcon(deletingRow.id)
+    // [subcon-del] Sebelumnya tab Stock In Vendor hanya membuang baris dari
+    // state lokal sehingga data kembali muncul setelah refresh. Kedua tab
+    // kini memanggil endpoint soft delete subcon inventory.
+    if (useApi) {
+      deleteSubconInventory(deletingRow.id)
         .unwrap()
-        .then(() => refetchApiRows())
+        .then(() => Promise.all([refetchVendorRows(), refetchReceivedRows()]))
+        .catch(() => undefined)
         .finally(() => closeDelete());
       return;
     }
@@ -542,16 +546,16 @@ export default function SubConMaterialsClient() {
           <Tag className="bg-green-50 text-green-600">NORMAL</Tag>
         ),
     },
-    {
-      title: "DN Logs",
-      key: "dnLogs",
-      width: 110,
-      render: (_: unknown, r: SubConRow) => (
-        <Button type="link" className="px-0">
-          View ({r.dnLogs})
-        </Button>
-      ),
-    },
+    // {
+    //   title: "DN Logs",
+    //   key: "dnLogs",
+    //   width: 110,
+    //   render: (_: unknown, r: SubConRow) => (
+    //     <Button type="link" className="px-0">
+    //       View ({r.dnLogs})
+    //     </Button>
+    //   ),
+    // },
     {
       title: "Approval",
       key: "approval",

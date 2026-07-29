@@ -166,6 +166,21 @@ export const subconInventorySlice = apiSlice.injectEndpoints({
         return ok({ id: "" }, r?.message ?? "Rejected");
       },
     }),
+
+    // [subcon-del] Baris pada tab Stock In Vendor maupun Stock Received
+    // sama-sama berasal dari tabel subcon_inventories, sehingga keduanya
+    // dihapus lewat endpoint soft delete yang sama.
+    deleteSubconInventory: builder.mutation<ApiResponse<{ id: string }>, string>({
+      query: (id) => ({
+        url: `/inventory/subcon-materials/${encodeURIComponent(id)}`,
+        method: "DELETE",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => {
+        const r = response as Partial<{ message: string }>;
+        return ok({ id: "" }, r?.message ?? "Deleted");
+      },
+    }),
   }),
 });
 
@@ -174,4 +189,5 @@ export const {
   useGetSubconReceivedQuery,
   useApproveSubconInventoryMutation,
   useRejectSubconInventoryMutation,
+  useDeleteSubconInventoryMutation,
 } = subconInventorySlice;
