@@ -219,6 +219,7 @@ export type WorkOrderRecord = {
   uniq_closed?: number;
   aging_days?: number;
   notes?: string;
+  defect_reason?: string | null;
   reference_wo?: string | null;
   qr_data_url?: string;
   items: WorkOrderItemRecord[];
@@ -314,6 +315,7 @@ const toWorkOrderRecord = (raw: unknown): WorkOrderRecord => {
     uniq_closed: getNumber(record, ["uniq_closed", "closed_uniq", "completed_items"]),
     aging_days: getNumber(record, ["aging_days", "aging", "agingDays"]),
     notes: getString(record, ["notes", "note"]),
+    defect_reason: getString(record, ["defect_reason", "defectReason"]) ?? null,
     reference_wo: getString(record, ["reference_wo", "referenceWo"]) ?? null,
     qr_data_url: getString(record, ["qr_data_url", "qrDataUrl"]),
     items,
