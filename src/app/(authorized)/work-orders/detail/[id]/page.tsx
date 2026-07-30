@@ -443,6 +443,17 @@ export default function WorkOrderDetailPage() {
                   <DetailField label="Total UNIQ" value={totalUniq} mono />
                   <DetailField label="Closed UNIQ" value={closedUniq} mono />
                 </div>
+
+                {workOrder?.defect_reason ? (
+                  <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3">
+                    <div className="text-[11px] font-medium text-amber-700">
+                      Reason / Info Defect (NG)
+                    </div>
+                    <div className="mt-1 break-words text-sm font-semibold text-amber-900">
+                      {workOrder.defect_reason}
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <aside className="border-t border-slate-200 p-4 sm:p-5 xl:border-l xl:border-t-0">
