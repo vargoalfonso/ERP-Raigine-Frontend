@@ -231,6 +231,54 @@ function formatPercent(value: number) {
   return `${value.toFixed(1)}%`;
 }
 
+// ============================================================
+// Helper untuk Analytics View.
+// Periode PRL bisa datang dalam beberapa format ("2026-07",
+// "2026-Q3", "2026-07-29", "2026"). Semuanya dinormalkan ke
+// satu kunci kuartal "YYYY-Qn" agar bisa diagregasi.
+// ============================================================
+function toQuarterKey(period: string): string | null {
+  const raw = String(period ?? "").trim();
+  if (!raw) return null;
+
+  const quarterMatch = raw.match(/^(\d{4})\D*Q([1-4])$/i);
+  if (quarterMatch) return `${quarterMatch[1]}-Q${quarterMatch[2]}`;
+
+  const monthMatch = raw.match(/^(\d{4})-(\d{1,2})/);
+  if (monthMatch) {
+    const month = Number(monthMatch[2]);
+    if (month >= 1 && month <= 12) {
+      return `${monthMatch[1]}-Q${Math.floor((month - 1) / 3) + 1}`;
+    }
+  }
+
+  return null;
+}
+
+// "2024-Q1" -> "Q1 2024"
+function quarterLabel(quarterKey: string): string {
+  const [year, quarter] = quarterKey.split("-Q");
+  return year && quarter ? `Q${quarter} ${year}` : quarterKey;
+}
+
+// Reliability dinilai dari seberapa dekat realisasi ke forecast.
+function reliabilityFromAccuracy(pct: number): "A+" | "A" | "B" {
+  const deviation = Math.abs(100 - pct);
+  if (deviation <= 5) return "A+";
+  if (deviation <= 10) return "A";
+  return "B";
+}
+
+function riskLevelFromPct(pct: number): "High" | "Medium" | "Low" {
+  if (pct >= 30) return "High";
+  if (pct >= 10) return "Medium";
+  return "Low";
+}
+
+function signedPercent(value: number, digits = 1): string {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}%`;
+}
+
 export default function PrlManagementPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<PrlTabId>("forecast-table");
@@ -263,9 +311,13 @@ export default function PrlManagementPage() {
   const prlDetailQuery = useGetPrlByIdQuery(forecastDetail.record?.key ?? "", {
     skip: !apiEnabled || !forecastDetail.open || !forecastDetail.record?.key,
   });
-  const gapQuery = useGetPrlGapAnalysisQuery(undefined, {
-    skip: !apiEnabled || activeTab !== "demand-gap",
-  });
+  // Gap analysis juga dipakai oleh Analytics View (tab Risk Analysis),
+  // jadi jangan di-skip saat modal analytics dibuka.
+  // Sumber data: GET /prls/history-vs-delivery (grouped per forecast_period + uniq_code).
+  const gapQuery = useGetPrlGapAnalysisQuery(
+    { page: 1, limit: 500 },
+    { skip: !apiEnabled || (activeTab !== "demand-gap" && !analyticsOpen) }
+  );
 
   const [importPrls, importPrlsState] = useImportPrlsMutation();
   const [updatePrl, updatePrlState] = useUpdatePrlMutation();
@@ -473,7 +525,9 @@ export default function PrlManagementPage() {
     };
 
     return list.map((g) => ({
-      key: g.uniq,
+      // uniq yang sama bisa muncul di beberapa forecast_period, jadi rowKey harus gabungan
+      // keduanya agar baris tidak saling menimpa di tabel.
+      key: g.forecast_period ? `${g.forecast_period}::${g.uniq}` : g.uniq,
       uniq: g.uniq,
       customerForecast: Number(g.customer_forecast ?? 0),
       actualDelivery: Number(g.actual_delivery ?? 0),
@@ -502,153 +556,344 @@ export default function PrlManagementPage() {
     []
   );
 
+  // ============================================================
+  // ANALYTICS VIEW - INTEGRASI DATA NYATA
+  // Tampilan tidak diubah. Yang berubah hanya sumber angkanya:
+  // sebelumnya hardcoded, sekarang dihitung dari prlListQuery
+  // (forecast vs delivery) dan gapQuery (gap analysis).
+  // ============================================================
+
+  // Agregasi per kuartal.
+  const quarterBuckets = useMemo(() => {
+    const map = new Map<
+      string,
+      { forecast: number; actual: number; entries: number; customers: Set<string> }
+    >();
+
+    for (const row of resolvedForecastRows) {
+      const key = toQuarterKey(row.period);
+      if (!key) continue;
+
+      const bucket =
+        map.get(key) ?? { forecast: 0, actual: 0, entries: 0, customers: new Set<string>() };
+      bucket.forecast += Number(row.quantity || 0);
+      bucket.actual += Number(row.deliveryQuantity || 0);
+      bucket.entries += 1;
+      if (row.customer && row.customer !== "-") bucket.customers.add(row.customer);
+      map.set(key, bucket);
+    }
+
+    return Array.from(map.entries())
+      .map(([period, value]) => ({ period, ...value }))
+      .sort((a, b) => a.period.localeCompare(b.period));
+  }, [resolvedForecastRows]);
+
+  // Agregasi per customer.
+  const customerAggregates = useMemo(() => {
+    const map = new Map<string, { forecast: number; actual: number; uniqs: Set<string> }>();
+
+    for (const row of resolvedForecastRows) {
+      const name = row.customer && row.customer !== "-" ? row.customer : "Unknown";
+      const bucket = map.get(name) ?? { forecast: 0, actual: 0, uniqs: new Set<string>() };
+      bucket.forecast += Number(row.quantity || 0);
+      bucket.actual += Number(row.deliveryQuantity || 0);
+      if (row.uniq && row.uniq !== "-") bucket.uniqs.add(row.uniq);
+      map.set(name, bucket);
+    }
+
+    return Array.from(map.entries())
+      .map(([customer, value]) => ({ customer, ...value }))
+      .sort((a, b) => b.forecast - a.forecast);
+  }, [resolvedForecastRows]);
+
+  // KPI kartu Overview.
+  const analyticsKpi = useMemo(() => {
+    const totalForecasts = prlListQuery.data?.pagination?.total ?? resolvedForecastRows.length;
+    const totalForecastQty = resolvedForecastRows.reduce((s, r) => s + Number(r.quantity || 0), 0);
+    const totalActualQty = resolvedForecastRows.reduce(
+      (s, r) => s + Number(r.deliveryQuantity || 0),
+      0
+    );
+    const accuracyPct = totalForecastQty > 0 ? (totalActualQty / totalForecastQty) * 100 : 0;
+
+    const activeCustomers = new Set(
+      resolvedForecastRows.filter((r) => r.customer && r.customer !== "-").map((r) => r.customer)
+    ).size;
+
+    const last = quarterBuckets[quarterBuckets.length - 1];
+    const prev = quarterBuckets[quarterBuckets.length - 2];
+
+    const entriesDelta =
+      last && prev && prev.entries > 0
+        ? ((last.entries - prev.entries) / prev.entries) * 100
+        : null;
+
+    const lastAccuracy = last && last.forecast > 0 ? (last.actual / last.forecast) * 100 : null;
+    const prevAccuracy = prev && prev.forecast > 0 ? (prev.actual / prev.forecast) * 100 : null;
+    const accuracyDelta =
+      lastAccuracy !== null && prevAccuracy !== null ? lastAccuracy - prevAccuracy : null;
+
+    const customerDelta = last && prev ? last.customers.size - prev.customers.size : null;
+
+    return {
+      totalForecasts,
+      totalForecastQty,
+      accuracyPct,
+      activeCustomers,
+      entriesDelta,
+      accuracyDelta,
+      customerDelta,
+    };
+  }, [prlListQuery.data, resolvedForecastRows, quarterBuckets]);
+
   const trendSeries = useMemo(
-    () => [
-      { period: "2023-Q4", forecast: 6500, actual: 6200 },
-      { period: "2024-Q1", forecast: 7200, actual: 7000 },
-      { period: "2024-Q2", forecast: 8200, actual: 8100 },
-      { period: "2024-Q3", forecast: 7800, actual: 7900 },
-      { period: "2024-Q4", forecast: 9800, actual: 5200 },
-    ],
-    []
+    () =>
+      quarterBuckets.slice(-5).map((b) => ({
+        period: b.period,
+        forecast: b.forecast,
+        actual: b.actual,
+      })),
+    [quarterBuckets]
   );
 
   const accuracyTrendSeries = useMemo(
-    () => [
-      { period: "2023-Q4", planned: 6800, actual: 6500 },
-      { period: "2024-Q1", planned: 7500, actual: 7200 },
-      { period: "2024-Q2", planned: 8300, actual: 8500 },
-      { period: "2024-Q3", planned: 7800, actual: 8000 },
-      { period: "2024-Q4", planned: 9200, actual: 9000 },
-    ],
-    []
+    () =>
+      quarterBuckets.slice(-5).map((b) => ({
+        period: b.period,
+        planned: b.forecast,
+        actual: b.actual,
+      })),
+    [quarterBuckets]
   );
 
-  const customerDistribution = useMemo(
-    () => [
-      { name: "Toyota Motor Corp", value: 35, color: "#3B82F6" },
-      { name: "Honda Manufacturing", value: 28, color: "#22C55E" },
-      { name: "Nissan Global", value: 20, color: "#F59E0B" },
-      { name: "Ford Motor Company", value: 12, color: "#EF4444" },
-      { name: "General Motors", value: 5, color: "#8B5CF6" },
-    ],
-    []
-  );
+  const customerDistribution = useMemo(() => {
+    const palette = ["#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#8B5CF6"];
+    const top = customerAggregates.slice(0, 5);
+    const total = top.reduce((s, c) => s + c.forecast, 0);
+    if (total <= 0) return [] as Array<{ name: string; value: number; color: string }>;
 
-  const partCategories = useMemo(
-    () => [
-      { name: "Engine Components", parts: 45, percent: 32, units: 12500 },
-      { name: "Suspension Parts", parts: 38, percent: 27, units: 9800 },
-      { name: "Brake Systems", parts: 26, percent: 20, units: 8200 },
-      { name: "Electrical Components", parts: 20, percent: 14, units: 5500 },
-      { name: "Body Parts", parts: 10, percent: 7, units: 2800 },
-    ],
-    []
-  );
+    return top.map((c, index) => ({
+      name: c.customer,
+      value: Math.round((c.forecast / total) * 100),
+      color: palette[index % palette.length],
+    }));
+  }, [customerAggregates]);
+
+  // Data PRL tidak punya kolom "kategori part", jadi pengelompokan
+  // memakai product_model sebagai kategori terdekat yang tersedia.
+  const partCategories = useMemo(() => {
+    const map = new Map<string, { parts: Set<string>; units: number }>();
+
+    for (const row of resolvedForecastRows) {
+      const name =
+        row.productModel && row.productModel !== "-" ? row.productModel : "Uncategorized";
+      const bucket = map.get(name) ?? { parts: new Set<string>(), units: 0 };
+      if (row.uniq && row.uniq !== "-") bucket.parts.add(row.uniq);
+      bucket.units += Number(row.quantity || 0);
+      map.set(name, bucket);
+    }
+
+    const list = Array.from(map.entries())
+      .map(([name, value]) => ({ name, parts: value.parts.size, units: value.units }))
+      .sort((a, b) => b.units - a.units)
+      .slice(0, 5);
+
+    const total = list.reduce((s, c) => s + c.units, 0);
+    return list.map((c) => ({
+      ...c,
+      percent: total > 0 ? Math.round((c.units / total) * 100) : 0,
+    }));
+  }, [resolvedForecastRows]);
 
   const customerPerformanceRows = useMemo<CustomerPerformanceRow[]>(
-    () => [
-      {
-        key: "Toyota Motor Corp",
-        customer: "Toyota Motor Corp",
-        forecastVolume: 2500,
-        actualVolume: 2350,
-        accuracyPct: 94,
-        revenueImpact: "$2.1M",
-        reliability: "A+",
-      },
-      {
-        key: "Honda Manufacturing",
-        customer: "Honda Manufacturing",
-        forecastVolume: 1800,
-        actualVolume: 1920,
-        accuracyPct: 107,
-        revenueImpact: "$1.8M",
-        reliability: "A",
-      },
-      {
-        key: "Nissan Global",
-        customer: "Nissan Global",
-        forecastVolume: 3200,
-        actualVolume: 3180,
-        accuracyPct: 99,
-        revenueImpact: "$2.8M",
-        reliability: "A+",
-      },
-    ],
-    []
+    () =>
+      customerAggregates.map((c) => {
+        const accuracyPct = c.forecast > 0 ? (c.actual / c.forecast) * 100 : 0;
+        return {
+          key: c.customer,
+          customer: c.customer,
+          forecastVolume: c.forecast,
+          actualVolume: c.actual,
+          accuracyPct: Number(accuracyPct.toFixed(1)),
+          // Data PRL tidak menyimpan harga satuan, sehingga dampak
+          // rupiah/dolar TIDAK bisa dihitung. Ditampilkan "-" daripada
+          // menampilkan angka karangan.
+          revenueImpact: "-",
+          reliability: reliabilityFromAccuracy(accuracyPct),
+        };
+      }),
+    [customerAggregates]
   );
 
   const quarterlyPerformanceRows = useMemo<QuarterlyPerformanceRow[]>(
-    () => [
-      {
-        key: "Q1 2024",
-        quarter: "Q1 2024",
-        plannedQty: 7500,
-        actualQty: 7250,
-        plannedRevenue: "$2.25M",
-        actualRevenue: "$2.17M",
-        accuracyPct: 96.7,
-      },
-      {
-        key: "Q2 2024",
-        quarter: "Q2 2024",
-        plannedQty: 8200,
-        actualQty: 8450,
-        plannedRevenue: "$2.46M",
-        actualRevenue: "$2.54M",
-        accuracyPct: 103,
-      },
-      {
-        key: "Q3 2024",
-        quarter: "Q3 2024",
-        plannedQty: 7800,
-        actualQty: 7920,
-        plannedRevenue: "$2.34M",
-        actualRevenue: "$2.38M",
-        accuracyPct: 101.5,
-      },
-    ],
-    []
+    () =>
+      quarterBuckets.slice(-8).map((b) => ({
+        key: b.period,
+        quarter: quarterLabel(b.period),
+        plannedQty: b.forecast,
+        actualQty: b.actual,
+        // Tidak ada sumber harga pada data PRL.
+        plannedRevenue: "-",
+        actualRevenue: "-",
+        accuracyPct: b.forecast > 0 ? Number(((b.actual / b.forecast) * 100).toFixed(1)) : 0,
+      })),
+    [quarterBuckets]
   );
 
-  const riskAssessmentRows = useMemo<RiskAssessmentRow[]>(
-    () => [
-      {
-        key: "Supply Chain Disruption",
-        riskFactor: "Supply Chain Disruption",
-        probability: "Medium",
-        impact: "High",
-        mitigationStrategy: "Diversify suppliers",
-        status: "Monitoring",
-      },
-      {
-        key: "Demand Volatility",
-        riskFactor: "Demand Volatility",
-        probability: "High",
-        impact: "Medium",
-        mitigationStrategy: "Flexible production capacity",
-        status: "Monitoring",
-      },
-      {
-        key: "Quality Issues",
-        riskFactor: "Quality Issues",
-        probability: "Low",
-        impact: "High",
-        mitigationStrategy: "Enhanced QC processes",
-        status: "Monitoring",
-      },
-      {
-        key: "Currency Fluctuation",
-        riskFactor: "Currency Fluctuation",
-        probability: "Medium",
-        impact: "Medium",
-        mitigationStrategy: "Hedging strategies",
-        status: "Monitoring",
-      },
-    ],
-    []
-  );
+  // Pola musiman dihitung dari rata-rata forecast tiap nomor kuartal
+  // dibanding rata-rata keseluruhan.
+  const seasonalPatterns = useMemo(() => {
+    const byQuarterNo = new Map<number, number[]>();
+    for (const b of quarterBuckets) {
+      const quarterNo = Number(b.period.split("-Q")[1]);
+      if (!Number.isFinite(quarterNo) || quarterNo < 1 || quarterNo > 4) continue;
+      const list = byQuarterNo.get(quarterNo) ?? [];
+      list.push(b.forecast);
+      byQuarterNo.set(quarterNo, list);
+    }
+
+    const averages = new Map<number, number>();
+    for (const [quarterNo, list] of byQuarterNo) {
+      averages.set(quarterNo, list.reduce((s, v) => s + v, 0) / list.length);
+    }
+
+    const overall =
+      averages.size > 0
+        ? Array.from(averages.values()).reduce((s, v) => s + v, 0) / averages.size
+        : 0;
+
+    return [1, 2, 3, 4].map((quarterNo) => {
+      const average = averages.get(quarterNo);
+      if (average === undefined || overall <= 0) {
+        return {
+          key: `Q${quarterNo}`,
+          title: `Q${quarterNo} - No Data`,
+          tagText: "No data",
+          highlight: false,
+        };
+      }
+
+      const delta = ((average - overall) / overall) * 100;
+      const seasonLabel =
+        delta >= 20
+          ? "High Season"
+          : delta >= 5
+            ? "Above Average"
+            : delta > -5
+              ? "Normal Season"
+              : "Below Average";
+
+      return {
+        key: `Q${quarterNo}`,
+        title: `Q${quarterNo} - ${seasonLabel}`,
+        tagText: `${signedPercent(delta, 0)} vs average`,
+        highlight: delta >= 5,
+      };
+    });
+  }, [quarterBuckets]);
+
+  const growthIndicators = useMemo(() => {
+    const last = quarterBuckets[quarterBuckets.length - 1];
+    const prev = quarterBuckets[quarterBuckets.length - 2];
+
+    const qoq =
+      last && prev && prev.forecast > 0
+        ? ((last.forecast - prev.forecast) / prev.forecast) * 100
+        : null;
+
+    // YoY membandingkan kuartal yang sama pada tahun sebelumnya.
+    let yoy: number | null = null;
+    if (last) {
+      const [yearStr, quarterStr] = last.period.split("-Q");
+      const target = `${Number(yearStr) - 1}-Q${quarterStr}`;
+      const sameQuarterLastYear = quarterBuckets.find((b) => b.period === target);
+      if (sameQuarterLastYear && sameQuarterLastYear.forecast > 0) {
+        yoy =
+          ((last.forecast - sameQuarterLastYear.forecast) / sameQuarterLastYear.forecast) * 100;
+      }
+    }
+
+    let retention: number | null = null;
+    let newCustomers: number | null = null;
+    if (last && prev) {
+      const retained = Array.from(last.customers).filter((c) => prev.customers.has(c)).length;
+      retention = prev.customers.size > 0 ? (retained / prev.customers.size) * 100 : null;
+      newCustomers = Array.from(last.customers).filter((c) => !prev.customers.has(c)).length;
+    }
+
+    return { qoq, yoy, retention, newCustomers };
+  }, [quarterBuckets]);
+
+  // Risiko diturunkan dari sinyal nyata: hasil gap analysis, sebaran
+  // forecast antar kuartal, dan kelengkapan master data part.
+  const riskAssessmentRows = useMemo<RiskAssessmentRow[]>(() => {
+    const rows: RiskAssessmentRow[] = [];
+    const gapList = gapQuery.data ?? [];
+    const totalGap = gapList.length;
+
+    const countByStatus = (target: string) =>
+      gapList.filter((g) => String(g.status ?? "").trim().toLowerCase() === target).length;
+
+    const underPct = totalGap > 0 ? (countByStatus("under") / totalGap) * 100 : 0;
+    const overPct = totalGap > 0 ? (countByStatus("over") / totalGap) * 100 : 0;
+
+    rows.push({
+      key: "under-delivery",
+      riskFactor: `Under-Delivery vs Forecast (${countByStatus("under")}/${totalGap} items)`,
+      probability: riskLevelFromPct(underPct),
+      impact: "High",
+      mitigationStrategy: "Review production capacity & supplier lead time",
+      status: underPct >= 30 ? "Action Needed" : "Monitoring",
+    });
+
+    rows.push({
+      key: "over-delivery",
+      riskFactor: `Over-Delivery vs Forecast (${countByStatus("over")}/${totalGap} items)`,
+      probability: riskLevelFromPct(overPct),
+      impact: "Medium",
+      mitigationStrategy: "Re-align forecast accuracy with customer",
+      status: overPct >= 30 ? "Action Needed" : "Monitoring",
+    });
+
+    // Volatilitas permintaan = koefisien variasi forecast antar kuartal.
+    let volatilityPct = 0;
+    if (quarterBuckets.length >= 2) {
+      const values = quarterBuckets.map((b) => b.forecast);
+      const mean = values.reduce((s, v) => s + v, 0) / values.length;
+      if (mean > 0) {
+        const variance =
+          values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length;
+        volatilityPct = (Math.sqrt(variance) / mean) * 100;
+      }
+    }
+
+    rows.push({
+      key: "demand-volatility",
+      riskFactor: `Demand Volatility (CV ${volatilityPct.toFixed(1)}%)`,
+      probability: riskLevelFromPct(volatilityPct),
+      impact: "Medium",
+      mitigationStrategy: "Flexible production capacity & buffer planning",
+      status: volatilityPct >= 30 ? "Action Needed" : "Monitoring",
+    });
+
+    // Kelengkapan master data part.
+    const incomplete = resolvedForecastRows.filter(
+      (r) => r.partName === "-" || r.partNumber === "-" || r.productModel === "-"
+    ).length;
+    const incompletePct =
+      resolvedForecastRows.length > 0 ? (incomplete / resolvedForecastRows.length) * 100 : 0;
+
+    rows.push({
+      key: "incomplete-master-data",
+      riskFactor: `Incomplete Part Master Data (${incomplete}/${resolvedForecastRows.length} rows)`,
+      probability: riskLevelFromPct(incompletePct),
+      impact: "High",
+      mitigationStrategy: "Complete BOM / item master mapping",
+      status: incompletePct >= 30 ? "Action Needed" : "Monitoring",
+    });
+
+    return rows;
+  }, [gapQuery.data, quarterBuckets, resolvedForecastRows]);
 
   const openAnalytics = (tab?: AnalyticsTabId) => {
     if (tab) setAnalyticsTab(tab);
@@ -1630,23 +1875,66 @@ export default function PrlManagementPage() {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div className="rounded-xl border border-gray-100 bg-white p-4">
                 <div className="text-xs text-gray-500">Total Forecasts</div>
-                <div className="text-xl font-bold text-gray-900 mt-1">142</div>
-                <div className="text-xs text-green-700 mt-1">+12% vs last quarter</div>
+                <div className="text-xl font-bold text-gray-900 mt-1">
+                  {formatNumber(analyticsKpi.totalForecasts)}
+                </div>
+                <div
+                  className={
+                    "text-xs mt-1 " +
+                    (analyticsKpi.entriesDelta === null
+                      ? "text-gray-500"
+                      : analyticsKpi.entriesDelta >= 0
+                        ? "text-green-700"
+                        : "text-red-600")
+                  }
+                >
+                  {analyticsKpi.entriesDelta === null
+                    ? "No previous quarter to compare"
+                    : `${signedPercent(analyticsKpi.entriesDelta, 0)} vs last quarter`}
+                </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-white p-4">
                 <div className="text-xs text-gray-500">Forecast Accuracy</div>
-                <div className="text-xl font-bold text-gray-900 mt-1">94.2%</div>
-                <div className="text-xs text-green-700 mt-1">+2.1% improvement</div>
+                <div className="text-xl font-bold text-gray-900 mt-1">
+                  {formatPercent(analyticsKpi.accuracyPct)}
+                </div>
+                <div
+                  className={
+                    "text-xs mt-1 " +
+                    (analyticsKpi.accuracyDelta === null
+                      ? "text-gray-500"
+                      : analyticsKpi.accuracyDelta >= 0
+                        ? "text-green-700"
+                        : "text-red-600")
+                  }
+                >
+                  {analyticsKpi.accuracyDelta === null
+                    ? "Delivery vs forecast quantity"
+                    : `${signedPercent(analyticsKpi.accuracyDelta)} vs last quarter`}
+                </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-white p-4">
                 <div className="text-xs text-gray-500">Active Customers</div>
-                <div className="text-xl font-bold text-gray-900 mt-1">5</div>
-                <div className="text-xs text-blue-700 mt-1">Stable base</div>
+                <div className="text-xl font-bold text-gray-900 mt-1">
+                  {formatNumber(analyticsKpi.activeCustomers)}
+                </div>
+                <div className="text-xs text-blue-700 mt-1">
+                  {analyticsKpi.customerDelta === null || analyticsKpi.customerDelta === 0
+                    ? "Stable base"
+                    : analyticsKpi.customerDelta > 0
+                      ? `+${analyticsKpi.customerDelta} vs last quarter`
+                      : `${analyticsKpi.customerDelta} vs last quarter`}
+                </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-white p-4">
                 <div className="text-xs text-gray-500">Planned Revenue</div>
-                <div className="text-xl font-bold text-gray-900 mt-1">$7.2M</div>
-                <div className="text-xs text-green-700 mt-1">+18% growth</div>
+                {/* Data PRL tidak menyimpan harga satuan, jadi nilai uang
+                    tidak bisa dihitung. Ditampilkan total qty forecast
+                    sebagai gantinya, bukan angka rupiah karangan. */}
+                <div className="text-xl font-bold text-gray-900 mt-1">-</div>
+                <div className="text-xs text-gray-500 mt-1">
+                  No price source ({formatNumber(analyticsKpi.totalForecastQty)} units planned)
+                </div>
               </div>
             </div>
 
@@ -1754,30 +2042,23 @@ export default function PrlManagementPage() {
                 <div className="text-xs text-gray-500 mt-1">Typical demand changes by quarter</div>
 
                 <div className="mt-4 space-y-2">
-                  <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-blue-50/40 px-3 py-2">
-                    <div className="text-xs font-semibold text-gray-800">Q1 - High Season</div>
-                    <Tag color="blue" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
-                      +25% above average
-                    </Tag>
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-blue-50/40 px-3 py-2">
-                    <div className="text-xs font-semibold text-gray-800">Q2 - Peak Season</div>
-                    <Tag color="blue" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
-                      +35% above average
-                    </Tag>
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-amber-50/40 px-3 py-2">
-                    <div className="text-xs font-semibold text-gray-800">Q3 - Normal Season</div>
-                    <Tag color="default" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
-                      Average demand
-                    </Tag>
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
-                    <div className="text-xs font-semibold text-gray-800">Q4 - Variable Season</div>
-                    <Tag color="default" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
-                      -10% to +20%
-                    </Tag>
-                  </div>
+                  {seasonalPatterns.map((s) => (
+                    <div
+                      key={s.key}
+                      className={
+                        "flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2 " +
+                        (s.highlight ? "bg-blue-50/40" : "bg-gray-50")
+                      }
+                    >
+                      <div className="text-xs font-semibold text-gray-800">{s.title}</div>
+                      <Tag
+                        color={s.highlight ? "blue" : "default"}
+                        className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+                      >
+                        {s.tagText}
+                      </Tag>
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -1788,19 +2069,49 @@ export default function PrlManagementPage() {
                 <div className="mt-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="text-xs text-gray-600">YoY Growth Rate</div>
-                    <div className="text-xs font-semibold text-green-700">+18.5%</div>
+                    <div
+                      className={
+                        "text-xs font-semibold " +
+                        (growthIndicators.yoy === null
+                          ? "text-gray-400"
+                          : growthIndicators.yoy >= 0
+                            ? "text-green-700"
+                            : "text-red-600")
+                      }
+                    >
+                      {growthIndicators.yoy === null ? "-" : signedPercent(growthIndicators.yoy)}
+                    </div>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="text-xs text-gray-600">QoQ Growth Rate</div>
-                    <div className="text-xs font-semibold text-blue-700">+6.2%</div>
+                    <div
+                      className={
+                        "text-xs font-semibold " +
+                        (growthIndicators.qoq === null
+                          ? "text-gray-400"
+                          : growthIndicators.qoq >= 0
+                            ? "text-blue-700"
+                            : "text-red-600")
+                      }
+                    >
+                      {growthIndicators.qoq === null ? "-" : signedPercent(growthIndicators.qoq)}
+                    </div>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="text-xs text-gray-600">Customer Retention</div>
-                    <div className="text-xs font-semibold text-purple-700">{formatPercent(96.8)}</div>
+                    <div className="text-xs font-semibold text-purple-700">
+                      {growthIndicators.retention === null
+                        ? "-"
+                        : formatPercent(growthIndicators.retention)}
+                    </div>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="text-xs text-gray-600">New Customer Acquisition</div>
-                    <div className="text-xs font-semibold text-red-600">2 per quarter</div>
+                    <div className="text-xs font-semibold text-red-600">
+                      {growthIndicators.newCustomers === null
+                        ? "-"
+                        : `${growthIndicators.newCustomers} last quarter`}
+                    </div>
                   </div>
                 </div>
               </div>

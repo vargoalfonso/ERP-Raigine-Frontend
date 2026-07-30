@@ -1,7 +1,16 @@
 "use client";
 
 import { Suspense, useMemo, useState } from "react";
-import { Button, DatePicker, Input, InputNumber, Select, Table, Tag, message } from "antd";
+import {
+  Button,
+  DatePicker,
+  Input,
+  InputNumber,
+  Select,
+  Table,
+  Tag,
+  message,
+} from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { LeftOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -12,7 +21,10 @@ import {
   type ProcurementPoType,
 } from "@/lib/api/procurement-po/api";
 import { getApiErrorMessage } from "@/lib/api/error";
-import { useGetPoBudgetListQuery, type PoBudgetType } from "@/lib/api/po-budget/api";
+import {
+  useGetPoBudgetListQuery,
+  type PoBudgetType,
+} from "@/lib/api/po-budget/api";
 import { getStoredParents } from "@/components/po-budget/poBudgetChildAdapters";
 
 type PoItemRow = {
@@ -40,7 +52,10 @@ type PoSupplierGroup = {
 
 type BudgetSubtype = "adhoc" | "regular";
 
-const specText = (spec: Record<string, unknown> | undefined, key: string): string => {
+const specText = (
+  spec: Record<string, unknown> | undefined,
+  key: string,
+): string => {
   const value = spec?.[key];
   if (value == null || value === "") return "-";
   return String(value);
@@ -61,9 +76,14 @@ const procurementTypeToBudgetType = (type: ProcurementPoType): PoBudgetType => {
 };
 
 const isBudgetSubtype = (value: string | undefined, subtype: BudgetSubtype) => {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  if (subtype === "adhoc") return normalized === "adhoc" || normalized === "additional";
-  return normalized === "regular" || normalized === "kanban" || normalized === "";
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (subtype === "adhoc")
+    return normalized === "adhoc" || normalized === "additional";
+  return (
+    normalized === "regular" || normalized === "kanban" || normalized === ""
+  );
 };
 
 function CreatePoProcurementPageContent() {
@@ -73,15 +93,21 @@ function CreatePoProcurementPageContent() {
   const apiEnabled = Boolean(apiBaseUrl);
   const [generatePo, generatePoState] = useGenerateProcurementPoMutation();
 
-  const poType = useMemo(() => tabToPoType(searchParams.get("tab")), [searchParams]);
-  const poBudgetType = useMemo(() => procurementTypeToBudgetType(poType), [poType]);
+  const poType = useMemo(
+    () => tabToPoType(searchParams.get("tab")),
+    [searchParams],
+  );
+  const poBudgetType = useMemo(
+    () => procurementTypeToBudgetType(poType),
+    [poType],
+  );
   const returnUrl = useMemo(() => {
     const tab = searchParams.get("tab");
     if (!tab) return "/po-procurement";
     return `/po-procurement?tab=${encodeURIComponent(tab)}`;
   }, [searchParams]);
 
- const [period, setPeriod] = useState<Dayjs | null>(dayjs(new Date()));
+  const [period, setPeriod] = useState<Dayjs | null>(dayjs(new Date()));
   const [totalIncoming, setTotalIncoming] = useState<number>(0);
   const [dnCreated, setDnCreated] = useState<number>(0);
   const [dnIncoming, setDnIncoming] = useState<number>(0);
@@ -90,7 +116,9 @@ function CreatePoProcurementPageContent() {
   const [budgetSubtype, setBudgetSubtype] = useState<BudgetSubtype>("adhoc");
   const [externalSystem, setExternalSystem] = useState<string>("zahir");
   // External PO (Zahir) number per PO-stage + supplier group, keyed by group key.
-  const [externalPoNumbers, setExternalPoNumbers] = useState<Record<string, string>>({});
+  const [externalPoNumbers, setExternalPoNumbers] = useState<
+    Record<string, string>
+  >({});
   const [generateMode, setGenerateMode] = useState<string>("both_stages");
 
   const poBudgetQuery = useGetPoBudgetListQuery(
@@ -116,7 +144,11 @@ function CreatePoProcurementPageContent() {
       const rowPeriod = String(row.period ?? "").trim();
       if (!rowPeriod) return false;
       // Compare on month+year so "July 2026" and "2026-07" both line up.
-      const rowMonth = dayjs(rowPeriod, ["MMMM YYYY", "YYYY-MM", "MM/YYYY"], true);
+      const rowMonth = dayjs(
+        rowPeriod,
+        ["MMMM YYYY", "YYYY-MM", "MM/YYYY"],
+        true,
+      );
       const parsed = rowMonth.isValid() ? rowMonth : dayjs(rowPeriod);
       return parsed.isValid()
         ? parsed.format("MMMM YYYY") === periodKey
@@ -144,7 +176,7 @@ function CreatePoProcurementPageContent() {
       { label: "Stage 1", value: "stage_1" },
       { label: "Stage 2", value: "stage_2" },
     ],
-    []
+    [],
   );
 
   const budgetSubtypeOptions = useMemo(
@@ -173,14 +205,21 @@ function CreatePoProcurementPageContent() {
         const parents = getStoredParents(row.detailJson);
 
         for (const parent of parents) {
-          const children = Array.isArray(parent.children) ? parent.children : [];
+          const children = Array.isArray(parent.children)
+            ? parent.children
+            : [];
           for (const child of children) {
-            const childSpec = (child.material_spec ?? {}) as Record<string, unknown>;
+            const childSpec = (child.material_spec ?? {}) as Record<
+              string,
+              unknown
+            >;
             const childQty = Number(child.quantity ?? child.qty_per_uniq ?? 0);
             const stageQty = Math.round((childQty * (pct || 0)) / 100);
             if (stageQty <= 0) continue;
 
-            const suppliers = Array.isArray(child.suppliers) ? child.suppliers : [];
+            const suppliers = Array.isArray(child.suppliers)
+              ? child.suppliers
+              : [];
             const supplierName =
               suppliers[0]?.supplier_name ?? row.supplier ?? "-";
 
@@ -189,7 +228,10 @@ function CreatePoProcurementPageContent() {
               parentUniq: String(parent.uniq_code ?? row.uniq ?? "-"),
               childUniq: String(child.uniq_code ?? "-"),
               materialGrade: String(
-                child.uniq ?? childSpec.material_grade ?? child.uniq_code ?? "-",
+                child.uniq ??
+                  childSpec.material_grade ??
+                  child.uniq_code ??
+                  "-",
               ),
               partNumber: String(child.part_number ?? "-"),
               partName: String(child.part_name ?? "-"),
@@ -250,7 +292,12 @@ function CreatePoProcurementPageContent() {
   }, [budgetRowsForPeriod, selectedBudgetIds, generateMode]);
 
   const columns: ColumnsType<PoItemRow> = [
-    { title: "Parent UNIQ", dataIndex: "parentUniq", key: "parentUniq", width: 110 },
+    {
+      title: "Parent UNIQ",
+      dataIndex: "parentUniq",
+      key: "parentUniq",
+      width: 110,
+    },
     {
       title: "Material Grade",
       dataIndex: "materialGrade",
@@ -266,7 +313,12 @@ function CreatePoProcurementPageContent() {
       ),
     },
     { title: "Part Name", dataIndex: "partName", key: "partName", width: 160 },
-    { title: "Part Number", dataIndex: "partNumber", key: "partNumber", width: 120 },
+    {
+      title: "Part Number",
+      dataIndex: "partNumber",
+      key: "partNumber",
+      width: 120,
+    },
     { title: "Form", dataIndex: "form", key: "form", width: 90 },
     { title: "Supplier", dataIndex: "supplier", key: "supplier", width: 150 },
     {
@@ -275,7 +327,9 @@ function CreatePoProcurementPageContent() {
       key: "qty",
       width: 90,
       align: "right",
-      render: (v: number) => <span className="font-medium text-gray-800">{formatNumber(v)}</span>,
+      render: (v: number) => (
+        <span className="font-medium text-gray-800">{formatNumber(v)}</span>
+      ),
     },
     { title: "UoM", dataIndex: "uom", key: "uom", width: 70 },
     {
@@ -284,7 +338,9 @@ function CreatePoProcurementPageContent() {
       key: "weightKg",
       width: 100,
       align: "right",
-      render: (v: number) => <span className="text-xs text-gray-700">{formatNumber(v)}</span>,
+      render: (v: number) => (
+        <span className="text-xs text-gray-700">{formatNumber(v)}</span>
+      ),
     },
   ];
 
@@ -343,7 +399,10 @@ function CreatePoProcurementPageContent() {
         </button>
 
         <div className="flex items-center gap-2">
-          <Button className="!rounded-lg" onClick={() => router.push(returnUrl)}>
+          <Button
+            className="!rounded-lg"
+            onClick={() => router.push(returnUrl)}
+          >
             Cancel
           </Button>
           <Button
@@ -359,8 +418,12 @@ function CreatePoProcurementPageContent() {
 
       <div className="mb-5">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-          <div className="text-xl font-bold text-gray-900">PO Procurement Management</div>
-          <div className="text-sm text-gray-500">Generate purchase order from PO Budget entries</div>
+          <div className="text-xl font-bold text-gray-900">
+            PO Procurement Management
+          </div>
+          <div className="text-sm text-gray-500">
+            Generate purchase order from PO Budget entries
+          </div>
         </div>
       </div>
 
@@ -368,17 +431,24 @@ function CreatePoProcurementPageContent() {
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-sm font-semibold text-gray-900">Step 1: Input General Data</div>
+              <div className="text-sm font-semibold text-gray-900">
+                Step 1: Input General Data
+              </div>
               <div className="text-xs text-gray-500">Input General Data</div>
             </div>
-            <Tag color="blue" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+            <Tag
+              color="blue"
+              className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+            >
               Required
             </Tag>
           </div>
 
           <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
             <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">Period</div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                Period
+              </div>
               <DatePicker
                 picker="month"
                 format="MM/YYYY"
@@ -392,52 +462,67 @@ function CreatePoProcurementPageContent() {
               />
             </div>
 
-            <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">Total Incoming</div>
+            {/* <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                Total Incoming
+              </div>
               <InputNumber
                 value={totalIncoming}
                 onChange={(v) => setTotalIncoming(Number(v ?? 0))}
                 className="w-full !rounded-lg"
                 min={0}
               />
-            </div>
+            </div> */}
 
-            <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">DN Created</div>
+            {/* <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                DN Created
+              </div>
               <InputNumber
                 value={dnCreated}
                 onChange={(v) => setDnCreated(Number(v ?? 0))}
                 className="w-full !rounded-lg"
                 min={0}
               />
-            </div>
+            </div> */}
 
-            <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">DN Incoming</div>
+            {/* <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                DN Incoming
+              </div>
               <InputNumber
                 value={dnIncoming}
                 onChange={(v) => setDnIncoming(Number(v ?? 0))}
                 className="w-full !rounded-lg"
                 min={0}
               />
-            </div>
+            </div> */}
           </div>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <div className="text-sm font-semibold text-gray-900">Step 2: Input Data</div>
-              <div className="text-xs text-gray-500">Input Data for each items</div>
+              <div className="text-sm font-semibold text-gray-900">
+                Step 2: Input Data
+              </div>
+              <div className="text-xs text-gray-500">
+                Input Data for each items
+              </div>
             </div>
-            <Tag color="blue" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+            <Tag
+              color="blue"
+              className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+            >
               Entry 1
             </Tag>
           </div>
 
           <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">Budget source</div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                Budget source
+              </div>
               <Select
                 value={budgetSubtype}
                 onChange={(value) => {
@@ -458,14 +543,26 @@ function CreatePoProcurementPageContent() {
                 showSearch
                 optionFilterProp="label"
                 value={selectedBudgetIds}
-                onChange={(values) => setSelectedBudgetIds(values.map((value) => Number(value)).filter(Number.isFinite))}
+                onChange={(values) =>
+                  setSelectedBudgetIds(
+                    values
+                      .map((value) => Number(value))
+                      .filter(Number.isFinite),
+                  )
+                }
                 options={poBudgetOptions}
-                placeholder={budgetSubtype === "adhoc" ? "Select PRL Adhoc entries" : "Select PR Budget entries"}
+                placeholder={
+                  budgetSubtype === "adhoc"
+                    ? "Select PRL Adhoc entries"
+                    : "Select PR Budget entries"
+                }
                 className="w-full"
               />
             </div>
             <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">Generate Mode</div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                Generate Mode
+              </div>
               <Select
                 value={generateMode}
                 onChange={setGenerateMode}
@@ -475,7 +572,9 @@ function CreatePoProcurementPageContent() {
               />
             </div>
             <div>
-              <div className="text-xs font-semibold text-gray-700 mb-1">External System</div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                External System
+              </div>
               <Select
                 value={externalSystem}
                 onChange={setExternalSystem}
@@ -489,17 +588,23 @@ function CreatePoProcurementPageContent() {
           <div className="mt-6 space-y-6">
             {poSupplierGroups.length === 0 ? (
               <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
-                Select {budgetSubtype === "adhoc" ? "PRL Adhoc" : "PR Budget"} entries above to preview the PO1 / PO2 child split.
+                Select {budgetSubtype === "adhoc" ? "PRL Adhoc" : "PR Budget"}{" "}
+                entries above to preview the PO1 / PO2 child split.
               </div>
             ) : (
               poSupplierGroups.map((g) => (
                 <div key={g.key}>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <div className="text-sm font-semibold text-gray-900">{g.label}</div>
+                      <div className="text-sm font-semibold text-gray-900">
+                        {g.label}
+                      </div>
                       <div className="text-xs text-gray-500">
-                        {g.items.length} material{g.items.length !== 1 ? "s" : ""} · total qty{" "}
-                        <span className="font-semibold text-gray-800">{formatNumber(g.totalQty)}</span>
+                        {g.items.length} material
+                        {g.items.length !== 1 ? "s" : ""} · total qty{" "}
+                        <span className="font-semibold text-gray-800">
+                          {formatNumber(g.totalQty)}
+                        </span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">

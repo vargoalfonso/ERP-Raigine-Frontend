@@ -706,8 +706,8 @@ export default function CreateWorkOrderPage() {
               {/* Header */}
               <div className="px-4 py-3 bg-gray-50 text-xs font-semibold text-gray-600 grid grid-cols-12 gap-3">
                 <div className="col-span-2">UNIQ</div>
-                <div className="col-span-3">Part Name</div>
-                <div className="col-span-1">Quantity</div>
+                <div className="col-span-2">Part Name</div>
+                <div className="col-span-2">Quantity</div>
                 <div className="col-span-1">UoM</div>
                 <div className="col-span-2">Process Name</div>
                 <div className="col-span-2">Kanban Number</div>
@@ -725,7 +725,7 @@ export default function CreateWorkOrderPage() {
                     <div
                       key={l.id}
                       className={[
-                        "px-4 py-3 grid grid-cols-12 gap-3 items-center",
+                        "px-4 py-3 grid grid-cols-12 gap-3 items-start",
                         isChild
                           ? "bg-blue-50/40 border-l-4 border-l-blue-300 pl-8"
                           : "bg-white",
@@ -751,7 +751,7 @@ export default function CreateWorkOrderPage() {
                       </div>
 
                       {/* Part Name */}
-                      <div className="col-span-3">
+                      <div className="col-span-2">
                         <div
                           className="flex items-center gap-2"
                         >
@@ -772,7 +772,7 @@ export default function CreateWorkOrderPage() {
                       </div>
 
                       {/* Quantity */}
-                      <div className="col-span-1">
+                      <div className="col-span-2">
                         <div className="flex items-center gap-1">
                           <InputNumber
                             className="!rounded-lg flex-1 min-w-0"

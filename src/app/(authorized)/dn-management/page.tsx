@@ -10,6 +10,17 @@ import {
   useLazyScanProcurementDnPackingQuery,
   useListProcurementDnsQuery,
 } from "@/lib/api/procurement-dn/api";
+import {
+  buildKanbanCardsHtml,
+  buildKanbanId,
+  kanbanCardCount,
+  kanbanPrintStamp,
+  kanbanQty,
+  type KanbanCardData,
+  type KanbanCategory,
+} from "@/components/kanban/KanbanTransportCard";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 
 type ProcurementTab = "raw" | "indirect" | "subcon";
 
@@ -77,6 +88,15 @@ const tabToType = (tab: ProcurementTab): ProcurementDnType => {
   return "RM";
 };
 
+/** DN tab -> kanban card style. Raw Material is green, Indirect is cyan. */
+const tabToKanbanCategory = (
+  tab: ProcurementTab
+): { category: KanbanCategory; label: string } => {
+  if (tab === "indirect") return { category: "IRM", label: "Indirect" };
+  if (tab === "subcon") return { category: "CP", label: "Child Parts" };
+  return { category: "RM", label: "Raw Material" };
+};
+
 const formatPeriodDisplay = (value: string): string => {
   const trimmed = String(value ?? "").trim();
   const match = /^([0-1]\d)\/(\d{4})$/.exec(trimmed);
@@ -129,6 +149,13 @@ export default function DnManagementPage() {
     skip: !apiEnabled || !barcodeDnId,
   });
   const [runScanPacking] = useLazyScanProcurementDnPackingQuery();
+
+  // Part names are not carried on the DN item, so they are resolved from BOM.
+  const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomTreeQuery.data?.data ?? []),
+    [bomTreeQuery.data?.data]
+  );
 
   const procurementApiAvailable = apiEnabled && !listQuery.error;
 
@@ -325,6 +352,106 @@ export default function DnManagementPage() {
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
+
+  /**
+   * Expands the DN items into Kanban Transport cards. One DN item becomes
+   * ceil(total qty / qty per kanban) cards, numbered "01 / N".
+   */
+  const kanbanCards = useMemo<KanbanCardData[]>(() => {
+    if (!barcodeData) return [];
+
+    const { category, label } = tabToKanbanCategory(activeTab);
+    const supplierCode = barcodeData.supplier?.supplier_code ?? "";
+    const supplierName =
+      barcodeData.supplier?.supplier_name ?? barcodeData.supplier_name ?? "";
+    const supplier = [supplierCode, supplierName].filter(Boolean).join(" - ");
+    const printedAt = kanbanPrintStamp();
+
+    const cards: KanbanCardData[] = [];
+
+    for (const item of barcodeItems) {
+      const uniq = String(item.item_uniq_code ?? "").trim();
+      const uom = String(item.uom ?? "PCS").toUpperCase();
+      const totalPlan = Number(item.quantity ?? item.order_qty ?? 0);
+      const perKanban =
+        Number(item.pcs_per_kanban ?? item.kanban?.kanban_qty ?? 0) || totalPlan;
+      const cardTotal = kanbanCardCount(totalPlan, perKanban);
+      const qr = String(item.qr ?? "");
+      const kanbanNumber = String(item.kanban?.kanban_number ?? "").trim();
+
+      for (let index = 1; index <= cardTotal; index += 1) {
+        cards.push({
+          key: `${uniq}::${item.packing_number ?? ""}::${index}`,
+          category,
+          categoryLabel: label,
+          partNumber: uniq || "-",
+          partName: bomIndex.partNameByUniq[uniq] ?? "-",
+          qtyPerKanban: kanbanQty(perKanban, uom),
+          totalPlan: kanbanQty(totalPlan, uom),
+          cardNo: index,
+          cardTotal,
+          kanbanId:
+            cardTotal === 1 && kanbanNumber
+              ? kanbanNumber
+              : buildKanbanId(category, uniq, index, cardTotal),
+          supplier: supplier || "-",
+          plant: "-",
+          // No plant / store / dock / routing data exists on the DN payload.
+          batchLot: String(item.packing_number ?? "-"),
+          basis: `DN ${barcodeData.dn_number ?? "-"}`,
+          areaStore: "-",
+          partLocation: "-",
+          nextProcess: "-",
+          dock: "-",
+          lineStore: "-",
+          partQr: qr,
+          // The DN payload exposes one QR per packing number only.
+          kanbanQr: qr,
+          printedAt,
+        });
+      }
+    }
+
+    return cards;
+  }, [activeTab, barcodeData, barcodeItems, bomIndex]);
+
+  /** Prints through a hidden iframe so the app is never navigated away. */
+  const handlePrintKanban = () => {
+    if (kanbanCards.length === 0) {
+      window.alert("Tidak ada kanban yang bisa dicetak untuk DN ini.");
+      return;
+    }
+
+    const html = buildKanbanCardsHtml(
+      kanbanCards,
+      `Kanban Transport - ${barcodeData?.dn_number ?? "DN"}`
+    );
+
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.right = "0";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    iframe.srcdoc = html;
+
+    iframe.onload = () => {
+      const frameWindow = iframe.contentWindow;
+      if (!frameWindow) return;
+      frameWindow.focus();
+      frameWindow.print();
+      setTimeout(() => {
+        try {
+          document.body.removeChild(iframe);
+        } catch {
+          // already detached
+        }
+      }, 1000);
+    };
+
+    document.body.appendChild(iframe);
+  };
 
   const handlePrintBarcodes = async () => {
     if (!barcodeData) return;
@@ -1028,6 +1155,14 @@ export default function DnManagementPage() {
                 onClick={() => setBarcodeDnId(null)}
               >
                 Cancel
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center rounded-lg border border-blue-600 bg-white px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50"
+                onClick={handlePrintKanban}
+                disabled={!barcodeData || kanbanCards.length === 0}
+              >
+                Print Kanban ({kanbanCards.length})
               </button>
               <button
                 type="button"

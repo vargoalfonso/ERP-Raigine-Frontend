@@ -49,6 +49,7 @@ import {
 } from "@/lib/api/inventory/api";
 import {
   formatNumber,
+  formatStock,
   getStatusStockColor,
 } from "@/lib/api/raw-materials/utils";
 
@@ -391,7 +392,7 @@ const RawMaterialDetailModal = ({
           </Descriptions.Item>
           <Descriptions.Item label="Stock">
             <span className="text-lg font-semibold">
-              {formatNumber(state.record.stock || 0)}
+              {formatStock(state.record.stock || 0)}
             </span>
           </Descriptions.Item>
           <Descriptions.Item label="Unit of Measurement">
@@ -701,7 +702,7 @@ export default function RawMaterialsPage() {
         { label: "RM Type", value: record.category },
         { label: "RM Source", value: record.code },
         { label: "Warehouse", value: record.warehouse?.name },
-        { label: "Stock", value: formatNumber(record.stock ?? 0) },
+        { label: "Stock", value: formatStock(record.stock ?? 0) },
         { label: "Status", value: record.status },
       ],
       progress,
@@ -722,7 +723,7 @@ export default function RawMaterialsPage() {
       ),
     },
     {
-      title: "Child Uniq",
+      title: "Uniq",
       key: "child_uniq",
       width: 200,
       render: (record: RawMaterialRecord) => {
@@ -799,7 +800,7 @@ export default function RawMaterialsPage() {
       width: 100,
       render: (record: RawMaterialRecord) => (
         <div className="text-lg font-semibold text-gray-900">
-          {formatNumber(record.stock || 0)}
+          {formatStock(record.stock || 0)}
         </div>
       ),
     },

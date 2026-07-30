@@ -485,7 +485,7 @@ export default function StockOpnamePage() {
             />
             {r.status !== "Completed" && r.approval !== "Approved" && (
               <>
-                <Button
+                {/* <Button
                   size="small"
                   type="primary"
                   className="!rounded-lg !bg-green-600 hover:!bg-green-700"
@@ -510,7 +510,7 @@ export default function StockOpnamePage() {
                     setApprovalRemarks("");
                     setApprovalOpen(true);
                   }}
-                />
+                /> */}
               </>
             )}
             {/* <Popconfirm

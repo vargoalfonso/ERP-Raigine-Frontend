@@ -199,13 +199,13 @@ const makeScrapColumns = (actions: {
           className="text-green-600 hover:text-green-800"
           onClick={() => actions.onEdit(record)}
         />
-        <Button
+        {/* <Button
           type="text"
           icon={<FaRegTrashAlt color="red" />}
           size="small"
           className="text-red-600 hover:text-gray-800"
           onClick={() => actions.onDelete(record)}
-        />
+        /> */}
       </div>
     ),
   },
