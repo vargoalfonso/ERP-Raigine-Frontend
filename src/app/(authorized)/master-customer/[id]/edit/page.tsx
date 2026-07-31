@@ -9,6 +9,7 @@ import {
   Checkbox,
   Form,
   Input,
+  Spin,
   Select,
   Typography,
   message,
@@ -20,9 +21,9 @@ import {
   useGetCustomerByIdQuery,
   useUpdateCustomerMutation,
 } from "@/lib/api/customers/api";
-import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { useGetBomListQuery } from "@/lib/api/bom/api";
 import { BANK_SELECT_OPTIONS } from "@/lib/constants/banks";
-import { buildBomCodeSelectOptions, normalizeBomCodes } from "@/lib/utils/bomSelectOptions";
+import { normalizeBomCodes } from "@/lib/utils/bomSelectOptions";
 
 type EditCustomerForm = {
   customerId?: string;
@@ -47,7 +48,7 @@ export default function EditCustomerPage() {
   const customerQueryArg = apiEnabled && customerId ? customerId : skipToken;
 
   const customerQuery = useGetCustomerByIdQuery(customerQueryArg);
-  const bomQuery = useGetBomTreeQuery({ page: 1, limit: 1000 }, { skip: !apiEnabled });
+  const bomQuery = useGetBomListQuery({ page: 1, limit: 1000 }, { skip: !apiEnabled });
 
   const [billingSame, setBillingSame] = useState(true);
   const [updateCustomer, updateState] = useUpdateCustomerMutation();
@@ -87,32 +88,21 @@ export default function EditCustomerPage() {
   );
 
   const bomOptions = useMemo(() => {
-    const data = bomQuery.data?.data;
-    const arr = Array.isArray(data)
-      ? data
-      : Array.isArray((data as any)?.items)
-      ? (data as any).items
-      : [];
-    // Only include parent/top-level BOM codes (no parent pointer or level === 1)
-    const parentCodes = new Set<string>();
-    const walk = (items: any[]) => {
-      for (const node of items) {
-        const hasParent = Boolean(node.parent_id ?? node.parentId ?? node.parent_uuid ?? node.parentUuid);
-        const levelNum = typeof node.level === "number" ? node.level : undefined;
-        if (!hasParent || levelNum === 1) {
-          const code = String(node.uniq_code ?? node.uniq ?? "").trim();
-          if (code) parentCodes.add(code);
-        }
-        // do not traverse children for parent detection; children are not considered parent-level
-      }
-    };
-    walk(arr);
-    // Build select options from parentCodes
-    const options = Array.from(parentCodes)
-      .map((c) => ({ value: c, label: c }))
-      .sort((a, b) => String(a.value ?? "").localeCompare(String(b.value ?? "")));
-    return options;
+    const rootNodes = Array.isArray(bomQuery.data?.data) ? bomQuery.data.data : [];
+    return rootNodes
+      .map((node) => {
+        const uniq = typeof (node as any)?.uniq === "string" && (node as any).uniq.trim()
+          ? (node as any).uniq.trim()
+          : typeof (node as any)?.uniq_code === "string"
+            ? (node as any).uniq_code.trim()
+            : "";
+        return uniq ? { label: uniq, value: uniq } : null;
+      })
+      .filter((option): option is { label: string; value: string } => Boolean(option))
+      .sort((left, right) => left.value.localeCompare(right.value));
   }, [bomQuery.data]);
+
+  const bomOptionsLoading = bomQuery.isLoading || bomQuery.isFetching;
 
   const onSave = async () => {
     try {
@@ -286,10 +276,21 @@ export default function EditCustomerPage() {
                   showSearch
                   className="!rounded-lg"
                   placeholder="Select BOM uniq codes"
-                  loading={bomQuery.isFetching}
+                  loading={bomOptionsLoading}
+                  disabled={bomOptionsLoading && bomOptions.length === 0}
                   options={bomOptions}
                   optionFilterProp="label"
                   maxTagCount="responsive"
+                  notFoundContent={
+                    bomOptionsLoading ? (
+                      <div className="flex items-center justify-center py-3">
+                        <Spin size="small" />
+                        <span className="ml-2 text-xs text-gray-500">
+                          Loading parent UNIQ data...
+                        </span>
+                      </div>
+                    ) : undefined
+                  }
                 />
               </Form.Item>
             </Card>
