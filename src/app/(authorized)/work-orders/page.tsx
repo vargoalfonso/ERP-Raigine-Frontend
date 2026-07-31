@@ -21,6 +21,7 @@ import {
   PrinterOutlined,
   PlayCircleOutlined,
   SearchOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
@@ -30,7 +31,9 @@ import WorkOrderLineExportModal, {
   buildBomDetailIndex,
   type ReportItem as WorkOrderReportItem,
 } from "@/components/work-orders/WorkOrderLineReport";
+import WorkOrderImportModal from "@/components/WorkOrderImportModal";
 import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
+
 import {
   type RmProcessingWorkOrderRecord,
   type WorkOrderRecord,
@@ -620,6 +623,7 @@ export default function WorkOrdersPage() {
   const [bulkNote, setBulkNote] = useState("");
   /* Modal export "Work Order per Line" (format PDF acuan). */
   const [lineExportOpen, setLineExportOpen] = useState(false);
+  const [importBulkOpen, setImportBulkOpen] = useState(false);
 
   const [bulkApproveWorkOrders, bulkApproveState] =
     useBulkApproveWorkOrdersMutation();
@@ -1777,13 +1781,13 @@ export default function WorkOrdersPage() {
               </div>
             ) : null}
           </div>
-          <Button
+          {/* <Button
             className="!rounded-lg"
             icon={<PrinterOutlined />}
             onClick={() => message.info("Print Kanban (mock)")}
           >
             Print Kanban
-          </Button>
+          </Button> */}
         </div>
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -2230,6 +2234,15 @@ export default function WorkOrdersPage() {
                       : ""}
                   </Button>
                 ) : null}
+                {isWorkOrderTab ? (
+                  <Button
+                    className="!rounded-lg"
+                    icon={<UploadOutlined />}
+                    onClick={() => setImportBulkOpen(true)}
+                  >
+                    Import Bulk WO
+                  </Button>
+                ) : null}
                 <Button
                   type="primary"
                   icon={<PlusOutlined />}
@@ -2563,6 +2576,11 @@ export default function WorkOrdersPage() {
         open={lineExportOpen}
         items={lineExportItems}
         onClose={() => setLineExportOpen(false)}
+      />
+
+      <WorkOrderImportModal
+        open={importBulkOpen}
+        onClose={() => setImportBulkOpen(false)}
       />
     </div>
   );
