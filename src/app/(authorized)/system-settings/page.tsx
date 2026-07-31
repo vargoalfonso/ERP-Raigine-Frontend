@@ -276,7 +276,7 @@ const MODULE_PERMISSION_KEYS: Record<string, string[]> = {
   roles: ["role"],
   "safety-stock": ["safety-stock"],
   stockdays: ["stockdays"],
-  "buy-not-buy-flag": ["procurement"],
+  // "buy-not-buy-flag": ["procurement"],
   "type-parameters": ["type-parameter"],
   scrap: ["scrap_type", "scrap"],
   "uom-global": ["unit_measurement"],
@@ -7264,7 +7264,10 @@ const handleImportKanban = async (file: File): Promise<boolean> => {
                         dataSource={filteredKanban}
                         rowKey="id"
                         pagination={false}
-                        scroll={{ x: "max-content" }}
+                        sticky
+                        // Scroll di dalam tabel (header tetap) supaya halaman
+                        // tidak memanjang ke bawah.
+                        scroll={{ x: "max-content", y: 460 }}
                       />
                     ) : selectedModuleId === "global" ? (
                       <Table<GlobalWorkingDaysRow>
@@ -7280,7 +7283,10 @@ const handleImportKanban = async (file: File): Promise<boolean> => {
                         dataSource={filteredProcess}
                         rowKey="id"
                         pagination={false}
-                        scroll={{ x: "max-content" }}
+                        sticky
+                        // Scroll di dalam tabel (header tetap) supaya halaman
+                        // tidak memanjang ke bawah.
+                        scroll={{ x: "max-content", y: 460 }}
                       />
                     ) : selectedModuleId === "machine" ? (
                       <Table<MachinePatternRow>
