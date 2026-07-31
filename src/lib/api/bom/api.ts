@@ -604,7 +604,7 @@ const parseCreateId = (response: unknown): string =>
 // ReplaceBom returns { new_bom_id, old_bom_id, ... } — NOT { bom_id, id }.
 // The new version lives under a brand new bom_id, so the edit page must redirect there.
 const parseReplaceIds = (
-  response: unknown
+  response: unknown,
 ): { id: string; bom_id: string; new_bom_id: string; old_bom_id: string } => {
   const empty = { id: "", bom_id: "", new_bom_id: "", old_bom_id: "" };
   if (!isRecord(response)) return empty;
@@ -614,7 +614,7 @@ const parseReplaceIds = (
     (data as any).newBomId,
     data.bom_id,
     data.id,
-    data.uuid
+    data.uuid,
   );
   const oldId = pickId((data as any).old_bom_id, (data as any).oldBomId);
   return { id: newId, bom_id: newId, new_bom_id: newId, old_bom_id: oldId };
@@ -674,25 +674,48 @@ export const bomSlice = apiSlice.injectEndpoints({
       ApiResponse<BackendBomNode[]>,
       { page?: number; limit?: number } | void
     >({
-      query: (params) => {
-        const page = params?.page ?? 1;
-        // Backend clamps any limit > 200 down to 20; request the max allowed.
-        const limit = Math.min(1000, params?.limit ?? 1000);
-        const searchParams = new URLSearchParams({
-          page: String(page),
-          limit: String(limit),
-        });
-        return {
-          url: `/products/bom?${searchParams.toString()}`,
-          method: "GET",
-          meta: { useAuthorization: true, contentType: "application/json" },
-        };
+      // The backend clamps any limit > 200 back down to its default of 20, so a
+      // single large request only ever returns ~20 rows (2 pages of 10 in the
+      // table). Page through the list at the max allowed limit (200) and
+      // accumulate every row so the table paginates over the full dataset.
+      async queryFn(params, _api, _extraOptions, fetchWithBQ) {
+        const limit = Math.min(200, params?.limit ?? 200);
+        const all: BackendBomNode[] = [];
+        let page = 1;
+        const maxPages = 500; // safety cap: 500 * 200 = 100,000 rows
+
+        while (page <= maxPages) {
+          const searchParams = new URLSearchParams({
+            page: String(page),
+            limit: String(limit),
+          });
+          const result = await fetchWithBQ({
+            url: `/products/bom?${searchParams.toString()}`,
+            method: "GET",
+            meta: { useAuthorization: true, contentType: "application/json" },
+          });
+          if (result.error) return { error: result.error };
+
+          const parsed = parseBomListResponse(result.data);
+          all.push(...parsed.items);
+
+          // Prefer the backend's own page count when present; otherwise fall
+          // back to stopping once a short (final) page comes back.
+          const knownTotalPages =
+            parsed.totalPages && parsed.totalPages > 0
+              ? parsed.totalPages
+              : null;
+          const reachedLastPage = knownTotalPages
+            ? page >= knownTotalPages
+            : parsed.items.length < limit;
+          if (reachedLastPage) break;
+          page += 1;
+        }
+
+        const mapped = all.map(mapNewNodeToLegacy);
+        return { data: ok(buildTreeIfFlat(mapped)) };
       },
-      transformResponse: (response: unknown) => {
-        const arr = parseTreeResponse(response);
-        const mapped = arr.map(mapNewNodeToLegacy);
-        return ok(buildTreeIfFlat(mapped));
-      },
+      providesTags: [BOM_TAG],
     }),
 
     getBomsBySupplier: builder.query<
@@ -834,7 +857,12 @@ export const bomSlice = apiSlice.injectEndpoints({
     }),
 
     replaceBom: builder.mutation<
-      ApiResponse<{ id: string; bom_id: string; new_bom_id: string; old_bom_id: string }>,
+      ApiResponse<{
+        id: string;
+        bom_id: string;
+        new_bom_id: string;
+        old_bom_id: string;
+      }>,
       ReplaceBomRequest
     >({
       query: ({ bom_id, payload, files = [] }) => {
@@ -852,7 +880,8 @@ export const bomSlice = apiSlice.injectEndpoints({
           meta: { useAuthorization: true, contentType: "multipart/form-data" },
         };
       },
-      transformResponse: (response: unknown) => ok(parseReplaceIds(response), "Updated"),
+      transformResponse: (response: unknown) =>
+        ok(parseReplaceIds(response), "Updated"),
       invalidatesTags: [BOM_TAG],
     }),
 

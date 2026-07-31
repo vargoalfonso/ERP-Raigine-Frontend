@@ -26,6 +26,16 @@ import {
   useGetWorkOrderByIdQuery,
   useGetWorkOrderItemQRQuery,
 } from "@/lib/api/work-orders/api";
+import {
+  buildKanbanCardsHtml,
+  buildKanbanId,
+  kanbanCardCount,
+  kanbanNextProcessLabel,
+  kanbanPrintStamp,
+  kanbanQty,
+  resolveWorkOrderKanbanCategory,
+  type KanbanCardData,
+} from "@/components/kanban/KanbanTransportCard";
 
 type DetailRow = {
   key: string;
@@ -39,6 +49,8 @@ type DetailRow = {
   status: string;
   kanbanNumber: string;
   qrDataUrl?: string;
+  /** Routing snapshot; each step carries the is_assembly flag. */
+  processFlowJson: unknown;
 };
 
 type DetailFieldProps = {
@@ -127,6 +139,7 @@ export default function WorkOrderDetailPage() {
       status: item.status || "Pending",
       kanbanNumber: item.kanban_number ?? "-",
       qrDataUrl: item.qr_data_url,
+      processFlowJson: item.process_flow_json,
     }));
   }, [bomIndex, workOrder?.items]);
 
@@ -188,6 +201,123 @@ export default function WorkOrderDetailPage() {
   useEffect(() => {
     setBrokenQRSrc("");
   }, [selectedItem?.key, selectedItemQRSrc]);
+
+  /**
+   * Builds Kanban Transport cards for the given work order items.
+   *
+   * A child part prints as CP (orange header). If ANY routing step of the item
+   * is flagged is_assembly in System Settings > Process, that item prints in
+   * the Sub-assy layout (cyan header) instead. The flag is read from the
+   * process_flow_json snapshot on the work order item, so renaming a process
+   * never breaks the rule.
+   */
+  const buildKanbanCards = useCallback(
+    (rows: DetailRow[]): KanbanCardData[] => {
+      const printedAt = kanbanPrintStamp();
+      const woNumber = String(
+        formatWorkOrderDisplayNumber(workOrder?.wo_number) ||
+          workOrder?.wo_number ||
+          "-",
+      )
+        .replace(/\(mock\)/gi, "")
+        .trim();
+
+      const cards: KanbanCardData[] = [];
+
+      for (const row of rows) {
+        const { category, label } = resolveWorkOrderKanbanCategory(
+          row.processFlowJson,
+        );
+
+        // row.quantity is already formatted as "120 pcs".
+        const totalPlan = Number.parseFloat(row.quantity) || 0;
+        const uom =
+          row.quantity.replace(/^[\d.,\s]+/, "").trim().toUpperCase() || "PCS";
+
+        // SNP from BOM is the closest available "qty per kanban" source.
+        const snp = Number(bomIndex.packingNumberByUniq[row.uniq] ?? 0);
+        const perKanban = snp > 0 ? snp : totalPlan;
+        const cardTotal = kanbanCardCount(totalPlan, perKanban);
+        const qr = row.qrDataUrl ?? "";
+        const kanbanNumber = row.kanbanNumber === "-" ? "" : row.kanbanNumber;
+
+        for (let index = 1; index <= cardTotal; index += 1) {
+          cards.push({
+            key: `${row.key}::${index}`,
+            category,
+            categoryLabel: label,
+            partNumber: row.uniq || "-",
+            partName: row.partName,
+            qtyPerKanban: kanbanQty(perKanban, uom),
+            totalPlan: kanbanQty(totalPlan, uom),
+            cardNo: index,
+            cardTotal,
+            kanbanId:
+              cardTotal === 1 && kanbanNumber
+                ? kanbanNumber
+                : buildKanbanId(category, row.uniq, index, cardTotal),
+            // Internal production: no supplier, and no plant / store / dock
+            // source exists on the work order payload.
+            supplier: "-",
+            plant: "-",
+            batchLot: "-",
+            basis: `WO ${woNumber}`,
+            areaStore: "-",
+            partLocation: "-",
+            nextProcess: kanbanNextProcessLabel(
+              row.processFlowJson,
+              row.processName,
+            ),
+            dock: "-",
+            lineStore: "-",
+            partQr: qr,
+            kanbanQr: qr,
+            printedAt,
+          });
+        }
+      }
+
+      return cards;
+    },
+    [bomIndex, workOrder?.wo_number],
+  );
+
+  /** Prints through a hidden iframe so the page is never navigated away. */
+  const printKanbanCards = useCallback(
+    (rows: DetailRow[]) => {
+      const cards = buildKanbanCards(rows);
+      if (cards.length === 0) {
+        message.warning("No kanban card to print");
+        return;
+      }
+
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.srcdoc = buildKanbanCardsHtml(cards, "Kanban Transport");
+
+      iframe.onload = () => {
+        const frameWindow = iframe.contentWindow;
+        if (!frameWindow) return;
+        frameWindow.focus();
+        frameWindow.print();
+        window.setTimeout(() => {
+          try {
+            document.body.removeChild(iframe);
+          } catch {
+            // already detached
+          }
+        }, 1000);
+      };
+
+      document.body.appendChild(iframe);
+    },
+    [buildKanbanCards],
+  );
 
   const printDetail = useCallback(() => {
     const win = window.open("", "_blank", "width=1100,height=800");
@@ -411,6 +541,14 @@ export default function WorkOrderDetailPage() {
             <Button className="min-h-11 flex-1 !rounded-md lg:flex-none" onClick={() => router.push("/work-orders")}>
               Close
             </Button>
+            <Button
+              icon={<PrinterOutlined />}
+              className="min-h-11 flex-1 !rounded-md lg:flex-none"
+              onClick={() => printKanbanCards(detailRows)}
+              disabled={detailRows.length === 0}
+            >
+              Print Kanban ({detailRows.length})
+            </Button>
             <Button type="primary" icon={<PrinterOutlined />} className="min-h-11 flex-1 !rounded-md lg:flex-none" onClick={printDetail}>
               Print work order
             </Button>
@@ -599,6 +737,20 @@ export default function WorkOrderDetailPage() {
                         disabled={!selectedItemQRSrc || hasBrokenSelectedQR}
                       >
                         Print item QR
+                      </Button>
+                      <Button
+                        icon={<PrinterOutlined />}
+                        className="min-h-11 flex-1 !rounded-md"
+                        onClick={() =>
+                          printKanbanCards([
+                            {
+                              ...selectedItem,
+                              qrDataUrl: selectedItemQRSrc || selectedItem.qrDataUrl,
+                            },
+                          ])
+                        }
+                      >
+                        Print Kanban
                       </Button>
                       <Button className="min-h-11 flex-1 !rounded-md" onClick={() => setSelectedItemKey(null)}>
                         Close detail

@@ -27,6 +27,33 @@ export const formatNumber = (value: number | null | undefined): string => {
 };
 
 /**
+ * Format stok: dibulatkan KE ATAS (roundup) sehingga tidak pernah ada koma.
+ *
+ * Dipakai khusus untuk nilai stok. Sengaja TIDAK mengubah formatNumber karena
+ * fungsi itu juga dipakai kolom lain (kanban quantity, stock days, kanban
+ * needed) yang tidak diminta dibulatkan.
+ *
+ * Pembulatan ini hanya untuk TAMPILAN. Nilai asli di database dan nilai yang
+ * dikirim saat create/update tidak berubah, termasuk perhitungan status
+ * OutOfStock / LowStock yang tetap memakai angka asli.
+ */
+export const formatStock = (value: number | null | undefined): string => {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "-";
+  }
+
+  return new Intl.NumberFormat("id-ID", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(Math.ceil(numeric));
+};
+
+/**
  * Format harga dalam IDR
  */
 export const formatPrice = (value: number | null | undefined): string => {

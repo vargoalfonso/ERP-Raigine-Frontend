@@ -21,12 +21,19 @@ import {
   PrinterOutlined,
   PlayCircleOutlined,
   SearchOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex, type BomUniqIndex } from "@/lib/utils/bomUniq";
+import WorkOrderLineExportModal, {
+  buildBomDetailIndex,
+  type ReportItem as WorkOrderReportItem,
+} from "@/components/work-orders/WorkOrderLineReport";
+import WorkOrderImportModal from "@/components/WorkOrderImportModal";
 import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
+
 import {
   type RmProcessingWorkOrderRecord,
   type WorkOrderRecord,
@@ -45,6 +52,9 @@ import {
 import { useListPrlsQuery, type PrlRecord } from "@/lib/api/prl/api";
 
 const { TextArea } = Input;
+
+/* Dipakai saat uniq belum punya process route di BOM, sehingga line tidak diketahui. */
+const FALLBACK_EXPORT_LINE = "UNASSIGNED";
 
 type UnknownRecord = Record<string, unknown>;
 const isRecord = (value: unknown): value is UnknownRecord =>
@@ -611,6 +621,9 @@ export default function WorkOrdersPage() {
   const [selectedRows, setSelectedRows] = useState<WorkOrderRow[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkNote, setBulkNote] = useState("");
+  /* Modal export "Work Order per Line" (format PDF acuan). */
+  const [lineExportOpen, setLineExportOpen] = useState(false);
+  const [importBulkOpen, setImportBulkOpen] = useState(false);
 
   const [bulkApproveWorkOrders, bulkApproveState] =
     useBulkApproveWorkOrdersMutation();
@@ -740,6 +753,15 @@ export default function WorkOrdersPage() {
     () => buildBomUniqIndex(bomTreeRes?.data ?? []),
     [bomTreeRes?.data],
   );
+  /**
+   * Index tambahan dari BOM tree yang SAMA (tidak ada request baru).
+   * buildBomUniqIndex membuang quantity dan process_routes, padahal keduanya
+   * dibutuhkan untuk daftar material + machine/cycle time di laporan per line.
+   */
+  const bomDetail = useMemo(
+    () => buildBomDetailIndex(bomTreeRes?.data ?? []),
+    [bomTreeRes?.data],
+  );
   const workOrdersPagedQuery = useGetWorkOrdersQuery(
     { page, limit },
     {
@@ -855,6 +877,66 @@ export default function WorkOrdersPage() {
       ),
     );
   }, [activeTab, search, workOrders]);
+
+  /**
+   * Ubah WO yang dicentang di tabel menjadi baris laporan per line.
+   * Satu WO bisa punya beberapa uniq, dan tiap uniq jadi satu baris laporan.
+   */
+  const lineExportItems = useMemo<WorkOrderReportItem[]>(() => {
+    const items: WorkOrderReportItem[] = [];
+
+    for (const row of selectedRows) {
+      for (const detail of row.uniqDetails) {
+        const uniq = (detail.uniq ?? "").trim();
+        /* uniqDetails.quantity berbentuk string "60 pcs", ambil angkanya. */
+        const woQty = Number.parseFloat(String(detail.quantity)) || 0;
+
+        const routes = bomDetail.routesByUniq[uniq] ?? [];
+        const primaryRoute = routes[0];
+        const cycleSec = routes.reduce(
+          (acc, route) => acc + (route.cycleTimeSec || 0),
+          0,
+        );
+
+        const snpRaw = bomDetail.snpByUniq[uniq];
+        const snp = snpRaw && snpRaw > 0 ? snpRaw : woQty;
+        const labelCount = snp > 0 ? Math.ceil(woQty / snp) : 1;
+
+        const materials = (bomDetail.materialsByUniq[uniq] ?? []).map(
+          (material) => ({
+            code: material.code,
+            name: material.name,
+            reqQty: (material.qtyPerUniq || 0) * woQty,
+            uom: material.uom,
+            /* Tidak ada sumber data lokasi rak per material di database. */
+            position: "-",
+          }),
+        );
+
+        items.push({
+          key: `${row.key}::${detail.key}`,
+          woNumber: row.woNumber,
+          requestCode: uniq ? `KR/${uniq}` : row.woNumber,
+          fgCode: uniq || "-",
+          partNo: bomIndex.partNumberByUniq[uniq] ?? "",
+          itemName: detail.productName || "-",
+          woQty,
+          actualQty: woQty,
+          line: primaryRoute?.processName || FALLBACK_EXPORT_LINE,
+          machine: primaryRoute?.machineName || "",
+          cycleSec,
+          labelCount,
+          snp,
+          productionDate: row.targetDate || row.createDate || "-",
+          /* Plant/location belum ada sumbernya di data work order. */
+          location: "-",
+          materials,
+        });
+      }
+    }
+
+    return items;
+  }, [bomDetail, bomIndex, selectedRows]);
 
   const metrics = useMemo(() => {
     const isRm = activeTab === "rmProcessing";
@@ -1699,13 +1781,13 @@ export default function WorkOrdersPage() {
               </div>
             ) : null}
           </div>
-          <Button
+          {/* <Button
             className="!rounded-lg"
             icon={<PrinterOutlined />}
             onClick={() => message.info("Print Kanban (mock)")}
           >
             Print Kanban
-          </Button>
+          </Button> */}
         </div>
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -2139,6 +2221,28 @@ export default function WorkOrdersPage() {
                       : ""}
                   </Button>
                 ) : null}
+                {isWorkOrderTab ? (
+                  <Button
+                    className="!rounded-lg"
+                    icon={<PrinterOutlined />}
+                    disabled={!selectedRowKeys.length}
+                    onClick={() => setLineExportOpen(true)}
+                  >
+                    Export per Line{" "}
+                    {selectedRowKeys.length
+                      ? `(${selectedRowKeys.length})`
+                      : ""}
+                  </Button>
+                ) : null}
+                {isWorkOrderTab ? (
+                  <Button
+                    className="!rounded-lg"
+                    icon={<UploadOutlined />}
+                    onClick={() => setImportBulkOpen(true)}
+                  >
+                    Import Bulk WO
+                  </Button>
+                ) : null}
                 <Button
                   type="primary"
                   icon={<PlusOutlined />}
@@ -2467,6 +2571,17 @@ export default function WorkOrdersPage() {
           </div>
         ) : null}
       </Modal>
+
+      <WorkOrderLineExportModal
+        open={lineExportOpen}
+        items={lineExportItems}
+        onClose={() => setLineExportOpen(false)}
+      />
+
+      <WorkOrderImportModal
+        open={importBulkOpen}
+        onClose={() => setImportBulkOpen(false)}
+      />
     </div>
   );
 }

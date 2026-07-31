@@ -16,6 +16,7 @@ import {
 import type { ColumnsType, TablePaginationConfig } from "antd/es/table";
 import {
   DownloadOutlined,
+  FileTextOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
 import {
@@ -39,6 +40,7 @@ import {
   useGetSupplierPerformanceListQuery,
   useGetSupplierPerformanceSummaryQuery,
 } from "@/lib/api/suppliers/performance";
+import SupplierPerformanceReportModal from "@/components/supplier-performance/SupplierPerformanceReport";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -121,8 +123,13 @@ export default function SupplierPerformanceManagementPage() {
   const apiEnabled = Boolean(apiBaseUrl);
   const [messageApi, contextHolder] = message.useMessage();
 
-  const [periodType, setPeriodType] = useState<"monthly" | "yearly" | "specific">("monthly");
+  const [periodType, setPeriodType] = useState<
+    "monthly" | "quarterly" | "yearly" | "specific"
+  >("monthly");
   const [periodValue, setPeriodValue] = useState<string>(currentMonth());
+
+  // Baris yang sedang dibuka di modal detail / laporan cetak.
+  const [detailRow, setDetailRow] = useState<SupplierPerformanceRow | null>(null);
 
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
@@ -305,6 +312,17 @@ export default function SupplierPerformanceManagementPage() {
       width: 160,
       render: (v: unknown) => <Tag color={statusColor(toText(v))}>{toText(v) ?? "-"}</Tag>,
     },
+    {
+      title: "Detail",
+      key: "detail",
+      width: 110,
+      fixed: "right",
+      render: (_: unknown, row) => (
+        <Button size="small" icon={<FileTextOutlined />} onClick={() => setDetailRow(row)}>
+          Detail
+        </Button>
+      ),
+    },
   ];
 
   const pagination: TablePaginationConfig = {
@@ -347,11 +365,33 @@ export default function SupplierPerformanceManagementPage() {
             onChange={(value) => {
               setPeriodType(value);
               setPage(1);
-              if (value === "monthly" && !periodValue) setPeriodValue(currentMonth());
+
+              // Setiap tipe periode memakai format nilai yang berbeda.
+              // Kalau nilainya tidak ikut disesuaikan, backend menerima
+              // kombinasi yang mustahil cocok, misalnya tipe "yearly"
+              // dengan nilai "2026-07" yang menghasilkan query
+              //   LEFT(evaluation_period_value, 4) = '2026-07'
+              // (membandingkan 4 karakter dengan 7 karakter) sehingga
+              // tabel SELALU kosong.
+              const now = new Date();
+              const yyyy = String(now.getFullYear());
+              const mm = String(now.getMonth() + 1).padStart(2, "0");
+              const dd = String(now.getDate()).padStart(2, "0");
+
+              if (value === "yearly") {
+                setPeriodValue(yyyy);
+              } else if (value === "quarterly") {
+                setPeriodValue(`${yyyy}-Q${Math.floor(now.getMonth() / 3) + 1}`);
+              } else if (value === "specific") {
+                setPeriodValue(`${yyyy}-${mm}-${dd}`);
+              } else {
+                setPeriodValue(`${yyyy}-${mm}`);
+              }
             }}
             style={{ width: 140 }}
             options={[
               { label: "Monthly", value: "monthly" },
+              { label: "Quarterly", value: "quarterly" },
               { label: "Yearly", value: "yearly" },
               { label: "Specific", value: "specific" },
             ]}
@@ -362,7 +402,15 @@ export default function SupplierPerformanceManagementPage() {
               setPeriodValue(e.target.value);
               setPage(1);
             }}
-            placeholder={periodType === "yearly" ? "YYYY" : "YYYY-MM"}
+            placeholder={
+              periodType === "yearly"
+                ? "YYYY"
+                : periodType === "quarterly"
+                  ? "YYYY-Qn"
+                  : periodType === "specific"
+                    ? "YYYY-MM-DD"
+                    : "YYYY-MM"
+            }
             style={{ width: 140 }}
           />
           <Button icon={<ReloadOutlined />} onClick={handleReload} disabled={!apiEnabled}>
@@ -533,6 +581,14 @@ export default function SupplierPerformanceManagementPage() {
           )}
         </Card>
       </div>
+
+      <SupplierPerformanceReportModal
+        open={Boolean(detailRow)}
+        row={detailRow}
+        periodType={periodType}
+        periodValue={periodValue}
+        onClose={() => setDetailRow(null)}
+      />
     </div>
   );
 }

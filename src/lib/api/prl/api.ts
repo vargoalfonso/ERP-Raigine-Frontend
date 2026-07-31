@@ -159,11 +159,47 @@ export type PrlGapStatus = "Under" | "Over" | "On Track" | string;
 
 export type PrlGapRowDto = {
   uniq: string;
+  forecast_period?: string;
   customer_forecast: number;
   actual_delivery: number;
   gap_units: string | number;
   gap_percentage: string;
   status: PrlGapStatus;
+};
+
+export type PrlGapAnalysisRequest = {
+  page?: number;
+  limit?: number;
+  search?: string;
+  forecast_period?: string;
+  uniq_code?: string;
+};
+
+// Backend TIDAK punya endpoint /api/prl/gap-analysis. Sumber data yang benar adalah
+// GET /prls/history-vs-delivery, yang mengembalikan PRLHistoryListItem:
+//   { forecast_period, uniq_code, prl_quantity, delivery_qty, last_updated }
+// Sudah di-GROUP BY (forecast_period, uniq_code) di repository, dengan delivery_qty
+// diambil dari delivery_schedule_items_customer. Gap dihitung di sini karena backend
+// hanya mengirim kedua angka mentahnya.
+const normalizeGapRow = (raw: unknown): PrlGapRowDto => {
+  const record = isRecord(raw) ? raw : {};
+  const uniq = toText(record.uniq_code) ?? toText(record.uniq) ?? "-";
+  const forecastPeriod = toText(record.forecast_period);
+  const forecast = toNumber(record.prl_quantity) ?? toNumber(record.customer_forecast) ?? 0;
+  const delivery = toNumber(record.delivery_qty) ?? toNumber(record.actual_delivery) ?? 0;
+  const gapUnits = delivery - forecast;
+  const gapPercentage = forecast > 0 ? (gapUnits / forecast) * 100 : 0;
+  const status: PrlGapStatus = gapUnits < 0 ? "Under" : gapUnits > 0 ? "Over" : "On Track";
+
+  return {
+    uniq,
+    forecast_period: forecastPeriod,
+    customer_forecast: forecast,
+    actual_delivery: delivery,
+    gap_units: gapUnits,
+    gap_percentage: gapPercentage.toFixed(1),
+    status,
+  };
 };
 
 const normalizePrlRecord = (raw: unknown): PrlRecord => {
@@ -359,16 +395,22 @@ export const prlApiSlice = apiSlice
         invalidatesTags: [{ type: TAG, id: "LIST" }],
       }),
 
-      getPrlGapAnalysis: builder.query<PrlGapRowDto[], void>({
-        query: () => ({
-          url: "/api/prl/gap-analysis",
+      getPrlGapAnalysis: builder.query<PrlGapRowDto[], PrlGapAnalysisRequest | void>({
+        query: (params) => ({
+          url: "/prls/history-vs-delivery",
           method: "GET",
+          params: {
+            page: params?.page ?? 1,
+            limit: params?.limit ?? 500,
+            ...(params?.search ? { search: params.search } : {}),
+            ...(params?.forecast_period ? { forecast_period: params.forecast_period } : {}),
+            ...(params?.uniq_code ? { uniq_code: params.uniq_code } : {}),
+          },
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => {
-          const list = unwrapBackendData<PrlGapRowDto[]>(response);
-          return Array.isArray(list) ? list : [];
-        },
+        transformResponse: (response: unknown) =>
+          parseArrayResponse<unknown>(response).map(normalizeGapRow),
+        providesTags: [{ type: TAG, id: "GAP" }],
       }),
     }),
     overrideExisting: true,

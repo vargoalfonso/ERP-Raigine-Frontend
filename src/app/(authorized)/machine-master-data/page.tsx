@@ -598,50 +598,57 @@ export default function MachineMasterDataPage() {
     <title>${escapeHtml(title)}</title>
     <style>
       * { box-sizing: border-box; }
-      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; padding: 24px; color: #111827; }
-      .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 18px 18px 20px; max-width: 520px; margin: 0 auto; }
-      .top-title { font-size: 14px; font-weight: 600; margin: 0 0 14px; }
-      .center-title { text-align: center; font-weight: 800; letter-spacing: 0.02em; margin: 6px 0 2px; }
-      .center-sub { text-align: center; font-size: 12px; color: #6b7280; margin: 0 0 14px; }
-      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 10px 0 14px; }
-      .label { font-size: 11px; color: #6b7280; margin-bottom: 3px; }
+      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; padding: 24px; color: #111827; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .card { border: 2px solid #111827; border-radius: 12px; max-width: 520px; margin: 0 auto; overflow: hidden; }
+      .top-title { font-size: 13px; font-weight: 600; margin: 0; padding: 12px 18px; border-bottom: 1px solid #d1d5db; background: #f9fafb; }
+      .header { padding: 16px 18px 12px; text-align: center; border-bottom: 1px solid #e5e7eb; }
+      .center-title { font-weight: 800; font-size: 18px; letter-spacing: 0.03em; margin: 0 0 2px; }
+      .center-sub { font-size: 12px; color: #6b7280; margin: 0; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; }
+      .cell { padding: 12px 18px; border-bottom: 1px solid #e5e7eb; }
+      .cell:nth-child(odd) { border-right: 1px solid #e5e7eb; }
+      .label { font-size: 10px; color: #6b7280; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
       .value { font-size: 13px; font-weight: 600; }
-      .divider { height: 1px; background: #e5e7eb; margin: 12px 0; }
-      .qr { display: flex; justify-content: center; align-items: center; padding: 12px 0 6px; }
-      .qr img { width: 180px; height: 180px; image-rendering: pixelated; }
-      .bottom-code { text-align: center; font-size: 12px; color: #111827; margin-top: 6px; font-weight: 600; }
+      .qr { display: flex; justify-content: center; align-items: center; padding: 20px 0 10px; }
+      .qr-box { border: 1px solid #d1d5db; border-radius: 8px; padding: 10px; line-height: 0; }
+      .qr img { width: 180px; height: 180px; image-rendering: pixelated; display: block; }
+      .bottom-code { text-align: center; font-size: 13px; letter-spacing: 0.08em; color: #111827; padding: 2px 0 16px; font-weight: 700; }
       @media print {
         body { padding: 0; }
-        .card { border: none; }
+        .card { border: 2px solid #111827; }
+        .top-title { background: #f9fafb !important; }
       }
     </style>
   </head>
   <body>
     <div class="card">
       <div class="top-title">${escapeHtml(title)}</div>
-      <div class="center-title">MACHINE INFORMATION</div>
-      <div class="center-sub">${escapeHtml(barcodeRow.machineNumber)}</div>
+      <div class="header">
+        <div class="center-title">MACHINE INFORMATION</div>
+        <div class="center-sub">${escapeHtml(barcodeRow.machineNumber)}</div>
+      </div>
       <div class="grid">
-        <div>
+        <div class="cell">
           <div class="label">Machine Name</div>
           <div class="value">${escapeHtml(barcodeRow.machineName)}</div>
         </div>
-        <div>
+        <div class="cell">
           <div class="label">Production Line</div>
           <div class="value">${escapeHtml(barcodeRow.productionLine)}</div>
         </div>
-        <div>
+        <div class="cell">
           <div class="label">Process</div>
           <div class="value">${escapeHtml(barcodeRow.processName)}</div>
         </div>
-        <div>
+        <div class="cell">
           <div class="label">Capacity</div>
           <div class="value">${escapeHtml(capacityText)}</div>
         </div>
       </div>
-      <div class="divider"></div>
       <div class="qr">
-        ${dataUrl ? `<img src="${dataUrl}" alt="QR" />` : `<div style="width:180px;height:180px;border:2px solid #111827"></div>`}
+        <div class="qr-box">
+          ${dataUrl ? `<img src="${dataUrl}" alt="QR" />` : `<div style="width:180px;height:180px;border:2px solid #111827"></div>`}
+        </div>
       </div>
       <div class="bottom-code">${escapeHtml(barcodeRow.machineNumber)}</div>
     </div>
