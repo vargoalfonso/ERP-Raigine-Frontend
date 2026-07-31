@@ -126,6 +126,10 @@ function StockOpnameDetailPageContent() {
   const tab = (searchParams.get("tab") ?? "finished").toLowerCase();
   const tabInventoryType = TAB_TO_INVENTORY_TYPE[tab] ?? "FG";
 
+  // [so-approval] Approval dipindah ke menu Approval Manager.
+  // Sembunyikan tombol approve/reject di menu Stock Opname (UI-only;
+  // backend tidak diubah).
+  const SHOW_STOCK_OPNAME_APPROVAL = false;
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [approvalAction, setApprovalAction] = useState<"approve" | "reject">("approve");
   const [approvalRemarks, setApprovalRemarks] = useState<string>("");
@@ -334,7 +338,7 @@ function StockOpnameDetailPageContent() {
         </button>
 
         <div className="flex items-center gap-2">
-          {canApprove && (
+          {SHOW_STOCK_OPNAME_APPROVAL && canApprove && (
             <>
               <Button
                 className="!rounded-lg"

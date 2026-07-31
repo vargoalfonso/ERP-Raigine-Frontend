@@ -221,13 +221,33 @@ const toScrapStocksStats = (raw: unknown): ScrapStocksStats => {
 
 const toHistoryLogRecord = (raw: unknown): ScrapStockHistoryLogRecord => {
   const record = isRecord(raw) ? raw : {};
+  const qtyChange = getNumber(record, ["qty_change", "qtyChange"]);
+  const referenceId = getString(record, ["reference_id", "referenceId"]);
+  const baseMessage = getString(record, [
+    "message",
+    "description",
+    "remarks",
+    "notes",
+  ]);
+  const messageParts: string[] = [];
+  if (typeof qtyChange === "number") {
+    messageParts.push(`Qty ${qtyChange > 0 ? "+" : ""}${qtyChange}`);
+  }
+  if (referenceId) messageParts.push(referenceId);
   return {
     id: getNumber(record, ["id"]) ?? 0,
-    action: getString(record, ["action", "event", "type"]) ?? "",
-    message: getString(record, ["message", "description", "remarks"]) ?? "",
-    created_by: getString(record, ["created_by", "createdBy", "user"]) ?? null,
+    action: getString(record, ["action", "event", "type", "reason"]) ?? "",
+    message: baseMessage || messageParts.join(" · ") || "-",
+    created_by:
+      getString(record, ["created_by", "createdBy", "user", "logged_by"]) ??
+      null,
     created_at:
-      getString(record, ["created_at", "createdAt", "timestamp"]) ?? null,
+      getString(record, [
+        "created_at",
+        "createdAt",
+        "timestamp",
+        "logged_at",
+      ]) ?? null,
     raw: isRecord(raw) ? raw : undefined,
   };
 };

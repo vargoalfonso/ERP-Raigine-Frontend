@@ -194,6 +194,10 @@ export default function StockOpnamePage() {
 
   const [deleteSession, { isLoading: deleting }] = useDeleteStockOpnameSessionMutation();
   const [approveSession, { isLoading: approving }] = useApproveStockOpnameSessionMutation();
+  // [so-approval] Approval dipindah ke menu Approval Manager.
+  // Sembunyikan tombol approve/reject di menu Stock Opname (UI-only;
+  // backend tidak diubah).
+  const SHOW_STOCK_OPNAME_APPROVAL = false;
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [approvalAction, setApprovalAction] = useState<"approve" | "reject">("approve");
   const [approvalRemarks, setApprovalRemarks] = useState<string>("");
@@ -483,7 +487,9 @@ export default function StockOpnamePage() {
                 )
               }
             />
-            {r.status !== "Completed" && r.approval !== "Approved" && (
+            {SHOW_STOCK_OPNAME_APPROVAL &&
+              r.status !== "Completed" &&
+              r.approval !== "Approved" && (
               <>
                 {/* <Button
                   size="small"

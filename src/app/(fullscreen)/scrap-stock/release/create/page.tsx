@@ -1,13 +1,14 @@
 "use client";
 
-import React, { useMemo } from "react";
+// CART-RELEASE-V1: multi-item cart + total weight(kg)/price-per-kg redesign
+
+import React, { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeftOutlined,
-  CheckCircleOutlined,
   DeleteOutlined,
-  DollarOutlined,
-  UserOutlined,
+  MinusOutlined,
+  PlusOutlined,
 } from "@ant-design/icons";
 import {
   Button,
@@ -32,15 +33,16 @@ import { useListCustomersQuery } from "@/lib/api/customers/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 
 type FormValues = {
-  scrap_stock_id: number;
   release_date: dayjs.Dayjs;
   release_type: string;
-  release_qty: number;
-  customer_name: string;
-  price_per_unit: number;
+  customer_name?: string;
   disposal_reason?: string;
   remarks?: string;
+  weight_kg?: number;
+  price_per_kg?: number;
 };
+
+type CartLine = { stockId: number; qty: number };
 
 export default function ScrapReleaseCreatePage() {
   const router = useRouter();
@@ -49,44 +51,21 @@ export default function ScrapReleaseCreatePage() {
   const apiEnabled = Boolean(apiBaseUrl);
 
   const [createRelease, createState] = useCreateScrapReleaseMutation();
+  const [cart, setCart] = useState<CartLine[]>([]);
 
   const releaseType = Form.useWatch("release_type", form);
-  const releaseQty = Form.useWatch("release_qty", form);
-  const pricePerUnit = Form.useWatch("price_per_unit", form);
-  const scrapStockId = Form.useWatch("scrap_stock_id", form);
   const releaseDate = Form.useWatch("release_date", form);
   const customerName = Form.useWatch("customer_name", form);
   const disposalReason = Form.useWatch("disposal_reason", form);
+  const weightKg = Form.useWatch("weight_kg", form);
+  const pricePerKg = Form.useWatch("price_per_kg", form);
 
   const isDump = String(releaseType ?? "").toLowerCase() === "dump";
-  const totalValue = (releaseQty ?? 0) * (pricePerUnit ?? 0);
+  const totalValue = (weightKg ?? 0) * (pricePerKg ?? 0);
 
   const scrapStocksQuery = useGetScrapStocksQuery(
     { page: 1, limit: 500 },
     { skip: !apiEnabled },
-  );
-
-  const scrapStockOptions = useMemo(() => {
-    const items = scrapStocksQuery.data?.items ?? [];
-    return items
-      .filter((i) => i.id)
-      .map((i) => ({
-        label: `${i.uniq} — ${i.part_name}`,
-        value: i.id,
-      }));
-  }, [scrapStocksQuery.data?.items]);
-
-  const customersQuery = useListCustomersQuery(undefined, {
-    skip: !apiEnabled,
-  });
-
-  const customerOptions = useMemo(
-    () =>
-      (customersQuery.data ?? [])
-        .map((c) => c.customer_name)
-        .filter((n): n is string => Boolean(n && n.trim()))
-        .map((n) => ({ label: n, value: n })),
-    [customersQuery.data],
   );
 
   const stockById = useMemo(() => {
@@ -97,27 +76,99 @@ export default function ScrapReleaseCreatePage() {
     return map;
   }, [scrapStocksQuery.data?.items]);
 
-  const selectedStock = scrapStockId ? stockById.get(scrapStockId) : undefined;
+  const scrapStockOptions = useMemo(() => {
+    const items = scrapStocksQuery.data?.items ?? [];
+    const inCart = new Set(cart.map((c) => c.stockId));
+    return items
+      .filter((i) => i.id && !inCart.has(i.id))
+      .map((i) => ({
+        label: (i.uniq || "-") + " \u2014 " + (i.part_name || "-"),
+        value: i.id,
+      }));
+  }, [scrapStocksQuery.data?.items, cart]);
+
+  const customersQuery = useListCustomersQuery(undefined, { skip: !apiEnabled });
+
+  const customerOptions = useMemo(
+    () =>
+      (customersQuery.data ?? [])
+        .map((c) => c.customer_name)
+        .filter((n): n is string => Boolean(n && n.trim()))
+        .map((n) => ({ label: n, value: n })),
+    [customersQuery.data],
+  );
+
+  const totalPcs = useMemo(
+    () => cart.reduce((sum, c) => sum + (c.qty || 0), 0),
+    [cart],
+  );
+
+  const hasInvalidQty = cart.some((c) => {
+    const st = stockById.get(c.stockId);
+    const max = st?.quantity ?? 0;
+    return !c.qty || c.qty <= 0 || c.qty > max;
+  });
+
+  const addToCart = (stockId?: number) => {
+    if (!stockId) return;
+    setCart((prev) =>
+      prev.some((c) => c.stockId === stockId)
+        ? prev
+        : [...prev, { stockId, qty: 1 }],
+    );
+  };
+
+  const setQty = (stockId: number, qty: number) => {
+    setCart((prev) =>
+      prev.map((c) => (c.stockId === stockId ? { ...c, qty } : c)),
+    );
+  };
+
+  const stepQty = (stockId: number, delta: number) => {
+    setCart((prev) =>
+      prev.map((c) => {
+        if (c.stockId !== stockId) return c;
+        const st = stockById.get(stockId);
+        const max = st?.quantity ?? 0;
+        let next = (c.qty || 0) + delta;
+        if (next < 1) next = 1;
+        if (max && next > max) next = max;
+        return { ...c, qty: next };
+      }),
+    );
+  };
+
+  const removeFromCart = (stockId: number) => {
+    setCart((prev) => prev.filter((c) => c.stockId !== stockId));
+  };
 
   const onFinish = async (values: FormValues) => {
     try {
       if (!apiEnabled)
         throw new Error("API is not configured (NEXT_PUBLIC_API_URL)");
+      if (cart.length === 0) throw new Error("Add at least one scrap item");
+      if (hasInvalidQty)
+        throw new Error("Check the pcs quantity of each cart item");
 
       const res = await createRelease({
-        scrap_stock_id: values.scrap_stock_id,
+        scrap_stock_id: cart[0].stockId,
         release_date: values.release_date.format("YYYY-MM-DD"),
         release_type: values.release_type,
-        release_qty: values.release_qty,
-        customer_name: values.customer_name,
-        price_per_unit: values.price_per_unit,
+        release_qty: totalPcs,
+        items: cart.map((c) => ({
+          scrap_stock_id: c.stockId,
+          release_qty: c.qty,
+        })),
+        weight_kg: values.weight_kg ?? null,
+        price_per_kg: isDump ? null : (values.price_per_kg ?? null),
+        customer_name: values.customer_name ?? "",
         disposal_reason: values.disposal_reason?.trim() || "",
         remarks: values.remarks?.trim() || null,
       }).unwrap();
 
       messageApi.success("Scrap release created");
       router.push(
-        `/scrap-stock/release/detail?id=${encodeURIComponent(String(res.id))}`,
+        "/scrap-stock/release/detail?id=" + encodeURIComponent(String(res.id)),
       );
     } catch (e) {
       messageApi.error(getApiErrorMessage(e, "Failed to create scrap release"));
@@ -125,216 +176,152 @@ export default function ScrapReleaseCreatePage() {
   };
 
   return (
-    <div className="w-full min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 p-4 md:p-8">
       {contextHolder}
-
-      <div className="flex items-center bg-white px-8 py-4 border-b">
-        <div className="flex items-center gap-4">
-          <ArrowLeftOutlined
-            className="cursor-pointer"
+      <div className="mx-auto max-w-3xl">
+        <div className="mb-6 flex items-center gap-3">
+          <Button
+            type="text"
+            icon={<ArrowLeftOutlined />}
             onClick={() => router.back()}
           />
-          <h1 className="text-2xl font-semibold m-0">Add Scrap Release</h1>
+          <div>
+            <h1 className="text-xl font-semibold">Add Scrap Release</h1>
+            <p className="text-sm text-gray-400">
+              Pilih beberapa scrap seperti keranjang belanja, lalu timbang total
+              (kg) untuk perhitungan penjualan
+            </p>
+          </div>
         </div>
-      </div>
 
-      <div className="p-8 max-w-10/12 mx-auto">
-        <Form<FormValues>
+        <Form
           form={form}
           layout="vertical"
-          requiredMark={false}
           onFinish={onFinish}
-          initialValues={{
-            release_date: dayjs(),
-            release_type: "Sell",
-          }}
+          initialValues={{ release_type: "Sell", release_date: dayjs() }}
         >
-          {/* Hidden field to keep release_type in form state */}
-          <Form.Item name="release_type" hidden>
-            <Input />
-          </Form.Item>
-
-          {/* Scrap Item Information */}
-          <Card className="rounded-2xl shadow mb-6">
-            <div className="font-semibold text-base mb-0.5">
-              Scrap Item Information
-            </div>
-            <div className="text-xs text-green-600 mb-4">
-              Current scrap details from database
+          {/* Scrap Items (Cart) */}
+          <Card className="mb-6 rounded-2xl shadow">
+            <div className="mb-0.5 text-base font-semibold">Scrap Items</div>
+            <div className="mb-4 text-xs text-green-600">
+              Pilih multi data scrap, atur jumlah pcs (tidak boleh melebihi stock)
             </div>
 
-            <Form.Item
-              name="scrap_stock_id"
-              rules={[{ required: true, message: "Scrap stock is required" }]}
-              className="mb-0"
-            >
-              <Select
-                showSearch
-                placeholder="Search and select scrap stock..."
-                loading={scrapStocksQuery.isFetching}
-                options={scrapStockOptions}
-                filterOption={(input, opt) =>
-                  String(opt?.label ?? "")
-                    .toLowerCase()
-                    .includes(input.trim().toLowerCase())
-                }
-              />
-            </Form.Item>
+            <Select
+              showSearch
+              className="mb-4 w-full"
+              placeholder="Search and add scrap stock to cart..."
+              value={null}
+              loading={scrapStocksQuery.isFetching}
+              options={scrapStockOptions}
+              onSelect={(val) => addToCart(Number(val))}
+              filterOption={(input, opt) =>
+                String(opt?.label ?? "")
+                  .toLowerCase()
+                  .includes(input.trim().toLowerCase())
+              }
+            />
 
-            {selectedStock && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-                <div>
-                  <div className="text-xs text-gray-400">UNIQ</div>
-                  <div className="font-semibold text-sm mt-0.5">
-                    {selectedStock.uniq || "-"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-400">Part Number</div>
-                  <div className="font-semibold text-sm mt-0.5">
-                    {selectedStock.part_number || "-"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-400">Part Name</div>
-                  <div className="font-semibold text-sm mt-0.5">
-                    {selectedStock.part_name || "-"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-400">Model</div>
-                  <div className="font-semibold text-sm mt-0.5">
-                    {selectedStock.model || "-"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-400">Scrap Type</div>
-                  <Tag color="red" className="mt-1">
-                    {selectedStock.scrap_type || "-"}
-                  </Tag>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-400">Date Received</div>
-                  <div className="font-semibold text-sm mt-0.5">
-                    {selectedStock.date_received
-                      ? dayjs(selectedStock.date_received).format("M/D/YYYY")
-                      : "-"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-400">Current Stock</div>
-                  <div className="font-bold text-orange-500 text-xl mt-0.5">
-                    {selectedStock.quantity ?? 0}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-gray-400">Packing Number</div>
-                  <div className="font-semibold text-sm mt-0.5">
-                    {selectedStock.packing_number || "-"}
-                  </div>
+            {cart.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-200 p-6 text-center text-sm text-gray-400">
+                Belum ada item. Tambahkan scrap dari daftar di atas.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {cart.map((line) => {
+                  const st = stockById.get(line.stockId);
+                  const max = st?.quantity ?? 0;
+                  const over = !line.qty || line.qty <= 0 || line.qty > max;
+                  return (
+                    <div
+                      key={line.stockId}
+                      className="flex flex-col gap-3 rounded-xl border border-gray-100 p-3 md:flex-row md:items-center"
+                    >
+                      <div className="flex-1">
+                        <div className="text-sm font-semibold">
+                          {(st?.uniq || "-") + " \u2014 " + (st?.part_name || "-")}
+                        </div>
+                        <div className="text-xs text-gray-400">
+                          {(st?.part_number || "-") +
+                            " \u00b7 " +
+                            (st?.scrap_type || "-")}{" "}
+                          \u00b7 Stock:{" "}
+                          <span className="font-medium text-orange-500">
+                            {max}
+                          </span>{" "}
+                          pcs
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="small"
+                          icon={<MinusOutlined />}
+                          onClick={() => stepQty(line.stockId, -1)}
+                        />
+                        <InputNumber
+                          min={1}
+                          max={max}
+                          value={line.qty}
+                          status={over ? "error" : undefined}
+                          onChange={(v) => setQty(line.stockId, Number(v ?? 0))}
+                          className="w-24"
+                        />
+                        <Button
+                          size="small"
+                          icon={<PlusOutlined />}
+                          onClick={() => stepQty(line.stockId, 1)}
+                        />
+                        <span className="w-16 text-right text-xs text-gray-400">
+                          / {max} pcs
+                        </span>
+                        <Button
+                          danger
+                          type="text"
+                          icon={<DeleteOutlined />}
+                          onClick={() => removeFromCart(line.stockId)}
+                        />
+                      </div>
+                      {over ? (
+                        <div className="text-xs text-red-500 md:w-full">
+                          Qty tidak boleh lebih dari stock ({max} pcs)
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+                <div className="text-right text-sm font-medium">
+                  Total: {totalPcs} pcs dari {cart.length} item
                 </div>
               </div>
             )}
           </Card>
 
           {/* Release Type */}
-          <Card className="rounded-2xl shadow mb-6">
-            <div className="font-semibold text-base mb-0.5">Release Type</div>
-            <div className="text-xs text-gray-400 mb-4">
-              Select how to release the scrap material
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              {[
-                {
-                  value: "Sell",
-                  label: "Sell",
-                  desc: "Sell scrap to third party buyer",
-                  iconEl: (sel: boolean) => (
-                    <DollarOutlined
-                      className={`text-3xl ${sel ? "text-green-500" : "text-gray-400"}`}
-                    />
-                  ),
-                  activeCard: "border-green-500 bg-green-50",
-                  activeCheck: "text-green-500",
-                },
-                {
-                  value: "Dump",
-                  label: "Dump",
-                  desc: "Dispose of scrap material",
-                  iconEl: (sel: boolean) => (
-                    <DeleteOutlined
-                      className={`text-3xl ${sel ? "text-red-500" : "text-gray-400"}`}
-                    />
-                  ),
-                  activeCard: "border-red-500 bg-red-50",
-                  activeCheck: "text-red-500",
-                },
-              ].map((opt) => {
-                const selected = releaseType === opt.value;
-                return (
-                  <div
-                    key={opt.value}
-                    onClick={() =>
-                      form.setFieldValue("release_type", opt.value)
-                    }
-                    className={`cursor-pointer rounded-xl border-2 p-5 flex flex-col items-center gap-2 transition-all ${
-                      selected
-                        ? opt.activeCard
-                        : "border-gray-200 bg-white hover:border-gray-300"
-                    }`}
-                  >
-                    {opt.iconEl(selected)}
-                    <div className="font-semibold text-sm">{opt.label}</div>
-                    <div className="text-xs text-gray-400 text-center">
-                      {opt.desc}
-                    </div>
-                    {selected && (
-                      <CheckCircleOutlined className={opt.activeCheck} />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+          <Card className="mb-6 rounded-2xl shadow">
+            <div className="mb-3 text-base font-semibold">Release Type</div>
+            <Form.Item
+              name="release_type"
+              rules={[{ required: true, message: "Release type is required" }]}
+            >
+              <Select
+                options={[
+                  { label: "Sell", value: "Sell" },
+                  { label: "Dump", value: "Dump" },
+                ]}
+              />
+            </Form.Item>
           </Card>
 
           {/* Release Details */}
-          <Card className="rounded-2xl shadow mb-6">
-            <div className="font-semibold text-base mb-0.5">
-              Release Details
-            </div>
-            <div className="text-xs text-gray-400 mb-4">
-              {isDump
-                ? "Enter information for disposing the scrap"
-                : "Enter information for selling the scrap"}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Card className="mb-6 rounded-2xl shadow">
+            <div className="mb-3 text-base font-semibold">Release Details</div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Form.Item
                 label="Release Date"
                 name="release_date"
-                rules={[
-                  { required: true, message: "Release date is required" },
-                ]}
+                rules={[{ required: true, message: "Release date is required" }]}
               >
-                <DatePicker className="w-full" />
-              </Form.Item>
-
-              <Form.Item
-                label="Quantity to Release"
-                name="release_qty"
-                rules={[{ required: true, message: "Release qty is required" }]}
-                extra={
-                  selectedStock
-                    ? `Maximum: ${selectedStock.quantity} units`
-                    : undefined
-                }
-              >
-                <InputNumber
-                  className="w-full"
-                  min={0}
-                  max={selectedStock?.quantity}
-                />
+                <DatePicker className="w-full" format="DD/MM/YYYY" />
               </Form.Item>
 
               <Form.Item
@@ -344,130 +331,140 @@ export default function ScrapReleaseCreatePage() {
                 rules={
                   isDump
                     ? []
-                    : [{ required: true, message: "Customer name is required" }]
+                    : [{ required: true, message: "Customer is required" }]
                 }
               >
                 <Select
                   showSearch
-                  placeholder="Select customer / buyer"
+                  allowClear
+                  placeholder="Select customer"
                   loading={customersQuery.isFetching}
                   options={customerOptions}
-                  optionFilterProp="label"
-                  notFoundContent={
-                    customersQuery.isFetching
-                      ? "Loading..."
-                      : "No customer found"
+                  filterOption={(input, opt) =>
+                    String(opt?.label ?? "")
+                      .toLowerCase()
+                      .includes(input.trim().toLowerCase())
                   }
-                  allowClear
                 />
               </Form.Item>
 
               <Form.Item
-                label="Price per Unit (IDR)"
-                name="price_per_unit"
+                label="Weight (kg)"
+                name="weight_kg"
+                extra="Total berat scrap yang ditimbang (kg)"
+                rules={
+                  isDump
+                    ? []
+                    : [{ required: true, message: "Weight (kg) is required" }]
+                }
+              >
+                <InputNumber className="w-full" min={0} step={0.1} />
+              </Form.Item>
+
+              <Form.Item
+                label="Price per kg (IDR)"
+                name="price_per_kg"
                 hidden={isDump}
                 rules={
                   isDump
                     ? []
-                    : [
-                        {
-                          required: true,
-                          message: "Price per unit is required",
-                        },
-                      ]
+                    : [{ required: true, message: "Price per kg is required" }]
                 }
               >
-                <InputNumber className="w-full" min={0} />
+                <InputNumber
+                  className="w-full"
+                  min={0}
+                  formatter={(v) =>
+                    (v ?? "").toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+                  }
+                  parser={(v) => Number((v ?? "").replace(/,/g, ""))}
+                />
               </Form.Item>
             </div>
 
-            {/* Total Value — Sell only */}
-            {!isDump && (
-              <div className="rounded-xl bg-green-50 border border-green-100 p-4 flex items-center justify-between mb-4">
-                <div>
-                  <div className="text-xs text-gray-500">Total Value</div>
-                  <div className="text-2xl font-bold text-green-600">
-                    IDR {totalValue.toLocaleString("id-ID")}
-                  </div>
-                  <div className="text-xs text-gray-400">
-                    {releaseQty ?? 0} units × IDR{" "}
-                    {(pricePerUnit ?? 0).toLocaleString("id-ID")}/unit
-                  </div>
+            {!isDump ? (
+              <div className="mt-2 rounded-xl bg-green-50 p-4">
+                <div className="text-xs text-gray-500">Total Value</div>
+                <div className="text-lg font-bold text-green-600">
+                  IDR {totalValue.toLocaleString("id-ID")}
                 </div>
-                <DollarOutlined className="text-4xl text-green-400" />
+                <div className="text-xs text-gray-400">
+                  {(weightKg ?? 0)} kg \u00d7 IDR{" "}
+                  {(pricePerKg ?? 0).toLocaleString("id-ID")}/kg
+                </div>
               </div>
-            )}
+            ) : null}
 
-            {/* Disposal Reason — Dump only */}
-            {isDump && (
+            {isDump ? (
               <Form.Item
+                className="mt-2"
                 label="Disposal Reason"
                 name="disposal_reason"
                 rules={[
                   { required: true, message: "Disposal reason is required" },
                 ]}
               >
-                <Input placeholder="Enter disposal reason" />
+                <Input placeholder="e.g. Damaged beyond repair" />
               </Form.Item>
-            )}
+            ) : null}
 
             <Form.Item
+              className="mt-2"
               label="Remarks / Reference Number"
               name="remarks"
-              className="mb-4"
             >
-              <TextArea
-                rows={3}
-                placeholder="Additional notes, reference documents, or special instructions..."
-              />
+              <TextArea rows={3} placeholder="Optional notes" />
             </Form.Item>
-
-            {/* Validator & Approver */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="flex items-center gap-2 text-sm">
-                <UserOutlined className="text-blue-400 text-base" />
-                <div>
-                  <div className="text-xs text-gray-400">Validator</div>
-                  <div className="font-medium text-gray-700">
-                    Current User (Auto)
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 text-sm">
-                <CheckCircleOutlined className="text-green-500 text-base" />
-                <div>
-                  <div className="text-xs text-gray-400">Approver Required</div>
-                  <div className="font-medium text-gray-700">
-                    Department Manager
-                  </div>
-                </div>
-              </div>
-            </div>
           </Card>
 
           {/* Release Summary */}
-          <Card className="rounded-2xl shadow mb-6">
-            <div className="font-semibold text-base mb-0.5">
-              Release Summary
-            </div>
-            <div className="text-xs text-gray-400 mb-4">
-              Review before processing
-            </div>
+          <Card className="mb-6 rounded-2xl shadow">
+            <div className="mb-0.5 text-base font-semibold">Release Summary</div>
+            <div className="mb-4 text-xs text-gray-400">Review before processing</div>
 
-            <table className="w-full text-sm">
+            <table className="mb-4 w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  <th className="text-left py-2 text-gray-400 font-normal w-1/3">
-                    Field
+                  <th className="py-2 text-left font-normal text-gray-400">Item</th>
+                  <th className="py-2 text-left font-normal text-gray-400">
+                    Qty (pcs)
                   </th>
-                  <th className="text-left py-2 text-gray-400 font-normal">
-                    Value
+                  <th className="py-2 text-left font-normal text-gray-400">
+                    Remaining Stock
                   </th>
                 </tr>
               </thead>
               <tbody>
+                {cart.length === 0 ? (
+                  <tr>
+                    <td className="py-2 text-gray-400" colSpan={3}>
+                      No items
+                    </td>
+                  </tr>
+                ) : (
+                  cart.map((line) => {
+                    const st = stockById.get(line.stockId);
+                    const max = st?.quantity ?? 0;
+                    return (
+                      <tr key={line.stockId} className="border-b border-gray-100">
+                        <td className="py-2 font-medium">
+                          {(st?.uniq || "-") + " \u2014 " + (st?.part_name || "-")}
+                        </td>
+                        <td className="py-2 font-medium text-orange-500">
+                          {line.qty} pcs
+                        </td>
+                        <td className="py-2">{max - (line.qty || 0)} pcs</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+
+            <table className="w-full text-sm">
+              <tbody>
                 <tr className="border-b border-gray-100">
-                  <td className="py-2 text-gray-500">Release Type</td>
+                  <td className="w-1/3 py-2 text-gray-500">Release Type</td>
                   <td className="py-2">
                     <Tag color={isDump ? "default" : "blue"}>
                       {releaseType || "-"}
@@ -475,66 +472,59 @@ export default function ScrapReleaseCreatePage() {
                   </td>
                 </tr>
                 <tr className="border-b border-gray-100">
-                  <td className="py-2 text-gray-500">Item</td>
-                  <td className="py-2 font-medium">
-                    {selectedStock?.part_name || "-"}
-                  </td>
-                </tr>
-                <tr className="border-b border-gray-100">
-                  <td className="py-2 text-gray-500">Quantity Released</td>
+                  <td className="py-2 text-gray-500">Total Quantity</td>
                   <td className="py-2 font-medium text-orange-500">
-                    {releaseQty ?? 0} units
+                    {totalPcs} pcs
                   </td>
                 </tr>
                 <tr className="border-b border-gray-100">
-                  <td className="py-2 text-gray-500">Remaining Stock</td>
-                  <td className="py-2 font-medium">
-                    {selectedStock
-                      ? `${selectedStock.quantity - (releaseQty ?? 0)} units`
-                      : "-"}
-                  </td>
+                  <td className="py-2 text-gray-500">Weight</td>
+                  <td className="py-2 font-medium">{weightKg ?? 0} kg</td>
                 </tr>
-                {!isDump && (
-                  <tr className="border-b border-gray-100">
-                    <td className="py-2 text-gray-500">Buyer</td>
-                    <td className="py-2 font-medium">{customerName || "-"}</td>
-                  </tr>
-                )}
-                {!isDump && (
-                  <tr className="border-b border-gray-100">
-                    <td className="py-2 text-gray-500">Total Value</td>
-                    <td className="py-2 font-bold text-green-600">
-                      IDR {totalValue.toLocaleString("id-ID")}
-                    </td>
-                  </tr>
-                )}
-                {isDump && (
+                {!isDump ? (
+                  <>
+                    <tr className="border-b border-gray-100">
+                      <td className="py-2 text-gray-500">Price per kg</td>
+                      <td className="py-2 font-medium">
+                        IDR {(pricePerKg ?? 0).toLocaleString("id-ID")}
+                      </td>
+                    </tr>
+                    <tr className="border-b border-gray-100">
+                      <td className="py-2 text-gray-500">Buyer</td>
+                      <td className="py-2 font-medium">{customerName || "-"}</td>
+                    </tr>
+                    <tr className="border-b border-gray-100">
+                      <td className="py-2 text-gray-500">Total Value</td>
+                      <td className="py-2 font-bold text-green-600">
+                        IDR {totalValue.toLocaleString("id-ID")}
+                      </td>
+                    </tr>
+                  </>
+                ) : (
                   <tr className="border-b border-gray-100">
                     <td className="py-2 text-gray-500">Disposal Reason</td>
-                    <td className="py-2 font-medium">
-                      {disposalReason || "-"}
-                    </td>
+                    <td className="py-2 font-medium">{disposalReason || "-"}</td>
                   </tr>
                 )}
                 <tr>
                   <td className="py-2 text-gray-500">Release Date</td>
                   <td className="py-2 font-medium">
-                    {releaseDate ? dayjs(releaseDate).format("D/M/YYYY") : "-"}
+                    {releaseDate ? dayjs(releaseDate).format("DD/MM/YYYY") : "-"}
                   </td>
                 </tr>
               </tbody>
             </table>
           </Card>
 
-          <div className="flex items-center justify-end gap-3 mt-4">
+          <div className="flex justify-end gap-3">
             <Button onClick={() => router.back()}>Cancel</Button>
             <Button
               type="primary"
               htmlType="submit"
               loading={createState.isLoading}
-              disabled={!scrapStockId || !releaseQty || releaseQty <= 0}
+              disabled={cart.length === 0 || hasInvalidQty}
             >
-              Create Release
+              Process Release
             </Button>
           </div>
         </Form>
