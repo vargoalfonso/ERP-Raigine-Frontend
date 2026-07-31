@@ -8,6 +8,7 @@ import {
   Checkbox,
   Form,
   Input,
+  Spin,
   Select,
   Typography,
   message,
@@ -16,9 +17,9 @@ import { ArrowLeftOutlined, SaveOutlined } from "@ant-design/icons";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useCreateCustomerMutation } from "@/lib/api/customers/api";
-import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { useGetBomListQuery } from "@/lib/api/bom/api";
 import { BANK_SELECT_OPTIONS } from "@/lib/constants/banks";
-import { buildBomCodeSelectOptions, normalizeBomCodes } from "@/lib/utils/bomSelectOptions";
+import { normalizeBomCodes } from "@/lib/utils/bomSelectOptions";
 
 type CreateCustomerForm = {
   customerId?: string;
@@ -41,7 +42,7 @@ export default function CreateCustomerPage() {
 
   const [billingSame, setBillingSame] = useState(true);
   const [createCustomer, createState] = useCreateCustomerMutation();
-  const bomQuery = useGetBomTreeQuery({ page: 1, limit: 1000 }, { skip: !apiEnabled });
+  const bomQuery = useGetBomListQuery({ page: 1, limit: 1000 }, { skip: !apiEnabled });
 
   useEffect(() => {
     form.setFieldsValue({
@@ -63,7 +64,6 @@ export default function CreateCustomerPage() {
   );
 
   const bomOptions = useMemo(() => {
-    // Prefer the root-level nodes returned by the API (these are parent-level BOMs).
     const rootNodes = Array.isArray(bomQuery.data?.data) ? bomQuery.data.data : [];
     const rootOpts: { label: string; value: string }[] = [];
     for (const n of rootNodes) {
@@ -74,22 +74,10 @@ export default function CreateCustomerPage() {
           : "";
       if (uniq) rootOpts.push({ label: uniq, value: uniq });
     }
-    if (rootOpts.length) return rootOpts;
-
-    // Fallback: if API returned a paginated shape, use only the top-level items array
-    const data = bomQuery.data?.data;
-    const arr = Array.isArray(data) ? data : Array.isArray((data as any)?.items) ? (data as any).items : [];
-    const topLevelOpts: { label: string; value: string }[] = [];
-    for (const n of arr) {
-      const uniq = typeof (n as any)?.uniq === "string" && (n as any).uniq.trim()
-        ? (n as any).uniq.trim()
-        : typeof (n as any)?.uniq_code === "string"
-          ? (n as any).uniq_code.trim()
-          : "";
-      if (uniq) topLevelOpts.push({ label: uniq, value: uniq });
-    }
-    return topLevelOpts;
+    return rootOpts.sort((left, right) => left.value.localeCompare(right.value));
   }, [bomQuery.data]);
+
+  const bomOptionsLoading = bomQuery.isLoading || bomQuery.isFetching;
 
   const onSave = async () => {
     try {
@@ -243,10 +231,21 @@ export default function CreateCustomerPage() {
                   showSearch
                   className="!rounded-lg"
                   placeholder="Select BOM uniq codes"
-                  loading={bomQuery.isFetching}
+                  loading={bomOptionsLoading}
+                  disabled={bomOptionsLoading && bomOptions.length === 0}
                   options={bomOptions}
                   optionFilterProp="label"
                   maxTagCount="responsive"
+                  notFoundContent={
+                    bomOptionsLoading ? (
+                      <div className="flex items-center justify-center py-3">
+                        <Spin size="small" />
+                        <span className="ml-2 text-xs text-gray-500">
+                          Loading parent UNIQ data...
+                        </span>
+                      </div>
+                    ) : undefined
+                  }
                 />
               </Form.Item>
             </Card>
