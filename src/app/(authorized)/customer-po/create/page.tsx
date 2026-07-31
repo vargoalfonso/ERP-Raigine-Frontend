@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useCallback, useMemo, useState, useEffect } from "react";
 import {
   Button,
   Card,
@@ -33,11 +33,34 @@ import {
   useGetCustomerOrderByIdQuery,
   useUpdateCustomerOrderMutation,
 } from "@/lib/api/customer-orders/api";
-import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import {
+  useGetBomTreeQuery,
+  useGetBomListQuery,
+  useGetBomFullByIdQuery,
+} from "@/lib/api/bom/api";
 import { useGetUomsQuery } from "@/lib/api/system-settings/api";
+import {
+  useGetWorkOrderUniqOptionsQuery,
+  type WorkOrderUniqSource,
+} from "@/lib/api/work-orders/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 
 type OrderType = "dn" | "po" | "so";
+
+// Ambil nilai teks pertama yang tidak kosong (null/undefined/"" dilewati).
+const pickText = (...values: unknown[]): string => {
+  for (const v of values) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  }
+  return "";
+};
+
+// Uniq code dari customer master kadang beda spasi/kapital dengan BOM.
+const normalizeUniqKey = (value: unknown): string =>
+  String(value ?? "")
+    .trim()
+    .toUpperCase();
 
 type EntryRow = {
   key: string;
@@ -171,10 +194,130 @@ export default function CreateCustomerOrderPage() {
   const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
   const uomsQuery = useGetUomsQuery(undefined, { skip: !apiEnabled });
 
-  const bomIndex = useMemo(
-    () => buildBomUniqIndex((bomTreeQuery.data?.data ?? []) as unknown),
-    [bomTreeQuery.data],
+  // getBomTree hanya mengambil 1 halaman (backend meng-clamp limit besar jadi
+  // 20 baris), sehingga detail BOM untuk sebagian uniq tidak pernah ikut
+  // ter-load. getBomList melakukan paging sampai habis -> dipakai sebagai
+  // sumber utama detail BOM.
+  const bomListQuery = useGetBomListQuery({ limit: 200 }, { skip: !apiEnabled });
+
+  // Master fallback (items + inventory) supaya part name / part number / model /
+  // uom tetap terisi walaupun node BOM tidak membawa detail tersebut.
+  const masterUniqQuery = useGetWorkOrderUniqOptionsQuery(
+    { limit: 500, sources: [] as WorkOrderUniqSource[] },
+    { skip: !apiEnabled },
   );
+
+  const bomNodes = useMemo(() => {
+    const fromList = bomListQuery.data?.data;
+    const fromTree = bomTreeQuery.data?.data?.items;
+    return [
+      ...(Array.isArray(fromList) ? (fromList as unknown[]) : []),
+      ...(Array.isArray(fromTree) ? (fromTree as unknown[]) : []),
+    ];
+  }, [bomListQuery.data, bomTreeQuery.data]);
+
+  const bomIndex = useMemo(() => buildBomUniqIndex(bomNodes), [bomNodes]);
+
+  // Detail BOM per uniq (termasuk bom_id supaya bisa ambil detail penuh).
+  const bomDetailByUniq = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        bomId: string;
+        partNumber: string;
+        partName: string;
+        model: string;
+        uom: string;
+      }
+    >();
+
+    const visit = (node: unknown) => {
+      if (!node || typeof node !== "object") return;
+      const n = node as Record<string, unknown>;
+      const code = normalizeUniqKey(n.uniq_code ?? n.uniq);
+      if (code) {
+        const prev = map.get(code);
+        map.set(code, {
+          bomId: pickText(n.bom_id, prev?.bomId),
+          partNumber: pickText(n.part_number, prev?.partNumber),
+          partName: pickText(n.part_name, prev?.partName),
+          model: pickText(
+            n.model,
+            (n as { product_model?: unknown }).product_model,
+            n.assembly_code,
+            prev?.model,
+          ),
+          uom: pickText(n.uom, n.unit_measurement, prev?.uom),
+        });
+      }
+      const children = n.children;
+      if (Array.isArray(children)) children.forEach(visit);
+    };
+
+    bomNodes.forEach(visit);
+    return map;
+  }, [bomNodes]);
+
+  const masterMetaByUniq = useMemo(() => {
+    const map = new Map<
+      string,
+      { partNumber: string; partName: string; model: string; uom: string }
+    >();
+    for (const opt of masterUniqQuery.data ?? []) {
+      const code = normalizeUniqKey(opt.uniq_code);
+      if (!code) continue;
+      map.set(code, {
+        partNumber: pickText(opt.part_number),
+        partName: pickText(opt.part_name),
+        model: pickText(opt.model),
+        uom: pickText(opt.uom),
+      });
+    }
+    return map;
+  }, [masterUniqQuery.data]);
+
+  // Satu sumber kebenaran untuk auto-fill: detail BOM dulu, lalu index BOM,
+  // terakhir master item.
+  const resolveUniqMeta = useCallback(
+    (uniq: string) => {
+      const raw = String(uniq ?? "").trim();
+      const code = normalizeUniqKey(raw);
+      const bom = bomDetailByUniq.get(code);
+      const master = masterMetaByUniq.get(code);
+      return {
+        bomId: bom?.bomId ?? "",
+        partNumber: pickText(
+          bom?.partNumber,
+          bomIndex.partNumberByUniq[raw],
+          master?.partNumber,
+        ),
+        partName: pickText(
+          bom?.partName,
+          bomIndex.partNameByUniq[raw],
+          master?.partName,
+        ),
+        model: pickText(bom?.model, bomIndex.modelByUniq[raw], master?.model),
+        uom: pickText(bom?.uom, bomIndex.uomByUniq[raw], master?.uom),
+      };
+    },
+    [
+      bomDetailByUniq,
+      bomIndex.partNumberByUniq,
+      bomIndex.partNameByUniq,
+      bomIndex.modelByUniq,
+      bomIndex.uomByUniq,
+      masterMetaByUniq,
+    ],
+  );
+
+  // Detail penuh BOM untuk uniq yang sedang dipilih (sumber paling akurat).
+  const selectedBomId = useMemo(
+    () => (entryUniq ? resolveUniqMeta(entryUniq).bomId : ""),
+    [entryUniq, resolveUniqMeta],
+  );
+  const bomFullQuery = useGetBomFullByIdQuery(selectedBomId, {
+    skip: !apiEnabled || !selectedBomId,
+  });
 
   const selectedCustomerId = Form.useWatch("customerId", form) as
     | string
@@ -190,9 +333,13 @@ export default function CreateCustomerOrderPage() {
       ];
     }
 
-    // Full uniq catalog from the BOM tree, keyed by uniq code.
-    const allOptions = (bomIndex.uniqs ?? []).map((uniq) => {
-      const partName = bomIndex.partNameByUniq[uniq];
+    // Full uniq catalog from the BOM (list + tree), keyed by uniq code.
+    const catalogUniqs = new Set<string>([
+      ...(bomIndex.uniqs ?? []),
+      ...Array.from(bomDetailByUniq.keys()),
+    ]);
+    const allOptions = Array.from(catalogUniqs).map((uniq) => {
+      const partName = resolveUniqMeta(uniq).partName;
       return {
         value: uniq,
         label: partName ? `${uniq} — ${partName}` : uniq,
@@ -233,14 +380,25 @@ export default function CreateCustomerOrderPage() {
       ];
     }
 
-    const optionByUniq = new Map(allOptions.map((o) => [o.value, o]));
-    return registeredCodes.map(
-      (code) => optionByUniq.get(code) ?? { label: code, value: code },
+    // Cocokkan case-insensitive supaya kode customer yang beda kapital/spasi
+    // tetap dapat detail BOM-nya.
+    const optionByUniq = new Map(
+      allOptions.map((o) => [normalizeUniqKey(o.value), o]),
     );
+    return registeredCodes.map((code) => {
+      const found = optionByUniq.get(normalizeUniqKey(code));
+      if (found) return found;
+      const partName = resolveUniqMeta(code).partName;
+      return {
+        value: code,
+        label: partName ? `${code} — ${partName}` : code,
+      };
+    });
   }, [
     apiEnabled,
-    bomIndex.partNameByUniq,
     bomIndex.uniqs,
+    bomDetailByUniq,
+    resolveUniqMeta,
     selectedCustomerId,
     customersQuery.data,
   ]);
@@ -295,6 +453,76 @@ export default function CreateCustomerOrderPage() {
       })
       .filter((x): x is NonNullable<typeof x> => Boolean(x));
   }, [apiEnabled, uomsQuery.data]);
+
+  // Uniq yang sudah ada di tabel -> tidak boleh dipilih dua kali.
+  const usedUniqs = useMemo(
+    () => new Set(rows.map((r) => String(r.uniq ?? "").trim()).filter(Boolean)),
+    [rows],
+  );
+
+  const uniqSelectOptions = useMemo(
+    () =>
+      uniqOptions.map((o) => {
+        const value = String(o.value ?? "");
+        const alreadyUsed = Boolean(value) && usedUniqs.has(value);
+        const baseDisabled = Boolean(
+          (o as { disabled?: boolean }).disabled,
+        );
+        return {
+          value: o.value,
+          label: alreadyUsed ? `${o.label} · sudah ditambahkan` : o.label,
+          disabled: baseDisabled || alreadyUsed,
+        };
+      }),
+    [uniqOptions, usedUniqs],
+  );
+
+  const selectedUniqMeta = useMemo(() => {
+    if (!entryUniq) {
+      return { bomId: "", partNumber: "", partName: "", model: "", uom: "" };
+    }
+    const base = resolveUniqMeta(entryUniq);
+    const full = bomFullQuery.data?.data;
+    // Hanya pakai detail penuh kalau uniq-nya memang sama.
+    const matches =
+      full && normalizeUniqKey(full.uniq_code) === normalizeUniqKey(entryUniq);
+    if (!matches) return base;
+    return {
+      bomId: base.bomId,
+      partNumber: pickText(full?.part_number, base.partNumber),
+      partName: pickText(full?.part_name, base.partName),
+      model: pickText(full?.model, base.model),
+      uom: pickText(full?.uom, base.uom),
+    };
+  }, [entryUniq, resolveUniqMeta, bomFullQuery.data]);
+
+  // Auto-fill UOM setiap kali detail BOM untuk uniq terpilih berubah/selesai
+  // ter-load.
+  useEffect(() => {
+    if (!entryUniq) return;
+    const bomUom = selectedUniqMeta.uom;
+    if (!bomUom) return;
+    const matched = uomOptions.find(
+      (o) => String(o.value).toLowerCase() === bomUom.toLowerCase(),
+    );
+    const next = matched ? String(matched.value) : bomUom;
+    setEntryUom((prev) => (prev === next ? prev : next));
+  }, [entryUniq, selectedUniqMeta.uom, uomOptions]);
+
+  // Pastikan UOM hasil auto-fill dari BOM/master tetap tampil walau belum
+  // terdaftar di master UOM.
+  const uomSelectOptions = useMemo(() => {
+    const merged = [...uomOptions];
+    const has = (val: string) =>
+      merged.some(
+        (o) => String(o.value).toLowerCase() === val.trim().toLowerCase(),
+      );
+    for (const extra of [selectedUniqMeta.uom, entryUom ?? ""]) {
+      const value = String(extra ?? "").trim();
+      if (value && !has(value)) merged.push({ label: value, value });
+    }
+    return merged;
+  }, [uomOptions, selectedUniqMeta.uom, entryUom]);
 
   const customerName = Form.useWatch("customerName", form) as
     | string
@@ -352,6 +580,7 @@ export default function CreateCustomerOrderPage() {
       },
       { title: "Part Name", dataIndex: "partName", key: "partName" },
       { title: "Model", dataIndex: "model", key: "model" },
+      { title: "UOM", dataIndex: "uom", key: "uom", width: 90 },
       {
         title: "Total Qty",
         dataIndex: "qty",
@@ -391,6 +620,12 @@ export default function CreateCustomerOrderPage() {
       message.warning("Select Uniq first");
       return;
     }
+    if (usedUniqs.has(entryUniq)) {
+      message.warning(
+        `Uniq ${entryUniq} sudah ditambahkan. Hapus baris lama atau pilih uniq lain.`,
+      );
+      return;
+    }
     if (!entryUom) {
       message.warning("Select UOM first");
       return;
@@ -400,9 +635,7 @@ export default function CreateCustomerOrderPage() {
       return;
     }
 
-    const partNumber = bomIndex.partNumberByUniq[entryUniq] ?? "";
-    const partName = bomIndex.partNameByUniq[entryUniq] ?? "";
-    const model = bomIndex.modelByUniq[entryUniq] ?? "";
+    const { partNumber, partName, model } = selectedUniqMeta;
     const newRow: EntryRow = {
       key: `row-${Date.now()}`,
       uniq: entryUniq,
@@ -784,15 +1017,27 @@ export default function CreateCustomerOrderPage() {
                 value={entryUniq}
                 onChange={(v) => {
                   setEntryUniq(v);
-                  const bomUom = bomIndex.uomByUniq[v];
-                  if (typeof bomUom === "string" && bomUom.trim()) {
-                    const candidate = bomUom.trim();
-                    const hasUom = uomOptions.some((o) => String(o.value) === candidate);
-                    if (hasUom) setEntryUom(candidate);
+                  // Auto-fill UOM dari BOM, fallback ke master item.
+                  // (useEffect di atas menyempurnakan setelah detail BOM load)
+                  const meta = resolveUniqMeta(v);
+                  const candidate = pickText(meta.uom);
+                  if (candidate) {
+                    const matched = uomOptions.find(
+                      (o) =>
+                        String(o.value).toLowerCase() ===
+                        candidate.toLowerCase(),
+                    );
+                    setEntryUom(matched ? String(matched.value) : candidate);
+                  } else {
+                    setEntryUom(undefined);
                   }
                 }}
-                options={uniqOptions}
-                loading={bomTreeQuery.isLoading}
+                options={uniqSelectOptions}
+                loading={
+                  bomTreeQuery.isLoading ||
+                  bomListQuery.isLoading ||
+                  masterUniqQuery.isLoading
+                }
                 showSearch
                 filterOption={(input, option) =>
                   String(option?.label ?? "")
@@ -808,8 +1053,8 @@ export default function CreateCustomerOrderPage() {
                 placeholder="Select UOM"
                 value={entryUom}
                 onChange={(v) => setEntryUom(v)}
-                options={uomOptions}
-                loading={uomsQuery.isLoading}
+                options={uomSelectOptions}
+                loading={uomsQuery.isLoading || masterUniqQuery.isLoading}
                 showSearch
                 filterOption={(input, option) =>
                   String(option?.label ?? "")
@@ -848,6 +1093,40 @@ export default function CreateCustomerOrderPage() {
               {actionLabel}
             </Button>
           </div>
+
+          {entryUniq ? (
+            <div className="mb-4 grid grid-cols-1 gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 md:grid-cols-4">
+              <div>
+                <div className="text-xs text-gray-500">Uniq</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  {entryUniq}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">Part Number</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  {selectedUniqMeta.partNumber || "-"}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">Part Name</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  {selectedUniqMeta.partName || "-"}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">Model</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  {selectedUniqMeta.model || "-"}
+                </div>
+                {bomFullQuery.isFetching ? (
+                  <div className="text-[11px] text-gray-400">
+                    Memuat detail BOM...
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
 
           <div className="text-base font-bold text-gray-900 mb-3">
             {orderNumber}
