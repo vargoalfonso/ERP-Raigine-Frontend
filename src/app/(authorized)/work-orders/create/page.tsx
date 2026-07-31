@@ -742,9 +742,19 @@ export default function CreateWorkOrderPage() {
                         ) : (
                           <Select
                             className="!rounded-lg w-full"
-                            placeholder="Select"
+                            placeholder="Search UNIQ"
                             value={l.uniq}
                             options={uniqSelectOptions}
+                            showSearch
+                            allowClear
+                            optionFilterProp="label"
+                            filterOption={(input, option) => {
+                              const label = String(option?.label ?? "").toLowerCase();
+                              const value = String(option?.value ?? "").toLowerCase();
+                              const search = input.trim().toLowerCase();
+                              return label.includes(search) || value.includes(search);
+                            }}
+                            notFoundContent="No UNIQ found"
                             onChange={(v) => onSelectUniq(l.id, v)}
                           />
                         )}

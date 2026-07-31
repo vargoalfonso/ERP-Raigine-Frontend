@@ -4,7 +4,7 @@ import { useMemo, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Card, Form, InputNumber, Select, Table, Tag, message } from "antd";
 
-import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { useGetBomListQuery } from "@/lib/api/bom/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useCreateKanbanStandardMutation } from "@/lib/api/system-settings/api";
 
@@ -36,19 +36,19 @@ export default function KanbanParameterCreateFullscreenPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
-  const { data: bomTreeApiData, isLoading: isBomLoading } = useGetBomTreeQuery(undefined, {
-    skip: !apiEnabled,
-  });
+  const { data: bomListApiData, isLoading: isBomLoading } = useGetBomListQuery(
+    { page: 1, limit: 1000 },
+    { skip: !apiEnabled },
+  );
   const [createKanbanStandard] = useCreateKanbanStandardMutation();
 
   // Normalize BOM tree data into a top-level array of parent nodes.
   const bomTreeNodes = useMemo<any[]>(() => {
-    const raw = (bomTreeApiData as any)?.data;
-    const candidate = Array.isArray(raw?.items) ? raw.items : raw;
-    if (Array.isArray(candidate)) return candidate;
-    if (candidate && typeof candidate === "object") return [candidate];
+    const raw = (bomListApiData as any)?.data;
+    if (Array.isArray(raw)) return raw;
+    if (raw && typeof raw === "object") return [raw];
     return [];
-  }, [bomTreeApiData]);
+  }, [bomListApiData]);
 
   // Dropdown: only top-level (parent) BOM nodes.
   const parentOptions = useMemo(() => {
