@@ -195,6 +195,72 @@ export interface DeliveryNoteResponse {
   data: DeliveryNoteItem[];
 }
 
+/**
+ * [packing-list] Satu baris packing/kanban milik satu uniq_code.
+ * Sumber utama: hasil scan barcode work order (work_order_items.kanban_number),
+ * di-enrich dengan delivery note yang memakai packing number yang sama.
+ */
+export interface InventoryPackingItem {
+  dn_number: string | null;
+  packing_number: string;
+  /** Qty rencana pada packing tersebut. */
+  quantity: number;
+  /** Qty saat ini (hasil scan / opname). */
+  qty_current: number;
+  /** Qty maksimal (standar kanban). */
+  qty_max: number;
+  /** 0-100, qty_current / qty_max. */
+  progress: number;
+  status: string | null;
+  wo_number: string | null;
+  /** work_order | delivery_note */
+  source: string;
+}
+
+export interface InventoryPackingList {
+  uniq_code: string;
+  items: InventoryPackingItem[];
+  total_packing: number;
+  total_qty_current: number;
+  total_qty_max: number;
+}
+
+const toInventoryPackingItem = (raw: unknown): InventoryPackingItem => {
+  const record = isRecord(raw) ? raw : {};
+  return {
+    dn_number: toText(record.dn_number) ?? null,
+    packing_number: toText(record.packing_number) ?? "",
+    quantity: toNumber(record.quantity) ?? 0,
+    qty_current: toNumber(record.qty_current) ?? 0,
+    qty_max: toNumber(record.qty_max) ?? 0,
+    progress: toNumber(record.progress) ?? 0,
+    status: toText(record.status) ?? null,
+    wo_number: toText(record.wo_number) ?? null,
+    source: toText(record.source) ?? "work_order",
+  };
+};
+
+const toInventoryPackingList = (
+  response: unknown,
+  uniqCode: string,
+): InventoryPackingList => {
+  const data = parseObjectResponse<UnknownRecord>(response) ?? {};
+  const items = Array.isArray(data.items)
+    ? data.items.map(toInventoryPackingItem)
+    : parseArrayResponse<unknown>(response).map(toInventoryPackingItem);
+  return {
+    uniq_code: toText(data.uniq_code) ?? uniqCode,
+    items,
+    total_packing: toNumber(data.total_packing) ?? items.length,
+    total_qty_current:
+      toNumber(data.total_qty_current) ??
+      items.reduce((acc, item) => acc + item.qty_current, 0),
+    total_qty_max:
+      toNumber(data.total_qty_max) ??
+      items.reduce((acc, item) => acc + item.qty_max, 0),
+  };
+};
+
 const toInventoryRecord = (raw: unknown): InventoryRecord => {
   const record = isRecord(raw) ? raw : {};
   return {
@@ -576,6 +642,23 @@ export const inventoryApiSlice = apiSlice.injectEndpoints({
         ),
     }),
 
+    /**
+     * [packing-list] Tabel packing pada halaman detail Raw Material /
+     * Indirect Raw Material. Data berasal dari scan barcode work order.
+     */
+    getInventoryPackingList: builder.query<
+      InventoryPackingList,
+      { type: InventoryType; uniq_code: string }
+    >({
+      query: ({ type, uniq_code }) => ({
+        url: `/inventory/${encodeURIComponent(type)}/packing-list?uniq_code=${encodeURIComponent(uniq_code)}`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown, _meta, arg) =>
+        toInventoryPackingList(response, arg.uniq_code),
+    }),
+
     getDeliveryNoteByUniq: builder.query<DeliveryNoteResponse, string>({
       query: (uniq) => ({
         url: `/delivery-notes/uniq/${encodeURIComponent(uniq)}`,
@@ -600,6 +683,8 @@ export const {
   useUpdateInventoryMutation,
   useLazyGenerateQRIndirectQuery,
   useLazyGenerateQRSubconQuery,
+  useGetInventoryPackingListQuery,
+  useLazyGetInventoryPackingListQuery,
   useGetDeliveryNoteByUniqQuery,
   useLazyGetDeliveryNoteByUniqQuery,
 } = inventoryApiSlice;
