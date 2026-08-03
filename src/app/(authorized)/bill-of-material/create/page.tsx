@@ -1379,7 +1379,12 @@ export default function Page() {
                       >
                         <Button icon={<UploadOutlined />}>Choose File</Button>
                       </Upload>
-
+<Form.Item name={[
+                      "material_spec",
+                      "cycle_time_sec",
+                    ]} label="Cycle Time (sec)">
+                      <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
+                    </Form.Item>
                       {/* <Button
                         icon={<UploadOutlined />}
                         onClick={() =>

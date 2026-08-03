@@ -7,7 +7,7 @@ const TAG = "WorkOrders" as const;
 const isRecord = (value: unknown): value is UnknownRecord =>
   typeof value === "object" && value !== null;
 
-const normalizeArrayResponse = <T,>(response: unknown): T[] => {
+const normalizeArrayResponse = <T>(response: unknown): T[] => {
   if (Array.isArray(response)) return response as T[];
   if (isRecord(response)) {
     const data = response.data;
@@ -20,7 +20,7 @@ const normalizeArrayResponse = <T,>(response: unknown): T[] => {
   return [];
 };
 
-const normalizeObjectResponse = <T,>(response: unknown): T | null => {
+const normalizeObjectResponse = <T>(response: unknown): T | null => {
   if (isRecord(response)) {
     const data = response.data;
     if (isRecord(data)) {
@@ -44,7 +44,7 @@ export type Paginated<T> = {
   pagination: Pagination;
 };
 
-const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
+const normalizePaginatedResponse = <T>(response: unknown): Paginated<T> => {
   const empty: Paginated<T> = {
     items: [],
     pagination: { total: 0, page: 1, limit: 20, total_pages: 1 },
@@ -57,7 +57,9 @@ const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
   const paginationRaw = (data as UnknownRecord).pagination;
 
   const items = Array.isArray(itemsRaw) ? (itemsRaw as T[]) : [];
-  const paginationRecord = isRecord(paginationRaw) ? (paginationRaw as UnknownRecord) : {};
+  const paginationRecord = isRecord(paginationRaw)
+    ? (paginationRaw as UnknownRecord)
+    : {};
 
   return {
     items,
@@ -65,12 +67,17 @@ const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
       total: getNumber(paginationRecord, ["total"]) ?? empty.pagination.total,
       page: getNumber(paginationRecord, ["page"]) ?? empty.pagination.page,
       limit: getNumber(paginationRecord, ["limit"]) ?? empty.pagination.limit,
-      total_pages: getNumber(paginationRecord, ["total_pages", "totalPages"]) ?? empty.pagination.total_pages,
+      total_pages:
+        getNumber(paginationRecord, ["total_pages", "totalPages"]) ??
+        empty.pagination.total_pages,
     },
   };
 };
 
-const getString = (record: UnknownRecord, keys: string[]): string | undefined => {
+const getString = (
+  record: UnknownRecord,
+  keys: string[],
+): string | undefined => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) return value.trim();
@@ -78,7 +85,10 @@ const getString = (record: UnknownRecord, keys: string[]): string | undefined =>
   return undefined;
 };
 
-const getNumber = (record: UnknownRecord, keys: string[]): number | undefined => {
+const getNumber = (
+  record: UnknownRecord,
+  keys: string[],
+): number | undefined => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -112,6 +122,10 @@ export type CreateWorkOrderRequest = {
   target_date: string;
   items: CreateWorkOrderItemRequest[];
   notes: string | null;
+  // [wo-estimated-time] estimasi waktu produksi (menit) + komponen hitungannya
+  estimated_time_minutes?: number | null;
+  cycle_time_min?: number | null;
+  machine_capacity?: number | null;
 };
 
 export type WorkOrderApprovalDecision = "approve" | "reject";
@@ -204,6 +218,10 @@ export type WorkOrderItemQRResponse = {
 };
 
 export type WorkOrderRecord = {
+  // [wo-estimated-time]
+  estimated_time_minutes?: number;
+  cycle_time_min?: number;
+  machine_capacity?: number;
   id: string;
   wo_number: string;
   wo_type: string;
@@ -271,7 +289,12 @@ const toWorkOrderItem = (raw: unknown): WorkOrderItemRecord => {
       getString(record, ["process_name", "process", "processName"]) ?? "",
     kanban_number: getString(record, ["kanban_number", "kanbanNumber"]),
     status: getString(record, ["status", "item_status"]),
-    part_name: getString(record, ["part_name", "item_name", "product_name", "partName"]),
+    part_name: getString(record, [
+      "part_name",
+      "item_name",
+      "product_name",
+      "partName",
+    ]),
     part_number: getString(record, ["part_number", "part_no", "partNumber"]),
     model: getString(record, ["model", "product_model", "assembly_code"]),
     qr_data_url: getString(record, ["qr_data_url", "qrDataUrl"]),
@@ -284,15 +307,20 @@ const toWorkOrderItemQRResponse = (raw: unknown): WorkOrderItemQRResponse => {
   return {
     kanban_number: getString(record, ["kanban_number", "kanbanNumber"]) ?? "",
     qr_payload: getString(record, ["qr_payload", "qrPayload"]) ?? "",
-    data_url: getString(record, ["data_url", "dataUrl", "qr_data_url", "qrDataUrl"]) ?? "",
+    data_url:
+      getString(record, ["data_url", "dataUrl", "qr_data_url", "qrDataUrl"]) ??
+      "",
   };
 };
 
 const toWorkOrderRecord = (raw: unknown): WorkOrderRecord => {
   const record = isRecord(raw) ? raw : {};
-  const items = getArray(record, ["items", "details", "work_order_items", "lines"]).map(
-    toWorkOrderItem
-  );
+  const items = getArray(record, [
+    "items",
+    "details",
+    "work_order_items",
+    "lines",
+  ]).map(toWorkOrderItem);
 
   return {
     id:
@@ -304,25 +332,58 @@ const toWorkOrderRecord = (raw: unknown): WorkOrderRecord => {
     wo_kind: getString(record, ["wo_kind", "woKind"]),
     status: getString(record, ["status", "wo_status"]),
     approval_status: getString(record, ["approval_status", "approvalStatus"]),
-    created_at: getString(record, ["created_at", "createdAt", "create_date", "createDate", "created_date"]),
+    created_at: getString(record, [
+      "created_at",
+      "createdAt",
+      "create_date",
+      "createDate",
+      "created_date",
+    ]),
     created_date: getString(record, ["created_date", "createdDate"]),
     target_date: getString(record, ["target_date", "targetDate"]),
-    operator_name: getString(record, ["operator_name", "operator", "assigned_to"]),
-    created_by_name: getString(record, ["created_by_name", "createdByName", "created_by"]),
+    operator_name: getString(record, [
+      "operator_name",
+      "operator",
+      "assigned_to",
+    ]),
+    created_by_name: getString(record, [
+      "created_by_name",
+      "createdByName",
+      "created_by",
+    ]),
     uniq_total:
-      getNumber(record, ["uniq_total", "total_uniq", "uniq_count", "total_items"]) ??
-      items.length,
-    uniq_closed: getNumber(record, ["uniq_closed", "closed_uniq", "completed_items"]),
+      getNumber(record, [
+        "uniq_total",
+        "total_uniq",
+        "uniq_count",
+        "total_items",
+      ]) ?? items.length,
+    uniq_closed: getNumber(record, [
+      "uniq_closed",
+      "closed_uniq",
+      "completed_items",
+    ]),
     aging_days: getNumber(record, ["aging_days", "aging", "agingDays"]),
     notes: getString(record, ["notes", "note"]),
     defect_reason: getString(record, ["defect_reason", "defectReason"]) ?? null,
+    estimated_time_minutes: getNumber(record, [
+      "estimated_time_minutes",
+      "estimatedTimeMinutes",
+    ]),
+    cycle_time_min: getNumber(record, ["cycle_time_min", "cycleTimeMin"]),
+    machine_capacity: getNumber(record, [
+      "machine_capacity",
+      "machineCapacity",
+    ]),
     reference_wo: getString(record, ["reference_wo", "referenceWo"]) ?? null,
     qr_data_url: getString(record, ["qr_data_url", "qrDataUrl"]),
     items,
   };
 };
 
-const toRmProcessingWorkOrderRecord = (raw: unknown): RmProcessingWorkOrderRecord => {
+const toRmProcessingWorkOrderRecord = (
+  raw: unknown,
+): RmProcessingWorkOrderRecord => {
   const record = isRecord(raw) ? raw : {};
   return {
     id:
@@ -332,13 +393,34 @@ const toRmProcessingWorkOrderRecord = (raw: unknown): RmProcessingWorkOrderRecor
     wo_number: getString(record, ["wo_number", "woNumber", "number"]),
     wo_type: getString(record, ["wo_type", "woType", "type"]),
     wo_kind: getString(record, ["wo_kind", "woKind"]),
-    source_material_uniq: getString(record, ["source_material_uniq", "sourceMaterialUniq"]),
-    target_material_uniq: getString(record, ["target_material_uniq", "targetMaterialUniq"]),
+    source_material_uniq: getString(record, [
+      "source_material_uniq",
+      "sourceMaterialUniq",
+    ]),
+    target_material_uniq: getString(record, [
+      "target_material_uniq",
+      "targetMaterialUniq",
+    ]),
     model: getString(record, ["model"]),
-    grade_size: getString(record, ["grade_size", "gradeSize", "model_grade", "modelGrade"]),
-    input_qty: getNumber(record, ["input_qty", "inputQty", "qty_input", "qtyInput"]),
+    grade_size: getString(record, [
+      "grade_size",
+      "gradeSize",
+      "model_grade",
+      "modelGrade",
+    ]),
+    input_qty: getNumber(record, [
+      "input_qty",
+      "inputQty",
+      "qty_input",
+      "qtyInput",
+    ]),
     input_uom: getString(record, ["input_uom", "inputUom"]),
-    output_qty: getNumber(record, ["output_qty", "outputQty", "qty_output", "qtyOutput"]),
+    output_qty: getNumber(record, [
+      "output_qty",
+      "outputQty",
+      "qty_output",
+      "qtyOutput",
+    ]),
     output_uom: getString(record, ["output_uom", "outputUom"]),
     date_issued: getString(record, ["date_issued", "dateIssued"]),
     date_completed: getString(record, ["date_completed", "dateCompleted"]),
@@ -347,14 +429,24 @@ const toRmProcessingWorkOrderRecord = (raw: unknown): RmProcessingWorkOrderRecor
     status: getString(record, ["status"]),
     approval_status: getString(record, ["approval_status", "approvalStatus"]),
     created_date: getString(record, ["created_date", "createdDate"]),
-    created_by_name: getString(record, ["created_by_name", "createdByName", "created_by"]),
+    created_by_name: getString(record, [
+      "created_by_name",
+      "createdByName",
+      "created_by",
+    ]),
     aging_days: getNumber(record, ["aging_days", "aging", "agingDays"]),
     qr_data_url: getString(record, ["qr_data_url", "qrDataUrl"]),
     created_at: getString(record, ["created_at", "createdAt"]),
     kanban_number: getString(record, ["kanban_number", "kanbanNumber"]),
     size_breakdown: getString(record, ["size_breakdown", "sizeBreakdown"]),
-    pre_processing: Boolean((record as Record<string, unknown>)["pre_processing"] ?? (record as Record<string, unknown>)["preProcessing"]),
-    kanban_qr_data_url: getString(record, ["kanban_qr_data_url", "kanbanQrDataUrl"]),
+    pre_processing: Boolean(
+      (record as Record<string, unknown>)["pre_processing"] ??
+      (record as Record<string, unknown>)["preProcessing"],
+    ),
+    kanban_qr_data_url: getString(record, [
+      "kanban_qr_data_url",
+      "kanbanQrDataUrl",
+    ]),
   };
 };
 
@@ -362,10 +454,20 @@ const toWorkOrderUniqOption = (raw: unknown): WorkOrderUniqOption => {
   const record = isRecord(raw) ? raw : {};
   return {
     uniq_code: getString(record, ["uniq_code", "uniq", "item_uniq_code"]) ?? "",
-    part_name: getString(record, ["part_name", "partName", "item_name", "name"]),
+    part_name: getString(record, [
+      "part_name",
+      "partName",
+      "item_name",
+      "name",
+    ]),
     part_number: getString(record, ["part_number", "partNumber", "part_no"]),
     model: getString(record, ["model", "product_model", "assembly_code"]),
-    grade_size: getString(record, ["grade_size", "gradeSize", "model_grade", "modelGrade"]),
+    grade_size: getString(record, [
+      "grade_size",
+      "gradeSize",
+      "model_grade",
+      "modelGrade",
+    ]),
     uom: getString(record, ["uom", "unit"]),
     source: getString(record, ["source", "inventory_source", "type"]),
   };
@@ -385,7 +487,10 @@ export const workOrdersApiSlice = apiSlice
   .enhanceEndpoints({ addTagTypes: [TAG] })
   .injectEndpoints({
     endpoints: (builder) => ({
-      getWorkOrders: builder.query<Paginated<WorkOrderRecord>, GetWorkOrdersParams>({
+      getWorkOrders: builder.query<
+        Paginated<WorkOrderRecord>,
+        GetWorkOrdersParams
+      >({
         query: ({ page, limit }) => ({
           url: "/working-order/work-orders",
           method: "GET",
@@ -400,7 +505,9 @@ export const workOrdersApiSlice = apiSlice
           };
         },
         providesTags: (result) => {
-          const base: Array<{ type: typeof TAG; id: string }> = [{ type: TAG, id: "LIST" }];
+          const base: Array<{ type: typeof TAG; id: string }> = [
+            { type: TAG, id: "LIST" },
+          ];
           if (!result) return base;
           return base.concat(
             result.items
@@ -417,7 +524,9 @@ export const workOrdersApiSlice = apiSlice
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) =>
-          toWorkOrderRecord(normalizeObjectResponse<unknown>(response) ?? response),
+          toWorkOrderRecord(
+            normalizeObjectResponse<unknown>(response) ?? response,
+          ),
         providesTags: (_result, _error, id) => [{ type: TAG, id }],
       }),
       getWorkOrderItemQR: builder.query<WorkOrderItemQRResponse, string>({
@@ -431,7 +540,10 @@ export const workOrdersApiSlice = apiSlice
             normalizeObjectResponse<unknown>(response) ?? response,
           ),
       }),
-      createWorkOrder: builder.mutation<WorkOrderRecord, CreateWorkOrderRequest>({
+      createWorkOrder: builder.mutation<
+        WorkOrderRecord,
+        CreateWorkOrderRequest
+      >({
         query: (body) => ({
           url: "/working-order/work-orders",
           method: "POST",
@@ -439,10 +551,15 @@ export const workOrdersApiSlice = apiSlice
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) =>
-          toWorkOrderRecord(normalizeObjectResponse<unknown>(response) ?? response),
+          toWorkOrderRecord(
+            normalizeObjectResponse<unknown>(response) ?? response,
+          ),
         invalidatesTags: [{ type: TAG, id: "LIST" }],
       }),
-      generateBulkWorkOrder: builder.mutation<WorkOrderRecord, BulkGenerateWorkOrderRequest>({
+      generateBulkWorkOrder: builder.mutation<
+        WorkOrderRecord,
+        BulkGenerateWorkOrderRequest
+      >({
         query: (body) => ({
           url: "/api/work-order/bulk/generate",
           method: "POST",
@@ -450,7 +567,9 @@ export const workOrdersApiSlice = apiSlice
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) =>
-          toWorkOrderRecord(normalizeObjectResponse<unknown>(response) ?? response),
+          toWorkOrderRecord(
+            normalizeObjectResponse<unknown>(response) ?? response,
+          ),
         invalidatesTags: [{ type: TAG, id: "LIST" }],
       }),
       getWorkOrdersSummary: builder.query<WorkOrderSummary, void>({
@@ -460,10 +579,15 @@ export const workOrdersApiSlice = apiSlice
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) =>
-          toWorkOrderSummary(normalizeObjectResponse<unknown>(response) ?? response),
+          toWorkOrderSummary(
+            normalizeObjectResponse<unknown>(response) ?? response,
+          ),
         providesTags: [{ type: TAG, id: "SUMMARY" }],
       }),
-      getWorkOrderUniqOptions: builder.query<WorkOrderUniqOption[], { limit: number; sources: WorkOrderUniqSource[] }>({
+      getWorkOrderUniqOptions: builder.query<
+        WorkOrderUniqOption[],
+        { limit: number; sources: WorkOrderUniqSource[] }
+      >({
         query: ({ limit, sources }) => ({
           url: "/working-order/work-orders/form-options/uniq",
           method: "GET",
@@ -471,9 +595,14 @@ export const workOrdersApiSlice = apiSlice
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) =>
-          normalizeArrayResponse<unknown>(response).map(toWorkOrderUniqOption).filter((o) => Boolean(o.uniq_code)),
+          normalizeArrayResponse<unknown>(response)
+            .map(toWorkOrderUniqOption)
+            .filter((o) => Boolean(o.uniq_code)),
       }),
-      approveWorkOrder: builder.mutation<unknown, { uuid: string; body: WorkOrderApprovalRequest }>({
+      approveWorkOrder: builder.mutation<
+        unknown,
+        { uuid: string; body: WorkOrderApprovalRequest }
+      >({
         query: ({ uuid, body }) => ({
           url: `/working-order/work-orders/${encodeURIComponent(uuid)}/approval`,
           method: "POST",
@@ -486,16 +615,25 @@ export const workOrdersApiSlice = apiSlice
           { type: TAG, id: "SUMMARY" },
         ],
       }),
-      bulkApproveWorkOrders: builder.mutation<unknown, WorkOrderBulkApprovalRequest>({
+      bulkApproveWorkOrders: builder.mutation<
+        unknown,
+        WorkOrderBulkApprovalRequest
+      >({
         query: (body) => ({
           url: "/working-order/work-orders/bulk-approval",
           method: "POST",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        invalidatesTags: [{ type: TAG, id: "LIST" }, { type: TAG, id: "SUMMARY" }],
+        invalidatesTags: [
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: "SUMMARY" },
+        ],
       }),
-      getRmProcessingWorkOrders: builder.query<Paginated<RmProcessingWorkOrderRecord>, GetWorkOrdersParams>({
+      getRmProcessingWorkOrders: builder.query<
+        Paginated<RmProcessingWorkOrderRecord>,
+        GetWorkOrdersParams
+      >({
         query: ({ page, limit }) => ({
           url: "/working-order/rm-processing/work-orders",
           method: "GET",
@@ -518,7 +656,9 @@ export const workOrdersApiSlice = apiSlice
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) =>
-          toWorkOrderSummary(normalizeObjectResponse<unknown>(response) ?? response),
+          toWorkOrderSummary(
+            normalizeObjectResponse<unknown>(response) ?? response,
+          ),
         providesTags: [{ type: TAG, id: "RM_PROCESSING_SUMMARY" }],
       }),
       createRmProcessingWorkOrder: builder.mutation<
@@ -532,7 +672,9 @@ export const workOrdersApiSlice = apiSlice
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) =>
-          toRmProcessingWorkOrderRecord(normalizeObjectResponse<unknown>(response) ?? response),
+          toRmProcessingWorkOrderRecord(
+            normalizeObjectResponse<unknown>(response) ?? response,
+          ),
         invalidatesTags: [
           { type: TAG, id: "RM_PROCESSING_LIST" },
           { type: TAG, id: "RM_PROCESSING_SUMMARY" },

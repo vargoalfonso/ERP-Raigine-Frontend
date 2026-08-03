@@ -68,7 +68,12 @@ const formatDate = (value?: string) => {
 
 const normalizeStatusColor = (value?: string) => {
   const lower = String(value ?? "").toLowerCase();
-  if (lower.includes("approve") || lower.includes("complete") || lower.includes("close")) return "green";
+  if (
+    lower.includes("approve") ||
+    lower.includes("complete") ||
+    lower.includes("close")
+  )
+    return "green";
   if (lower.includes("progress") || lower.includes("process")) return "blue";
   if (lower.includes("pending")) return "gold";
   if (lower.includes("reject") || lower.includes("error")) return "red";
@@ -123,7 +128,7 @@ export default function WorkOrderDetailPage() {
 
   const bomIndex = useMemo(
     () => buildBomUniqIndex(bomTreeRes?.data ?? []),
-    [bomTreeRes?.data]
+    [bomTreeRes?.data],
   );
 
   const detailRows = useMemo<DetailRow[]>(() => {
@@ -131,9 +136,14 @@ export default function WorkOrderDetailPage() {
       key: item.id || `${item.item_uniq_code}-${index}`,
       id: item.id,
       uniq: item.item_uniq_code,
-      partName: item.part_name ?? bomIndex.partNameByUniq[item.item_uniq_code] ?? "-",
-      partNumber: item.part_number ?? bomIndex.partNumberByUniq[item.item_uniq_code] ?? "-",
-      model: item.model ?? bomIndex.assemblyCodeByUniq[item.item_uniq_code] ?? "-",
+      partName:
+        item.part_name ?? bomIndex.partNameByUniq[item.item_uniq_code] ?? "-",
+      partNumber:
+        item.part_number ??
+        bomIndex.partNumberByUniq[item.item_uniq_code] ??
+        "-",
+      model:
+        item.model ?? bomIndex.assemblyCodeByUniq[item.item_uniq_code] ?? "-",
       quantity: `${item.quantity} ${item.uom || "pcs"}`,
       processName: item.process_name || "-",
       status: item.status || "Pending",
@@ -174,23 +184,32 @@ export default function WorkOrderDetailPage() {
 
   const selectedItemQRSrc =
     selectedItemQRResponse?.data_url || selectedItem?.qrDataUrl || "";
-  const hasBrokenSelectedQR = Boolean(selectedItemQRSrc) && brokenQRSrc === selectedItemQRSrc;
+  const hasBrokenSelectedQR =
+    Boolean(selectedItemQRSrc) && brokenQRSrc === selectedItemQRSrc;
   const totalUniq = workOrder?.uniq_total ?? detailRows.length;
   const closedUniq =
     workOrder?.uniq_closed ??
-    detailRows.filter((item) => item.status.toLowerCase().includes("close")).length;
+    detailRows.filter((item) => item.status.toLowerCase().includes("close"))
+      .length;
 
   const completedCount = useMemo(
     () =>
       detailRows.filter((item) => {
         const s = String(item.status ?? "").toLowerCase();
-        return s.includes("complete") || s.includes("close") || s.includes("finished");
+        return (
+          s.includes("complete") ||
+          s.includes("close") ||
+          s.includes("finished")
+        );
       }).length,
-    [detailRows]
+    [detailRows],
   );
 
-  const percentComplete = totalUniq ? Math.round((completedCount / Number(totalUniq)) * 100) : 0;
-  const displayWoNumber = formatWorkOrderDisplayNumber(workOrder?.wo_number) || "-";
+  const percentComplete = totalUniq
+    ? Math.round((completedCount / Number(totalUniq)) * 100)
+    : 0;
+  const displayWoNumber =
+    formatWorkOrderDisplayNumber(workOrder?.wo_number) || "-";
   const displayAging =
     frontAging != null
       ? `${frontAging} days`
@@ -232,7 +251,10 @@ export default function WorkOrderDetailPage() {
         // row.quantity is already formatted as "120 pcs".
         const totalPlan = Number.parseFloat(row.quantity) || 0;
         const uom =
-          row.quantity.replace(/^[\d.,\s]+/, "").trim().toUpperCase() || "PCS";
+          row.quantity
+            .replace(/^[\d.,\s]+/, "")
+            .trim()
+            .toUpperCase() || "PCS";
 
         // SNP from BOM is the closest available "qty per kanban" source.
         const snp = Number(bomIndex.packingNumberByUniq[row.uniq] ?? 0);
@@ -326,7 +348,11 @@ export default function WorkOrderDetailPage() {
       return;
     }
 
-    const printedWoNumber = String(formatWorkOrderDisplayNumber(workOrder?.wo_number) || workOrder?.wo_number || "Work Order")
+    const printedWoNumber = String(
+      formatWorkOrderDisplayNumber(workOrder?.wo_number) ||
+        workOrder?.wo_number ||
+        "Work Order",
+    )
       .replace(/\(mock\)/gi, "")
       .trim();
 
@@ -339,7 +365,7 @@ export default function WorkOrderDetailPage() {
             <td>${escapePrint(row.quantity)}</td>
             <td>${escapePrint(row.processName)}</td>
             <td>${escapePrint(row.status)}</td>
-          </tr>`
+          </tr>`,
       )
       .join("");
 
@@ -485,7 +511,10 @@ export default function WorkOrderDetailPage() {
 
     if (isItemQRFetching && !selectedItemQRResponse?.data_url) {
       return (
-        <div className="flex aspect-square w-44 items-center justify-center rounded-lg border border-slate-200 bg-slate-50" aria-live="polite">
+        <div
+          className="flex aspect-square w-44 items-center justify-center rounded-lg border border-slate-200 bg-slate-50"
+          aria-live="polite"
+        >
           <Spin tip="Loading item QR">
             <div />
           </Spin>
@@ -505,11 +534,20 @@ export default function WorkOrderDetailPage() {
     }
 
     return (
-      <div className="flex aspect-square w-44 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-sm text-slate-500" role="status">
+      <div
+        className="flex aspect-square w-44 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 text-center text-sm text-slate-500"
+        role="status"
+      >
         <QrcodeOutlined className="text-2xl" aria-hidden />
-        <span>{isItemQRError ? "Unable to load item QR" : "Item QR is unavailable"}</span>
+        <span>
+          {isItemQRError ? "Unable to load item QR" : "Item QR is unavailable"}
+        </span>
         {isItemQRError ? (
-          <Button icon={<ReloadOutlined />} onClick={() => refetchItemQR()} className="!rounded-md">
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => refetchItemQR()}
+            className="!rounded-md"
+          >
             Retry
           </Button>
         ) : null}
@@ -538,7 +576,10 @@ export default function WorkOrderDetailPage() {
             </p>
           </div>
           <div className="flex w-full gap-2 lg:w-auto">
-            <Button className="min-h-11 flex-1 !rounded-md lg:flex-none" onClick={() => router.push("/work-orders")}>
+            <Button
+              className="min-h-11 flex-1 !rounded-md lg:flex-none"
+              onClick={() => router.push("/work-orders")}
+            >
               Close
             </Button>
             <Button
@@ -549,35 +590,74 @@ export default function WorkOrderDetailPage() {
             >
               Print Kanban ({detailRows.length})
             </Button>
-            <Button type="primary" icon={<PrinterOutlined />} className="min-h-11 flex-1 !rounded-md lg:flex-none" onClick={printDetail}>
+            <Button
+              type="primary"
+              icon={<PrinterOutlined />}
+              className="min-h-11 flex-1 !rounded-md lg:flex-none"
+              onClick={printDetail}
+            >
               Print work order
             </Button>
           </div>
         </header>
 
         <Spin spinning={isFetching}>
-          <section aria-labelledby="work-order-overview" className="mb-5 overflow-hidden rounded-[10px] border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+          <section
+            aria-labelledby="work-order-overview"
+            className="mb-5 overflow-hidden rounded-[10px] border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+          >
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_260px]">
               <div className="min-w-0 p-4 sm:p-5">
                 <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <h2 id="work-order-overview" className="text-sm font-semibold text-slate-950">
+                    <h2
+                      id="work-order-overview"
+                      className="text-sm font-semibold text-slate-950"
+                    >
                       Work order overview
                     </h2>
-                    <p className="mt-1 text-xs text-slate-500">Current order status and production context.</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Current order status and production context.
+                    </p>
                   </div>
-                  <Tag color={normalizeStatusColor(workOrder?.approval_status)} className="!m-0 !w-fit !rounded-md">
+                  <Tag
+                    color={normalizeStatusColor(workOrder?.approval_status)}
+                    className="!m-0 !w-fit !rounded-md"
+                  >
                     {workOrder?.approval_status || "Pending Approval"}
                   </Tag>
                 </div>
 
                 <div className="grid min-w-0 grid-cols-2 gap-4 lg:grid-cols-4">
                   <DetailField label="WO Number" value={displayWoNumber} mono />
-                  <DetailField label="WO Type" value={workOrder?.wo_type || "-"} />
-                  <DetailField label="Operator" value={workOrder?.operator_name || "Not Assigned"} />
+                  <DetailField
+                    label="WO Type"
+                    value={workOrder?.wo_type || "-"}
+                  />
+                  <DetailField
+                    label="Operator"
+                    value={workOrder?.operator_name || "Not Assigned"}
+                  />
                   <DetailField label="Aging" value={displayAging} mono />
-                  <DetailField label="Created Date" value={formatDate(workOrder?.created_date ?? workOrder?.created_at)} />
-                  <DetailField label="Target Date" value={formatDate(workOrder?.target_date)} />
+                  <DetailField
+                    label="Created Date"
+                    value={formatDate(
+                      workOrder?.created_date ?? workOrder?.created_at,
+                    )}
+                  />
+                  <DetailField
+                    label="Target Date"
+                    value={formatDate(workOrder?.target_date)}
+                  />
+                  {/* [wo-estimated-time] */}
+                  <DetailField
+                    label="Estimasi Waktu"
+                    value={
+                      workOrder?.estimated_time_minutes
+                        ? `${workOrder.estimated_time_minutes} menit`
+                        : "-"
+                    }
+                  />
                   <DetailField label="Total UNIQ" value={totalUniq} mono />
                   <DetailField label="Closed UNIQ" value={closedUniq} mono />
                 </div>
@@ -597,11 +677,17 @@ export default function WorkOrderDetailPage() {
               <aside className="border-t border-slate-200 p-4 sm:p-5 xl:border-l xl:border-t-0">
                 <div className="flex items-start gap-4 xl:flex-col">
                   <div className="min-w-0 flex-1 xl:w-full">
-                    <div className="text-[11px] font-medium text-slate-500">Completion</div>
+                    <div className="text-[11px] font-medium text-slate-500">
+                      Completion
+                    </div>
                     <div className="mt-1 font-mono text-3xl font-semibold tracking-[-0.04em] text-slate-950 tabular-nums">
                       {percentComplete}%
                     </div>
-                    <Progress percent={percentComplete} status={percentComplete >= 100 ? "success" : "active"} showInfo={false} />
+                    <Progress
+                      percent={percentComplete}
+                      status={percentComplete >= 100 ? "success" : "active"}
+                      showInfo={false}
+                    />
                   </div>
                   <div className="shrink-0">
                     {workOrder?.qr_data_url ? (
@@ -625,14 +711,24 @@ export default function WorkOrderDetailPage() {
             <div className="min-w-0 overflow-hidden rounded-[10px] border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
               <div className="flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 px-4">
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-950">Work order items</h2>
-                  <p className="mt-0.5 text-xs text-slate-500">Select an item to view its QR and metadata.</p>
+                  <h2 className="text-sm font-semibold text-slate-950">
+                    Work order items
+                  </h2>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Select an item to view its QR and metadata.
+                  </p>
                 </div>
-                <span className="font-mono text-xs text-slate-500 tabular-nums">{detailRows.length} items</span>
+                <span className="font-mono text-xs text-slate-500 tabular-nums">
+                  {detailRows.length} items
+                </span>
               </div>
 
               {detailRows.length === 0 ? (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="This work order has no items" className="py-12" />
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="This work order has no items"
+                  className="py-12"
+                />
               ) : (
                 <div className="min-w-0">
                   <div className="hidden grid-cols-[minmax(160px,1.2fr)_minmax(130px,1fr)_100px_minmax(110px,0.8fr)_88px] gap-3 bg-slate-50 px-4 py-2.5 text-xs font-medium text-slate-500 md:grid">
@@ -657,13 +753,24 @@ export default function WorkOrderDetailPage() {
                         }`}
                       >
                         <span className="min-w-0">
-                          <span className="block break-words font-mono text-sm font-semibold text-slate-950">{row.uniq}</span>
-                          <span className="mt-0.5 block truncate text-xs text-slate-500">{row.partName}</span>
+                          <span className="block break-words font-mono text-sm font-semibold text-slate-950">
+                            {row.uniq}
+                          </span>
+                          <span className="mt-0.5 block truncate text-xs text-slate-500">
+                            {row.partName}
+                          </span>
                         </span>
-                        <span className="hidden min-w-0 break-words font-mono text-xs text-slate-700 md:block">{row.kanbanNumber}</span>
-                        <span className="hidden font-mono text-xs text-slate-700 tabular-nums md:block">{row.quantity}</span>
+                        <span className="hidden min-w-0 break-words font-mono text-xs text-slate-700 md:block">
+                          {row.kanbanNumber}
+                        </span>
+                        <span className="hidden font-mono text-xs text-slate-700 tabular-nums md:block">
+                          {row.quantity}
+                        </span>
                         <span className="justify-self-end md:justify-self-start">
-                          <Tag color={normalizeStatusColor(row.status)} className="!m-0 !rounded-md">
+                          <Tag
+                            color={normalizeStatusColor(row.status)}
+                            className="!m-0 !rounded-md"
+                          >
                             {row.status}
                           </Tag>
                         </span>
@@ -680,9 +787,13 @@ export default function WorkOrderDetailPage() {
             <aside className="min-w-0 overflow-hidden rounded-[10px] border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] xl:sticky xl:top-5">
               <div className="flex min-h-14 items-center justify-between gap-3 border-b border-slate-200 px-4">
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-950">Detail item</h2>
+                  <h2 className="text-sm font-semibold text-slate-950">
+                    Detail item
+                  </h2>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    {selectedItem ? "QR and production fields for the selected item." : "No item selected."}
+                    {selectedItem
+                      ? "QR and production fields for the selected item."
+                      : "No item selected."}
                   </p>
                 </div>
                 {selectedItem ? (
@@ -699,33 +810,63 @@ export default function WorkOrderDetailPage() {
                 {selectedItem ? (
                   <>
                     <div className="flex min-w-0 flex-col gap-4 sm:flex-row xl:flex-col 2xl:flex-row">
-                      <div className="flex justify-center sm:justify-start">{renderItemQR()}</div>
+                      <div className="flex justify-center sm:justify-start">
+                        {renderItemQR()}
+                      </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-[11px] font-medium text-slate-500">Selected UNIQ</div>
+                        <div className="text-[11px] font-medium text-slate-500">
+                          Selected UNIQ
+                        </div>
                         <div className="mt-1 break-words font-mono text-lg font-semibold tracking-[-0.02em] text-slate-950">
                           {selectedItem.uniq}
                         </div>
                         <p className="mt-2 text-sm leading-6 text-slate-500">
-                          QR is read from the item response first, then fetched from the item QR endpoint when needed.
+                          QR is read from the item response first, then fetched
+                          from the item QR endpoint when needed.
                         </p>
                       </div>
                     </div>
 
                     <div className="mt-5 grid grid-cols-2 gap-4 border-t border-slate-100 pt-5">
-                      <DetailField label="Kanban" value={selectedItem.kanbanNumber} mono />
+                      <DetailField
+                        label="Kanban"
+                        value={selectedItem.kanbanNumber}
+                        mono
+                      />
                       <DetailField
                         label="Status"
-                        value={(
-                          <Tag color={normalizeStatusColor(selectedItem.status)} className="!m-0 !rounded-md">
+                        value={
+                          <Tag
+                            color={normalizeStatusColor(selectedItem.status)}
+                            className="!m-0 !rounded-md"
+                          >
                             {selectedItem.status}
                           </Tag>
-                        )}
+                        }
                       />
-                      <DetailField label="Part name" value={selectedItem.partName} />
-                      <DetailField label="Part number" value={selectedItem.partNumber} mono />
-                      <DetailField label="Model" value={selectedItem.model} mono />
-                      <DetailField label="Quantity" value={selectedItem.quantity} mono />
-                      <DetailField label="Process" value={selectedItem.processName} />
+                      <DetailField
+                        label="Part name"
+                        value={selectedItem.partName}
+                      />
+                      <DetailField
+                        label="Part number"
+                        value={selectedItem.partNumber}
+                        mono
+                      />
+                      <DetailField
+                        label="Model"
+                        value={selectedItem.model}
+                        mono
+                      />
+                      <DetailField
+                        label="Quantity"
+                        value={selectedItem.quantity}
+                        mono
+                      />
+                      <DetailField
+                        label="Process"
+                        value={selectedItem.processName}
+                      />
                     </div>
 
                     <div className="mt-5 flex flex-col gap-2 sm:flex-row">
@@ -745,20 +886,28 @@ export default function WorkOrderDetailPage() {
                           printKanbanCards([
                             {
                               ...selectedItem,
-                              qrDataUrl: selectedItemQRSrc || selectedItem.qrDataUrl,
+                              qrDataUrl:
+                                selectedItemQRSrc || selectedItem.qrDataUrl,
                             },
                           ])
                         }
                       >
                         Print Kanban
                       </Button>
-                      <Button className="min-h-11 flex-1 !rounded-md" onClick={() => setSelectedItemKey(null)}>
+                      <Button
+                        className="min-h-11 flex-1 !rounded-md"
+                        onClick={() => setSelectedItemKey(null)}
+                      >
                         Close detail
                       </Button>
                     </div>
                   </>
                 ) : (
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Select an item to view its details" className="py-10" />
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description="Select an item to view its details"
+                    className="py-10"
+                  />
                 )}
               </div>
             </aside>

@@ -131,11 +131,54 @@ export type CreateFinishedGoodRequest = {
   warehouse_location: string;
 };
 
+const toFinishedGoodPackingItem = (raw: unknown): FinishedGoodPackingItem => {
+  const record = isRecord(raw) ? raw : {};
+  const qtyCurrent = getNumber(record, ["qty_current", "qtyCurrent"]) ?? 0;
+  const qtyMax = getNumber(record, ["qty_max", "qtyMax"]) ?? 0;
+  const progress =
+    getNumber(record, ["progress"]) ??
+    (qtyMax > 0 ? Math.floor((qtyCurrent / qtyMax) * 100) : 0);
+
+  return {
+    dn_number: getString(record, ["dn_number", "dnNumber"]) ?? "",
+    packing_number:
+      getString(record, ["packing_number", "packingNumber", "kanban_number"]) ??
+      "",
+    quantity: getNumber(record, ["quantity", "qty"]) ?? 0,
+    progress: Math.max(0, Math.min(100, progress)),
+    qty_current: qtyCurrent,
+    qty_max: qtyMax,
+    status: getString(record, ["status", "check"]) ?? "",
+    wo_number: getString(record, ["wo_number", "woNumber"]) ?? "",
+    source: getString(record, ["source"]) ?? "",
+  };
+};
+
 export type UpdateFinishedGoodRequest = {
   uniq_code?: string;
   warehouse_location?: string;
   stock_qty?: number;
 };
+export type FinishedGoodPackingItem = {
+  dn_number: string;
+  packing_number: string;
+  quantity: number;
+  progress: number;
+  qty_current: number;
+  qty_max: number;
+  status: string;
+  wo_number: string;
+  source: string;
+};
+
+export type FinishedGoodPackingList = {
+  uniq_code: string;
+  items: FinishedGoodPackingItem[];
+  total_packing: number;
+  total_qty_current: number;
+  total_qty_max: number;
+};
+
 export interface DeliveryNoteItem {
   dn_number: string;
   item_uniq_code: string;
@@ -458,6 +501,39 @@ export const finishedGoodsSlice = apiSlice.injectEndpoints({
       }),
     }),
 
+    getFinishedGoodPackingList: builder.query<FinishedGoodPackingList, string>({
+      query: (uniqCode) => ({
+        url: "/finished-goods/packing-list",
+        method: "GET",
+        params: { uniq_code: uniqCode },
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown, _meta: unknown, arg: string) => {
+        const data = normalizeObjectResponse<UnknownRecord>(response) ?? {};
+        const rawItems = Array.isArray((data as UnknownRecord).items)
+          ? ((data as UnknownRecord).items as unknown[])
+          : Array.isArray(response)
+            ? (response as unknown[])
+            : [];
+        const items = rawItems
+          .map(toFinishedGoodPackingItem)
+          .filter((it) => it.packing_number || it.dn_number);
+
+        return {
+          uniq_code: getString(data, ["uniq_code", "uniqCode"]) ?? arg,
+          items,
+          total_packing:
+            getNumber(data, ["total_packing", "totalPacking"]) ?? items.length,
+          total_qty_current:
+            getNumber(data, ["total_qty_current", "totalQtyCurrent"]) ??
+            items.reduce((acc, it) => acc + it.qty_current, 0),
+          total_qty_max:
+            getNumber(data, ["total_qty_max", "totalQtyMax"]) ??
+            items.reduce((acc, it) => acc + it.qty_max, 0),
+        };
+      },
+    }),
+
     getDeliveryNoteByUniq: builder.query<DeliveryNoteResponse, string>({
       query: (uniq) => ({
         url: `/delivery-notes/uniq/${encodeURIComponent(uniq)}`,
@@ -482,6 +558,8 @@ export const {
   useUpdateFinishedGoodMutation,
   useDeleteFinishedGoodMutation,
   useLazyGenerateFinishedGoodQRQuery,
+  useGetFinishedGoodPackingListQuery,
+  useLazyGetFinishedGoodPackingListQuery,
   useGetDeliveryNoteByUniqQuery,
   useLazyGetDeliveryNoteByUniqQuery,
 } = finishedGoodsSlice;

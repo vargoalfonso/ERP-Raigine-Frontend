@@ -9,7 +9,9 @@ import {
   useGetFinishedGoodParameterizedSummaryQuery,
   useGetFinishedGoodHistoryQuery,
   useGetDeliveryNoteByUniqQuery,
+  useGetFinishedGoodPackingListQuery,
   type FinishedGoodHistoryItem,
+  type FinishedGoodPackingItem,
   type DeliveryNoteItem as ApiDeliveryNoteItem,
 } from "@/lib/api/finished-goods/api";
 
@@ -101,12 +103,21 @@ function FinishedGoodDetailContent() {
   const historyData: FinishedGoodHistoryItem[] = historyRes?.items ?? [];
   const resolvedUniq = detail?.uniq_code || uniqCode || "-";
 
-  const { data: deliveryNoteRes, isFetching: deliveryNoteLoading } =
-    useGetDeliveryNoteByUniqQuery(uniqCode, {
-      skip: !uniqCode,
-    });
+  const { data: deliveryNoteRes } = useGetDeliveryNoteByUniqQuery(uniqCode, {
+    skip: !uniqCode,
+  });
 
   const deliveryNoteData: ApiDeliveryNoteItem[] = deliveryNoteRes?.data ?? [];
+
+  // [packing-list] Sumber utama tabel packing: hasil scan barcode work order
+  // (work_order_items.kanban_number) yang sudah dipasangkan dengan delivery note.
+  const {
+    data: packingRes,
+    isFetching: packingLoading,
+    isError: packingError,
+  } = useGetFinishedGoodPackingListQuery(uniqCode, { skip: !uniqCode });
+
+  const packingData: FinishedGoodPackingItem[] = packingRes?.items ?? [];
 
   const deliveryDnNumbers = Array.from(
     new Set(
@@ -128,22 +139,6 @@ function FinishedGoodDetailContent() {
   const deliveryPackingText = deliveryPackingNumbers.length
     ? deliveryPackingNumbers.join(", ")
     : "-";
-
-  const packingCurrentQty = Number(detail?.stock_qty ?? 0);
-  const packingTargetQty =
-    detail?.target_stock_qty && detail.target_stock_qty > 0
-      ? Number(detail.target_stock_qty)
-      : packingCurrentQty + Number(detail?.stock_to_kanban_pcs ?? 0);
-  const packingProgress =
-    packingTargetQty > 0
-      ? Math.max(
-          0,
-          Math.min(
-            100,
-            Math.round((packingCurrentQty / packingTargetQty) * 100),
-          ),
-        )
-      : 0;
 
   /* ================= COLUMNS HISTORY ================= */
   const historyColumns: ColumnsType<FinishedGoodHistoryItem> = [
@@ -391,106 +386,134 @@ function FinishedGoodDetailContent() {
             />
           )}
 
-          {deliveryNoteData?.length > 0 && (
-            <div className="mt-8">
-              <h3 className="text-lg font-semibold mb-4">
-                Delivery Note History
-              </h3>
-
-              <Table<ApiDeliveryNoteItem>
-                rowKey={(record) =>
-                  `${record.dn_number ?? "-"}-${record.packing_number ?? "-"}`
-                }
-                pagination={false}
-                dataSource={deliveryNoteData}
-                columns={[
-                  {
-                    title: "DN Number",
-                    dataIndex: "dn_number",
-                    key: "dn_number",
-                    render: (
-                      value: string,
-                      record: { dn_number?: string; packing_number?: string },
-                    ) => (
-                      <span className="flex items-center gap-1">
-                        <BarcodeOutlined
-                          className="cursor-pointer text-blue-600"
-                          onClick={() =>
-                            setBarcodeModal({
-                              dn: value || "-",
-                              packing: record.packing_number || "-",
-                            })
-                          }
-                        />{" "}
-                        {value || "-"}
-                      </span>
-                    ),
-                  },
-                  {
-                    title: "Packing Number",
-                    dataIndex: "packing_number",
-                    key: "packing_number",
-                    render: (value: string) => value || "-",
-                  },
-                  {
-                    title: "Quantity",
-                    dataIndex: "quantity",
-                    key: "quantity",
-                    align: "right",
-                    render: (value: number) =>
-                      Number(value ?? 0).toLocaleString("en-US"),
-                  },
-                  {
-                    title: "Progress",
-                    key: "progress",
-                    width: 220,
-                    // [packing-qty] Dihitung PER BARIS: qty_opname / quantity.
-                    // quantity = rencana DN (batas), qty_opname = hasil stock opname.
-                    render: (_: unknown, record: { quantity?: number; qty_opname?: number | null }) => {
-                      const rowMax = Number(record?.quantity ?? packingTargetQty);
-                      const rowCur = Number(
-                        record?.qty_opname ?? record?.quantity ?? packingCurrentQty,
-                      );
-                      const rowPct =
-                        rowMax > 0
-                          ? Math.max(
-                              0,
-                              Math.min(100, Math.round((rowCur / rowMax) * 100)),
-                            )
-                          : packingProgress;
-                      return (
-                        <div>
-                          <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-200">
-                            <div
-                              className="h-full rounded-full bg-blue-600"
-                              style={{ width: `${rowPct}%` }}
-                            />
-                          </div>
-                          <p className="mt-1 text-xs text-gray-500">
-                            {rowPct}% tercapai
-                          </p>
-                        </div>
-                      );
-                    },
-                  },
-                  {
-                    title: "Qty saat ini",
-                    key: "current_qty",
-                    align: "right",
-                    render: (_: unknown, record: { quantity?: number; qty_opname?: number | null }) =>
-                      (Number(record?.qty_opname ?? record?.quantity ?? packingCurrentQty)).toLocaleString("en-US"),
-                  },
-                  {
-                    title: "Qty maksimal",
-                    key: "target_qty",
-                    align: "right",
-                    render: (_: unknown, record: { quantity?: number; qty_opname?: number | null }) =>
-                      (Number(record?.quantity ?? packingTargetQty)).toLocaleString("en-US"),
-                  },
-                ]}
-              />
+          <div className="mt-8">
+            <div className="mb-4 flex items-end justify-between">
+              <div>
+                <h3 className="m-0 text-lg font-semibold">Packing List</h3>
+                <p className="m-0 text-sm text-gray-400">
+                  Kanban / packing hasil scan barcode work order untuk{" "}
+                  {resolvedUniq}
+                </p>
+              </div>
+              <span className="text-sm text-gray-500">
+                {packingRes?.total_packing ?? packingData.length} packing
+              </span>
             </div>
-          )}
+
+            {packingError ? (
+              <div className="py-6 text-center text-red-500">
+                Failed to load packing list.
+              </div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <Table<FinishedGoodPackingItem>
+                  rowKey={(record, index) =>
+                    `${record.packing_number || record.dn_number || "row"}-${index}`
+                  }
+                  pagination={false}
+                  loading={packingLoading}
+                  dataSource={packingData}
+                  locale={{
+                    emptyText:
+                      "Belum ada packing. Data muncul setelah barcode work order di-scan.",
+                  }}
+                  columns={[
+                    {
+                      title: "DN Number",
+                      dataIndex: "dn_number",
+                      key: "dn_number",
+                      render: (value: string, record) => (
+                        <span className="flex items-center gap-1">
+                          <BarcodeOutlined
+                            className="cursor-pointer text-blue-600"
+                            onClick={() =>
+                              setBarcodeModal({
+                                dn: value || "-",
+                                packing: record.packing_number || "-",
+                              })
+                            }
+                          />{" "}
+                          {value || (
+                            <span className="text-gray-400">Belum ada DN</span>
+                          )}
+                        </span>
+                      ),
+                    },
+                    {
+                      title: "Packing Number",
+                      dataIndex: "packing_number",
+                      key: "packing_number",
+                      render: (value: string, record) => (
+                        <div className="flex flex-col">
+                          <span className="font-medium">{value || "-"}</span>
+                          {record.wo_number ? (
+                            <span className="text-xs text-gray-400">
+                              {record.wo_number}
+                            </span>
+                          ) : null}
+                        </div>
+                      ),
+                    },
+                    {
+                      title: "Quantity",
+                      dataIndex: "quantity",
+                      key: "quantity",
+                      align: "right",
+                      render: (value: number) =>
+                        Number(value ?? 0).toLocaleString("en-US"),
+                    },
+                    {
+                      title: "Progress",
+                      dataIndex: "progress",
+                      key: "progress",
+                      width: 220,
+                      // [packing-qty] progress = qty saat ini / qty maksimal (dihitung di BE)
+                      render: (value: number) => {
+                        const pct = Math.max(
+                          0,
+                          Math.min(100, Math.round(Number(value ?? 0))),
+                        );
+                        return (
+                          <div>
+                            <div className="h-2.5 w-full overflow-hidden rounded-full bg-gray-200">
+                              <div
+                                className={`h-full rounded-full ${
+                                  pct >= 100 ? "bg-green-600" : "bg-blue-600"
+                                }`}
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            <p className="mt-1 text-xs text-gray-500">
+                              {pct}% tercapai
+                            </p>
+                          </div>
+                        );
+                      },
+                    },
+                    {
+                      title: "Qty saat ini",
+                      dataIndex: "qty_current",
+                      key: "qty_current",
+                      align: "right",
+                      render: (value: number) => (
+                        <span className="font-semibold text-blue-600">
+                          {Number(value ?? 0).toLocaleString("en-US")}
+                        </span>
+                      ),
+                    },
+                    {
+                      title: "Qty maksimal",
+                      dataIndex: "qty_max",
+                      key: "qty_max",
+                      align: "right",
+                      render: (value: number) =>
+                        Number(value ?? 0).toLocaleString("en-US"),
+                    },
+                  ]}
+                />
+              </div>
+            )}
+          </div>
         </Card>
       </div>
 
