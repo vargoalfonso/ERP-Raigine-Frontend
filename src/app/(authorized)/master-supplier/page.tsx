@@ -58,6 +58,7 @@ type SupplierRow = {
   quantity: number;
   pcsPerKanban: number;
   customerCycle: string;
+  cycleTime: number;
   uom: string;
   weight: number;
   warehouse: string;
@@ -177,6 +178,7 @@ const toSupplierRow = (record: SupplierItemRecord, index: number): SupplierRow =
     quantity: pickNumber(record.quantity),
     pcsPerKanban: pickNumber(record.pcs_per_kanban),
     customerCycle: pickText(record.customer_cycle) || "-",
+    cycleTime: pickNumber(record.cycle_time),
     uom: pickText(record.uom) || "-",
     weight: pickNumber(record.weight),
     warehouse: pickText(record.warehouse_name, record.warehouse_id) || "-",
@@ -413,6 +415,20 @@ export default function MasterSupplierPage() {
       key: "customerCycle",
       width: 100,
       render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value,
+    },
+    {
+      title: "Cycle Time",
+      dataIndex: "cycleTime",
+      key: "cycleTime",
+      width: 120,
+      render: (value: number, row) =>
+        row.isGroup ? (
+          <span className="text-gray-400">—</span>
+        ) : value ? (
+          `${value} day${value > 1 ? "s" : ""}`
+        ) : (
+          "-"
+        ),
     },
     { title: "UOM", dataIndex: "uom", key: "uom", width: 100, render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
     { title: "Weight", dataIndex: "weight", key: "weight", width: 100, render: (value: number, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
