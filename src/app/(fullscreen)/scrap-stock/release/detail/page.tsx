@@ -93,6 +93,30 @@ function ScrapReleaseDetailContent() {
           />
           <h1 className="text-2xl font-semibold m-0">Scrap Release Detail</h1>
         </div>
+        {/* DETAIL-ACTIONS-TOP */}
+        <div className="flex items-center gap-3">
+          {release && isPending ? (
+            <>
+              <Button
+                danger
+                onClick={() => handleDecision("Rejected")}
+                loading={approveState.isLoading}
+              >
+                Reject
+              </Button>
+              <Button
+                type="primary"
+                onClick={() => handleDecision("Completed")}
+                loading={approveState.isLoading}
+              >
+                Approve
+              </Button>
+            </>
+          ) : null}
+          <Button onClick={() => router.push("/scrap-stock")}>
+            Back to Scrap Stock
+          </Button>
+        </div>
       </div>
 
       <div className="p-8">
@@ -181,7 +205,44 @@ function ScrapReleaseDetailContent() {
                 <div className="font-semibold text-gray-900 mb-2">
                   Scrap Stock
                 </div>
-                {scrapStockQuery.isFetching ? (
+                {release.items && release.items.length > 0 ? (
+                  <div className="mb-4 overflow-hidden rounded-lg border border-gray-200 bg-white">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-100">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium text-gray-500">
+                            UNIQ
+                          </th>
+                          <th className="px-3 py-2 text-left font-medium text-gray-500">
+                            Part Name
+                          </th>
+                          <th className="px-3 py-2 text-right font-medium text-gray-500">
+                            Qty (pcs)
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {release.items.map((it, idx) => (
+                          <tr
+                            key={`${it.scrap_stock_id}-${idx}`}
+                            className="border-t border-gray-100"
+                          >
+                            <td className="px-3 py-2 font-semibold text-gray-900">
+                              {it.uniq || "-"}
+                            </td>
+                            <td className="px-3 py-2 text-gray-700">
+                              {it.part_name || "-"}
+                            </td>
+                            <td className="px-3 py-2 text-right font-semibold text-orange-500">
+                              {it.release_qty}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : null}
+                {/* {scrapStockQuery.isFetching ? (
                   <div className="text-sm text-gray-500">
                     Loading scrap stock…
                   </div>
@@ -222,9 +283,9 @@ function ScrapReleaseDetailContent() {
                       <div className="font-semibold">{scrapStock.status}</div>
                     </div>
                   </div>
-                )}
+                )} */}
 
-                <div className="mt-4">
+                {/* <div className="mt-4">
                   <Button
                     onClick={() =>
                       router.push(
@@ -234,32 +295,10 @@ function ScrapReleaseDetailContent() {
                   >
                     View Scrap Stock
                   </Button>
-                </div>
+                </div> */}
               </div>
 
-              <div className="flex items-center justify-end gap-3">
-                {isPending ? (
-                  <>
-                    <Button
-                      danger
-                      onClick={() => handleDecision("Rejected")}
-                      loading={approveState.isLoading}
-                    >
-                      Reject
-                    </Button>
-                    <Button
-                      type="primary"
-                      onClick={() => handleDecision("Completed")}
-                      loading={approveState.isLoading}
-                    >
-                      Approve
-                    </Button>
-                  </>
-                ) : null}
-                <Button onClick={() => router.push("/scrap-stock")}>
-                  Back to Scrap Stock
-                </Button>
-              </div>
+              {/* DETAIL-ACTIONS-MOVED-TO-TOP */}
             </div>
           )}
         </Card>

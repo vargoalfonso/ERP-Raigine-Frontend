@@ -100,6 +100,8 @@ export type ScrapReleaseRecord = {
   weight_released: number | null;
   customer_name: string | null;
   price_per_unit: number | null;
+  price_per_kg: number | null;
+  items: ScrapReleaseLineRecord[];
   total_value: number | null;
   disposal_reason: string | null;
   approval_status: string;
@@ -118,11 +120,38 @@ export type ScrapReleaseCreateRequest = {
   release_date: string; // YYYY-MM-DD
   release_type: string;
   release_qty: number;
+  // CART-RELEASE-V1: multi-item cart lines
+  items?: { scrap_stock_id: number; release_qty: number }[];
+  // CART-RELEASE-V1: total weight + price per kg (sale calc)
+  weight_kg?: number | null;
+  price_per_kg?: number | null;
   customer_name: string;
-  price_per_unit: number;
+  price_per_unit?: number;
   remarks: string | null;
   disposal_reason: string; // dump|sell|inventory
   approver?: string;
+};
+
+export type ScrapReleaseLineRecord = {
+  scrap_stock_id: number;
+  uniq: string | null;
+  part_name: string | null;
+  release_qty: number;
+};
+
+const mapScrapReleaseLines = (raw: unknown): ScrapReleaseLineRecord[] => {
+  const record = isRecord(raw) ? raw : {};
+  const list = record["items"];
+  if (!Array.isArray(list)) return [];
+  return list.map((it) => {
+    const r = isRecord(it) ? it : {};
+    return {
+      scrap_stock_id: getNumber(r, ["scrap_stock_id", "scrapStockId"]) ?? 0,
+      uniq: getString(r, ["uniq"]) ?? null,
+      part_name: getString(r, ["part_name", "partName"]) ?? null,
+      release_qty: getNumber(r, ["release_qty", "releaseQty"]) ?? 0,
+    };
+  });
 };
 
 const toScrapReleaseRecord = (raw: unknown): ScrapReleaseRecord => {
@@ -146,6 +175,8 @@ const toScrapReleaseRecord = (raw: unknown): ScrapReleaseRecord => {
       "price_per_unit",
       "pricePerUnit",
     ]),
+    price_per_kg: getNullableNumber(record, ["price_per_kg", "pricePerKg"]),
+    items: mapScrapReleaseLines(record),
     total_value: getNullableNumber(record, ["total_value", "totalValue"]),
     disposal_reason:
       getString(record, ["disposal_reason", "scrap_reason"]) ?? null,

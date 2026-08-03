@@ -12,12 +12,15 @@ import {
   Modal,
   Select,
   Tag,
+  Tooltip,
   message,
 } from "antd";
 import {
   ScanOutlined,
   PlusOutlined,
   EyeOutlined,
+  CheckOutlined,
+  CloseOutlined,
   AlertOutlined,
   CheckCircleOutlined,
   WarningOutlined,
@@ -44,6 +47,7 @@ import { useGetEmployeesQuery } from "@/lib/api/system-settings/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
   type ScrapReleaseRecord,
+  useApproveScrapReleaseMutation,
   useGetScrapReleasesLegacyQuery,
   useGetScrapReleasesQuery,
 } from "@/lib/api/scrap-release/api";
@@ -256,6 +260,7 @@ const isNotFoundError = (error: unknown) => {
 
 const makeReleaseColumns = (actions: {
   onView: (record: ReleaseRecord) => void;
+  onDecision?: (record: ReleaseRecord, action: "Completed" | "Rejected") => void;
   getScrapStockDisplay?: (scrapStockId: number) => {
     part_name?: string;
     wo_number?: string | null;
@@ -324,10 +329,49 @@ const makeReleaseColumns = (actions: {
   {
     title: "UNIQ / Part Number",
     key: "uniqPart",
-    width: 200,
+    width: 220,
     render: (_: unknown, record: ReleaseRecord) => {
       const display =
         actions.getScrapStockDisplay?.(record.scrap_stock_id) ?? null;
+      if (record.items && record.items.length > 0) {
+        const uniqItems = record.items;
+        const maxVisible = 5;
+        const visibleItems = uniqItems.slice(0, maxVisible);
+        const hiddenCount = uniqItems.length - visibleItems.length;
+        return (
+          <div className="space-y-1">
+            {visibleItems.map((it, idx) => (
+              <div key={`${it.scrap_stock_id}-${idx}`}>
+                <span className="font-semibold text-gray-900">
+                  {it.uniq || "-"}
+                </span>
+                <span className="text-xs text-gray-500"> · {it.release_qty} pcs</span>
+              </div>
+            ))}
+            {hiddenCount > 0 ? (
+              <Tooltip
+                title={
+                  <div className="max-h-64 space-y-1 overflow-auto">
+                    {uniqItems.map((it, idx) => (
+                      <div
+                        key={`all-${it.scrap_stock_id}-${idx}`}
+                        className="text-xs"
+                      >
+                        {it.uniq || "-"} · {it.release_qty} pcs
+                      </div>
+                    ))}
+                  </div>
+                }
+                overlayStyle={{ maxWidth: 320 }}
+              >
+                <span className="cursor-pointer text-xs font-medium text-blue-600">
+                  +{hiddenCount} more
+                </span>
+              </Tooltip>
+            ) : null}
+          </div>
+        );
+      }
       return (
         <div>
           <div className="font-semibold text-gray-900">
@@ -425,16 +469,40 @@ const makeReleaseColumns = (actions: {
   {
     title: "Actions",
     key: "actions",
-    width: 80,
-    render: (_: unknown, record: ReleaseRecord) => (
-      <Button
-        type="text"
-        icon={<EyeOutlined />}
-        size="small"
-        className="text-blue-600 hover:text-blue-800"
-        onClick={() => actions.onView(record)}
-      />
-    ),
+    width: 140,
+    render: (_: unknown, record: ReleaseRecord) => {
+      const pending =
+        String(record.approval_status || "").toLowerCase() === "pending";
+      return (
+        <div className="flex items-center gap-1">
+          <Button
+            type="text"
+            icon={<EyeOutlined />}
+            size="small"
+            className="text-blue-600 hover:text-blue-800"
+            onClick={() => actions.onView(record)}
+          />
+          {pending ? (
+            <>
+              <Button
+                type="text"
+                icon={<CheckOutlined />}
+                size="small"
+                className="text-green-600 hover:text-green-800"
+                onClick={() => actions.onDecision?.(record, "Completed")}
+              />
+              <Button
+                type="text"
+                icon={<CloseOutlined />}
+                size="small"
+                className="text-red-600 hover:text-red-800"
+                onClick={() => actions.onDecision?.(record, "Rejected")}
+              />
+            </>
+          ) : null}
+        </div>
+      );
+    },
   },
 ];
 
@@ -610,8 +678,53 @@ export default function ScrapStockPage() {
     );
   };
 
+  const [approveReleaseFromTable] = useApproveScrapReleaseMutation();
+
+  const handleReleaseDecision = (
+    record: ReleaseRecord,
+    action: "Completed" | "Rejected",
+  ) => {
+    let remarks = "";
+    Modal.confirm({
+      title: action === "Completed" ? "Approve release?" : "Reject release?",
+      content: (
+        <div className="mt-2">
+          <div className="text-sm text-gray-500 mb-1">Remarks (optional)</div>
+          <Input.TextArea
+            rows={3}
+            onChange={(e) => (remarks = e.target.value)}
+          />
+          {action === "Completed" ? (
+            <div className="mt-2 text-xs text-gray-500">
+              Qty {record.release_qty} akan dikurangi dari stok scrap terkait.
+            </div>
+          ) : null}
+        </div>
+      ),
+      okText: action === "Completed" ? "Approve" : "Reject",
+      okButtonProps: { danger: action === "Rejected" },
+      onOk: async () => {
+        try {
+          await approveReleaseFromTable({
+            id: record.id,
+            action,
+            remarks: remarks.trim() || null,
+          }).unwrap();
+          messageApi.success(
+            action === "Completed" ? "Release approved" : "Release rejected",
+          );
+          releasesQuery.refetch();
+        } catch (err) {
+          messageApi.error(getApiErrorMessage(err, "Failed to update release"));
+          throw err;
+        }
+      },
+    });
+  };
+
   const releaseColumns = makeReleaseColumns({
     onView: openReleaseDetail,
+    onDecision: handleReleaseDecision,
     getScrapStockDisplay: (scrapStockId) =>
       scrapStockById.get(scrapStockId) ?? null,
   });
