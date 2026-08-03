@@ -81,6 +81,9 @@ export default function BomChildEditor({
           <Form.Item name={[...fieldPath, "is_phantom"]} valuePropName="checked" label=" ">
             <Checkbox disabled={disabled}>Is Phantom</Checkbox>
           </Form.Item>
+          <Form.Item name={[...fieldPath, "is_phantom"]} valuePropName="checked" label=" ">
+            <Checkbox disabled={disabled}>Is Phantom</Checkbox>
+          </Form.Item>
         </div>
 
         <Form.Item name={[...fieldPath, "asset_id"]} hidden>

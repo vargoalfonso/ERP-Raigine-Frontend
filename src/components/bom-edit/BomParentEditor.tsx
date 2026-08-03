@@ -1,6 +1,6 @@
 "use client";
 
-import { Alert, Card, Form, Input, Select } from "antd";
+import { Alert, Card, Form, Input, InputNumber, Select } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
 import AssetUploadField from "./AssetUploadField";
 import MaterialSpecEditor from "./MaterialSpecEditor";
@@ -74,6 +74,11 @@ export default function BomParentEditor(props: ParentEditorProps) {
           <Form.Item name="uom" label="UOM" rules={[{ required: true, message: "UOM is required" }]}>
             <Select showSearch disabled={disabled} loading={isUomsLoading} options={uomOptions} optionFilterProp="label" />
           </Form.Item>
+          
+          <Form.Item name={["material_spec", "cycle_time_sec"]} label="Cycle Time (s)">
+            <InputNumber min={0} className="w-full" disabled={disabled} />
+          </Form.Item>
+ 
         </div>
 
         <Form.Item name="asset_id" hidden>
@@ -114,6 +119,7 @@ export default function BomParentEditor(props: ParentEditorProps) {
       </Card>
 
       <Card title="Material specification" className="rounded-3xl border-slate-200 shadow-sm">
+        
         <MaterialSpecEditor fieldPath={[]} disabled={disabled || isAssembly} />
       </Card>
     </div>
