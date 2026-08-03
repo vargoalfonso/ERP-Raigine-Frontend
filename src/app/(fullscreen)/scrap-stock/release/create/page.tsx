@@ -373,7 +373,7 @@ export default function ScrapReleaseCreatePage() {
               >
                 <InputNumber
                   className="w-full"
-                  min={0}
+                  min={0 as number}
                   formatter={(v) =>
                     (v ?? "").toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")
                   }
