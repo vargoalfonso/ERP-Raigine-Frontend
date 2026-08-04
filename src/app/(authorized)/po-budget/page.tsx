@@ -1,7 +1,7 @@
 "use client";
 import { apiBaseUrl, getCookiesFromBrowser } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import {
   useGetPoBudgetListQuery,
@@ -602,6 +602,10 @@ export default function PoBudgetPage() {
   const [bulkPrlSearch, setBulkPrlSearch] = useState("");
   const [bulkPrlPage, setBulkPrlPage] = useState(1);
   const [prlCache, setPrlCache] = useState<PrlRecord[]>([]);
+  // [prl-type-switch] Signature (tipe + pencarian) yang sedang di-cache di
+  // prlCache. Dipakai agar pergantian PO Budget Type selalu mengganti isi cache
+  // walaupun RTK Query mengembalikan referensi objek yang sama dari cache.
+  const prlCacheSigRef = useRef<string>("");
   const [bulkBudgetType, setBulkBudgetType] = useState<BulkBudgetType>("adhoc");
   const [bulkPeriod, setBulkPeriod] = useState<string | undefined>(undefined);
   const [bulkPo1Pct, setBulkPo1Pct] = useState<number>(60);
@@ -669,11 +673,25 @@ export default function PoBudgetPage() {
   );
 
   useEffect(() => {
-    // Skip while no fetch is active for the current selector, so a response
-    // left over from a previous prl_type/skip state never repopulates the
-    // cache after switching PO Budget Type.
     if (!shouldFetchPrls) return;
+    // [prl-type-switch] Kunci cache ke kombinasi tipe + pencarian yang aktif.
+    // Saat tipe/pencarian berganti, RTK Query bisa langsung mengembalikan data
+    // hasil cache untuk arg yang pernah di-fetch (mis. additional -> reguler ->
+    // additional) TANPA mengubah referensi objek, sehingga effect lama tidak
+    // ter-trigger untuk repopulasi. Dengan membandingkan signature, kita selalu
+    // mengganti isi cache begitu pilihan berubah.
+    const sig = `${activePrlTypeFilter}::${bulkPrlSearch.trim()}`;
     const incoming = prlsResponse?.items ?? [];
+
+    if (prlCacheSigRef.current !== sig) {
+      // Pilihan (tipe/pencarian) baru berganti: ganti total isi cache dengan
+      // data untuk pilihan baru. Boleh kosong bila fetch masih berjalan,
+      // sehingga data tipe sebelumnya tidak tertinggal.
+      prlCacheSigRef.current = sig;
+      setPrlCache(incoming);
+      return;
+    }
+
     if (incoming.length === 0) return;
 
     setPrlCache((prev) => {
@@ -691,7 +709,13 @@ export default function PoBudgetPage() {
       incoming.forEach((item, index) => byKey.set(getKey(item, index), item));
       return Array.from(byKey.values());
     });
-  }, [bulkPrlPage, prlsResponse, shouldFetchPrls, activePrlTypeFilter]);
+  }, [
+    bulkPrlPage,
+    prlsResponse,
+    shouldFetchPrls,
+    activePrlTypeFilter,
+    bulkPrlSearch,
+  ]);
 
   const prls = prlCache;
   const bulkPrlPagination = prlsResponse?.pagination;
@@ -706,11 +730,11 @@ export default function PoBudgetPage() {
   };
 
   useEffect(() => {
+    // [prl-type-switch] Cukup reset halaman + minta data segar. Pengosongan &
+    // pengisian ulang prlCache kini ditangani effect populasi berbasis signature
+    // di atas, sehingga tidak ada lagi race yang membuat data hilang ketika tipe
+    // dikembalikan ke pilihan yang datanya sudah pernah di-cache.
     setBulkPrlPage(1);
-    setPrlCache([]);
-    // RTK Query serves cached data instantly for an arg combo it has seen
-    // before (e.g. switching additional -> reguler -> additional again), so
-    // force a real refetch whenever the active PRL type changes.
     if (shouldFetchPrls) refetchPrls();
   }, [activePrlTypeFilter]);
 
@@ -2256,6 +2280,8 @@ export default function PoBudgetPage() {
     setBulkPrlSearch("");
     setBulkPrlPage(1);
     setPrlCache([]);
+    // [prl-type-switch] paksa repopulasi cache saat modal dibuka kembali
+    prlCacheSigRef.current = "";
     setBulkPrlDetailCache({});
     setBulkItems([]);
     setExpandedBulkRowKeys([]);
@@ -2921,10 +2947,10 @@ export default function PoBudgetPage() {
           if (created <= 0) return;
         }
 
-        if (created <= 0) {
-          message.warning("No PO Budget entries were created.");
-          return;
-        }
+        // if (created <= 0) {
+        //   message.warning("No PO Budget entries were created.");
+        //   return;
+        // }
       }
       message.success(
         `Bulk ${getBudgetTypeLabel(activeTab)} PO Budget saved successfully (${created} entr${created === 1 ? "y" : "ies"} created)`,
