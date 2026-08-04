@@ -1,14 +1,16 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import { Button, Input, Table, Tag, message } from "antd";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Button, Empty, Input, Modal, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useRouter } from "next/navigation";
 import {
   DownloadOutlined,
   EditOutlined,
   EyeOutlined,
+  FileSearchOutlined,
   FileTextOutlined,
+  HistoryOutlined,
   PlusOutlined,
 } from "@ant-design/icons";
 import {
@@ -24,6 +26,7 @@ import {
   useListDeliveryNotesQuery,
   useListSpecialOrdersQuery,
 } from "@/lib/api/customer-orders/api";
+import { useListCustomerOrderLogsQuery } from "@/lib/api/customer-orders/logs";
 
 type CustomerPoTabId = "dn" | "po" | "so";
 
@@ -31,6 +34,7 @@ type DnRow = {
   key: string;
   dnDate: string;
   dnNumber: string;
+  specialInstructions?: string;
   customer: string;
   quantity: number;
   uom: string;
@@ -43,6 +47,7 @@ type PoRow = {
   key: string;
   poDate: string;
   poNumber: string;
+  specialInstructions?: string;
   customer: string;
   quantity: number;
   uom: string;
@@ -55,6 +60,7 @@ type SoRow = {
   key: string;
   soDate: string;
   soNumber: string;
+  specialInstructions?: string;
   customer: string;
   quantity: number;
   uom: string;
@@ -96,17 +102,29 @@ export default function CustomerPoDnSoPage() {
   const [tab, setTab] = useState<CustomerPoTabId>("dn");
   const [search, setSearch] = useState("");
   const [customerFilter, setCustomerFilter] = useState<string>("");
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [logsDocFilter, setLogsDocFilter] = useState<string>("");
+
+  const openLogs = useCallback((documentNumber?: string) => {
+    setLogsDocFilter(documentNumber ?? "");
+    setLogsOpen(true);
+  }, []);
 
   const apiEnabled = Boolean(apiBaseUrl);
 
   const dnQuery = useListDeliveryNotesQuery(undefined, { skip: !apiEnabled });
   const poQuery = useListCustomerPosQuery(undefined, { skip: !apiEnabled });
   const soQuery = useListSpecialOrdersQuery(undefined, { skip: !apiEnabled });
+  const logsQuery = useListCustomerOrderLogsQuery(
+    { document_number: logsDocFilter || undefined },
+    { skip: !apiEnabled || !logsOpen },
+  );
 
   const dnRows = useMemo<DnRow[]>(
     () => [
       {
         key: "DN-001",
+        specialInstructions: "Kirim data harian sebelum pukul 09:00 WIB",
         dnDate: "10/1/2025",
         dnNumber: "PO-TMC-2025-001",
         customer: "Toyota Motor Company",
@@ -146,6 +164,7 @@ export default function CustomerPoDnSoPage() {
     () => [
       {
         key: "PO-001",
+        specialInstructions: "Split pengiriman 2x per minggu",
         poDate: "10/1/2025",
         poNumber: "PO-FMC-2025-001",
         customer: "Ford Motor Company",
@@ -185,6 +204,7 @@ export default function CustomerPoDnSoPage() {
     () => [
       {
         key: "SO-001",
+        specialInstructions: "Butuh sertifikat material per batch",
         soDate: "10/1/2025",
         soNumber: "SO-FMC-2025-001",
         customer: "Ford Motor Company",
@@ -242,6 +262,7 @@ export default function CustomerPoDnSoPage() {
         uom: firstItem?.uom ?? "Pcs",
         deliveryDate: dn.delivery_date ?? "-",
         cycle: "Monthly",
+        specialInstructions: dn.notes ?? undefined,
         status: dn.status ?? "-",
       };
     });
@@ -269,6 +290,7 @@ export default function CustomerPoDnSoPage() {
         uom: firstItem?.uom ?? "Pcs",
         deliveryDate: firstItem?.delivery_date ?? "-",
         cycle: "Monthly",
+        specialInstructions: po.special_instructions ?? undefined,
         status: po.status ?? "-",
       };
     });
@@ -296,6 +318,7 @@ export default function CustomerPoDnSoPage() {
         uom: firstItem?.uom ?? "Pcs",
         deliveryDate: firstItem?.target_date ?? "-",
         cycle: "Monthly",
+        specialInstructions: so.special_instructions ?? undefined,
         status: so.status ?? "-",
       };
     });
@@ -420,6 +443,23 @@ export default function CustomerPoDnSoPage() {
           </Tag>
         ),
       },
+      {
+        title: "Special Instruction",
+        dataIndex: "specialInstructions",
+        key: "specialInstructions",
+        width: 220,
+        render: (v?: string) => {
+          const text = (v ?? "").trim();
+          if (!text || text === "-") {
+            return <span className="text-xs text-gray-400">-</span>;
+          }
+          return (
+            <span className="text-sm text-gray-700" title={text}>
+              {text.length > 40 ? `${text.slice(0, 40)}…` : text}
+            </span>
+          );
+        },
+      },
       // {
       //   title: "Status",
       //   dataIndex: "status",
@@ -458,11 +498,22 @@ export default function CustomerPoDnSoPage() {
                 )
               }
             />
+            {r.specialInstructions &&
+            r.specialInstructions.trim() &&
+            r.specialInstructions.trim() !== "-" ? (
+              <Button
+                size="small"
+                icon={<FileSearchOutlined />}
+                className="!rounded-lg"
+                title="Lihat history logs automation"
+                onClick={() => openLogs(r.dnNumber)}
+              />
+            ) : null}
           </div>
         ),
       },
     ],
-    [router],
+    [router, openLogs],
   );
 
   const poColumns = useMemo<ColumnsType<PoRow>>(
@@ -509,6 +560,23 @@ export default function CustomerPoDnSoPage() {
           </Tag>
         ),
       },
+      {
+        title: "Special Instruction",
+        dataIndex: "specialInstructions",
+        key: "specialInstructions",
+        width: 220,
+        render: (v?: string) => {
+          const text = (v ?? "").trim();
+          if (!text || text === "-") {
+            return <span className="text-xs text-gray-400">-</span>;
+          }
+          return (
+            <span className="text-sm text-gray-700" title={text}>
+              {text.length > 40 ? `${text.slice(0, 40)}…` : text}
+            </span>
+          );
+        },
+      },
       // {
       //   title: "Status",
       //   dataIndex: "status",
@@ -547,11 +615,22 @@ export default function CustomerPoDnSoPage() {
                 )
               }
             />
+            {r.specialInstructions &&
+            r.specialInstructions.trim() &&
+            r.specialInstructions.trim() !== "-" ? (
+              <Button
+                size="small"
+                icon={<FileSearchOutlined />}
+                className="!rounded-lg"
+                title="Lihat history logs automation"
+                onClick={() => openLogs(r.poNumber)}
+              />
+            ) : null}
           </div>
         ),
       },
     ],
-    [router],
+    [router, openLogs],
   );
 
   const soColumns = useMemo<ColumnsType<SoRow>>(
@@ -605,6 +684,23 @@ export default function CustomerPoDnSoPage() {
           </Tag>
         ),
       },
+      {
+        title: "Special Instruction",
+        dataIndex: "specialInstructions",
+        key: "specialInstructions",
+        width: 220,
+        render: (v?: string) => {
+          const text = (v ?? "").trim();
+          if (!text || text === "-") {
+            return <span className="text-xs text-gray-400">-</span>;
+          }
+          return (
+            <span className="text-sm text-gray-700" title={text}>
+              {text.length > 40 ? `${text.slice(0, 40)}…` : text}
+            </span>
+          );
+        },
+      },
       // {
       //   title: "Status",
       //   dataIndex: "status",
@@ -643,11 +739,22 @@ export default function CustomerPoDnSoPage() {
                 )
               }
             />
+            {r.specialInstructions &&
+            r.specialInstructions.trim() &&
+            r.specialInstructions.trim() !== "-" ? (
+              <Button
+                size="small"
+                icon={<FileSearchOutlined />}
+                className="!rounded-lg"
+                title="Lihat history logs automation"
+                onClick={() => openLogs(r.soNumber)}
+              />
+            ) : null}
           </div>
         ),
       },
     ],
-    [router],
+    [router, openLogs],
   );
 
   const tabs = useMemo(
@@ -655,6 +762,83 @@ export default function CustomerPoDnSoPage() {
       { id: "dn" as const, label: "Delivery Notes" },
       { id: "po" as const, label: "Purchase Order" },
       { id: "so" as const, label: "Special Order" },
+    ],
+    [],
+  );
+
+  type LogRow = {
+    key: string;
+    no: number;
+    uniq: string;
+    partName: string;
+    description: string;
+    qtyActive: number;
+    reason: string;
+  };
+
+  const mockLogRows = useMemo<LogRow[]>(
+    () => [
+      {
+        key: "log-1",
+        no: 1,
+        uniq: "LV-001",
+        partName: "Steel Plate",
+        description: "Bracket assembly steel plate",
+        qtyActive: 120,
+        reason: "Qty aktif melebihi kapasitas (gagal terkirim ke automation)",
+      },
+      {
+        key: "log-2",
+        no: 2,
+        uniq: "LV-002",
+        partName: "Engine Mount",
+        description: "Rubber engine mount",
+        qtyActive: 0,
+        reason: "Uniq code tidak ditemukan (gagal masuk)",
+      },
+    ],
+    [],
+  );
+
+  const logRows = useMemo<LogRow[]>(() => {
+    if (!apiEnabled) return mockLogRows;
+    const list = logsQuery.data;
+    if (!list || list.length === 0) return [];
+    return list.map((log, index) => ({
+      key: log.id || `log-${index}`,
+      no: log.row_no || index + 1,
+      uniq: log.item_uniq_code || "-",
+      partName: log.part_name || "-",
+      description: log.description || "-",
+      qtyActive: Number(log.qty_active ?? 0),
+      reason: log.failure_reason || "-",
+    }));
+  }, [apiEnabled, logsQuery.data, mockLogRows]);
+
+  const logColumns = useMemo<ColumnsType<LogRow>>(
+    () => [
+      { title: "No", dataIndex: "no", key: "no", width: 60, align: "center" },
+      { title: "Uniq", dataIndex: "uniq", key: "uniq", width: 110 },
+      { title: "Part Name", dataIndex: "partName", key: "partName" },
+      { title: "Deskripsi", dataIndex: "description", key: "description" },
+      {
+        title: "Qty Aktif",
+        dataIndex: "qtyActive",
+        key: "qtyActive",
+        align: "right",
+        width: 110,
+        render: (v: number) => (
+          <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+        ),
+      },
+      {
+        title: "Alasan Gagal",
+        dataIndex: "reason",
+        key: "reason",
+        render: (v: string) => (
+          <span className="text-sm text-red-600">{v}</span>
+        ),
+      },
     ],
     [],
   );
@@ -674,6 +858,13 @@ export default function CustomerPoDnSoPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Button
+              className="!rounded-lg"
+              icon={<HistoryOutlined />}
+              onClick={() => openLogs()}
+            >
+              History Logs
+            </Button>
             <Button
               className="!rounded-lg"
               icon={<FileTextOutlined />}
@@ -802,6 +993,38 @@ export default function CustomerPoDnSoPage() {
           )}
         </div>
       </div>
+
+      <Modal
+        title="History Logs — Automation"
+        open={logsOpen}
+        onCancel={() => setLogsOpen(false)}
+        footer={null}
+        width={900}
+      >
+        <div className="mb-3 text-sm text-gray-500">
+          {logsDocFilter
+            ? `Menampilkan data gagal untuk dokumen ${logsDocFilter}`
+            : "Menampilkan data yang gagal masuk / gagal terkirim dari automation"}
+        </div>
+        <div className="overflow-hidden rounded-xl border border-gray-100">
+          <Table<LogRow>
+            dataSource={logRows}
+            columns={logColumns}
+            rowKey="key"
+            size="middle"
+            pagination={false}
+            loading={apiEnabled ? logsQuery.isFetching : false}
+            locale={{
+              emptyText: (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="Tidak ada log kegagalan"
+                />
+              ),
+            }}
+          />
+        </div>
+      </Modal>
     </div>
   );
 }

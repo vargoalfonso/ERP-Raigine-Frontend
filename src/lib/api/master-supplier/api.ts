@@ -1,136 +1,383 @@
 import { apiSlice } from "@/lib/api/instance";
 
-export type MasterSupplierRecord = {
-  id?: string | number;
-  supplier_code?: string;
-  supplier_name?: string;
-  status?: string;
+type UnknownRecord = Record<string, unknown>;
 
-  // Item-ish fields (based on provided payload)
-  sebango?: string;
-  customer_cycle?: string;
-  quantity?: number;
-  type?: string;
-  description?: string;
+const isRecord = (value: unknown): value is UnknownRecord => Boolean(value) && typeof value === "object";
 
-  // Allow backend to add extra fields without breaking
-  [key: string]: unknown;
-};
-
-export type MasterSupplierCreateRequest = {
-  supplier_code: string;
-  supplier_name: string;
-  sebango: string;
-  customer_cycle: string;
-  quantity: number;
-  type: string;
-  description: string;
-};
-
-const normalizeArrayResponse = <T,>(response: unknown): T[] => {
-  if (Array.isArray(response)) return response as T[];
-  if (response && typeof response === "object") {
-    const maybeData = (response as Record<string, unknown>).data;
-    if (Array.isArray(maybeData)) return maybeData as T[];
+const toRecord = (value: unknown): UnknownRecord | undefined => {
+  if (isRecord(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return isRecord(parsed) ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
   }
+  return undefined;
+};
+
+const toText = (value: unknown): string | undefined => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+};
+
+const toNumber = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+};
+
+const parseArrayResponse = <T,>(response: unknown): T[] => {
+  if (Array.isArray(response)) return response as T[];
+  if (!isRecord(response)) return [];
+
+  const data = response.data;
+  if (Array.isArray(data)) return data as T[];
+  if (isRecord(data)) {
+    if (Array.isArray(data.items)) return data.items as T[];
+    if (Array.isArray(data.data)) return data.data as T[];
+    const nested = data.data;
+    if (isRecord(nested) && Array.isArray(nested.items)) return nested.items as T[];
+  }
+
   return [];
 };
 
-const normalizeObjectResponse = <T,>(response: unknown): T => {
-  if (response && typeof response === "object") {
-    const maybeData = (response as Record<string, unknown>).data;
-    if (maybeData && typeof maybeData === "object") return maybeData as T;
+// Locate the `pagination` block regardless of how deeply the array payload
+// is nested (top-level, data.pagination, or data.data.pagination).
+const parseListPagination = (response: unknown): { page?: number; totalPages?: number } => {
+  if (!isRecord(response)) return {};
+  const candidates = [response, response.data, isRecord(response.data) ? response.data.data : undefined];
+  for (const candidate of candidates) {
+    if (!isRecord(candidate)) continue;
+    const pagination = candidate.pagination;
+    if (isRecord(pagination)) {
+      return {
+        page: toNumber(pagination.page),
+        totalPages: toNumber(pagination.total_pages ?? pagination.totalPages),
+      };
+    }
   }
+  return {};
+};
+
+const parseObjectResponse = <T,>(response: unknown): T | null => {
+  if (!isRecord(response)) return null;
+  const data = response.data;
+  if (isRecord(data) && isRecord(data.data)) return data.data as T;
+  if (isRecord(data)) return data as T;
   return response as T;
 };
 
-const TAG = "MasterSuppliers" as const;
+export type SupplierItemPayloadBomOption = {
+  value?: string | null;
+  label?: string | null;
+  material_code?: string | null;
+  grade?: string | null;
+  size?: string | null;
+  type?: string | null;
+  uom?: string | null;
+  weight?: number | null;
+  quantity?: number | null;
+  customer_cycle?: string | null;
+  part_name?: string | null;
+  part_number?: string | null;
+  product_model?: string | null;
+};
 
-export const masterSupplierApiSlice = apiSlice
+export type SupplierItemPayloadFormSnapshot = {
+  warehouse_uuid?: string | null;
+  warehouse_name?: string | null;
+  product_model?: string | null;
+  part_name?: string | null;
+  part_number?: string | null;
+  description?: string | null;
+};
+
+export type SupplierItemPayloadMaterialSpecDetail = {
+  material_grade?: string | null;
+  grade?: string | null;
+  form?: string | null;
+  width_mm?: number | null;
+  diameter_mm?: number | null;
+  thickness_mm?: number | null;
+  length_mm?: number | null;
+  weight_kg?: number | null;
+};
+
+export type SupplierItemPayloadDetail = {
+  material_spec?: SupplierItemPayloadMaterialSpecDetail | null;
+  // legacy compatibility for previously saved payloads
+  schema_version?: number;
+  source_section?: string | null;
+  bom_lookup_id?: string | null;
+  bom_selected_uniq_code?: string | null;
+  bom_option?: SupplierItemPayloadBomOption | null;
+  form_snapshot?: SupplierItemPayloadFormSnapshot | null;
+  material_spec_detail?: SupplierItemPayloadMaterialSpecDetail | null;
+};
+
+export type SupplierItemPayloadJSON = UnknownRecord & {
+  payload_detail?: SupplierItemPayloadDetail;
+};
+
+export type SupplierItemRecord = {
+  row_id?: number;
+  id?: string;
+  supplier_item_uuid?: string;
+  supplier_uuid?: string;
+  supplier_name?: string;
+  supplier_code?: string;
+  warehouse_uuid?: string;
+  warehouse_id?: string;
+  warehouse_name?: string;
+  sebango_code?: string;
+  uniq_code?: string;
+  type?: string;
+  material_type?: string;
+  description?: string;
+  quantity?: number;
+  uom?: string;
+  weight?: number;
+  pcs_per_kanban?: number;
+  customer_cycle?: string | number;
+  cycle_time?: number;
+  percentage?: number;
+  status?: string;
+  product_model?: string;
+  part_name?: string;
+  part_number?: string;
+  grade?: string;
+  size?: string;
+  payload_json?: SupplierItemPayloadJSON;
+  payload_detail?: SupplierItemPayloadDetail;
+  created_at?: string;
+  updated_at?: string;
+  [key: string]: unknown;
+};
+
+export type SupplierItemMutationRequest = {
+  supplier_uuid: string;
+  sebango_code: string;
+  uniq_code: string;
+  type: string;
+  description: string;
+  quantity: string | number;
+  uom: string;
+  weight: string | number;
+  pcs_per_kanban: string | number;
+  customer_cycle: string;
+  cycle_time?: string | number;
+  status?: string;
+  warehouse_uuid?: string;
+  warehouse_name?: string;
+  product_model?: string;
+  part_name?: string;
+  part_number?: string;
+  material_type?: string;
+  grade?: string;
+  size?: string;
+  percentage?: string | number;
+  payload_detail?: SupplierItemPayloadDetail;
+};
+
+const normalizeSupplierItem = (record: unknown): SupplierItemRecord => {
+  const row = isRecord(record) ? record : {};
+  const supplier = isRecord(row.supplier) ? row.supplier : undefined;
+  const warehouse = isRecord(row.warehouse) ? row.warehouse : undefined;
+  const product = isRecord(row.product) ? row.product : undefined;
+  const payloadJson = (toRecord(row.payload_json) ?? toRecord(row.payloadJson)) as SupplierItemPayloadJSON | undefined;
+  const payloadDetail = (toRecord(payloadJson?.payload_detail) ?? toRecord(row.payload_detail)) as SupplierItemPayloadDetail | undefined;
+  const materialSpecDetail = payloadDetail?.material_spec ?? payloadDetail?.material_spec_detail;
+  const formSnapshot = payloadDetail?.form_snapshot;
+  const bomOption = payloadDetail?.bom_option;
+
+  return {
+    ...row,
+    row_id: toNumber(row.row_id),
+    id:
+      toText(row.supplier_item_uuid) ??
+      toText(row.uuid) ??
+      toText(row.id),
+    supplier_item_uuid:
+      toText(row.supplier_item_uuid) ??
+      toText(row.uuid) ??
+      toText(row.id),
+    supplier_uuid:
+      toText(row.supplier_uuid) ??
+      toText(row.supplier_id) ??
+      toText(supplier?.uuid) ??
+      toText(supplier?.id),
+    supplier_name:
+      toText(row.supplier_name) ??
+      toText(row.supplier) ??
+      toText(supplier?.supplier_name) ??
+      toText(supplier?.name),
+    supplier_code:
+      toText(row.supplier_code) ??
+      toText(supplier?.supplier_code) ??
+      toText(supplier?.code),
+    warehouse_uuid:
+      toText(row.warehouse_uuid) ??
+      toText(row.warehouse_id) ??
+      toText(warehouse?.warehouse_uuid) ??
+      toText(warehouse?.uuid) ??
+      toText(warehouse?.id),
+    warehouse_id:
+      toText(row.warehouse_id) ??
+      toText(row.warehouse_uuid) ??
+      toText(warehouse?.warehouse_uuid) ??
+      toText(warehouse?.id),
+    warehouse_name:
+      toText(row.warehouse_name) ??
+      toText(row.location) ??
+      toText(warehouse?.warehouse_name) ??
+      toText(warehouse?.name),
+    sebango_code: toText(row.sebango_code) ?? toText(row.sebanggo) ?? toText(row.sebango),
+    uniq_code: toText(row.uniq_code) ?? toText(row.uniq),
+    type: toText(row.type),
+    material_type: toText(row.material_type) ?? toText(row.item_type) ?? toText(row.raw_material_type),
+    description: toText(row.description) ?? toText(formSnapshot?.description),
+    quantity: toNumber(row.quantity),
+    uom: toText(row.uom),
+    weight: toNumber(row.weight) ?? toNumber(materialSpecDetail?.weight_kg),
+    pcs_per_kanban: toNumber(row.pcs_per_kanban) ?? toNumber(row.qty_per_kanban),
+    customer_cycle: toText(row.customer_cycle) ?? toText(row.cycle_days) ?? toText(row.cycle),
+    cycle_time: toNumber(row.cycle_time) ?? toNumber(row.cycle_time_days),
+    status: toText(row.status) ?? "active",
+    product_model: toText(row.product_model) ?? toText(formSnapshot?.product_model) ?? toText(bomOption?.product_model) ?? toText(product?.model) ?? toText(product?.description),
+    part_name: toText(row.part_name) ?? toText(formSnapshot?.part_name) ?? toText(bomOption?.part_name) ?? toText(product?.part_name),
+    part_number: toText(row.part_number) ?? toText(formSnapshot?.part_number) ?? toText(bomOption?.part_number) ?? toText(product?.part_number),
+    grade: toText(row.grade) ?? toText(materialSpecDetail?.grade) ?? toText(row.material_grade),
+    size: toText(row.size),
+    percentage: toNumber(row.percentage),
+    payload_json: payloadJson,
+    payload_detail: payloadDetail,
+    created_at: toText(row.created_at),
+    updated_at: toText(row.updated_at),
+  };
+};
+
+export type ListSupplierItemsParams = {
+  type?: string;
+  status?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+};
+
+const buildQueryString = (params: Record<string, string | undefined>): string => {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value) qs.set(key, value);
+  }
+  const str = qs.toString();
+  return str ? `?${str}` : "";
+};
+
+const TAG = "SupplierItems" as const;
+
+export const supplierItemsApiSlice = apiSlice
   .enhanceEndpoints({ addTagTypes: [TAG] })
   .injectEndpoints({
     endpoints: (builder) => ({
-      listMasterSuppliers: builder.query<MasterSupplierRecord[], void>({
-        query: () => ({
-          url: "/api/master-suppliers",
-          method: "GET",
-          meta: {
-            useAuthorization: true,
-            contentType: "application/json",
-          },
-        }),
-        transformResponse: (response: unknown) =>
-          normalizeArrayResponse<MasterSupplierRecord>(response),
+      listSupplierItems: builder.query<SupplierItemRecord[], ListSupplierItemsParams | void>({
+        queryFn: async (params, _api, _extraOptions, fetchWithBQ) => {
+          const qs = { type: params?.type, status: params?.status, search: params?.search };
+          const items: unknown[] = [];
+          let page = 1;
+          const maxPages = 50; // safety cap: 50 * 100 = 5,000 rows
+
+          while (page <= maxPages) {
+            const url = `/supplier-items${buildQueryString({ ...qs, limit: "100", page: String(page) })}`;
+            const result = await fetchWithBQ({
+              url,
+              method: "GET",
+              meta: { useAuthorization: true, contentType: "application/json" },
+            });
+            if (result.error) return { error: result.error };
+
+            items.push(...parseArrayResponse<unknown>(result.data));
+            const { totalPages } = parseListPagination(result.data);
+            if (!totalPages || page >= totalPages) break;
+            page += 1;
+          }
+
+          return { data: items.map(normalizeSupplierItem) };
+        },
         providesTags: (result) => {
-          const base: Array<{ type: typeof TAG; id: "LIST" | string | number }> = [
-            { type: TAG, id: "LIST" },
-          ];
+          const base: Array<{ type: typeof TAG; id: string }> = [{ type: TAG, id: "LIST" }];
           if (!result) return base;
           return base.concat(
             result
-              .map((r) => r.id ?? r.supplier_code)
-              .filter((id): id is string | number => id !== undefined && id !== null)
+              .map((item) => item.id)
+              .filter((id): id is string => Boolean(id))
               .map((id) => ({ type: TAG, id }))
           );
         },
       }),
 
-      createMasterSupplier: builder.mutation<MasterSupplierRecord, MasterSupplierCreateRequest>({
+      getSupplierItemById: builder.query<SupplierItemRecord, string | number>({
+        query: (id) => ({
+          url: `/supplier-items/${encodeURIComponent(String(id))}`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => normalizeSupplierItem(parseObjectResponse<unknown>(response) ?? response),
+        providesTags: (_result, _error, id) => [{ type: TAG, id: String(id) }],
+      }),
+
+      createSupplierItem: builder.mutation<SupplierItemRecord, SupplierItemMutationRequest>({
         query: (body) => ({
-          url: "/api/master-suppliers",
+          url: "/supplier-items",
           method: "POST",
           body,
-          meta: {
-            useAuthorization: true,
-            contentType: "application/json",
-          },
+          meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) =>
-          normalizeObjectResponse<MasterSupplierRecord>(response),
+        transformResponse: (response: unknown) => normalizeSupplierItem(parseObjectResponse<unknown>(response) ?? response),
         invalidatesTags: [{ type: TAG, id: "LIST" }],
       }),
 
-    updateMasterSupplier: builder.mutation<
-      MasterSupplierRecord,
-      { id: string | number; body: Partial<MasterSupplierCreateRequest> & Record<string, unknown> }
-    >({
-      query: ({ id, body }) => ({
-        url: `/api/master-suppliers/${id}`,
-        method: "PUT",
-        body,
-        meta: {
-          useAuthorization: true,
-          contentType: "application/json",
-        },
+      updateSupplierItem: builder.mutation<SupplierItemRecord, { id: string | number; body: Partial<SupplierItemMutationRequest> & Record<string, unknown> }>({
+        query: ({ id, body }) => ({
+          url: `/supplier-items/${encodeURIComponent(String(id))}`,
+          method: "PUT",
+          body,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => normalizeSupplierItem(parseObjectResponse<unknown>(response) ?? response),
+        invalidatesTags: (_result, _error, arg) => [
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: String(arg.id) },
+        ],
       }),
-      transformResponse: (response: unknown) =>
-        normalizeObjectResponse<MasterSupplierRecord>(response),
-      invalidatesTags: (_res, _err, arg) => [
-        { type: TAG, id: "LIST" },
-        { type: TAG, id: arg.id },
-      ],
-    }),
 
-    deleteMasterSupplier: builder.mutation<{ success: boolean } | unknown, string | number>({
-      query: (id) => ({
-        url: `/api/master-suppliers/${id}`,
-        method: "DELETE",
-        meta: {
-          useAuthorization: true,
-          contentType: "application/json",
-        },
+      deleteSupplierItem: builder.mutation<{ success: boolean } | unknown, string | number>({
+        query: (id) => ({
+          url: `/supplier-items/${encodeURIComponent(String(id))}`,
+          method: "DELETE",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        invalidatesTags: (_result, _error, id) => [
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: String(id) },
+        ],
       }),
-      invalidatesTags: (_res, _err, id) => [
-        { type: TAG, id: "LIST" },
-        { type: TAG, id },
-      ],
     }),
-  }),
-});
+  });
 
 export const {
-  useListMasterSuppliersQuery,
-  useCreateMasterSupplierMutation,
-  useUpdateMasterSupplierMutation,
-  useDeleteMasterSupplierMutation,
-} = masterSupplierApiSlice;
+  useListSupplierItemsQuery,
+  useGetSupplierItemByIdQuery,
+  useCreateSupplierItemMutation,
+  useUpdateSupplierItemMutation,
+  useDeleteSupplierItemMutation,
+} = supplierItemsApiSlice;

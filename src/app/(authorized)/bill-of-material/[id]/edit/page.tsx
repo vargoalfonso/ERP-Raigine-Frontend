@@ -649,13 +649,26 @@ export default function BomEditPage() {
       if (parentFile) files.push({ key: "upload_parent", file: parentFile });
 
       const parentRoutes = mapProcessRoutes(values.process_routes);
-      const parentMaterialSpec = assemblyMode ? null : mapMaterialSpec(values.material_spec);
+      // [bom-cycle-time] Cycle time disimpan di material_spec.cycle_time_sec.
+      // Untuk parent assembly material spec dikirim null, jadi cycle time-nya
+      // dikirim terpisah supaya nilainya tidak hilang saat edit BOM.
+      const parentCycleTimeSec =
+        typeof values.material_spec?.cycle_time_sec === "number" &&
+        Number.isFinite(values.material_spec.cycle_time_sec)
+          ? values.material_spec.cycle_time_sec
+          : null;
+      const parentMaterialSpec = assemblyMode
+        ? parentCycleTimeSec !== null
+          ? { cycle_time_sec: parentCycleTimeSec }
+          : null
+        : mapMaterialSpec(values.material_spec);
       const childrenPayload = mapChildParts(values.child_parts, 1, rootUniqValue, ["child_parts"]);
 
       if (assemblyMode && childrenPayload.length < 2) {
         messageApi.error("Assembly parent must have at least 2 child parts.");
         return;
       }
+      // [bom-cycle-time] parentMaterialSpec bisa berisi cycle time saja untuk assembly.
       if (!assemblyMode && !parentMaterialSpec) {
         messageApi.error("Material specifications are required.");
         return;

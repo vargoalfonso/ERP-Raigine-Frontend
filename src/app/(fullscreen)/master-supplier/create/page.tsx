@@ -71,6 +71,7 @@ type FormValues = {
   pcs_per_kanban?: number;
   percentage?: number;
   customer_cycle?: string;
+  cycle_time?: number;
   description?: string;
   status?: string;
 };
@@ -950,6 +951,11 @@ function MasterSupplierCreatePageContent() {
           ? Number(detailQuery.data.percentage)
           : undefined,
       customer_cycle: pickText(detailQuery.data.customer_cycle),
+      cycle_time:
+        detailQuery.data.cycle_time !== undefined &&
+        detailQuery.data.cycle_time !== null
+          ? Number(detailQuery.data.cycle_time)
+          : undefined,
       description: pickText(detailQuery.data.description),
       status: pickText(detailQuery.data.status) || "active",
     });
@@ -1697,6 +1703,20 @@ function MasterSupplierCreatePageContent() {
 
                             <Form.Item
                               className="md:col-span-1 xl:col-span-3"
+                              label="Cycle Time (days)"
+                              name="cycle_time">
+                              <InputNumber
+                                style={{ width: "100%" }}
+                                min={0}
+                                size="large"
+                                className="w-full"
+                                placeholder="e.g. 7"
+                                addonAfter="days"
+                              />
+                            </Form.Item>
+
+                            <Form.Item
+                              className="md:col-span-1 xl:col-span-3"
                               label="Status"
                               name="status"
                               initialValue="active">
@@ -1988,6 +2008,17 @@ function MasterSupplierCreatePageContent() {
                             <Input
                               size="large"
                               placeholder="e.g. Daily / Weekly / Monthly"
+                            />
+                          </Form.Item>
+
+                          <Form.Item label="Cycle Time (days)" name="cycle_time">
+                            <InputNumber
+                              style={{ width: "100%" }}
+                              min={0}
+                              size="large"
+                              className="w-full"
+                              placeholder="e.g. 7"
+                              addonAfter="days"
                             />
                           </Form.Item>
 
