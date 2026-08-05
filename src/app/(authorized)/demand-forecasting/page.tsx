@@ -319,7 +319,7 @@ export default function DemandForecastingPage() {
         auto_observations: true,
         item_id: predictItemId,
         horizon: predictHorizon,
-        lookback_points: 30,
+        lookback_points: predictHorizon,
       }).unwrap();
       message.success("Forecast generated");
     } catch (error) {
@@ -908,7 +908,7 @@ export default function DemandForecastingPage() {
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                 <Table
                   size="small"
-                  rowKey={(r) => r.deployment_id ?? r.model_version_id ?? Math.random().toString()}
+                  rowKey={(r, index) => r.deployment_id || r.model_version_id || `deploy-${index}`}
                   loading={deploymentsQuery.isFetching}
                   dataSource={deploymentsQuery.data ?? []}
                   pagination={false}
