@@ -25,6 +25,7 @@ export type CustomerPoDto = {
 
 export type CreateCustomerPoRequest = {
   po_number: string;
+  remarks?: string;
   customer_id: number;
   contact_person?: string;
   delivery_address?: string;
@@ -57,6 +58,7 @@ export type DeliveryNoteDto = {
 
 export type CreateDeliveryNoteRequest = {
   dn_number: string;
+  remarks?: string;
   customer_id: number;
   delivery_date: string;
   contact_person?: string;
@@ -82,6 +84,7 @@ export type SpecialOrderDto = {
 
 export type CreateSpecialOrderRequest = {
   so_number: string;
+  remarks?: string;
   customer_id?: number | null;
   order_date: string;
   special_instructions?: string;
@@ -188,6 +191,7 @@ export type CustomerOrderRecord = {
   delivery_address: string | null;
   status: string;
   notes: string | null;
+  remarks: string | null;
   total_quantity: number;
   total_uniq: number;
   created_by?: string | null;
@@ -202,6 +206,7 @@ export type CreateCustomerOrderRequest = {
   contact_person: string;
   delivery_address: string;
   notes: string;
+  remarks?: string;
   delivery_date?: string;
   items: Array<{ item_uniq_code: string; quantity: number; delivery_date?: string }>;
 };
@@ -211,6 +216,7 @@ export type UpdateCustomerOrderRequest = {
   contact_person: string;
   delivery_address: string;
   notes: string;
+  remarks?: string;
   delivery_date?: string;
   items: Array<{ item_uniq_code: string; quantity: number; delivery_date?: string }>;
 };
@@ -246,6 +252,7 @@ const toCustomerOrderRecord = (raw: unknown): CustomerOrderRecord => {
     delivery_address: getString(record, ["delivery_address", "deliveryAddress"]) ?? null,
     status: getString(record, ["status"]) ?? "",
     notes: getString(record, ["notes"]) ?? null,
+    remarks: getString(record, ["remarks"]) ?? null,
     total_quantity: getNumber(record, ["total_quantity", "totalQuantity"]) ?? 0,
     total_uniq: getNumber(record, ["total_uniq", "totalUniq"]) ?? 0,
     created_by: getString(record, ["created_by", "createdBy"]) ?? null,
@@ -411,6 +418,7 @@ export const customerOrdersApiSlice = apiSlice.injectEndpoints({
           contact_person: body.contact_person ?? "",
           delivery_address: body.delivery_address ?? "",
           notes: body.special_instructions ?? "",
+          remarks: body.remarks ?? "",
           items: body.items.map((i) => ({
             item_uniq_code: i.item_uniq_code,
             quantity: Number(i.quantity),
@@ -437,6 +445,7 @@ export const customerOrdersApiSlice = apiSlice.injectEndpoints({
           contact_person: body.contact_person ?? "",
           delivery_address: body.delivery_address ?? "",
           notes: body.notes ?? "",
+          remarks: body.remarks ?? "",
           delivery_date: body.delivery_date,
           items: body.items.map((i) => ({
             item_uniq_code: i.item_uniq_code,
@@ -462,6 +471,7 @@ export const customerOrdersApiSlice = apiSlice.injectEndpoints({
           contact_person: body.contact_person ?? "",
           delivery_address: body.delivery_address ?? "",
           notes: body.special_instructions ?? "",
+          remarks: body.remarks ?? "",
           delivery_date: body.order_date,
           items: body.items.map((i) => ({
             item_uniq_code: i.item_uniq_code,

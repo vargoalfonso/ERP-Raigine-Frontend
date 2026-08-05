@@ -23,6 +23,7 @@ import type { UploadFile } from "antd/es/upload/interface";
 import {
   CaretRightOutlined,
   CheckOutlined,
+  CloudDownloadOutlined,
   CloudUploadOutlined,
   ReloadOutlined,
   ThunderboltOutlined,
@@ -50,6 +51,12 @@ import {
   useTrainCustomMutation,
   useTrainGlobalMutation,
   useUploadDatasetMutation,
+  usePullPrlDatasetMutation,
+  usePullDnDatasetMutation,
+  useGetPrlBoundsQuery,
+  useGetDnBoundsQuery,
+  type DatasetBounds,
+  type PullDatasetRequest,
   type DatasetRecord,
   type ForecastDomain,
   type ForecastScope,
@@ -104,6 +111,13 @@ export default function DemandForecastingPage() {
   const [prlUpload, setPrlUpload] = useState<UploadDatasetResponse | null>(null);
   const [deliveryUpload, setDeliveryUpload] = useState<UploadDatasetResponse | null>(null);
 
+  // Pull-from-ERP state (PRL uses YYYY-MM, DN uses YYYY-MM-DD)
+  const [prlFrom, setPrlFrom] = useState<string>("");
+  const [prlTo, setPrlTo] = useState<string>("");
+  const [dnFrom, setDnFrom] = useState<string>("");
+  const [dnTo, setDnTo] = useState<string>("");
+  const [pullTriggerTraining, setPullTriggerTraining] = useState<boolean>(false);
+
   // -------------------------------------------------------------------------
   // Train state
   // -------------------------------------------------------------------------
@@ -133,6 +147,12 @@ export default function DemandForecastingPage() {
     scope === "custom" ? { scope, tenant, uniq: uniq || undefined } : { scope }
   );
   const deploymentsQuery = useListDeploymentsQuery({ scope });
+  const prlBoundsQuery = useGetPrlBoundsQuery(
+    scope === "custom" ? { scope, tenant, uniq: uniq || undefined } : { scope }
+  );
+  const dnBoundsQuery = useGetDnBoundsQuery(
+    scope === "custom" ? { scope, tenant, uniq: uniq || undefined } : { scope }
+  );
 
   const trainingRunQuery = useGetTrainingRunQuery(activeTrainingRunId as string, {
     skip: !activeTrainingRunId,
@@ -150,6 +170,8 @@ export default function DemandForecastingPage() {
   const [promoteModel, promoteState] = usePromoteModelMutation();
   const [reloadModel, reloadState] = useReloadModelMutation();
   const [predict, predictState] = usePredictMutation();
+  const [pullPrl, pullPrlState] = usePullPrlDatasetMutation();
+  const [pullDn, pullDnState] = usePullDnDatasetMutation();
 
   const isTraining = trainGlobalState.isLoading || trainCustomState.isLoading;
 
@@ -190,6 +212,52 @@ export default function DemandForecastingPage() {
       message.success(`Dataset registered: ${result.name} (${formatNumber(result.row_count)} rows)`);
     } catch (error) {
       message.error(getApiErrorMessage(error, "Failed to upload dataset"));
+    }
+  };
+
+  const handlePull = async (kind: "prl" | "delivery"): Promise<void> => {
+    const isPrl = kind === "prl";
+    if (scope === "custom" && (!tenant || !uniq)) {
+      message.error("Scope custom requires both Tenant and Uniq");
+      return;
+    }
+    const from = isPrl ? prlFrom : dnFrom;
+    const to = isPrl ? prlTo : dnTo;
+    if (!from || !to) {
+      message.error("Enter both Date from and Date to");
+      return;
+    }
+
+    const body: PullDatasetRequest = {
+      scope,
+      date_from: from,
+      date_to: to,
+      trigger_training: pullTriggerTraining,
+      ...(scope === "custom" ? { tenant, uniq } : {}),
+      ...(pullTriggerTraining
+        ? { selected_model: selectedModel ?? null, fine_tune: fineTune, time_limit: timeLimit }
+        : {}),
+    };
+
+    try {
+      const result = isPrl ? await pullPrl(body).unwrap() : await pullDn(body).unwrap();
+
+      if (isPrl) {
+        setPrlUpload(result);
+      } else {
+        setDeliveryUpload(result);
+        setTrainDomain("dn");
+      }
+      setSelectedDatasetId(result.dataset_id);
+      message.success(
+        `Dataset pulled from ERP: ${result.name} (${formatNumber(result.row_count)} rows)`
+      );
+      if (result.training_run_id) {
+        setActiveTrainingRunId(result.training_run_id);
+        message.info("Training triggered from the pulled dataset");
+      }
+    } catch (error) {
+      message.error(getApiErrorMessage(error, "Failed to pull dataset from ERP"));
     }
   };
 
@@ -435,6 +503,13 @@ export default function DemandForecastingPage() {
     const files = isPrl ? prlFiles : deliveryFiles;
     const setFiles = isPrl ? setPrlFiles : setDeliveryFiles;
     const uploaded = isPrl ? prlUpload : deliveryUpload;
+    const boundsQuery = isPrl ? prlBoundsQuery : dnBoundsQuery;
+    const bounds: DatasetBounds | undefined = boundsQuery.data;
+    const pullFrom = isPrl ? prlFrom : dnFrom;
+    const setPullFrom = isPrl ? setPrlFrom : setDnFrom;
+    const pullTo = isPrl ? prlTo : dnTo;
+    const setPullTo = isPrl ? setPrlTo : setDnTo;
+    const pullState = isPrl ? pullPrlState : pullDnState;
 
     return (
       <div className="space-y-6">
@@ -520,6 +595,93 @@ export default function DemandForecastingPage() {
                 No dataset uploaded in this session yet.
               </div>
             )}
+          </div>
+        </div>
+
+        <div className="bg-blue-50/60 rounded-xl border border-blue-100 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-blue-700">
+              {isPrl ? "Pull PRL from ERP" : "Pull Delivery (DN) from ERP"}
+            </h2>
+            <Space>
+              <Tag color={isPrl ? "purple" : "blue"}>
+                {isPrl ? "granularity: month (YYYY-MM)" : "granularity: day (YYYY-MM-DD)"}
+              </Tag>
+              <Button size="small" icon={<ReloadOutlined />} onClick={() => boundsQuery.refetch()}>
+                Refresh range
+              </Button>
+            </Space>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-100 p-4">
+            <Alert
+              type="info"
+              showIcon
+              className="!mb-4"
+              message="Pull builds the dataset directly from ERP data"
+              description={
+                isPrl
+                  ? "Pulls approved PRLs from ERP for the selected month range (freq=M). The forecasting service must have ERP credentials configured."
+                  : "Pulls customer orders (document_type=DN) from ERP for the selected day range (freq=D). The forecasting service must have ERP credentials configured."
+              }
+            />
+            {boundsQuery.isFetching ? (
+              <div className="text-xs text-gray-400 mb-3">Loading available range…</div>
+            ) : bounds && bounds.min && bounds.max ? (
+              <div className="text-xs text-gray-500 mb-3">
+                Available range: <b>{bounds.min}</b> → <b>{bounds.max}</b>
+                {typeof bounds.row_count === "number" ? ` • ${formatNumber(bounds.row_count)} rows` : ""}
+                {typeof bounds.uniq_count === "number" ? ` • ${formatNumber(bounds.uniq_count)} uniqs` : ""}
+              </div>
+            ) : (
+              <div className="text-xs text-gray-400 mb-3">
+                Available range unavailable (check ERP connection / credentials).
+              </div>
+            )}
+            <div className="flex flex-wrap items-end gap-4">
+              <div>
+                <div className="text-xs font-semibold text-gray-700 mb-1">Date from</div>
+                <Input
+                  value={pullFrom}
+                  onChange={(e) => setPullFrom(e.target.value)}
+                  placeholder={isPrl ? "2025-01" : "2025-01-01"}
+                  style={{ width: 150 }}
+                />
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-gray-700 mb-1">Date to</div>
+                <Input
+                  value={pullTo}
+                  onChange={(e) => setPullTo(e.target.value)}
+                  placeholder={isPrl ? "2025-12" : "2025-12-31"}
+                  style={{ width: 150 }}
+                />
+              </div>
+              <Button
+                size="small"
+                disabled={!bounds?.min || !bounds?.max}
+                onClick={() => {
+                  if (bounds?.min) setPullFrom(bounds.min);
+                  if (bounds?.max) setPullTo(bounds.max);
+                }}
+              >
+                Use full range
+              </Button>
+              <Checkbox
+                checked={pullTriggerTraining}
+                onChange={(e) => setPullTriggerTraining(e.target.checked)}
+              >
+                Trigger training after pull
+              </Checkbox>
+              <Button
+                type="primary"
+                className="!rounded-lg"
+                icon={<CloudDownloadOutlined />}
+                loading={pullState.isLoading}
+                onClick={() => void handlePull(kind)}
+              >
+                Pull &amp; Register
+              </Button>
+            </div>
           </div>
         </div>
 

@@ -156,6 +156,7 @@ export default function CreateCustomerOrderPage() {
       contactPerson: order.contact_person ?? undefined,
       deliveryAddress: order.delivery_address ?? undefined,
       specialInstructions: order.notes ?? undefined,
+      remarks: order.remarks ?? undefined,
       externalOrderNumber: order.document_number ?? undefined,
     });
 
@@ -691,6 +692,7 @@ export default function CreateCustomerOrderPage() {
             contact_person: values.contactPerson,
             delivery_address: values.deliveryAddress,
             notes: values.specialInstructions ?? "",
+            remarks: values.remarks ?? "",
             delivery_date: dateStr,
             items: rows.map((r) => ({
               item_uniq_code: r.uniq,
@@ -715,6 +717,7 @@ export default function CreateCustomerOrderPage() {
           contact_person: values.contactPerson,
           delivery_address: values.deliveryAddress,
           special_instructions: values.specialInstructions,
+          remarks: values.remarks,
           items: rows.map((r) => ({
             item_uniq_code: r.uniq,
             quantity: r.qty,
@@ -730,6 +733,7 @@ export default function CreateCustomerOrderPage() {
           contact_person: values.contactPerson,
           delivery_address: values.deliveryAddress,
           notes: values.specialInstructions,
+          remarks: values.remarks,
           items: rows.map((r) => ({
             item_uniq_code: r.uniq,
             quantity: r.qty,
@@ -742,6 +746,7 @@ export default function CreateCustomerOrderPage() {
           customer_id: customerId,
           order_date: dateStr,
           special_instructions: values.specialInstructions,
+          remarks: values.remarks,
           contact_person: values.contactPerson,
           delivery_address: values.deliveryAddress,
           items: rows.map((r) => ({
@@ -983,6 +988,17 @@ export default function CreateCustomerOrderPage() {
               <Input.TextArea
                 placeholder="Enter any special handling or delivery requirements"
                 rows={4}
+              />
+            </Form.Item>
+
+            <Form.Item
+              label="Remarks"
+              name="remarks"
+              className="lg:col-span-2"
+            >
+              <Input.TextArea
+                placeholder="Additional remarks (optional)"
+                rows={3}
               />
             </Form.Item>
           </div>

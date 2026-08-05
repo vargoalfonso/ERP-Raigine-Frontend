@@ -31,6 +31,7 @@ type CustomerPoDetail = {
   deliveryCycle: "Daily" | "Weekly" | "Monthly";
   totalUniq: number;
   specialInstructions: string;
+  remarks: string;
   rows: DetailRow[];
 };
 
@@ -61,6 +62,7 @@ export default function CustomerPoDetailPage() {
         deliveryCycle: "Monthly",
         totalUniq: Number(order.total_uniq ?? 0),
         specialInstructions: order.notes || "-",
+        remarks: order.remarks || "-",
         rows: (order.items ?? []).map((it) => ({
           key: it.id || `${it.line_no}-${it.item_uniq_code}`,
           deliveryDate: it.delivery_date ?? "-",
@@ -85,6 +87,7 @@ export default function CustomerPoDetailPage() {
       deliveryCycle: "Daily",
       totalUniq: 8,
       specialInstructions: "-",
+      remarks: "-",
       rows: [
         {
           key: "r1",
@@ -268,6 +271,10 @@ export default function CustomerPoDetailPage() {
                     <div className="lg:col-span-2">
                       <div className="text-xs text-gray-500">Special Instructions</div>
                       <div className="text-sm text-gray-900 mt-1">{detail.specialInstructions}</div>
+                    </div>
+                    <div className="lg:col-span-2">
+                      <div className="text-xs text-gray-500">Remarks</div>
+                      <div className="text-sm text-gray-900 mt-1">{detail.remarks}</div>
                     </div>
                   </div>
 
