@@ -19,7 +19,7 @@ import { unwrapBackendData } from "@/lib/api/utils/unwrap";
  *    data }`; we unwrap `data` here.
  */
 
-const FORECASTING_BASE = "/api/v1/forecasting";
+const FORECASTING_BASE = "/forecasting";
 
 /** Generate a unique request_id (required by the backend on most endpoints). */
 export const buildRequestId = (prefix = "req"): string => {
