@@ -84,6 +84,8 @@ type DnRow = {
   dnDate: string;
   customer: string;
   customerPo: string;
+  source: string;
+  sourceId: string;
   partTitle: string;
   uniq: string;
   partNo: string;
@@ -114,6 +116,18 @@ const formatDateShort = (iso: string) => {
   const date = new Date(`${iso}T00:00:00`);
   if (Number.isNaN(date.getTime())) return iso;
   return new Intl.DateTimeFormat("en-US").format(date);
+};
+
+// Infer the source document (PO / DN / SO) type and id from a document
+// reference such as "PO-2025-0001", "DN-2025-0007", or "SO-2025-0003".
+// The DN in the creation list originates from one of these source documents,
+// so we surface which one and its id below the DN info.
+const parseDocSource = (ref: string): { type: string; id: string } => {
+  const id = (ref ?? "").trim();
+  if (!id || id === "-") return { type: "-", id: "-" };
+  const prefix = (id.split("-")[0] ?? "").toUpperCase();
+  const known: Record<string, string> = { PO: "PO", DN: "DN", SO: "SO" };
+  return { type: known[prefix] ?? "PO", id };
 };
 
 // Only surface schedules whose delivery date falls within H-3..H+3 from today.
@@ -423,12 +437,23 @@ function DeliverySchedulingPageInner() {
 
   const dnRows: DnRow[] = useMemo(
     () =>
-      (dnCreationQuery.data?.data ?? []).map((row, index) => ({
+      [...(dnCreationQuery.data?.data ?? [])]
+        // Sort by DN date, newest first (most recent date at the top).
+        .sort((a, b) => {
+          const ta = new Date(a.dnDate ?? "").getTime();
+          const tb = new Date(b.dnDate ?? "").getTime();
+          return (Number.isNaN(tb) ? 0 : tb) - (Number.isNaN(ta) ? 0 : ta);
+        })
+        .map((row, index) => {
+          const src = parseDocSource(row.poDnName || row.customerPo || "");
+          return {
         key: row.id || row.dnNumber || `dn-${index}`,
         dnNumber: row.dnNumber || "-",
         dnDate: formatDateShort(row.dnDate),
         customer: row.customerName || "-",
         customerPo: row.customerPo || row.poDnName || "-",
+        source: src.type,
+        sourceId: src.id,
         partTitle: row.partTitle || row.partName || row.partNo || "-",
         uniq: row.uniq || "-",
         partNo: row.partNo || "-",
@@ -438,7 +463,8 @@ function DeliverySchedulingPageInner() {
         packingList: row.packingList || "-",
         status: toDnStatus(row.status),
         statusHint: row.statusHint || row.updatedAt || row.createdAt || "-",
-      })),
+          };
+        }),
     [dnCreationQuery.data]
   );
 
@@ -566,6 +592,13 @@ function DeliverySchedulingPageInner() {
         <div className="leading-tight">
           <div className="text-sm font-semibold text-gray-900">{record.dnNumber}</div>
           <div className="text-xs text-gray-500">{record.dnDate}</div>
+          {record.sourceId !== "-" && (
+            <div className="mt-1 inline-flex items-center gap-1 rounded-md border border-blue-100 bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-700">
+              <span className="uppercase">Source {record.source}</span>
+              <span className="text-blue-500">•</span>
+              <span className="font-mono">{record.sourceId}</span>
+            </div>
+          )}
         </div>
       ),
     },
