@@ -85,6 +85,56 @@ export type UploadDatasetResponse = {
 };
 
 // ---------------------------------------------------------------------------
+// Pull Dataset from ERP
+// ---------------------------------------------------------------------------
+
+// Body for POST /datasets/pull/{prl,dn}. `date_from`/`date_to` are REQUIRED.
+//  - PRL: monthly granularity, format "YYYY-MM".
+//  - DN:  daily granularity, format "YYYY-MM-DD".
+export type PullDatasetRequest = {
+  request_id?: string;
+  scope?: ForecastScope;
+  tenant?: string; // required when scope=custom
+  uniq?: string; // required when scope=custom
+  name?: string;
+  version?: string;
+  freq?: string; // defaults: PRL="M", DN="D"
+  status?: string; // PRL default "approved"
+  date_from: string;
+  date_to: string;
+  trigger_training?: boolean;
+  fine_tune?: boolean;
+  time_limit?: number;
+  presets?: string;
+  selected_model?: SelectedModel | null;
+};
+
+// Response of GET /datasets/pull/{prl,dn}/bounds. Use min/max to constrain the
+// date pickers in the UI.
+export type DatasetBounds = {
+  domain: ForecastDomain;
+  scope?: string;
+  tenant?: string;
+  uniq?: string;
+  status?: string;
+  granularity: "month" | "day" | string;
+  min: string;
+  max: string;
+  min_label?: string;
+  max_label?: string;
+  row_count?: number;
+  uniq_count?: number;
+  note?: string;
+};
+
+export type PullBoundsRequest = {
+  scope?: ForecastScope;
+  tenant?: string;
+  uniq?: string;
+  status?: string;
+};
+
+// ---------------------------------------------------------------------------
 // Training
 // ---------------------------------------------------------------------------
 
@@ -397,6 +447,66 @@ const forecastingApi = apiSlice
         invalidatesTags: [{ type: "ForecastingDataset", id: "LIST" }],
       }),
 
+      // --- Pull Dataset from ERP -------------------------------------------
+      pullPrlDataset: builder.mutation<UploadDatasetResponse, PullDatasetRequest>({
+        query: (body) => ({
+          url: `${FORECASTING_BASE}/datasets/pull/prl`,
+          method: "POST",
+          body: {
+            request_id: buildRequestId("pull-prl"),
+            status: "approved",
+            freq: "M",
+            ...body,
+          },
+          meta: AUTH_META,
+        }),
+        transformResponse: (response: unknown) => unwrapBackendData<UploadDatasetResponse>(response),
+        invalidatesTags: [
+          { type: "ForecastingDataset", id: "LIST" },
+          { type: "ForecastingTrainingRun", id: "LIST" },
+        ],
+      }),
+
+      pullDnDataset: builder.mutation<UploadDatasetResponse, PullDatasetRequest>({
+        query: (body) => ({
+          url: `${FORECASTING_BASE}/datasets/pull/dn`,
+          method: "POST",
+          body: {
+            request_id: buildRequestId("pull-dn"),
+            freq: "D",
+            ...body,
+          },
+          meta: AUTH_META,
+        }),
+        transformResponse: (response: unknown) => unwrapBackendData<UploadDatasetResponse>(response),
+        invalidatesTags: [
+          { type: "ForecastingDataset", id: "LIST" },
+          { type: "ForecastingTrainingRun", id: "LIST" },
+        ],
+      }),
+
+      getPrlBounds: builder.query<DatasetBounds, PullBoundsRequest | void>({
+        query: (params) => ({
+          url: `${FORECASTING_BASE}/datasets/pull/prl/bounds`,
+          method: "GET",
+          params: cleanParams({ ...(params ?? {}) }),
+          meta: AUTH_META,
+        }),
+        transformResponse: (response: unknown) => unwrapBackendData<DatasetBounds>(response),
+        providesTags: [{ type: "ForecastingDataset", id: "PRL_BOUNDS" }],
+      }),
+
+      getDnBounds: builder.query<DatasetBounds, PullBoundsRequest | void>({
+        query: (params) => ({
+          url: `${FORECASTING_BASE}/datasets/pull/dn/bounds`,
+          method: "GET",
+          params: cleanParams({ ...(params ?? {}) }),
+          meta: AUTH_META,
+        }),
+        transformResponse: (response: unknown) => unwrapBackendData<DatasetBounds>(response),
+        providesTags: [{ type: "ForecastingDataset", id: "DN_BOUNDS" }],
+      }),
+
       // --- Training ---------------------------------------------------------
       trainGlobal: builder.mutation<TrainResponse, TrainGlobalRequest>({
         query: (body) => ({
@@ -554,6 +664,12 @@ const forecastingApi = apiSlice
 
 export const {
   useUploadDatasetMutation,
+  usePullPrlDatasetMutation,
+  usePullDnDatasetMutation,
+  useGetPrlBoundsQuery,
+  useLazyGetPrlBoundsQuery,
+  useGetDnBoundsQuery,
+  useLazyGetDnBoundsQuery,
   useTrainGlobalMutation,
   useTrainCustomMutation,
   useGetTrainingRunQuery,
