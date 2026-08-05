@@ -17,7 +17,7 @@ import {
   QrcodeOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { Button, Empty, Progress, Spin, Tag, message } from "antd";
+import { Button, Empty, Progress, Spin, Tag, Tooltip, message } from "antd";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
@@ -662,14 +662,39 @@ export default function WorkOrderDetailPage() {
                   <DetailField label="Closed UNIQ" value={closedUniq} mono />
                 </div>
 
-                {workOrder?.defect_reason ? (
+                {(workOrder?.defect_reasons?.length ?? 0) > 0 ||
+                workOrder?.defect_reason ? (
                   <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3">
                     <div className="text-[11px] font-medium text-amber-700">
                       Reason / Info Defect (NG)
                     </div>
-                    <div className="mt-1 break-words text-sm font-semibold text-amber-900">
-                      {workOrder.defect_reason}
-                    </div>
+                    {(workOrder?.defect_reasons?.length ?? 0) > 0 ? (
+                      <Tooltip
+                        title={
+                          <div className="space-y-1">
+                            {workOrder!.defect_reasons!.map((r, i) => (
+                              <div key={i}>
+                                {r.source === "scrap_reason" ? "Scrap" : "NG"}:{" "}
+                                {r.info || "-"} (Qty: {r.qty})
+                              </div>
+                            ))}
+                          </div>
+                        }
+                      >
+                        <div className="mt-1 inline-flex cursor-help items-center gap-1 break-words text-sm font-semibold text-amber-900 underline decoration-dotted underline-offset-2">
+                          {workOrder!.defect_reasons![0].info ||
+                            workOrder?.defect_reason ||
+                            "-"}
+                          {workOrder!.defect_reasons!.length > 1
+                            ? ` +${workOrder!.defect_reasons!.length - 1} lainnya`
+                            : ""}
+                        </div>
+                      </Tooltip>
+                    ) : (
+                      <div className="mt-1 break-words text-sm font-semibold text-amber-900">
+                        {workOrder?.defect_reason}
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </div>

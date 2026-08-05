@@ -238,6 +238,8 @@ export type WorkOrderRecord = {
   aging_days?: number;
   notes?: string;
   defect_reason?: string | null;
+  // [wo-defect-reasons] semua Reason/Info (NG & Scrap) round 3 untuk tooltip
+  defect_reasons?: Array<{ source: string; info: string; qty: number }>;
   reference_wo?: string | null;
   qr_data_url?: string;
   items: WorkOrderItemRecord[];
@@ -366,6 +368,22 @@ const toWorkOrderRecord = (raw: unknown): WorkOrderRecord => {
     aging_days: getNumber(record, ["aging_days", "aging", "agingDays"]),
     notes: getString(record, ["notes", "note"]),
     defect_reason: getString(record, ["defect_reason", "defectReason"]) ?? null,
+    defect_reasons: (() => {
+      const rawReasons =
+        (record as UnknownRecord)["defect_reasons"] ??
+        (record as UnknownRecord)["defectReasons"];
+      if (!Array.isArray(rawReasons)) return undefined;
+      return rawReasons
+        .map((it) => {
+          const r = isRecord(it) ? it : {};
+          return {
+            source: getString(r, ["source"]) ?? "",
+            info: getString(r, ["info", "reason", "text"]) ?? "",
+            qty: getNumber(r, ["qty"]) ?? 0,
+          };
+        })
+        .filter((r) => r.info !== "" || r.qty > 0);
+    })(),
     estimated_time_minutes: getNumber(record, [
       "estimated_time_minutes",
       "estimatedTimeMinutes",
