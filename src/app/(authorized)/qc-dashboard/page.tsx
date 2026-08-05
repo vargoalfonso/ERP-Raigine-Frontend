@@ -14,6 +14,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -28,6 +29,7 @@ import {
   SearchOutlined,
 } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
+import { useRouter } from "next/navigation";
 
 import StatsCard from "@/components/StatsCard";
 import { getApiErrorMessage } from "@/lib/api/error";
@@ -41,6 +43,7 @@ import {
   type QcDashboardIncomingQcItem,
   type QcDashboardProductReturnQcItem,
   type QcDashboardProductionQcItem,
+  type QcDashboardProductionQcIssue,
   type QcDashboardTopIssue,
   useCreateQcDashboardReportMutation,
   useGetQcDashboardDefectsQuery,
@@ -48,6 +51,7 @@ import {
   useGetQcDashboardOverviewQuery,
   useGetQcDashboardProductReturnQcQuery,
   useGetQcDashboardProductionQcQuery,
+  useGetQcDashboardProductionQcDetailQuery,
   useGetManualReferenceOptionsQuery,
 } from "@/lib/api/qc-dashboard/api";
 
@@ -148,6 +152,7 @@ export default function QcDashboardPage() {
   const [manualForm] = Form.useForm<ManualReportFormValues>();
   const apiEnabled = Boolean(apiBaseUrl);
 
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<UiTabId>("production");
   const [pagination, setPagination] = useState<PaginationState>({
     production: { page: 1, limit: 20 },
@@ -364,7 +369,36 @@ export default function QcDashboardPage() {
         title: "Issue",
         dataIndex: "issue_label",
         key: "issue_label",
-        render: (v) => (v ? String(v) : "-"),
+        render: (v, record) => {
+          const issues =
+            (record as { issues?: QcDashboardProductionQcIssue[] }).issues ?? [];
+          const label = v
+            ? String(v)
+            : issues.length > 0
+              ? issues[0].reason_text
+              : "-";
+          if (issues.length === 0) return label || "-";
+          return (
+            <Tooltip
+              title={
+                <div className="space-y-1">
+                  {issues.map((it, i) => (
+                    <div key={i}>
+                      {it.reason_code || it.source || "issue"}
+                      {it.reason_text ? `: ${it.reason_text}` : ""} (Qty:{" "}
+                      {it.qty || it.qty_defect || it.qty_scrap})
+                    </div>
+                  ))}
+                </div>
+              }
+            >
+              <span className="cursor-help underline decoration-dotted underline-offset-2">
+                {label || "-"}
+                {issues.length > 1 ? ` +${issues.length - 1}` : ""}
+              </span>
+            </Tooltip>
+          );
+        },
       },
       {
         title: "Defect",
@@ -396,8 +430,26 @@ export default function QcDashboardPage() {
           <Tag color={statusColor(String(v ?? ""))}>{String(v ?? "-")}</Tag>
         ),
       },
+      {
+        title: "Detail",
+        key: "detail",
+        fixed: "right",
+        width: 90,
+        render: (_v, record) => (
+          <Button
+            type="link"
+            size="small"
+            className="!px-0"
+            onClick={() =>
+              router.push(`/qc-dashboard/production/${record.qc_log_id}`)
+            }
+          >
+            Detail
+          </Button>
+        ),
+      },
     ],
-    [],
+    [router],
   );
 
   const incomingColumns = useMemo<ColumnsType<QcDashboardIncomingQcItem>>(
@@ -423,7 +475,36 @@ export default function QcDashboardPage() {
         title: "Issue",
         dataIndex: "issue_label",
         key: "issue_label",
-        render: (v) => (v ? String(v) : "-"),
+        render: (v, record) => {
+          const issues =
+            (record as { issues?: QcDashboardProductionQcIssue[] }).issues ?? [];
+          const label = v
+            ? String(v)
+            : issues.length > 0
+              ? issues[0].reason_text
+              : "-";
+          if (issues.length === 0) return label || "-";
+          return (
+            <Tooltip
+              title={
+                <div className="space-y-1">
+                  {issues.map((it, i) => (
+                    <div key={i}>
+                      {it.reason_code || it.source || "issue"}
+                      {it.reason_text ? `: ${it.reason_text}` : ""} (Qty:{" "}
+                      {it.qty || it.qty_defect || it.qty_scrap})
+                    </div>
+                  ))}
+                </div>
+              }
+            >
+              <span className="cursor-help underline decoration-dotted underline-offset-2">
+                {label || "-"}
+                {issues.length > 1 ? ` +${issues.length - 1}` : ""}
+              </span>
+            </Tooltip>
+          );
+        },
       },
       {
         title: "Defect",
@@ -493,7 +574,36 @@ export default function QcDashboardPage() {
         title: "Issue",
         dataIndex: "issue_label",
         key: "issue_label",
-        render: (v) => (v ? String(v) : "-"),
+        render: (v, record) => {
+          const issues =
+            (record as { issues?: QcDashboardProductionQcIssue[] }).issues ?? [];
+          const label = v
+            ? String(v)
+            : issues.length > 0
+              ? issues[0].reason_text
+              : "-";
+          if (issues.length === 0) return label || "-";
+          return (
+            <Tooltip
+              title={
+                <div className="space-y-1">
+                  {issues.map((it, i) => (
+                    <div key={i}>
+                      {it.reason_code || it.source || "issue"}
+                      {it.reason_text ? `: ${it.reason_text}` : ""} (Qty:{" "}
+                      {it.qty || it.qty_defect || it.qty_scrap})
+                    </div>
+                  ))}
+                </div>
+              }
+            >
+              <span className="cursor-help underline decoration-dotted underline-offset-2">
+                {label || "-"}
+                {issues.length > 1 ? ` +${issues.length - 1}` : ""}
+              </span>
+            </Tooltip>
+          );
+        },
       },
       {
         title: "Rework",

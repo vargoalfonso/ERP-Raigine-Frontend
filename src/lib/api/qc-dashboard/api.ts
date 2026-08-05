@@ -84,6 +84,16 @@ export type QcDashboardOverview = {
   implementation_note?: string;
 };
 
+export type QcDashboardProductionQcIssue = {
+  source: string;
+  reason_code: string;
+  reason_text: string;
+  qty: number;
+  qty_defect: number;
+  qty_scrap: number;
+  process_name: string;
+};
+
 export type QcDashboardProductionQcItem = {
   qc_log_id: number;
   report_date: string;
@@ -96,6 +106,11 @@ export type QcDashboardProductionQcItem = {
   qty_scrap: number;
   quality_rate_percent: number;
   status: string;
+  issues?: QcDashboardProductionQcIssue[];
+};
+
+export type QcDashboardProductionQcDetail = {
+  item: QcDashboardProductionQcItem;
 };
 
 export type QcDashboardIncomingQcItem = {
@@ -305,6 +320,21 @@ export const qcDashboardApiSlice = apiSlice
         providesTags: [{ type: TAG, id: "PRODUCTION_V2" }],
       }),
 
+      getQcDashboardProductionQcDetail: builder.query<ApiResponse<QcDashboardProductionQcDetail>, number>({
+        query: (qcLogId) => ({
+          url: `/qc-dashboard/production-qc/${qcLogId}`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => {
+          const payload = unwrapBackendData<unknown>(response);
+          const root = isRecord(payload) ? payload : {};
+          const item = (isRecord(root.item) ? root.item : root) as QcDashboardProductionQcItem;
+          return ok({ item }, "OK");
+        },
+        providesTags: [{ type: TAG, id: "PRODUCTION_V2" }],
+      }),
+
       getQcDashboardIncomingQc: builder.query<ApiResponse<QcDashboardIncomingQcItem[]>, QcDashboardPaginatedRequest>({
         query: ({ limit, page }) => ({
           url: "/qc-dashboard/incoming-qc",
@@ -413,6 +443,7 @@ export const qcDashboardApiSlice = apiSlice
 export const {
   useGetQcDashboardOverviewQuery,
   useGetQcDashboardProductionQcQuery,
+  useGetQcDashboardProductionQcDetailQuery,
   useGetQcDashboardIncomingQcQuery,
   useGetQcDashboardDefectsQuery,
   useGetQcDashboardProductReturnQcQuery,
