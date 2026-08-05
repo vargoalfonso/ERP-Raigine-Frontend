@@ -350,13 +350,29 @@ export default function DemandForecastingPage() {
 
   const predictChartData = useMemo(() => {
     const forecasts = predictState.data?.forecasts ?? [];
+    const num = (v: unknown) => (typeof v === "number" ? v : Number(v) || 0);
     return forecasts.map((f) => ({
       name: (f.timestamp ?? "").slice(0, 10),
-      mean: typeof f.mean === "number" ? f.mean : Number(f.mean) || 0,
-      low: typeof f["0.1"] === "number" ? (f["0.1"] as number) : Number(f["0.1"]) || 0,
-      high: typeof f["0.9"] === "number" ? (f["0.9"] as number) : Number(f["0.9"]) || 0,
+      mean: num(f.mean),
+      low: num(f["0.25"]),
+      high: num(f["0.75"]),
     }));
   }, [predictState.data]);
+
+  // Y-axis domain with padding so even a single day is clearly visible (not a flat line).
+  const predictYDomain = useMemo<[number, number]>(() => {
+    if (predictChartData.length === 0) return [0, 1];
+    const vals = predictChartData.flatMap((d) => [d.low, d.mean, d.high]);
+    let min = Math.min(...vals);
+    let max = Math.max(...vals);
+    if (min === max) {
+      // Single flat value: pad around it so the marker sits in the middle.
+      const pad = Math.max(1, Math.abs(max) * 0.2);
+      return [Math.floor(min - pad), Math.ceil(max + pad)];
+    }
+    const pad = (max - min) * 0.15;
+    return [Math.floor(min - pad), Math.ceil(max + pad)];
+  }, [predictChartData]);
 
   const steps: Array<{ id: DemandStepId; label: string }> = [
     { id: "dashboard", label: "Dashboard & Predict" },
@@ -853,8 +869,8 @@ export default function DemandForecastingPage() {
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={predictChartData} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
+                      <XAxis dataKey="name" padding={{ left: 30, right: 30 }} />
+                      <YAxis domain={predictYDomain} allowDecimals={false} />
                       <Tooltip />
                       <Legend />
                       <Area
@@ -862,7 +878,10 @@ export default function DemandForecastingPage() {
                         dataKey="high"
                         stroke="#93C5FD"
                         fill="#DBEAFE"
-                        name="P90"
+                        name="P75"
+                        dot={{ r: 4 }}
+                        activeDot={{ r: 6 }}
+                        isAnimationActive={false}
                       />
                       <Area
                         type="monotone"
@@ -870,13 +889,19 @@ export default function DemandForecastingPage() {
                         stroke="#2563EB"
                         fill="#BFDBFE"
                         name="Mean"
+                        dot={{ r: 5 }}
+                        activeDot={{ r: 7 }}
+                        isAnimationActive={false}
                       />
                       <Area
                         type="monotone"
                         dataKey="low"
                         stroke="#60A5FA"
                         fill="#EFF6FF"
-                        name="P10"
+                        name="P25"
+                        dot={{ r: 4 }}
+                        activeDot={{ r: 6 }}
+                        isAnimationActive={false}
                       />
                     </AreaChart>
                   </ResponsiveContainer>
