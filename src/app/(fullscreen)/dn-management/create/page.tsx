@@ -17,6 +17,7 @@ import {
   usePreviewProcurementDnMutation,
   type ProcurementDnType,
 } from "@/lib/api/procurement-dn/api";
+import { useListSupplierItemsQuery } from "@/lib/api/supplier-items/api";
 import { type ProcurementPoType, useGetProcurementPoByIdQuery, useListProcurementPosQuery } from "@/lib/api/procurement-po/api";
 import { useGetGlobalWorkingDaysQuery } from "@/lib/api/system-settings/api";
 import { useGetWorkOrdersQuery } from "@/lib/api/work-orders/api";
@@ -153,11 +154,15 @@ function DnRawMaterialCreatePageContent() {
 
   const [createProcurementDn, { isLoading: saving }] = useCreateProcurementDnMutation();
   const [previewProcurementDn, { isLoading: previewing }] = usePreviewProcurementDnMutation();
+  const supplierItemsQuery = useListSupplierItemsQuery(undefined, { skip: !apiEnabled });
 
   const [step1, setStep1] = useState<Step1Data>({});
 
   // Work Order khusus untuk DN Subcon (dipakai membaca process flow / poka-yoke)
   const [workOrder, setWorkOrder] = useState<string | undefined>(undefined);
+
+  // "Pengiriman ke ..." mengikuti cycle_time (lead time) supplier; urut & tidak bisa lompat/mundur.
+  const [deliveryTo, setDeliveryTo] = useState<number | undefined>(undefined);
 
   const [scheduleDate, setScheduleDate] = useState<Dayjs | null>(dayjs());
   const [priority, setPriority] = useState<string>("normal");
@@ -380,6 +385,54 @@ function DnRawMaterialCreatePageContent() {
     [draft.packing, draft.uniq, items, previewItems],
   );
 
+  // N = cycle_time (lead time) supplier terpilih -> jumlah total pengiriman terjadwal.
+  const supplierCycleTime = useMemo(() => {
+    const name = String(step1.supplier ?? "").trim().toLowerCase();
+    if (!name) return 0;
+    let max = 0;
+    for (const it of supplierItemsQuery.data ?? []) {
+      const sName = String(it.supplier_name ?? "").trim().toLowerCase();
+      if (sName !== name) continue;
+      const ct = Number(it.cycle_time ?? 0);
+      if (Number.isFinite(ct) && ct > max) max = ct;
+    }
+    return max;
+  }, [step1.supplier, supplierItemsQuery.data]);
+
+  // Pengiriman berikutnya yang boleh dibuat = jumlah DN yang sudah dibuat + 1.
+  // Harus urut mulai dari 1; tidak boleh lompat atau mundur.
+  const nextDelivery = useMemo(() => (step1.dnCreated ?? 0) + 1, [step1.dnCreated]);
+
+  const allDeliveriesDone = supplierCycleTime > 0 && nextDelivery > supplierCycleTime;
+
+  const deliveryOptions = useMemo(
+    () =>
+      Array.from({ length: Math.max(0, supplierCycleTime) }, (_, i) => {
+        const value = i + 1;
+        const done = value < nextDelivery;
+        const locked = value > nextDelivery;
+        return {
+          value,
+          disabled: value !== nextDelivery,
+          label: done
+            ? `Pengiriman ke ${value} (sudah dibuat)`
+            : locked
+              ? `Pengiriman ke ${value} (belum bisa)`
+              : `Pengiriman ke ${value}`,
+        };
+      }),
+    [supplierCycleTime, nextDelivery],
+  );
+
+  // Kunci otomatis ke pengiriman berikutnya (urut; tidak bisa lompat/mundur).
+  useEffect(() => {
+    if (supplierCycleTime <= 0 || allDeliveriesDone) {
+      if (deliveryTo != null) setDeliveryTo(undefined);
+      return;
+    }
+    if (deliveryTo !== nextDelivery) setDeliveryTo(nextDelivery);
+  }, [supplierCycleTime, allDeliveriesDone, nextDelivery, deliveryTo]);
+
   const dnCode = useMemo(() => `${copy.codePrefix}-${step1.period?.replace(/[^0-9A-Za-z]/g, "") ?? "202401"}-001`, [copy.codePrefix, step1.period]);
   const totalUniqChosen = useMemo(() => items.length, [items]);
   const totalQty = useMemo(() => items.reduce((sum, it) => sum + Number(it.orderQty ?? 0), 0), [items]);
@@ -570,6 +623,7 @@ function DnRawMaterialCreatePageContent() {
         po_number: step1.poNumber,
         period: step1.period,
         type: procurementType,
+        ...(deliveryTo ? { delivery_to: deliveryTo, delivery_total: supplierCycleTime } : {}),
         ...(dnType === "subcon" && workOrder ? { wo_number: workOrder } : {}),
         items: items.map((item) => ({
           item_uniq_code: item.uniq,
@@ -657,6 +711,38 @@ function DnRawMaterialCreatePageContent() {
                 <div className="xl:col-span-2">
                   <div className="mb-2 text-sm font-medium text-gray-700">Supplier</div>
                   <Input value={step1.supplier ?? ""} disabled placeholder="Autofilled" />
+                </div>
+                <div className="xl:col-span-2">
+                  <div className="mb-2 text-sm font-medium text-gray-700">
+                    Pengiriman ke {supplierCycleTime > 0 ? `(dari ${supplierCycleTime})` : ""}
+                  </div>
+                  <Select
+                    value={deliveryTo}
+                    onChange={(value) => {
+                      // Hanya boleh pengiriman berikutnya (urut) — tidak lompat/mundur.
+                      if (value === nextDelivery) setDeliveryTo(value);
+                    }}
+                    options={deliveryOptions}
+                    placeholder={
+                      supplierCycleTime <= 0
+                        ? "Lead time supplier belum diisi"
+                        : allDeliveriesDone
+                          ? "Semua pengiriman sudah dibuat"
+                          : "Pilih pengiriman ke ..."
+                    }
+                    className="w-full"
+                    disabled={supplierCycleTime <= 0 || allDeliveriesDone}
+                  />
+                  {supplierCycleTime > 0 && !allDeliveriesDone ? (
+                    <div className="mt-1 text-xs text-gray-500">
+                      Pengiriman dibuat berurutan. DN ini = pengiriman ke {nextDelivery} dari {supplierCycleTime}.
+                    </div>
+                  ) : null}
+                  {allDeliveriesDone ? (
+                    <div className="mt-1 text-xs text-orange-600">
+                      Semua {supplierCycleTime} pengiriman untuk PO ini sudah dibuat.
+                    </div>
+                  ) : null}
                 </div>
 
                 <div>

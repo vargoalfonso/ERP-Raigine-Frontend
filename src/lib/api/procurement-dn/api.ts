@@ -69,6 +69,9 @@ export type CreateProcurementDnRequest = {
   customer_id?: number;
   contact_person?: string;
   wo_number?: string;
+  // "Pengiriman ke ..." (delivery sequence) + total pengiriman terjadwal (= cycle_time/lead time supplier).
+  delivery_to?: number;
+  delivery_total?: number;
 };
 
 export type ProcurementDnItem = {
@@ -145,6 +148,9 @@ export type ProcurementDnRecord = {
   };
   items: ProcurementDnItem[];
   material_grade?: string; 
+  // "Pengiriman ke ..." berikut total pengiriman terjadwal (= cycle_time supplier).
+  delivery_to?: number;
+  delivery_total?: number;
 };
 
 export type ProcurementDnPreview = {
@@ -277,6 +283,8 @@ const toDnRecord = (raw: unknown): ProcurementDnRecord => {
         }
       : undefined,
     items: Array.isArray(record.items) ? record.items.map(toDnItem) : [],
+    delivery_to: toNumber(record.delivery_to),
+    delivery_total: toNumber(record.delivery_total),
   };
 };
 
