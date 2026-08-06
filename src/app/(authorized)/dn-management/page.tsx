@@ -38,49 +38,11 @@ type DnRow = {
   dnCreated: number;
   dnIncoming: number;
   supplier: string;
+  deliveryTo: number;
+  deliveryTotal: number;
 };
 
-const dnRows: DnRow[] = [
-  {
-    key: "DN-001",
-    id: "DN-001",
-    period: "Oct\n-25",
-    dnNumber: "DN-001",
-    totalPo: 1000,
-    totalIncoming: 950,
-    progressPercent: 95,
-    pendingUnits: 50,
-    dnCreated: 1000,
-    dnIncoming: 950,
-    supplier: "PT Steel Indonesia",
-  },
-  {
-    key: "DN-002",
-    id: "DN-002",
-    period: "Oct\n-25",
-    dnNumber: "DN-002",
-    totalPo: 800,
-    totalIncoming: 0,
-    progressPercent: 0,
-    pendingUnits: 800,
-    dnCreated: 800,
-    dnIncoming: 0,
-    supplier: "PT Metal Works",
-  },
-  {
-    key: "DN-003",
-    id: "DN-003",
-    period: "Oct\n-25",
-    dnNumber: "DN-003",
-    totalPo: 600,
-    totalIncoming: 600,
-    progressPercent: 100,
-    pendingUnits: 0,
-    dnCreated: 600,
-    dnIncoming: 600,
-    supplier: "PT Chemical Solutions",
-  },
-];
+
 
 const tabToType = (tab: ProcurementTab): ProcurementDnType => {
   if (tab === "indirect") return "IRM";
@@ -160,7 +122,7 @@ export default function DnManagementPage() {
   const procurementApiAvailable = apiEnabled && !listQuery.error;
 
   const rows = useMemo<DnRow[]>(() => {
-    if (!procurementApiAvailable) return dnRows;
+    if (!procurementApiAvailable) return [];
 
     const type = tabToType(activeTab);
     const list = (listQuery.data?.data ?? []).filter((dn) => String(dn.type ?? "").toUpperCase() === type);
