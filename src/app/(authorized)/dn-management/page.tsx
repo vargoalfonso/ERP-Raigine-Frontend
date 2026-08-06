@@ -38,49 +38,11 @@ type DnRow = {
   dnCreated: number;
   dnIncoming: number;
   supplier: string;
+  deliveryTo: number;
+  deliveryTotal: number;
 };
 
-const dnRows: DnRow[] = [
-  {
-    key: "DN-001",
-    id: "DN-001",
-    period: "Oct\n-25",
-    dnNumber: "DN-001",
-    totalPo: 1000,
-    totalIncoming: 950,
-    progressPercent: 95,
-    pendingUnits: 50,
-    dnCreated: 1000,
-    dnIncoming: 950,
-    supplier: "PT Steel Indonesia",
-  },
-  {
-    key: "DN-002",
-    id: "DN-002",
-    period: "Oct\n-25",
-    dnNumber: "DN-002",
-    totalPo: 800,
-    totalIncoming: 0,
-    progressPercent: 0,
-    pendingUnits: 800,
-    dnCreated: 800,
-    dnIncoming: 0,
-    supplier: "PT Metal Works",
-  },
-  {
-    key: "DN-003",
-    id: "DN-003",
-    period: "Oct\n-25",
-    dnNumber: "DN-003",
-    totalPo: 600,
-    totalIncoming: 600,
-    progressPercent: 100,
-    pendingUnits: 0,
-    dnCreated: 600,
-    dnIncoming: 600,
-    supplier: "PT Chemical Solutions",
-  },
-];
+
 
 const tabToType = (tab: ProcurementTab): ProcurementDnType => {
   if (tab === "indirect") return "IRM";
@@ -160,7 +122,7 @@ export default function DnManagementPage() {
   const procurementApiAvailable = apiEnabled && !listQuery.error;
 
   const rows = useMemo<DnRow[]>(() => {
-    if (!procurementApiAvailable) return dnRows;
+    if (!procurementApiAvailable) return [];
 
     const type = tabToType(activeTab);
     const list = (listQuery.data?.data ?? []).filter((dn) => String(dn.type ?? "").toUpperCase() === type);
@@ -186,6 +148,8 @@ export default function DnManagementPage() {
           dnCreated,
           dnIncoming: Number(dn.total_dn_incoming ?? 0),
           supplier: String(dn.supplier_name ?? (dn.supplier_id ? `Supplier #${dn.supplier_id}` : "-")),
+          deliveryTo: Number(dn.delivery_to ?? 0),
+          deliveryTotal: Number(dn.delivery_total ?? 0),
         };
       })
       .filter((row) => !hiddenDn.has(row.dnNumber));
@@ -802,6 +766,7 @@ export default function DnManagementPage() {
                     <th className="text-left font-medium px-4 py-3">DELIVERY STATUS</th>
                     <th className="text-left font-medium px-4 py-3">DELIVERY NOTES</th>
                     <th className="text-left font-medium px-4 py-3">SUPPLIER</th>
+                    <th className="text-left font-medium px-4 py-3">PENGIRIMAN</th>
                     <th className="text-right font-medium px-4 py-3">ACTIONS</th>
                   </tr>
                 </thead>
@@ -856,6 +821,13 @@ export default function DnManagementPage() {
                             <div className="text-sm font-medium text-gray-900">{r.supplier}</div>
                           </div>
                         </td>
+                        <td className="px-4 py-4 whitespace-nowrap">
+                          {r.deliveryTotal > 0
+                            ? `${r.deliveryTo}/${r.deliveryTotal}`
+                            : r.deliveryTo > 0
+                              ? String(r.deliveryTo)
+                              : "-"}
+                        </td>
                         <td className="px-4 py-4 whitespace-nowrap text-right">
                           <div className="inline-flex items-center gap-3 text-gray-500">
                             <button type="button" className="hover:text-gray-700" aria-label="QR" title="Barcode" onClick={() => setBarcodeDnId(r.id)}>
@@ -892,7 +864,7 @@ export default function DnManagementPage() {
                   })}
                   {pagedRows.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-sm text-gray-500">
+                      <td colSpan={9} className="px-4 py-10 text-center text-sm text-gray-500">
                         No delivery notes found.
                       </td>
                     </tr>

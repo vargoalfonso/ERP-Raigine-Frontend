@@ -270,8 +270,8 @@ const MaterialSpecDesc = ({ spec }: { spec: MaterialSpec | null | undefined }) =
       <Descriptions.Item label="Diameter">{fmt(spec.diameter_mm, "mm")}</Descriptions.Item>
       <Descriptions.Item label="Thickness">{fmt(spec.thickness_mm, "mm")}</Descriptions.Item>
       <Descriptions.Item label="Length">{fmt(spec.length_mm, "mm")}</Descriptions.Item>
-      {/* <Descriptions.Item label="Cycle Time">{fmt(spec.cycle_time_sec, "sec")}</Descriptions.Item>
-      <Descriptions.Item label="Setup Time">{fmt(spec.setup_time_min, "min")}</Descriptions.Item> */}
+      <Descriptions.Item label="Cycle Time">{fmt(spec.cycle_time_sec, "sec")}</Descriptions.Item>
+      <Descriptions.Item label="Setup Time">{fmt(spec.setup_time_min, "min")}</Descriptions.Item>
     </Descriptions>
   );
 };

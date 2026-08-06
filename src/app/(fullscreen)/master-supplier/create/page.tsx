@@ -1194,6 +1194,16 @@ function MasterSupplierCreatePageContent() {
         weight: String(values.weight ?? 0),
         pcs_per_kanban: String(values.pcs_per_kanban ?? 0),
         customer_cycle: pickText(values.customer_cycle),
+        // Cycle Time (days): include it in the outgoing payload so it is
+        // persisted to supplier_item.cycle_time. Without this the field was
+        // rendered in the form but never sent, so the DB column stayed empty
+        // and the value never showed up again on reload.
+        cycle_time:
+          values.cycle_time !== undefined &&
+          values.cycle_time !== null &&
+          `${values.cycle_time}`.trim() !== ""
+            ? String(Math.trunc(Number(values.cycle_time)))
+            : undefined,
         status:
           pickText(values.status) ||
           pickText(detailQuery.data?.status) ||
@@ -1703,11 +1713,13 @@ function MasterSupplierCreatePageContent() {
 
                             <Form.Item
                               className="md:col-span-1 xl:col-span-3"
-                              label="Cycle Time (days)"
+                              label="Lead Time (days)"
                               name="cycle_time">
                               <InputNumber
                                 style={{ width: "100%" }}
                                 min={0}
+                                step={1}
+                                precision={0}
                                 size="large"
                                 className="w-full"
                                 placeholder="e.g. 7"
@@ -2011,10 +2023,12 @@ function MasterSupplierCreatePageContent() {
                             />
                           </Form.Item>
 
-                          <Form.Item label="Cycle Time (days)" name="cycle_time">
+                          <Form.Item label="Lead Time (days)" name="cycle_time">
                             <InputNumber
                               style={{ width: "100%" }}
                               min={0}
+                              step={1}
+                              precision={0}
                               size="large"
                               className="w-full"
                               placeholder="e.g. 7"

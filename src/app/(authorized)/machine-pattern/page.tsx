@@ -23,7 +23,7 @@ import {
   SearchOutlined,
 } from "@ant-design/icons";
 import { MdSettings, MdTrendingUp } from "react-icons/md";
-import { useGetBomTreeQuery, useLazyGetBomFullByIdQuery } from "@/lib/api/bom/api";
+import { useGetBomListQuery, useLazyGetBomFullByIdQuery } from "@/lib/api/bom/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetGlobalWorkingDaysQuery } from "@/lib/api/system-settings/api";
@@ -165,7 +165,10 @@ export default function MachinePatternPage() {
   const { data: summary } = useGetMachinePatternSummaryQuery(undefined, { skip: !apiEnabled });
   const { data: machineParameters } = useGetMachineParametersQuery({ page: 1, limit: 1000 }, { skip: !apiEnabled });
   const { data: apiMachines = [] } = useGetMachinesQuery(undefined, { skip: !apiEnabled });
-  const { data: bomTreeData } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  // Load the FULL uniq set for the dropdown. getBomList loops through every
+  // page at the max backend-allowed limit (200/page) and accumulates all rows,
+  // so the Uniq options are not capped at a single clamped page.
+  const { data: bomTreeData } = useGetBomListQuery({ limit: 200 }, { skip: !apiEnabled });
   const [createMachinePattern, createState] = useCreateMachinePatternMutation();
   const [updateMachinePattern, updateState] = useUpdateMachinePatternMutation();
   const [deleteMachinePattern, deleteState] = useDeleteMachinePatternMutation();
@@ -862,7 +865,15 @@ const periodOptions = useMemo(() => {
           initialValues={{ status: "Active", movingType: "Fast Moving", workingDays: 25 }}
         >
           <Form.Item name="uniqCode" label="Uniq Name (from Bill of Material)" rules={[{ required: true, message: "Required" }]}>
-            <Select options={uniqOptions} placeholder="Select Uniq" className="w-full" showSearch optionFilterProp="label" />
+            <Select
+              options={uniqOptions}
+              placeholder="Select Uniq"
+              className="w-full"
+              showSearch
+              optionFilterProp="label"
+              virtual
+              listHeight={320}
+            />
           </Form.Item>
           <Form.Item name="machineId" label="Machine Name (from Machine Master Data)" rules={[{ required: true, message: "Required" }]}>
             <Select options={machineOptions} placeholder="Select machine" className="w-full" showSearch optionFilterProp="label" />

@@ -115,7 +115,7 @@ export const productionDashboardApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     getFinishedGoodsDashboard: builder.query<ApiResponse<ProductionDashboardPayload<FinishedGoodsDashboardRow>>, void>({
       query: () => ({
-        url: "/api/production-dashboard/fg-dashboard",
+        url: "/production-dashboard/fg-dashboard",
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
@@ -123,7 +123,7 @@ export const productionDashboardApiSlice = apiSlice.injectEndpoints({
     }),
     getWipDashboard: builder.query<ApiResponse<ProductionDashboardPayload<WipDashboardRow>>, void>({
       query: () => ({
-        url: "/api/production-dashboard/wip-dashboard",
+        url: "/production-dashboard/wip-dashboard",
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
@@ -131,7 +131,7 @@ export const productionDashboardApiSlice = apiSlice.injectEndpoints({
     }),
     getOutputMachineDashboard: builder.query<ApiResponse<ProductionDashboardPayload<OutputMachineDashboardRow>>, void>({
       query: () => ({
-        url: "/api/production-dashboard/output-machine-dashboard",
+        url: "/production-dashboard/output-machine-dashboard",
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
@@ -139,7 +139,7 @@ export const productionDashboardApiSlice = apiSlice.injectEndpoints({
     }),
     getSummaryStrokeDashboard: builder.query<ApiResponse<ProductionDashboardPayload<SummaryStrokeDashboardRow>>, void>({
       query: () => ({
-        url: "/api/production-dashboard/summary-stroke-dashboard",
+        url: "/production-dashboard/summary-stroke-dashboard",
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
@@ -147,7 +147,7 @@ export const productionDashboardApiSlice = apiSlice.injectEndpoints({
     }),
     getRuntimeDashboard: builder.query<ApiResponse<ProductionDashboardPayload<RuntimeDashboardRow>>, void>({
       query: () => ({
-        url: "/api/production-dashboard/runtime",
+        url: "/production-dashboard/runtime",
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
