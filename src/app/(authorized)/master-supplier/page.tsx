@@ -18,10 +18,12 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import {
   DeleteOutlined,
+  DownloadOutlined,
   EditOutlined,
   EyeOutlined,
   PlusOutlined,
   SearchOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import {
   type SupplierItemRecord,
@@ -29,7 +31,9 @@ import {
   useListSupplierItemsQuery,
 } from "@/lib/api/supplier-items/api";
 import {
+  type CreateSupplierRequest,
   type SupplierRecord,
+  useBulkImportSuppliersMutation,
   useDeleteSupplierMutation,
   useGetSupplierByIdQuery,
   useListSuppliersQuery,
@@ -37,6 +41,18 @@ import {
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { consumeFlashMessage } from "@/lib/utils/flashMessage";
+import ExcelImportModal from "@/components/master-data/ExcelImportModal";
+import { exportRows } from "@/lib/utils/excel/masterExcel";
+import {
+  SUPPLIER_ONLY_EXCEL_COLUMNS,
+  SUPPLIER_ONLY_EXCEL_EXAMPLE_ROWS,
+  normalizeMaterialCategory as normalizeMaterialCategoryImport,
+  normalizeStatusToApi,
+} from "@/lib/utils/excel/supplierExcelConfig";
+import {
+  extractBulkOutcome,
+  type BulkImportOutcome,
+} from "@/lib/utils/excel/bulkImportTypes";
 
 type SupplierSection = "supplier-only" | "raw-material" | "indirect-raw-material" | "subcon";
 type SupplierItemSection = Exclude<SupplierSection, "supplier-only">;
@@ -218,6 +234,7 @@ export default function MasterSupplierPage() {
   const [selectedSupplierOnlyRow, setSelectedSupplierOnlyRow] = useState<SupplierOnlyRow | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const itemTypeFilter = sectionToItemType(activeSection);
   const supplierItemsQuery = useListSupplierItemsQuery(
@@ -227,6 +244,7 @@ export default function MasterSupplierPage() {
   const suppliersQuery = useListSuppliersQuery({ page: 1, limit: 1000 }, { skip: !apiEnabled });
   const [deleteSupplierItem, deleteSupplierItemState] = useDeleteSupplierItemMutation();
   const [deleteSupplier, deleteSupplierState] = useDeleteSupplierMutation();
+  const [bulkImportSuppliers] = useBulkImportSuppliersMutation();
 
   const selectedSupplierId = selectedSupplierOnlyRow?.id;
   const supplierDetailQuery = useGetSupplierByIdQuery(selectedSupplierId ?? "", {
@@ -340,6 +358,51 @@ export default function MasterSupplierPage() {
     if (row?.id) params.set("id", row.id);
 
     router.push(`/master-supplier/create?${params.toString()}`);
+  };
+
+  const handleBulkImport = async (
+    payloads: CreateSupplierRequest[]
+  ): Promise<BulkImportOutcome> => {
+    try {
+      return await bulkImportSuppliers(payloads).unwrap();
+    } catch (error) {
+      const parsed = extractBulkOutcome((error as { data?: unknown })?.data);
+      if (parsed) return parsed;
+      throw new Error(getApiErrorMessage(error, "Gagal mengimport data supplier."));
+    }
+  };
+
+  const handleExportSupplierOnly = () => {
+    const records = suppliersQuery.data ?? [];
+    if (!records.length) {
+      messageApi.warning("Tidak ada data supplier untuk diekspor.");
+      return;
+    }
+    exportRows({
+      fileNamePrefix: "master-supplier-only",
+      columns: SUPPLIER_ONLY_EXCEL_COLUMNS,
+      rows: records.map((s) => ({
+        supplier_code: s.supplier_code ?? "",
+        supplier_name: s.supplier_name ?? "",
+        contact_person: s.contact_person ?? "",
+        contact_number: s.contact_number ?? "",
+        email_address: s.email_address ?? "",
+        material_category: s.material_category ?? "",
+        full_address: s.full_address ?? "",
+        city: s.city ?? "",
+        province: s.province ?? "",
+        country: s.country ?? "",
+        tax_id_npwp: s.tax_id_npwp ?? "",
+        bank_name: s.bank_name ?? "",
+        bank_account_number: s.bank_account_number ?? "",
+        bank_account_name: s.bank_account_name ?? "",
+        payment_terms: s.payment_terms ?? "",
+        delivery_lead_time_days:
+          s.delivery_lead_time_days == null ? "" : String(s.delivery_lead_time_days),
+        status: s.status ?? "",
+      })),
+    });
+    messageApi.success(`${records.length} supplier diekspor.`);
   };
 
   const handleDeleteSupplierItem = async (row: SupplierRow) => {
@@ -581,19 +644,41 @@ export default function MasterSupplierPage() {
             </Typography.Text>
           </div>
 
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => {
-              if (isSupplierOnly) {
-                router.push("/master-supplier/only/create");
-                return;
-              }
-              openCreatePage("create");
-            }}
-          >
-            {isSupplierOnly ? "Add Supplier Only" : "Add Supplier Item"}
-          </Button>
+          <div className="flex items-center gap-2">
+            {isSupplierOnly ? (
+              <>
+                <Button
+                  className="!rounded-lg"
+                  icon={<UploadOutlined />}
+                  onClick={() => setImportOpen(true)}
+                  disabled={!apiEnabled}
+                >
+                  Import
+                </Button>
+                <Button
+                  className="!rounded-lg"
+                  icon={<DownloadOutlined />}
+                  onClick={handleExportSupplierOnly}
+                >
+                  Export
+                </Button>
+              </>
+            ) : null}
+
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                if (isSupplierOnly) {
+                  router.push("/master-supplier/only/create");
+                  return;
+                }
+                openCreatePage("create");
+              }}
+            >
+              {isSupplierOnly ? "Add Supplier Only" : "Add Supplier Item"}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -697,6 +782,59 @@ export default function MasterSupplierPage() {
           />
         )}
       </div>
+
+      <ExcelImportModal<CreateSupplierRequest>
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        title="Import Supplier Only (Data Massal)"
+        entityName="supplier"
+        templateFileName="template-import-supplier-only.xlsx"
+        templateTitle="Template Import Master Supplier - Supplier Only"
+        columns={SUPPLIER_ONLY_EXCEL_COLUMNS}
+        exampleRows={SUPPLIER_ONLY_EXCEL_EXAMPLE_ROWS}
+        mapRow={(row) => {
+          const name = (row.supplier_name ?? "").trim();
+          const label = name || "(tanpa nama)";
+          if (!name) {
+            return { ok: false, label, error: "Supplier Name wajib diisi." };
+          }
+          const leadTimeRaw = (row.delivery_lead_time_days ?? "").trim();
+          const leadTime = leadTimeRaw ? Number(leadTimeRaw) : undefined;
+          if (leadTimeRaw && !Number.isFinite(leadTime)) {
+            return { ok: false, label, error: "Lead Time (days) harus berupa angka." };
+          }
+          const supplierCode = (row.supplier_code ?? "").trim();
+          const materialCategory = (row.material_category ?? "").trim();
+          const status = (row.status ?? "").trim();
+          return {
+            ok: true,
+            label,
+            payload: {
+              ...(supplierCode ? { supplier_code: supplierCode } : {}),
+              supplier_name: name,
+              contact_person: (row.contact_person ?? "").trim(),
+              contact_number: (row.contact_number ?? "").trim(),
+              email_address: (row.email_address ?? "").trim(),
+              ...(materialCategory
+                ? { material_category: normalizeMaterialCategoryImport(materialCategory) }
+                : {}),
+              full_address: (row.full_address ?? "").trim(),
+              city: (row.city ?? "").trim(),
+              province: (row.province ?? "").trim(),
+              country: (row.country ?? "").trim() || "Indonesia",
+              tax_id_npwp: (row.tax_id_npwp ?? "").trim(),
+              bank_name: (row.bank_name ?? "").trim(),
+              bank_account_number: (row.bank_account_number ?? "").trim(),
+              bank_account_name: (row.bank_account_name ?? "").trim(),
+              payment_terms: (row.payment_terms ?? "").trim() || "30D",
+              delivery_lead_time_days: leadTime ?? 7,
+              ...(status ? { status: normalizeStatusToApi(status) } : {}),
+            },
+          };
+        }}
+        bulkImport={handleBulkImport}
+        onImported={() => suppliersQuery.refetch()}
+      />
 
       <Modal
         open={detailOpen}
