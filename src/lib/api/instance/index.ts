@@ -1,4 +1,5 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
+import { notifySessionExpired } from "@/lib/sessionExpiry";
 
 let cachedLocationPromise: Promise<{ latitude: number | null; longitude: number | null }> | null = null;
 
@@ -146,6 +147,18 @@ export const apiSlice = createApi({
         ...headers,
       },
     })(args, api, extraOptions);
+
+    // [session-expiry] Token ditolak backend (sesi habis) pada request ber-autorisasi
+    // -> munculkan modal login ulang, jangan langsung redirect.
+    if (
+      result &&
+      "error" in result &&
+      result.error &&
+      (result.error as { status?: number | string }).status === 401 &&
+      useAuthorization
+    ) {
+      notifySessionExpired();
+    }
 
     return result;
   },
