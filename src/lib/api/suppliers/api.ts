@@ -1,4 +1,9 @@
 import { apiSlice } from "@/lib/api/instance";
+import {
+  emptyBulkOutcome,
+  extractBulkOutcome,
+  type BulkImportOutcome,
+} from "@/lib/utils/excel/bulkImportTypes";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -182,6 +187,24 @@ export const supplierApiSlice = apiSlice
         invalidatesTags: [{ type: TAG, id: "LIST" }],
       }),
 
+      /**
+       * Bulk import: sends every supplier payload in one request to
+       * POST /suppliers/bulk and returns the per-row outcome. On HTTP 207
+       * (partial) and 422 (all failed) the envelope is surfaced as an RTK
+       * error; the page-level wrapper reads it via extractBulkOutcome.
+       */
+      bulkImportSuppliers: builder.mutation<BulkImportOutcome, CreateSupplierRequest[]>({
+        query: (items) => ({
+          url: "/suppliers/bulk",
+          method: "POST",
+          body: { items },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) =>
+          extractBulkOutcome(response) ?? emptyBulkOutcome(),
+        invalidatesTags: [{ type: TAG, id: "LIST" }],
+      }),
+
       getSupplierById: builder.query<SupplierRecord, string | number>({
         query: (id) => ({
           url: `/suppliers/${encodeURIComponent(String(id))}`,
@@ -238,6 +261,7 @@ export const {
   useGetNextSupplierCodeQuery,
   useListSuppliersQuery,
   useCreateSupplierMutation,
+  useBulkImportSuppliersMutation,
   useGetSupplierByIdQuery,
   useUpdateSupplierMutation,
   useEditSupplierMutation,

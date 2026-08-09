@@ -1,4 +1,9 @@
 import { apiSlice } from "@/lib/api/instance";
+import {
+  emptyBulkOutcome,
+  extractBulkOutcome,
+  type BulkImportOutcome,
+} from "@/lib/utils/excel/bulkImportTypes";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -112,6 +117,24 @@ export const customerApiSlice = apiSlice
         invalidatesTags: [{ type: TAG, id: "LIST" }],
       }),
 
+      /**
+       * Bulk import: sends every customer payload in one request to
+       * POST /customers/bulk and returns the per-row outcome. On HTTP 207
+       * (partial) and 422 (all failed) the envelope is surfaced as an RTK
+       * error; the page-level wrapper reads it via extractBulkOutcome.
+       */
+      bulkImportCustomers: builder.mutation<BulkImportOutcome, CreateCustomerRequest[]>({
+        query: (items) => ({
+          url: "/customers/bulk",
+          method: "POST",
+          body: { items },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) =>
+          extractBulkOutcome(response) ?? emptyBulkOutcome(),
+        invalidatesTags: [{ type: TAG, id: "LIST" }],
+      }),
+
       getCustomerById: builder.query<CustomerRecord, string | number>({
         query: (id) => ({
           url: `/customers/${encodeURIComponent(String(id))}`,
@@ -153,6 +176,7 @@ export const customerApiSlice = apiSlice
 export const {
   useListCustomersQuery,
   useCreateCustomerMutation,
+  useBulkImportCustomersMutation,
   useGetCustomerByIdQuery,
   useUpdateCustomerMutation,
   useDeleteCustomerMutation,

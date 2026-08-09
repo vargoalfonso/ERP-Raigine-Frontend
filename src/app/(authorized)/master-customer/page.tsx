@@ -6,19 +6,35 @@ import { Button, Input, Modal, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   DeleteOutlined,
+  DownloadOutlined,
   EditOutlined,
   EyeOutlined,
   PlusOutlined,
   SearchOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
+  type CreateCustomerRequest,
   type CustomerRecord,
+  useBulkImportCustomersMutation,
   useDeleteCustomerMutation,
   useGetCustomerByIdQuery,
   useListCustomersQuery,
 } from "@/lib/api/customers/api";
+import ExcelImportModal from "@/components/master-data/ExcelImportModal";
+import { exportRows } from "@/lib/utils/excel/masterExcel";
+import {
+  extractBulkOutcome,
+  type BulkImportOutcome,
+} from "@/lib/utils/excel/bulkImportTypes";
+import {
+  CUSTOMER_EXCEL_COLUMNS,
+  CUSTOMER_EXCEL_EXAMPLE_ROWS,
+  parseCommaList,
+  parseYesNo,
+} from "@/lib/utils/excel/customerExcelConfig";
 
 type CustomerRow = {
   key: string;
@@ -61,11 +77,13 @@ export default function MasterCustomerPage() {
   );
 
   const [deleteCustomer, deleteState] = useDeleteCustomerMutation();
+  const [bulkImportCustomers] = useBulkImportCustomersMutation();
 
   const [searchValue, setSearchValue] = useState("");
   const [selectedRow, setSelectedRow] = useState<CustomerRow | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const selectedId = selectedRow?.id;
   const detailQuery = useGetCustomerByIdQuery(selectedId ?? "", {
@@ -87,6 +105,42 @@ export default function MasterCustomerPage() {
         .includes(q)
     );
   }, [rows, searchValue]);
+
+  const handleBulkImport = async (
+    payloads: CreateCustomerRequest[]
+  ): Promise<BulkImportOutcome> => {
+    try {
+      return await bulkImportCustomers(payloads).unwrap();
+    } catch (error) {
+      // On HTTP 207 / 422 RTK surfaces the envelope on `error.data`.
+      const parsed = extractBulkOutcome((error as { data?: unknown })?.data);
+      if (parsed) return parsed;
+      throw new Error(getApiErrorMessage(error, "Gagal mengimport data customer."));
+    }
+  };
+
+  const handleExport = () => {
+    if (!customers.length) {
+      message.warning("Tidak ada data customer untuk diekspor.");
+      return;
+    }
+    exportRows({
+      fileNamePrefix: "master-customer",
+      columns: CUSTOMER_EXCEL_COLUMNS,
+      rows: customers.map((c) => ({
+        customer_id: c.customer_id ?? c.customer_code ?? "",
+        customer_name: c.customer_name ?? "",
+        phone_number: c.phone_number ?? "",
+        shipping_address: c.shipping_address ?? "",
+        billing_same_as_shipping: c.billing_same_as_shipping ? "Yes" : "No",
+        billing_address: c.billing_address ?? "",
+        bank_account: c.bank_account ?? "",
+        bank_account_number: c.bank_account_number ?? "",
+        bom_codes: Array.isArray(c.bom_codes) ? c.bom_codes.join(", ") : "",
+      })),
+    });
+    message.success(`${customers.length} customer diekspor.`);
+  };
 
   const columns: ColumnsType<CustomerRow> = [
     {
@@ -202,8 +256,21 @@ export default function MasterCustomerPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button className="!rounded-lg">Import</Button>
-          <Button className="!rounded-lg">Export</Button>
+          <Button
+            className="!rounded-lg"
+            icon={<UploadOutlined />}
+            onClick={() => setImportOpen(true)}
+            disabled={!apiEnabled}
+          >
+            Import
+          </Button>
+          <Button
+            className="!rounded-lg"
+            icon={<DownloadOutlined />}
+            onClick={handleExport}
+          >
+            Export
+          </Button>
           <Button
             type="primary"
             icon={<PlusOutlined />}
@@ -236,6 +303,59 @@ export default function MasterCustomerPage() {
           scroll={{ x: 1200 }}
         />
       </div>
+
+      <ExcelImportModal<CreateCustomerRequest>
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        title="Import Customer (Data Massal)"
+        entityName="customer"
+        templateFileName="template-import-customer.xlsx"
+        templateTitle="Template Import Master Customer"
+        columns={CUSTOMER_EXCEL_COLUMNS}
+        exampleRows={CUSTOMER_EXCEL_EXAMPLE_ROWS}
+        mapRow={(row) => {
+          const name = (row.customer_name ?? "").trim();
+          const label = name || "(tanpa nama)";
+          if (!name) {
+            return { ok: false, label, error: "Customer Name wajib diisi." };
+          }
+          const phone = (row.phone_number ?? "").trim();
+          if (!phone) {
+            return { ok: false, label, error: "Phone Number wajib diisi." };
+          }
+          const shipping = (row.shipping_address ?? "").trim();
+          if (!shipping) {
+            return { ok: false, label, error: "Shipping Address wajib diisi." };
+          }
+          const same = parseYesNo(row.billing_same_as_shipping);
+          const billing = (row.billing_address ?? "").trim();
+          if (!same && !billing) {
+            return {
+              ok: false,
+              label,
+              error: "Billing Address wajib diisi jika Billing Same As Shipping = No.",
+            };
+          }
+          const customerId = (row.customer_id ?? "").trim();
+          return {
+            ok: true,
+            label,
+            payload: {
+              customer_id: customerId || undefined,
+              customer_name: name,
+              phone_number: phone,
+              shipping_address: shipping,
+              billing_same_as_shipping: same,
+              billing_address: same ? null : billing,
+              bank_account: (row.bank_account ?? "").trim() || null,
+              bank_account_number: (row.bank_account_number ?? "").trim() || null,
+              bom_codes: parseCommaList(row.bom_codes),
+            },
+          };
+        }}
+        bulkImport={handleBulkImport}
+        onImported={() => refetch()}
+      />
 
       <Modal
         open={detailOpen}

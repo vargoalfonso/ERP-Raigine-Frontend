@@ -50,13 +50,16 @@ function RawMaterialsDetailPageContent() {
   const uniq = searchParams.get("uniq") ?? "LV7-001";
   const apiEnabled = Boolean(apiBaseUrl);
 
+  // [rm-key] Kalau id baris tidak ada di tabel raw_materials (data lama /
+  // id dari sumber lain), pakai uniq_code sebagai kunci detail.
+  const detailKey = id || uniq;
   const detailQuery = useGetInventoryDetailQuery(
-    { type: "raw-materials", id },
-    { skip: !apiEnabled || !id },
+    { type: "raw-materials", id: detailKey },
+    { skip: !apiEnabled || !detailKey },
   );
   const historyQuery = useGetInventoryHistoryQuery(
-    { type: "raw-materials", id, page: 1, limit: 20 },
-    { skip: !apiEnabled || !id },
+    { type: "raw-materials", id: detailKey, page: 1, limit: 20 },
+    { skip: !apiEnabled || !detailKey },
   );
   const summaryQuery = useGetInventoryKanbanSummaryQuery(
     { uniq_code: uniq },
