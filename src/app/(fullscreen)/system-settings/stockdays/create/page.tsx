@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
-import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { useGetBomListQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 
 import {
@@ -16,8 +16,6 @@ import {
   useGetStockdaysByIdQuery,
   useUpdateStockdaysMutation,
 } from "@/lib/api/system-settings/api";
-import { useGetInventoryListQuery } from "@/lib/api/inventory/api";
-import { useGetFinishedGoodsQuery } from "@/lib/api/finished-goods/api";
 
 type FormValues = {
   inventoryType?: string;
@@ -70,7 +68,7 @@ function PageContent() {
     skip: !apiEnabled,
   });
 
-  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
+  const { data: bomTreeRes } = useGetBomListQuery({ limit: 200 }, {
     skip: !apiEnabled,
   });
 
@@ -81,48 +79,12 @@ function PageContent() {
 
   const selectedInventoryType = Form.useWatch("inventoryType", form);
 
-  const normalizedInventoryType = String(selectedInventoryType ?? "").trim().toLowerCase();
-  const inventoryApiType = (() => {
-    switch (normalizedInventoryType) {
-      case "raw_material":
-      case "raw-material":
-        return "raw-materials";
-      case "indirect_material":
-      case "indirect-raw-material":
-        return "indirect-materials";
-      case "subcon":
-        return "subcon-materials";
-      case "finished_goods":
-      case "finished-goods":
-        return "finished-goods";
-      default:
-        return undefined;
-    }
-  })();
-
-  const { data: inventoryListResp } = useGetInventoryListQuery(
-    inventoryApiType ? { type: inventoryApiType as any, page: 1, limit: 1000 } : ({} as any),
-    { skip: !inventoryApiType || !apiEnabled }
-  );
-  const finishedGoodsQuery = useGetFinishedGoodsQuery({ page: 1, limit: 1000 }, { skip: !apiEnabled });
+  // Uniq options are sourced entirely from the Bill of Material (see uniqOptions).
 
   const uniqOptions = useMemo(() => {
     const currentItemCode = String(form.getFieldValue("itemCode") ?? "").trim();
 
-    // prefer inventory API results when available for the selected type
-    const apiItems =
-      inventoryApiType === "finished-goods"
-        ? (finishedGoodsQuery?.data?.items ?? [])
-        : (inventoryListResp as any)?.data ?? inventoryListResp ?? [];
-    const apiOptions = (apiItems as any[])
-      .map((r) => {
-        const uniq = r?.uniq_code ?? r?.uniq ?? r?.UniqCode ?? r?.uniqCode;
-        if (!uniq) return null;
-        const label = uniq + (r?.part_name ? ` - ${r.part_name}` : "");
-        return { value: String(uniq), label };
-      })
-      .filter(Boolean) as { value: string; label: string }[];
-
+    // Read ALL uniq from the Bill of Material (not from inventory).
     const baseOptions = bomIndex.options.map((item) => ({
       value: item.value,
       label: bomIndex.partNameByUniq[item.value]
@@ -139,14 +101,11 @@ function PageContent() {
       used.add(uniq);
     }
 
-    // choose source: apiOptions if inventory type selected and results exist, otherwise bomIndex
-    const source = inventoryApiType && apiOptions.length > 0 ? apiOptions : baseOptions;
-
-    return source.filter((option) => {
+    return baseOptions.filter((option) => {
       if (currentItemCode && option.value === currentItemCode) return true;
       return !used.has(option.value);
     });
-  }, [inventoryListResp, bomIndex, form, selectedInventoryType, stockdaysList, inventoryApiType]);
+  }, [bomIndex, form, selectedInventoryType, stockdaysList]);
 
   const detailQuery = useGetStockdaysByIdQuery(id, {
     skip: !apiEnabled || !id,
@@ -371,6 +330,8 @@ function PageContent() {
                       showSearch
                       optionFilterProp="label"
                       options={uniqOptions}
+                      virtual
+                      listHeight={320}
                     />
                   </Form.Item>
 

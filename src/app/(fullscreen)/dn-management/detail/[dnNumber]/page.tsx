@@ -386,6 +386,16 @@ function DnRawMaterialDetailPageContent() {
                       {String(header.status ?? "-")}
                     </div>
                   </div>
+                  <div>
+                    <div className="text-xs text-gray-500">Pengiriman</div>
+                    <div className="text-xl font-semibold text-gray-900">
+                      {Number(detail?.delivery_total ?? 0) > 0
+                        ? `Ke ${Number(detail?.delivery_to ?? 0)} / ${Number(detail?.delivery_total ?? 0)}`
+                        : Number(detail?.delivery_to ?? 0) > 0
+                          ? `Ke ${Number(detail?.delivery_to ?? 0)}`
+                          : "-"}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

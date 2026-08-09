@@ -149,6 +149,7 @@ export type SupplierItemRecord = {
   weight?: number;
   pcs_per_kanban?: number;
   customer_cycle?: string | number;
+  cycle_time?: number;
   percentage?: number;
   status?: string;
   product_model?: string;
@@ -174,6 +175,7 @@ export type SupplierItemMutationRequest = {
   weight: string | number;
   pcs_per_kanban: string | number;
   customer_cycle: string;
+  cycle_time?: string | number;
   status?: string;
   warehouse_uuid?: string;
   warehouse_name?: string;
@@ -249,6 +251,7 @@ const normalizeSupplierItem = (record: unknown): SupplierItemRecord => {
     weight: toNumber(row.weight) ?? toNumber(materialSpecDetail?.weight_kg),
     pcs_per_kanban: toNumber(row.pcs_per_kanban) ?? toNumber(row.qty_per_kanban),
     customer_cycle: toText(row.customer_cycle) ?? toText(row.cycle_days) ?? toText(row.cycle),
+    cycle_time: toNumber(row.cycle_time) ?? toNumber(row.cycle_time_days),
     status: toText(row.status) ?? "active",
     product_model: toText(row.product_model) ?? toText(formSnapshot?.product_model) ?? toText(bomOption?.product_model) ?? toText(product?.model) ?? toText(product?.description),
     part_name: toText(row.part_name) ?? toText(formSnapshot?.part_name) ?? toText(bomOption?.part_name) ?? toText(product?.part_name),

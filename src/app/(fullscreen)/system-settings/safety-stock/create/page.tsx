@@ -18,7 +18,8 @@ import {
   useGetSafetyStockQuery,
   useUpdateSafetyStockMutation,
 } from "@/lib/api/system-settings/api";
-import { useGetInventoryListQuery } from "@/lib/api/inventory/api";
+import { useGetBomListQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 
 type Entry = {
   id: string;
@@ -129,22 +130,25 @@ function PageContent() {
     }
   }, [safetyStockRecord]);
 
-  const { data: inventoryListResp } = useGetInventoryListQuery(
-    inventoryType ? { type: inventoryType, page: 1, limit: 1000 } : ({} as any),
-    { skip: !inventoryType }
+  const { data: bomListRes } = useGetBomListQuery(
+    { limit: 200 },
+    { skip: !apiEnabled }
+  );
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomListRes?.data ?? []),
+    [bomListRes?.data]
   );
 
   const { data: safetyStockList } = useGetSafetyStockQuery(undefined, { skip: !apiEnabled });
 
   const uniqOptions = useMemo(() => {
-    const items = inventoryListResp?.data ?? [];
-    const fromApi = items
-      .map((r) => {
-        const uniq = (r as any)?.uniq_code ?? (r as any)?.uniq;
-        if (!uniq) return null;
-        return { label: String(uniq), value: String(uniq) };
-      })
-      .filter(Boolean) as { label: string; value: string }[];
+    // Read ALL uniq from the Bill of Material (not from inventory).
+    const fromApi = bomIndex.options.map((item) => ({
+      value: item.value,
+      label: bomIndex.partNameByUniq[item.value]
+        ? `${item.value} - ${bomIndex.partNameByUniq[item.value]}`
+        : item.value,
+    }));
 
     // include any uniqs already present in entries (e.g., when editing)
     const existing = entries
@@ -182,7 +186,7 @@ function PageContent() {
     });
 
     return filtered;
-  }, [inventoryListResp, entries, safetyStockList, inventoryType]);
+  }, [bomIndex, entries, safetyStockList, inventoryType]);
 
   // When type changes and we have options, ensure entries have a sensible default uniq
   useEffect(() => {
@@ -384,6 +388,10 @@ function PageContent() {
                         placeholder={inventoryType ? "Select Uniq" : "Select Type first"}
                         options={uniqOptions}
                         disabled={!inventoryType}
+                        showSearch
+                        optionFilterProp="label"
+                        virtual
+                        listHeight={320}
                       />
                     </div>
 

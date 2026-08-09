@@ -110,9 +110,15 @@ export default function ProcessRoutesEditor({
                   </Form.Item>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-1 xl:grid-cols-2">
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  <Form.Item name={[field.name, "cycle_time_sec"]} label="Cycle Time (s)">
+                    <InputNumber min={0} step={0.1} className="w-full" disabled={disabled} placeholder="detik / pcs" />
+                  </Form.Item>
+                  <Form.Item name={[field.name, "setup_time_min"]} label="Setup Time (min)">
+                    <InputNumber min={0} step={0.1} className="w-full" disabled={disabled} placeholder="menit" />
+                  </Form.Item>
                   <Form.Item name={[field.name, "machine_stroke"]} label="Machine Stroke">
-                    <Input placeholder="Machine stroke" />
+                    <Input placeholder="Machine stroke" disabled={disabled} />
                   </Form.Item>
                 </div>
               </div>

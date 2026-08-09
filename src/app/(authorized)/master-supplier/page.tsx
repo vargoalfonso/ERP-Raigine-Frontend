@@ -480,7 +480,7 @@ export default function MasterSupplierPage() {
       render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value,
     },
     {
-      title: "Cycle Time",
+      title: "Lead Time",
       dataIndex: "cycleTime",
       key: "cycleTime",
       width: 120,
