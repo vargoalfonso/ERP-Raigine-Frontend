@@ -522,6 +522,7 @@ export default function ShopFloor() {
   const [activeTab, setActiveTab] = useState<ShopFloorTabId>("live-production");
   const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
   const [isMachineModalOpen, setIsMachineModalOpen] = useState(false);
+  const [expandedMachineIds, setExpandedMachineIds] = useState<Set<string>>(new Set());
 
   const apiEnabled = Boolean(apiBaseUrl);
   const liveProductionQuery = useGetShopFloorLiveProductionSummaryQuery(
@@ -617,6 +618,7 @@ export default function ShopFloor() {
 
     if (!selectedMachineId || !liveLines.some((line) => line.machineId === selectedMachineId)) {
       setSelectedMachineId(liveLines[0].machineId);
+      setExpandedMachineIds((prev) => (prev.size ? prev : new Set([liveLines[0].machineId])));
     }
   }, [liveLines, selectedMachineId]);
 
@@ -782,6 +784,19 @@ export default function ShopFloor() {
     await fetchMachineDetail(selectedMachineId, true);
   };
 
+  const toggleMachineExpanded = (machineId: string) => {
+    setSelectedMachineId(machineId);
+    setExpandedMachineIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(machineId)) {
+        next.delete(machineId);
+      } else {
+        next.add(machineId);
+      }
+      return next;
+    });
+  };
+
   const throughputIcon = iconChip(
     "M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
   );
@@ -806,6 +821,23 @@ export default function ShopFloor() {
       return <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-red-50 text-red-700 border border-red-100">Issue</span>;
     }
     return <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-blue-50 text-blue-700 border border-blue-100">Completed</span>;
+  };
+
+  // Trigger otomatis (bukan toggle manual): mesin dianggap "nyala" selama Work Order-nya
+  // BELUM complete. Begitu WO selesai (Completed / progress 100%), lampu jadi merah (mati).
+  const isMachineOn = (line: LineCard) =>
+    !(line.status === "Completed" || line.progressPercent >= 100 || /complete/i.test(line.progressLabel));
+
+  const machinePowerLight = (on: boolean) => {
+    return (
+      <span className="inline-flex items-center gap-1.5" title={on ? "Mesin nyala (WO berjalan)" : "Mesin mati (WO selesai)"}>
+        <span className="relative flex w-3 h-3">
+          {on ? <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" /> : null}
+          <span className={`relative inline-flex rounded-full w-3 h-3 ${on ? "bg-green-500" : "bg-red-500"}`} />
+        </span>
+        <span className={`text-xs font-medium ${on ? "text-green-600" : "text-red-600"}`}>{on ? "Nyala" : "Mati"}</span>
+      </span>
+    );
   };
 
   const deliveryRiskPill = (risk: DeliveryRisk) => {
@@ -1324,10 +1356,13 @@ export default function ShopFloor() {
             </>
           ) : (
             <>
-              {liveLines.length ? liveLines.map((line) => (
-                <button key={line.key} type="button" onClick={() => setSelectedMachineId(line.machineId)} className={`w-full text-left bg-white rounded-xl border shadow-sm transition ${line.machineId === selectedMachineId ? "border-blue-300 ring-2 ring-blue-100" : "border-gray-100 hover:border-blue-200"}`}>
-                  <div className="px-4 py-3 flex items-center justify-between">
+              {liveLines.length ? liveLines.map((line) => {
+                const isExpanded = expandedMachineIds.has(line.machineId);
+                return (
+                <div key={line.key} className={`w-full bg-white rounded-xl border shadow-sm transition ${line.machineId === selectedMachineId ? "border-blue-300 ring-2 ring-blue-100" : "border-gray-100 hover:border-blue-200"}`}>
+                  <button type="button" onClick={() => toggleMachineExpanded(line.machineId)} className="w-full text-left px-4 py-3 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
+                      {machinePowerLight(isMachineOn(line))}
                       <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-600 flex items-center justify-center">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2a4 4 0 014-4h2a4 4 0 014 4v2M7 7h10M6 21h12" />
@@ -1338,9 +1373,15 @@ export default function ShopFloor() {
                         <div className="text-xs text-gray-500">{line.lineCode}{line.machineId === selectedMachineId ? " • Selected" : ""}</div>
                       </div>
                     </div>
-                    {statusPill(line.status)}
-                  </div>
+                    <div className="flex items-center gap-3">
+                      {statusPill(line.status)}
+                      <svg className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </button>
 
+                  {isExpanded ? (
                   <div className="px-4 pb-4">
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                       <div className="rounded-xl bg-blue-50 border border-blue-100 p-4">
@@ -1409,8 +1450,10 @@ export default function ShopFloor() {
                       </div>
                     </div>
                   </div>
-                </button>
-              )) : emptyState("No live production data", "Endpoint `live-production` belum mengembalikan mesin aktif.")}
+                  ) : null}
+                </div>
+                );
+              }) : emptyState("No live production data", "Endpoint `live-production` belum mengembalikan mesin aktif.")}
             </>
           )}
         </div>

@@ -51,6 +51,7 @@ import {
   useGetQcDashboardOverviewQuery,
   useGetQcDashboardProductReturnQcQuery,
   useGetQcDashboardProductionQcQuery,
+  useLazyGetQcDashboardProductionQcQuery,
   useGetQcDashboardProductionQcDetailQuery,
   useGetManualReferenceOptionsQuery,
 } from "@/lib/api/qc-dashboard/api";
@@ -148,6 +149,265 @@ const downloadCsv = (
   URL.revokeObjectURL(url);
 };
 
+const escapeHtml = (value: unknown) =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
+/**
+ * Bangun HTML laporan Quality Check List untuk satu fase (semua uniq yang
+ * berbagi WO Number yang sama). Layout meniru formulir MRP-FM-QC-01-01:
+ * kop dokumen, blok info (PLANT/TANGGAL/SHIFT/PIC QC/WO NUMBER) beserta
+ * kotak Note, tabel data dua baris header (Check Methode / Qty / Hasil
+ * Check), dan tiga baris per uniq (Check Ke I / II / III). Ukuran halaman
+ * A4 landscape.
+ */
+const buildQcLineReportHtml = (
+  faseRows: QcDashboardProductionQcItem[],
+  meta: {
+    plant?: string;
+    tanggal: string;
+    shift?: string;
+    picQc?: string;
+    woNumber: string;
+  },
+) => {
+  const bodyRows =
+    faseRows.length === 0
+      ? `<tr><td colspan="16" class="empty">Tidak ada uniq untuk fase ini.</td></tr>`
+      : faseRows
+          .map((uniq, idx) => {
+            const totalNg = (uniq.qty_defect ?? 0) + (uniq.qty_scrap ?? 0);
+            const totalOk = Math.max(
+              0,
+              (uniq.items_checked ?? 0) - totalNg,
+            );
+            const status = String(uniq.status ?? "").toLowerCase();
+            const isPass =
+              status.includes("pass") && !status.includes("not");
+            const hasilOk = isPass ? "OK" : "";
+            const hasilNg = isPass ? "" : "NG";
+            const issueText =
+              (uniq.issues ?? [])
+                .map((it) => {
+                  const label =
+                    it.reason_text || it.reason_code || it.source || "-";
+                  const qty =
+                    it.qty || it.qty_defect || it.qty_scrap || 0;
+                  return qty > 0 ? `${label} (Qty: ${qty})` : label;
+                })
+                .join(" | ") ||
+              (uniq.issue_label ?? "") ||
+              "";
+            const uniqCell = escapeHtml(uniq.uniq_code || "");
+            const problem = escapeHtml(issueText);
+            const itemsChecked = escapeHtml(String(uniq.items_checked ?? 0));
+            return `
+        <tr>
+          <td rowspan="3">${idx + 1}</td>
+          <td rowspan="3"></td>
+          <td rowspan="3">${uniqCell}</td>
+          <td rowspan="3"></td>
+          <td>I</td>
+          <td></td>
+          <td rowspan="3">${itemsChecked}</td>
+          <td></td><td></td><td></td>
+          <td>${totalOk}</td>
+          <td>${totalNg}</td>
+          <td>${hasilOk}</td>
+          <td>${hasilNg}</td>
+          <td rowspan="3" class="left">${problem}</td>
+          <td rowspan="3"></td>
+        </tr>
+        <tr>
+          <td>II</td><td></td>
+          <td></td><td></td><td></td>
+          <td></td><td></td>
+          <td></td><td></td>
+        </tr>
+        <tr>
+          <td>III</td><td></td>
+          <td></td><td></td><td></td>
+          <td></td><td></td>
+          <td></td><td></td>
+        </tr>`;
+          })
+          .join("");
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Quality Check List ${escapeHtml(meta.woNumber)}</title>
+<style>
+  @page { size: A4 landscape; margin: 8mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 9px; color: #000; }
+  .doc { padding: 4px; }
+  table { border-collapse: collapse; width: 100%; }
+  .hdr-tbl td { border: 1px solid #000; padding: 3px 6px; vertical-align: middle; }
+  .hdr-tbl .company { text-align: center; font-weight: bold; font-size: 13px; }
+  .hdr-tbl .subtitle { font-size: 10px; font-weight: bold; }
+  .hdr-tbl .meta-l { width: 90px; }
+  .hdr-tbl .meta-r { width: 170px; }
+  .info-wrap { margin-top: 4px; display: flex; align-items: stretch; gap: 8px; }
+  .info-tbl { border-collapse: collapse; }
+  .info-tbl td { padding: 1px 4px; border: none; }
+  .info-tbl .lbl { width: 90px; font-weight: bold; }
+  .info-tbl .sep { width: 8px; text-align: center; }
+  .note-box { border: 1px solid #000; padding: 4px 8px; margin-left: auto; max-width: 380px; font-size: 8.5px; }
+  .data-tbl { margin-top: 4px; table-layout: fixed; }
+  .data-tbl th, .data-tbl td { border: 1px solid #000; padding: 2px 3px; text-align: center; font-size: 9px; word-wrap: break-word; }
+  .data-tbl th { background: #f2f2f2; font-weight: bold; }
+  .data-tbl td.left { text-align: left; }
+  .data-tbl td.empty { padding: 12px; color: #666; font-style: italic; }
+  .footer-note { margin-top: 4px; font-size: 8.5px; color: #444; }
+</style>
+</head>
+<body>
+  <div class="doc">
+    <table class="hdr-tbl">
+      <tr>
+        <td rowspan="4" class="company" style="width: 90px;">MRP</td>
+        <td rowspan="4" class="company">
+          PT.MATRA RODA PIRANTI
+          <div class="subtitle">FORMULIR</div>
+          <div class="subtitle">QUALITY CHECK LIST</div>
+        </td>
+        <td class="meta-l">Nomor</td>
+        <td class="meta-r">: MRP-FM-QC-01-01</td>
+      </tr>
+      <tr><td>Revisi</td><td>: 01</td></tr>
+      <tr><td>Berlaku</td><td>: 25 Juli 2017</td></tr>
+      <tr><td>Halaman</td><td>: 1 Dari 1</td></tr>
+    </table>
+
+    <div class="info-wrap">
+      <table class="info-tbl">
+        <tr><td class="lbl">PLANT</td><td class="sep">:</td><td>${escapeHtml(meta.plant ?? "")}</td></tr>
+        <tr><td class="lbl">TANGGAL</td><td class="sep">:</td><td>${escapeHtml(meta.tanggal)}</td></tr>
+        <tr><td class="lbl">SHIFT</td><td class="sep">:</td><td>${escapeHtml(meta.shift ?? "")}</td></tr>
+        <tr><td class="lbl">PIC QC</td><td class="sep">:</td><td>${escapeHtml(meta.picQc ?? "")}</td></tr>
+        <tr><td class="lbl">WO NUMBER</td><td class="sep">:</td><td>${escapeHtml(meta.woNumber)}</td></tr>
+      </table>
+      <div class="note-box">
+        <b>Note :</b><br />
+        Bila Proses 1 ( Mesin O ) tdk Bisa Di konfirmasi menggunakan CF/CG, Alat Ukur,
+        Maka Konfirmasinya By Visual ( yg di Contreng - adalah Visual pada Methode Cek nya )
+      </div>
+    </div>
+
+    <table class="data-tbl">
+      <colgroup>
+        <col style="width: 3%" />
+        <col style="width: 8%" />
+        <col style="width: 8%" />
+        <col style="width: 4%" />
+        <col style="width: 5%" />
+        <col style="width: 4%" />
+        <col style="width: 7%" />
+        <col style="width: 3.5%" />
+        <col style="width: 6%" />
+        <col style="width: 4%" />
+        <col style="width: 3.5%" />
+        <col style="width: 3.5%" />
+        <col style="width: 3.5%" />
+        <col style="width: 3.5%" />
+        <col style="width: 17%" />
+        <col style="width: 14%" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th rowspan="2">NO</th>
+          <th rowspan="2">LINE / No.Mesin</th>
+          <th rowspan="2">Uniq No<br />Part No</th>
+          <th rowspan="2">DH</th>
+          <th rowspan="2">Check Ke</th>
+          <th rowspan="2">Jam</th>
+          <th rowspan="2">Qty Check (PCS) n / pn</th>
+          <th colspan="3">Check Methode</th>
+          <th colspan="2">Qty ( PCS )</th>
+          <th colspan="2">Hasil Check</th>
+          <th rowspan="2">Problem</th>
+          <th rowspan="2">Action ( Product/Produksi )</th>
+        </tr>
+        <tr>
+          <th>C/F</th>
+          <th>Alat Ukur</th>
+          <th>Visual</th>
+          <th>OK</th>
+          <th>NG</th>
+          <th>OK</th>
+          <th>NG</th>
+        </tr>
+      </thead>
+      <tbody>${bodyRows}</tbody>
+    </table>
+
+    <div class="footer-note">
+      Report ini dibuat otomatis dari QC Dashboard — ${escapeHtml(dayjs().format("YYYY-MM-DD HH:mm"))}
+    </div>
+  </div>
+</body>
+</html>`;
+};
+
+/**
+ * Render HTML report ke hidden iframe lalu panggil window.print(). Pengguna
+ * memilih "Save as PDF" (atau "Microsoft Print to PDF") pada dialog print
+ * bawaan browser untuk menyimpan sebagai file PDF.
+ */
+const printHtmlReport = (html: string) => {
+  if (typeof document === "undefined") return;
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("aria-hidden", "true");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) {
+    document.body.removeChild(iframe);
+    return;
+  }
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  const cleanup = () => {
+    window.setTimeout(() => {
+      try {
+        document.body.removeChild(iframe);
+      } catch {}
+    }, 500);
+  };
+
+  const cw = iframe.contentWindow;
+  if (!cw) {
+    cleanup();
+    return;
+  }
+  cw.onafterprint = cleanup;
+  // Beri jeda kecil supaya konten & style ter-render sebelum print dialog
+  // dibuka; kalau tidak, sebagian browser mencetak halaman kosong.
+  window.setTimeout(() => {
+    try {
+      cw.focus();
+      cw.print();
+    } catch {
+      cleanup();
+    }
+  }, 300);
+};
+
 export default function QcDashboardPage() {
   const [manualForm] = Form.useForm<ManualReportFormValues>();
   const apiEnabled = Boolean(apiBaseUrl);
@@ -188,6 +448,55 @@ export default function QcDashboardPage() {
 
   const [createQcReport, createQcReportState] =
     useCreateQcDashboardReportMutation();
+  const [triggerFetchAllProductionQc, fetchAllProductionQcState] =
+    useLazyGetQcDashboardProductionQcQuery();
+
+  /**
+   * Download laporan Quality Check List per fase.
+   * "Fase" di sini didefinisikan sebagai satu WO Number — semua uniq yang
+   * berbagi WO Number yang sama akan muncul di satu file report bersama
+   * detail dan issue-nya (I/II/III check ke).
+   */
+  const handleDownloadFaseReport = React.useCallback(
+    async (row: QcDashboardProductionQcItem) => {
+      const woNumber = (row.wo_number || "").trim();
+      if (!woNumber) {
+        message.warning("WO Number tidak tersedia untuk baris ini.");
+        return;
+      }
+      try {
+        const response = await triggerFetchAllProductionQc({
+          limit: 1000,
+          page: 1,
+        }).unwrap();
+        const allRows = (response?.data ?? []) as QcDashboardProductionQcItem[];
+        const faseRows = allRows.filter((r) => r.wo_number === woNumber);
+        const uniqSet = new Map<string, QcDashboardProductionQcItem>();
+        faseRows.forEach((r) => {
+          const key = r.uniq_code || String(r.qc_log_id);
+          if (!uniqSet.has(key)) uniqSet.set(key, r);
+        });
+        // Fallback: kalau lazy fetch tidak mengembalikan baris untuk WO ini
+        // (misal data belum ter-index), tetap generate untuk baris terpilih.
+        const finalRows =
+          uniqSet.size > 0 ? Array.from(uniqSet.values()) : [row];
+
+        const html = buildQcLineReportHtml(finalRows, {
+          tanggal: formatDate(row.report_date),
+          woNumber,
+        });
+        printHtmlReport(html);
+        message.success(
+          `Report fase ${woNumber} (${finalRows.length} uniq) siap dicetak / Save as PDF.`,
+        );
+      } catch (error) {
+        message.error(
+          getApiErrorMessage(error, "Gagal generate report fase"),
+        );
+      }
+    },
+    [triggerFetchAllProductionQc],
+  );
   const selectedQcType = Form.useWatch("qc_type", manualForm);
   const selectedReferenceNumber = Form.useWatch("reference_number", manualForm);
 
@@ -448,8 +757,32 @@ export default function QcDashboardPage() {
           </Button>
         ),
       },
+      {
+        title: "Report",
+        key: "report",
+        fixed: "right",
+        width: 110,
+        render: (_v, record) => (
+          <Tooltip title="Print / Save as PDF: Quality Check List per fase (semua uniq dengan WO Number yang sama)">
+            <Button
+              type="link"
+              size="small"
+              className="!px-0"
+              icon={<DownloadOutlined />}
+              loading={fetchAllProductionQcState.isFetching}
+              onClick={() => handleDownloadFaseReport(record)}
+            >
+              PDF
+            </Button>
+          </Tooltip>
+        ),
+      },
     ],
-    [router],
+    [
+      router,
+      handleDownloadFaseReport,
+      fetchAllProductionQcState.isFetching,
+    ],
   );
 
   const incomingColumns = useMemo<ColumnsType<QcDashboardIncomingQcItem>>(
