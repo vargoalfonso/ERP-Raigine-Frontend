@@ -377,6 +377,19 @@ export default function CreateWorkOrderPage() {
   };
 
   const onSelectUniq = (id: string, uniq: string) => {
+    // FIX: bersihkan children milik parent-line ini secara sinkron sebelum
+    // memuat children uniq baru. Sebelumnya, `applyChildLines` hanya jalan
+    // setelah fetch selesai — dan kalau uniq baru tidak punya children (atau
+    // fetch gagal / return kosong), children uniq lama tetap menempel &
+    // menumpuk saat user berganti-ganti uniq.
+    setLines((prev) => {
+      const cleaned = prev.filter((l) => l.parentId !== id);
+      return cleaned.map((l, idx) => ({
+        ...l,
+        kanbanNumber: nextKanbanNumber(idx),
+      }));
+    });
+
     const getFirstProcessName = (node: any): string | null => {
       if (!node) return null;
       const routes = Array.isArray(node.process_routes)
@@ -613,9 +626,16 @@ export default function CreateWorkOrderPage() {
       });
 
     // --- Helper: apply child lines ke state ---
+    // Selalu reset children milik parent id ini, bahkan jika detailChildren
+    // kosong (uniq baru memang tidak punya BOM child). Ini mencegah children
+    // uniq sebelumnya menempel/nyangkut saat user ganti uniq.
     const applyChildLines = (detailChildren: any[], detailRoot?: any) => {
-      if (!detailChildren.length) return;
       setLines((prev) => {
+        // Stale-guard: kalau user sudah ganti uniq lagi di parent line ini
+        // sebelum fetch async ini selesai, abaikan hasilnya supaya children
+        // stale tidak nempel ke uniq baru.
+        const currentParent = prev.find((l) => l.id === id);
+        if (!currentParent || currentParent.uniq !== uniq) return prev;
         const baseLines = prev.filter((l) => l.id !== id && l.parentId !== id);
         // QPU untuk parent: ambil dari qty_per_uniq di BOM node jika ada
         const parentQpu =
