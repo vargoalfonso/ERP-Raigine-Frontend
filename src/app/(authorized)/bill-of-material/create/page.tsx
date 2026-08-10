@@ -387,8 +387,17 @@ export default function Page() {
         "uom",
       ]);
       setStep(1);
-    } catch {
-      // antd will show validation errors
+    } catch (err) {
+      // antd sudah menandai field merah; fokuskan ke field pertama yang kosong.
+      const firstName = (
+        err as { errorFields?: Array<{ name: Array<string | number> }> }
+      )?.errorFields?.[0]?.name;
+      if (firstName) {
+        try {
+          form.scrollToField(firstName, { behavior: "smooth", block: "center" });
+        } catch {}
+      }
+      messageApi.error("Masih ada field wajib yang belum diisi (ditandai merah).");
     }
   };
 
@@ -460,7 +469,7 @@ export default function Page() {
                 <div key={routeField.key} className="rounded-lg border border-gray-200 p-4">
                   <div className="space-y-3">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <Form.Item name={[routeField.name, "process_id"]} label="Process" rules={[{ required: true, message: "Process is required" }]}> 
+                      <Form.Item name={[routeField.name, "process_id"]} label="Process" rules={[{ required: true, message: "Process belum diisi" }]}> 
                         <Select
                           size="large"
                           showSearch
@@ -475,7 +484,7 @@ export default function Page() {
                         />
                       </Form.Item>
 
-                      <Form.Item name={[routeField.name, "machine_id"]} label="Machine" rules={[{ required: true, message: "Machine is required" }]}> 
+                      <Form.Item name={[routeField.name, "machine_id"]} label="Machine" rules={[{ required: true, message: "Machine belum diisi" }]}> 
                         <Select
                           size="large"
                           showSearch
@@ -527,16 +536,16 @@ export default function Page() {
     <div className="space-y-3">
       <Text strong>Material Specifications</Text>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Form.Item name={[...fieldPath, "material_spec", "material_code"]} label="Material Code" rules={disabled ? [] : [{ required: true, message: "Material Code is required" }]}>
+        <Form.Item name={[...fieldPath, "material_spec", "material_code"]} label="Material Code" rules={disabled ? [] : [{ required: true, message: "Material Code belum diisi" }]}>
           <Input placeholder="e.g., STKM550" size="large" disabled={disabled} />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "form"]} label="Form" rules={disabled ? [] : [{ required: true, message: "Form is required" }]}>
+        <Form.Item name={[...fieldPath, "material_spec", "form"]} label="Form" rules={disabled ? [] : [{ required: true, message: "Form belum diisi" }]}>
           <Select placeholder="Select form" size="large" disabled={disabled} options={[{ label: "Plate", value: "Plate" },{ label: "Coil", value: "Coil" },{ label: "Pipe", value: "Pipe" },{ label: "Rod", value: "Rod" },{ label: "Wire", value: "Wire" },{ label: "Other", value: "Other" }]} allowClear />
         </Form.Item>
         <Form.Item name={[...fieldPath, "material_spec", "weight_kg"]} label="Weight (kg)">
           <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={disabled} />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "grade"]} label="Grade" rules={disabled ? [] : [{ required: true, message: "Grade is required" }]}>
+        <Form.Item name={[...fieldPath, "material_spec", "grade"]} label="Grade" rules={disabled ? [] : [{ required: true, message: "Grade belum diisi" }]}>
           <Input placeholder="e.g., Grade A" size="large" disabled={disabled} />
         </Form.Item>
       </div>
@@ -618,28 +627,28 @@ export default function Page() {
               <Form.Item
                 name={[field.name, "uniq"]}
                 label="UNIQ"
-                rules={[{ required: true, message: "UNIQ is required" }]}
+                rules={[{ required: true, message: "UNIQ belum diisi" }]}
               >
                 <Input placeholder={`e.g., LV7-001-${String.fromCharCode(64 + Math.min(level, 26))}`} size="large" />
               </Form.Item>
               <Form.Item
                 name={[field.name, "part_name"]}
                 label="Part Name"
-                rules={[{ required: true, message: "Part name is required" }]}
+                rules={[{ required: true, message: "Part Name belum diisi" }]}
               >
                 <Input placeholder="Enter part name" size="large" />
               </Form.Item>
               <Form.Item
                 name={[field.name, "part_number"]}
                 label="Part Number"
-                rules={[{ required: true, message: "Part number is required" }]}
+                rules={[{ required: true, message: "Part Number belum diisi" }]}
               >
                 <Input placeholder="Enter part number" size="large" />
               </Form.Item>
               <Form.Item
                 name={[field.name, "model"]}
                 label="Product Model"
-                rules={[{ required: true, message: "Product model is required" }]}
+                rules={[{ required: true, message: "Product Model belum diisi" }]}
               >
                 <Input placeholder="Enter product model" size="large" />
               </Form.Item>
@@ -649,7 +658,7 @@ export default function Page() {
               <Form.Item
                 name={[field.name, "qpu"]}
                 label={level === 1 ? "QPU (Quantity Per Unit)" : "QPU"}
-                rules={[{ required: true, message: "QPU is required" }]}
+                rules={[{ required: true, message: "QPU belum diisi" }]}
               >
                 <InputNumber min={0} size="large" style={{ width: "100%" }} />
               </Form.Item>
@@ -822,13 +831,14 @@ export default function Page() {
     try {
       // Ensure Step 1 required fields are validated even when user is on Step 2
       // (because unmounted Form.Items won't be validated automatically).
-      await form.validateFields([
-        "parent_uniq",
-        "part_name",
-        "part_number",
-        "model",
-        "uom",
-      ]);
+      // Validasi field wajib Step 1 (parent). Bekerja walau user sedang di Step 2.
+      const step1Required: FormPath[] = [
+        ["parent_uniq"],
+        ["part_name"],
+        ["part_number"],
+        ["model"],
+        ["uom"],
+      ];
 
       // `validateFields(names)` only returns those specific fields. We need the
       // full form state (including `child_parts`) to build the payload.
@@ -838,11 +848,58 @@ export default function Page() {
         values.process_routes.some((route) => isAssemblyProcessValue(route?.process_id));
 
       if (!assemblyMode) {
-        await form.validateFields([
+        step1Required.push(
           ["material_spec", "material_code"],
           ["material_spec", "form"],
           ["material_spec", "grade"],
-        ]);
+        );
+      }
+
+      // Pindah ke step yang memuat field bermasalah lalu fokuskan (beri jeda agar
+      // Form.Item di step tujuan sempat ter-mount sebelum di-scroll).
+      const focusMissingField = (error: unknown, targetStep: number) => {
+        const firstName = (
+          error as { errorFields?: Array<{ name: Array<string | number> }> }
+        )?.errorFields?.[0]?.name;
+        setStep(targetStep);
+        if (firstName) {
+          setTimeout(() => {
+            try {
+              form.scrollToField(firstName, { behavior: "smooth", block: "center" });
+            } catch {}
+          }, 50);
+        }
+      };
+
+      try {
+        await form.validateFields(step1Required);
+      } catch (validationError) {
+        messageApi.destroy("bom-save");
+        focusMissingField(validationError, 0);
+        messageApi.error(
+          "Masih ada field wajib di Step 1 yang belum diisi (ditandai merah).",
+        );
+        return;
+      }
+
+      // Validasi field child part yang sedang tampil (Step 2) supaya field yang
+      // kelewatan ikut ditandai merah, bukan diam-diam dilewati.
+      try {
+        await form.validateFields();
+      } catch (childValidationError) {
+        const childErrors = (
+          childValidationError as {
+            errorFields?: Array<{ name: Array<string | number> }>;
+          }
+        )?.errorFields?.filter((f) => f?.name?.[0] === "child_parts");
+        if (childErrors && childErrors.length > 0) {
+          messageApi.destroy("bom-save");
+          focusMissingField({ errorFields: childErrors }, 1);
+          messageApi.error(
+            "Masih ada field child part yang belum diisi (ditandai merah).",
+          );
+          return;
+        }
       }
 
       messageApi.open({
@@ -1275,7 +1332,7 @@ export default function Page() {
           <Form
             form={form}
             layout="vertical"
-            requiredMark={false}
+            requiredMark
             initialValues={initialValues}
           >
             {step === 0 ? (
@@ -1294,7 +1351,7 @@ export default function Page() {
                     <Form.Item
                       name="parent_uniq"
                       label="Parent UNIQ"
-                      rules={[{ required: true, message: "Parent UNIQ is required" }]}
+                      rules={[{ required: true, message: "Parent UNIQ belum diisi" }]}
                     >
                       <Input placeholder="e.g., LV7-001" size="large" />
                     </Form.Item>
@@ -1302,7 +1359,7 @@ export default function Page() {
                     <Form.Item
                       name="part_name"
                       label="Part Name"
-                      rules={[{ required: true, message: "Part name is required" }]}
+                      rules={[{ required: true, message: "Part Name belum diisi" }]}
                     >
                       <Input
                         placeholder="e.g., Engine Mount Assembly"
@@ -1313,7 +1370,7 @@ export default function Page() {
                     <Form.Item
                       name="part_number"
                       label="Part Number"
-                      rules={[{ required: true, message: "Part number is required" }]}
+                      rules={[{ required: true, message: "Part Number belum diisi" }]}
                     >
                       <Input placeholder="e.g., EMA-001-LV7" size="large" />
                     </Form.Item>
@@ -1321,7 +1378,7 @@ export default function Page() {
                     <Form.Item
                       name="model"
                       label="Product Model"
-                      rules={[{ required: true, message: "Product model is required" }]}
+                      rules={[{ required: true, message: "Product Model belum diisi" }]}
                     >
                       <Input placeholder="e.g., Model A" size="large" />
                     </Form.Item>
@@ -1329,7 +1386,7 @@ export default function Page() {
                     <Form.Item
                       name="uom"
                       label="UOM"
-                      rules={[{ required: true, message: "UOM is required" }]}
+                      rules={[{ required: true, message: "UOM belum diisi" }]}
                     >
                       <Select
                         showSearch
@@ -1502,7 +1559,7 @@ export default function Page() {
                                         {...routeField}
                                         name={[field.name, "process_id"]}
                                         label="Process"
-                                        rules={[{ required: true, message: "Process is required" }]}
+                                        rules={[{ required: true, message: "Process belum diisi" }]}
                                       >
                                         <Select
                                           size="large"
@@ -1524,7 +1581,7 @@ export default function Page() {
                                         {...routeField}
                                         name={[field.name, "machine_id"]}
                                         label="Machine"
-                                        rules={[{ required: true, message: "Machine is required" }]}
+                                        rules={[{ required: true, message: "Machine belum diisi" }]}
                                       >
                                         <Select
                                           size="large"
@@ -1623,7 +1680,7 @@ export default function Page() {
                     <Form.Item
                       name={["material_spec", "material_code"]}
                       label="Material Code"
-                      rules={isParentAssembly ? [] : [{ required: true, message: "Material Code is required" }]}
+                      rules={isParentAssembly ? [] : [{ required: true, message: "Material Code belum diisi" }]}
                     >
                       <Input placeholder="e.g., STKM550" size="large" disabled={isParentAssembly} />
                     </Form.Item>
@@ -1631,7 +1688,7 @@ export default function Page() {
                     <Form.Item
                       name={["material_spec", "form"]}
                       label="Form"
-                      rules={isParentAssembly ? [] : [{ required: true, message: "Form is required" }]}
+                      rules={isParentAssembly ? [] : [{ required: true, message: "Form belum diisi" }]}
                     >
                       <Select
                         placeholder="Select form"
@@ -1669,7 +1726,7 @@ export default function Page() {
                     <Form.Item
                       name={["material_spec", "grade"]}
                       label="Grade"
-                      rules={isParentAssembly ? [] : [{ required: true, message: "Grade is required" }]}
+                      rules={isParentAssembly ? [] : [{ required: true, message: "Grade belum diisi" }]}
                     >
                       <Input placeholder="e.g., STKM550" size="large" disabled={isParentAssembly} />
                     </Form.Item>

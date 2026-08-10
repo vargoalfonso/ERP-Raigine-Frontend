@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   CheckCircleFilled,
@@ -132,6 +132,37 @@ function StockStatusCell({ uniqCode }: { uniqCode: string }) {
       <StatusTag status={status} />
     </div>
   );
+}
+
+// Urutan urgensi stok: Low (paling atas) -> Normal -> Overstock (paling bawah).
+// Status yang belum termuat diletakkan paling akhir agar tidak mengganggu urutan.
+function stockStatusRank(status?: string) {
+  const normalized = (status ?? "").trim().toLowerCase();
+  if (!normalized) return 3;
+  if (normalized.includes("low")) return 0;
+  if (normalized.includes("over")) return 2;
+  return 1;
+}
+
+// Probe tak terlihat: memakai query summary yang sama dengan sel-sel baris (di-cache/dedupe
+// oleh RTK Query, jadi tanpa request tambahan) lalu melaporkan status stok ke parent untuk sorting.
+function StockStatusProbe({
+  uniqCode,
+  onResolved,
+}: {
+  uniqCode: string;
+  onResolved: (uniqCode: string, status: string) => void;
+}) {
+  const apiEnabled = Boolean(apiBaseUrl);
+  const q = useGetFinishedGoodParameterizedSummaryQuery(
+    { uniq_code: uniqCode },
+    { skip: !apiEnabled || !uniqCode },
+  );
+  const status = q.data?.status;
+  useEffect(() => {
+    if (status !== undefined) onResolved(uniqCode, status || "Normal");
+  }, [status, uniqCode, onResolved]);
+  return null;
 }
 
 function FinishedGoodsDetailModal({
@@ -551,6 +582,13 @@ export default function FinishedGoodsPage() {
   const [editRecord, setEditRecord] = useState<FinishedGoodListItem | null>(
     null,
   );
+  // Peta uniq_code -> status stok untuk mengurutkan tabel berdasarkan urgensi.
+  const [statusMap, setStatusMap] = useState<Record<string, string>>({});
+  const handleStatusResolved = useCallback((uniqCode: string, status: string) => {
+    setStatusMap((prev) =>
+      prev[uniqCode] === status ? prev : { ...prev, [uniqCode]: status },
+    );
+  }, []);
 
   const listQuery = useGetFinishedGoodsQuery(
     { page: currentPage, limit: pageSize },
@@ -622,6 +660,16 @@ export default function FinishedGoodsPage() {
     if (typeFilter === "all") return filteredItems;
     return filteredItems;
   }, [filteredItems, typeFilter]);
+
+  // Urutkan UNIQ berdasarkan urgensi stok: Low -> Normal -> Overstock.
+  // Array.sort stabil, jadi item dengan rank sama mempertahankan urutan aslinya.
+  const sortedItems = useMemo(() => {
+    return [...displayItems].sort(
+      (a, b) =>
+        stockStatusRank(statusMap[a.uniq_code]) -
+        stockStatusRank(statusMap[b.uniq_code]),
+    );
+  }, [displayItems, statusMap]);
 
   const columns: ColumnsType<FinishedGoodListItem> = [
     { title: "Uniq", dataIndex: "uniq_code", key: "uniq", width: 110 },
@@ -941,10 +989,20 @@ export default function FinishedGoodsPage() {
             </div>
           </div>
 
+          {tab === "inventory"
+            ? displayItems.map((it) => (
+                <StockStatusProbe
+                  key={`probe-${it.uniq_code}`}
+                  uniqCode={it.uniq_code}
+                  onResolved={handleStatusResolved}
+                />
+              ))
+            : null}
+
           <Table<FinishedGoodListItem>
             rowKey={(r) => r.uuid || r.uniq_code}
             columns={columns}
-            dataSource={tab === "inventory" ? displayItems : []}
+            dataSource={tab === "inventory" ? sortedItems : []}
             loading={apiEnabled ? listQuery.isFetching : false}
             rowSelection={{}}
             pagination={{
