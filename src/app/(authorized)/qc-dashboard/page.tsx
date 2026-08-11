@@ -361,6 +361,692 @@ const buildQcLineReportHtml = (
  * memilih "Save as PDF" (atau "Microsoft Print to PDF") pada dialog print
  * bawaan browser untuk menyimpan sebagai file PDF.
  */
+/* ============================================================
+ * MONTHLY REPORT (RECORDING OF DATA DEFECT IN Q-GATE) helpers
+ * Layout mengikuti form FM-QA-029: header, monthly tendency +
+ * table 12 bulan, weekly tendency + pareto, tabel weekly / defect
+ * list / reject-scrap, dan tabel Problem-Action.
+ * ============================================================ */
+
+type MonthlyReportMeta = {
+  line: string;
+  customer: string;
+  period: Dayjs; // month + year
+  targetDefectPercent: number;
+  approvedBy?: string;
+  checkedBy?: string;
+  preparedBy?: string;
+};
+
+type MonthAggregate = {
+  totalCheck: number;
+  totalDefect: number;
+  totalScrap: number;
+  defectPercent: number;
+  ppm: number;
+};
+
+type WeekAggregate = {
+  totalCheck: number;
+  totalDefect: number;
+  defectRatio: number;
+};
+
+type DefectListEntry = {
+  code: string;
+  label: string;
+  count: number;
+  paretoPercent: number;
+};
+
+const aggregateMonthly = (
+  rows: QcDashboardProductionQcItem[],
+  year: number,
+): MonthAggregate[] => {
+  const arr: MonthAggregate[] = Array.from({ length: 12 }, () => ({
+    totalCheck: 0,
+    totalDefect: 0,
+    totalScrap: 0,
+    defectPercent: 0,
+    ppm: 0,
+  }));
+  for (const r of rows) {
+    const d = dayjs(r.report_date);
+    if (!d.isValid() || d.year() !== year) continue;
+    const m = d.month();
+    arr[m].totalCheck += Number(r.items_checked ?? 0);
+    arr[m].totalDefect += Number(r.qty_defect ?? 0);
+    arr[m].totalScrap += Number(r.qty_scrap ?? 0);
+  }
+  for (const a of arr) {
+    a.defectPercent =
+      a.totalCheck > 0 ? (a.totalDefect / a.totalCheck) * 100 : 0;
+    a.ppm =
+      a.totalCheck > 0 ? (a.totalDefect / a.totalCheck) * 1_000_000 : 0;
+  }
+  return arr;
+};
+
+const aggregateWeekly = (
+  rows: QcDashboardProductionQcItem[],
+  year: number,
+  month: number,
+): WeekAggregate[] => {
+  const arr: WeekAggregate[] = Array.from({ length: 4 }, () => ({
+    totalCheck: 0,
+    totalDefect: 0,
+    defectRatio: 0,
+  }));
+  for (const r of rows) {
+    const d = dayjs(r.report_date);
+    if (!d.isValid() || d.year() !== year || d.month() !== month) continue;
+    const dom = d.date();
+    const w = dom <= 7 ? 0 : dom <= 14 ? 1 : dom <= 21 ? 2 : 3;
+    arr[w].totalCheck += Number(r.items_checked ?? 0);
+    arr[w].totalDefect += Number(r.qty_defect ?? 0);
+  }
+  for (const a of arr) {
+    a.defectRatio =
+      a.totalCheck > 0 ? (a.totalDefect / a.totalCheck) * 100 : 0;
+  }
+  return arr;
+};
+
+const aggregateDefectList = (
+  rows: QcDashboardProductionQcItem[],
+  year: number,
+  month: number,
+): DefectListEntry[] => {
+  const map = new Map<string, DefectListEntry>();
+  let total = 0;
+  for (const r of rows) {
+    const d = dayjs(r.report_date);
+    if (!d.isValid() || d.year() !== year || d.month() !== month) continue;
+    const issues = r.issues ?? [];
+    if (issues.length === 0) {
+      const qty = Number(r.qty_defect ?? 0);
+      if (qty > 0) {
+        const key = r.issue_label || "OTHER";
+        const entry = map.get(key) ?? {
+          code: "",
+          label: key,
+          count: 0,
+          paretoPercent: 0,
+        };
+        entry.count += qty;
+        map.set(key, entry);
+        total += qty;
+      }
+      continue;
+    }
+    for (const it of issues) {
+      const key = it.reason_code || it.reason_text || "OTHER";
+      const qty = Number(it.qty_defect || it.qty || 0);
+      if (qty <= 0) continue;
+      const entry = map.get(key) ?? {
+        code: it.reason_code || "",
+        label: it.reason_text || it.reason_code || "OTHER",
+        count: 0,
+        paretoPercent: 0,
+      };
+      entry.count += qty;
+      map.set(key, entry);
+      total += qty;
+    }
+  }
+  const arr = Array.from(map.values());
+  arr.sort((a, b) => b.count - a.count);
+  for (const e of arr) {
+    e.paretoPercent = total > 0 ? (e.count / total) * 100 : 0;
+  }
+  return arr;
+};
+
+const aggregateScrap = (
+  rows: QcDashboardProductionQcItem[],
+  year: number,
+  month: number,
+) => {
+  let totalCheck = 0;
+  let totalScrap = 0;
+  for (const r of rows) {
+    const d = dayjs(r.report_date);
+    if (!d.isValid() || d.year() !== year || d.month() !== month) continue;
+    totalCheck += Number(r.items_checked ?? 0);
+    totalScrap += Number(r.qty_scrap ?? 0);
+  }
+  return {
+    totalCheck,
+    totalScrap,
+    scrapPercent: totalCheck > 0 ? (totalScrap / totalCheck) * 100 : 0,
+  };
+};
+
+/** SVG bar + line chart dengan Y-axis kiri (bar) & kanan (line %). */
+const buildBarLineSvg = (args: {
+  width: number;
+  height: number;
+  bars: number[];
+  lineValues: number[];
+  labels: string[];
+  barMax?: number;
+  lineMax?: number;
+  targetLineValue?: number | null;
+  barColor?: string;
+  lineColor?: string;
+  showLineLabel?: (v: number) => string;
+}) => {
+  const {
+    width,
+    height,
+    bars,
+    lineValues,
+    labels,
+    targetLineValue = null,
+    barColor = "#2f5fb5",
+    lineColor = "#000",
+    showLineLabel = (v: number) => (v > 0 ? v.toFixed(2) + "%" : ""),
+  } = args;
+  const paddingL = 34;
+  const paddingR = 42;
+  const paddingT = 12;
+  const paddingB = 22;
+  const chartW = Math.max(0, width - paddingL - paddingR);
+  const chartH = Math.max(0, height - paddingT - paddingB);
+  const n = Math.max(1, bars.length);
+  const slotW = chartW / n;
+  const barW = slotW * 0.6;
+  const bMax = Math.max(args.barMax ?? 0, ...bars, 1);
+  const lMax = Math.max(args.lineMax ?? 0, ...lineValues, 1);
+
+  const barsSvg = bars
+    .map((v, i) => {
+      const x = paddingL + i * slotW + (slotW - barW) / 2;
+      const h = bMax > 0 ? (v / bMax) * chartH : 0;
+      const y = paddingT + chartH - h;
+      const lbl = v > 0 ? String(Math.round(v)) : "";
+      return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="${barColor}" stroke="#1e3a8a" stroke-width="0.4" /><text x="${(x + barW / 2).toFixed(1)}" y="${(y - 2).toFixed(1)}" font-size="6" text-anchor="middle" fill="#000">${lbl}</text>`;
+    })
+    .join("");
+
+  const linePoints = lineValues
+    .map((v, i) => {
+      const x = paddingL + i * slotW + slotW / 2;
+      const y =
+        paddingT + chartH - (lMax > 0 ? (v / lMax) * chartH : 0);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+
+  const lineDots = lineValues
+    .map((v, i) => {
+      const x = paddingL + i * slotW + slotW / 2;
+      const y =
+        paddingT + chartH - (lMax > 0 ? (v / lMax) * chartH : 0);
+      return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="1.6" fill="${lineColor}" /><text x="${(x + 3).toFixed(1)}" y="${(y - 3).toFixed(1)}" font-size="6" fill="${lineColor}">${escapeHtml(showLineLabel(v))}</text>`;
+    })
+    .join("");
+
+  const targetSvg =
+    targetLineValue != null && lMax > 0
+      ? (() => {
+          const y =
+            paddingT + chartH - (targetLineValue / lMax) * chartH;
+          return `<line x1="${paddingL}" y1="${y.toFixed(1)}" x2="${(paddingL + chartW).toFixed(1)}" y2="${y.toFixed(1)}" stroke="#0ea5e9" stroke-width="0.7" stroke-dasharray="3,2" /><text x="${(paddingL + chartW - 2).toFixed(1)}" y="${(y - 2).toFixed(1)}" font-size="6" text-anchor="end" fill="#0ea5e9">TARGET ${targetLineValue}%</text>`;
+        })()
+      : "";
+
+  const labelsSvg = labels
+    .map((lb, i) => {
+      const x = paddingL + i * slotW + slotW / 2;
+      const y = paddingT + chartH + 10;
+      return `<text x="${x.toFixed(1)}" y="${y}" font-size="6" text-anchor="middle" fill="#000">${escapeHtml(lb)}</text>`;
+    })
+    .join("");
+
+  const yTicksL = [0, 0.25, 0.5, 0.75, 1]
+    .map((t) => {
+      const v = bMax * t;
+      const y = paddingT + chartH - t * chartH;
+      return `<line x1="${paddingL - 2}" y1="${y}" x2="${paddingL}" y2="${y}" stroke="#000" stroke-width="0.4" /><text x="${paddingL - 3}" y="${y + 2}" font-size="5" text-anchor="end" fill="#000">${Math.round(v)}</text>`;
+    })
+    .join("");
+  const yTicksR = [0, 0.25, 0.5, 0.75, 1]
+    .map((t) => {
+      const v = lMax * t;
+      const y = paddingT + chartH - t * chartH;
+      return `<line x1="${paddingL + chartW}" y1="${y}" x2="${paddingL + chartW + 2}" y2="${y}" stroke="#000" stroke-width="0.4" /><text x="${paddingL + chartW + 3}" y="${y + 2}" font-size="5" text-anchor="start" fill="#000">${v.toFixed(2)}%</text>`;
+    })
+    .join("");
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+    <rect x="${paddingL}" y="${paddingT}" width="${chartW}" height="${chartH}" fill="#fff" stroke="#000" stroke-width="0.5" />
+    ${barsSvg}
+    ${targetSvg}
+    <polyline points="${linePoints}" fill="none" stroke="${lineColor}" stroke-width="1" />
+    ${lineDots}
+    ${labelsSvg}
+    ${yTicksL}
+    ${yTicksR}
+  </svg>`;
+};
+
+const MONTH_LABELS = [
+  "JAN",
+  "FEB",
+  "MAR",
+  "APR",
+  "MAY",
+  "JUN",
+  "JUL",
+  "AUG",
+  "SEP",
+  "OCT",
+  "NOV",
+  "DEC",
+];
+
+const buildMonthlyReportHtml = (
+  rows: QcDashboardProductionQcItem[],
+  meta: MonthlyReportMeta,
+) => {
+  const year = meta.period.year();
+  const monthIdx = meta.period.month();
+  const monthly = aggregateMonthly(rows, year);
+  const weekly = aggregateWeekly(rows, year, monthIdx);
+  const defectList = aggregateDefectList(rows, year, monthIdx);
+  const scrap = aggregateScrap(rows, year, monthIdx);
+
+  const totalYearCheck = monthly.reduce((s, m) => s + m.totalCheck, 0);
+  const totalYearDefect = monthly.reduce((s, m) => s + m.totalDefect, 0);
+  const yearAvgPercent =
+    totalYearCheck > 0 ? (totalYearDefect / totalYearCheck) * 100 : 0;
+
+  const currentMonthDefectPercent = monthly[monthIdx]?.defectPercent ?? 0;
+  const achieved = currentMonthDefectPercent <= meta.targetDefectPercent;
+  const resultText = achieved ? "ACHIEVED" : "NOT ACHIEVED";
+  const resultColor = achieved ? "#22c55e" : "#ef4444";
+
+  const monthlyChart = buildBarLineSvg({
+    width: 760,
+    height: 190,
+    bars: monthly.map((m) => m.totalDefect),
+    lineValues: monthly.map((m) => m.defectPercent),
+    labels: MONTH_LABELS,
+    lineMax: Math.max(4, meta.targetDefectPercent * 4),
+    targetLineValue: meta.targetDefectPercent,
+  });
+
+  const weeklyChart = buildBarLineSvg({
+    width: 380,
+    height: 170,
+    bars: weekly.map((w) => w.totalDefect),
+    lineValues: weekly.map((w) => w.defectRatio),
+    labels: ["Week 1", "Week 2", "Week 3", "Week 4"],
+    lineMax: Math.max(4, meta.targetDefectPercent * 4),
+  });
+
+  const paretoTop = defectList.slice(0, 12);
+  const paretoCum: number[] = [];
+  {
+    let cum = 0;
+    for (const e of paretoTop) {
+      cum += e.paretoPercent;
+      paretoCum.push(cum);
+    }
+  }
+  const paretoChart = buildBarLineSvg({
+    width: 500,
+    height: 170,
+    bars: paretoTop.map((e) => e.count),
+    lineValues: paretoCum,
+    labels: paretoTop.map((_, i) => `D${i + 1}`),
+    lineMax: 100,
+    showLineLabel: (v) => (v > 0 ? Math.round(v) + "%" : ""),
+  });
+
+  const monthCell = (idx: number, s: string, highlight: boolean) =>
+    highlight
+      ? `<td style="background:#fde68a;font-weight:bold;">${escapeHtml(s)}</td>`
+      : `<td>${escapeHtml(s)}</td>`;
+
+  const monthlyTableRows = (
+    [
+      ["TOTAL CHECK", monthly.map((m) => formatNumber(m.totalCheck))],
+      ["TOTAL DEFECT", monthly.map((m) => formatNumber(m.totalDefect))],
+      [
+        "% DEFECT",
+        monthly.map((m) =>
+          m.totalCheck > 0 ? m.defectPercent.toFixed(2) + "%" : "0,00%",
+        ),
+      ],
+      ["% AVERAGE", monthly.map(() => yearAvgPercent.toFixed(2) + "%")],
+      [
+        "Ppm DEFECT",
+        monthly.map((m) => (m.totalCheck > 0 ? m.ppm.toFixed(2) : "0.00")),
+      ],
+    ] as Array<[string, string[]]>
+  )
+    .map(
+      ([label, cells]) =>
+        `<tr><td class="lbl">${escapeHtml(label)}</td>${cells
+          .map((c, i) => monthCell(i, c, i === monthIdx))
+          .join("")}</tr>`,
+    )
+    .join("");
+
+  const weeklyTotalCheck = weekly.reduce((s, w) => s + w.totalCheck, 0);
+  const weeklyTotalDefect = weekly.reduce((s, w) => s + w.totalDefect, 0);
+  const weeklyTotalRatio =
+    weeklyTotalCheck > 0
+      ? (weeklyTotalDefect / weeklyTotalCheck) * 100
+      : 0;
+  const weeklyTableRows = (
+    [
+      [
+        "TOTAL CHECK",
+        [
+          ...weekly.map((w) => formatNumber(w.totalCheck)),
+          formatNumber(weeklyTotalCheck),
+        ],
+      ],
+      [
+        "TOTAL DEFECT",
+        [
+          ...weekly.map((w) => formatNumber(w.totalDefect)),
+          formatNumber(weeklyTotalDefect),
+        ],
+      ],
+      [
+        "DEFECT RATIO ( % )",
+        [
+          ...weekly.map((w) => w.defectRatio.toFixed(2) + "%"),
+          weeklyTotalRatio.toFixed(2) + "%",
+        ],
+      ],
+    ] as Array<[string, string[]]>
+  )
+    .map(
+      ([label, cells]) =>
+        `<tr><td class="lbl">${escapeHtml(label)}</td>${cells
+          .map((c) => `<td>${escapeHtml(c)}</td>`)
+          .join("")}</tr>`,
+    )
+    .join("");
+
+  const defectListHeaderCols =
+    paretoTop.length === 0
+      ? '<th colspan="1" style="font-style:italic;color:#666;">No defect data</th>'
+      : paretoTop
+          .map(
+            (e) =>
+              `<th style="writing-mode:vertical-rl;transform:rotate(180deg);height:60px;font-size:7px;">${escapeHtml(e.label)}</th>`,
+          )
+          .join("");
+  const totalDefectListSum = paretoTop.reduce((s, e) => s + e.count, 0);
+  const defectListRows = (
+    [
+      [
+        "TOTAL DEFECT ( Pcs )",
+        [
+          ...paretoTop.map((e) => String(e.count)),
+          String(totalDefectListSum),
+        ],
+      ],
+      [
+        "PARETO DEFECT ( % )",
+        [
+          ...paretoTop.map((e) => Math.round(e.paretoPercent) + "%"),
+          "100%",
+        ],
+      ],
+    ] as Array<[string, string[]]>
+  )
+    .map(
+      ([label, cells]) =>
+        `<tr><td class="lbl">${escapeHtml(label)}</td>${cells
+          .map((c) => `<td>${escapeHtml(c)}</td>`)
+          .join("")}</tr>`,
+    )
+    .join("");
+
+  const emptyActionRows = Array.from({ length: 4 })
+    .map(
+      () =>
+        `<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`,
+    )
+    .join("");
+
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Monthly Report ${escapeHtml(meta.period.format("MMMM YYYY"))}</title>
+<style>
+  @page { size: A4 landscape; margin: 5mm; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 8px; color: #000; }
+  .doc { padding: 2px; }
+  table { border-collapse: collapse; width: 100%; }
+  .hdr-tbl td { border: 1px solid #000; padding: 3px 6px; vertical-align: middle; }
+  .hdr-tbl .company { font-weight: bold; font-size: 10px; }
+  .hdr-tbl .title { text-align: center; font-weight: bold; font-size: 15px; }
+  .hdr-tbl .subtitle { text-align: center; font-size: 10px; font-weight: bold; }
+  .info-box { border: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: bold; font-size: 9px; }
+  .info-box small { display:block; font-weight: normal; font-size: 7px; }
+  .result-box { border: 1px solid #000; padding: 6px 10px; text-align: center; font-weight: bold; color: #fff; font-size: 10px; }
+  .section-lbl { border: 1px solid #000; padding: 4px 2px; font-weight: bold; text-align: center; font-size: 9px; writing-mode: vertical-rl; transform: rotate(180deg); }
+  .chart-box { border: 1px solid #000; padding: 2px; background:#fff; }
+  .data-tbl { border-collapse: collapse; width: 100%; }
+  .data-tbl td, .data-tbl th { border: 1px solid #000; padding: 2px 3px; text-align: center; font-size: 7.5px; }
+  .data-tbl .lbl { text-align: left; font-weight: bold; background: #f5f5f5; }
+  .action-tbl td, .action-tbl th { border: 1px solid #000; padding: 4px 6px; font-size: 9px; height: 42px; vertical-align: top; }
+  .action-tbl th { background: #f0f0f0; font-weight: bold; text-align: center; }
+  .approve-tbl { width: 100%; border-collapse: collapse; }
+  .approve-tbl td { border: 1px solid #000; text-align: center; font-size: 8px; padding: 2px 4px; }
+  .approve-tbl .h { font-weight: bold; background: #f0f0f0; }
+  .signature { height: 30px; }
+  .flex { display: flex; }
+  .gap-1 { gap: 3px; }
+  .mt-1 { margin-top: 3px; }
+</style>
+</head>
+<body>
+  <div class="doc">
+    <!-- HEADER TITLE ROW -->
+    <table class="hdr-tbl">
+      <tr>
+        <td rowspan="3" style="width: 110px; text-align: center;">
+          <div style="font-size:18px; font-weight:bold; color:#dc2626; letter-spacing:1px;">BT</div>
+          <div class="company">PT. BONECOM TRICOM</div>
+          <div style="font-size:7px; font-style: italic;">Quality Assurance Departement</div>
+        </td>
+        <td class="title">MONTHLY REPORT</td>
+        <td rowspan="3" style="width: 260px; padding: 0;">
+          <table class="approve-tbl">
+            <tr><td style="font-weight:bold;" colspan="3">NO. DOKUMEN : FM - QA - 029</td></tr>
+            <tr><td style="font-weight:bold;" colspan="3">REVISI : 00 / 01-12-21</td></tr>
+            <tr>
+              <td class="h" style="width:33%;">APPROVED</td>
+              <td class="h" style="width:33%;">CHECKED</td>
+              <td class="h">PREPARED</td>
+            </tr>
+            <tr>
+              <td class="signature">${escapeHtml(meta.approvedBy || "")}</td>
+              <td class="signature">${escapeHtml(meta.checkedBy || "")}</td>
+              <td class="signature">${escapeHtml(meta.preparedBy || "")}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+      <tr>
+        <td class="subtitle">( RECORDING OF DATA DEFECT IN Q - GATE )</td>
+      </tr>
+      <tr>
+        <td style="text-align: center; font-weight: bold;">LINE : ${escapeHtml(meta.line)}</td>
+      </tr>
+    </table>
+
+    <!-- Monthly Tendency label + chart + info panel -->
+    <div class="flex gap-1 mt-1">
+      <div style="width: 30px; display:flex;">
+        <div class="section-lbl" style="flex:1;">MONTHLY TENDENCY</div>
+      </div>
+      <div class="chart-box" style="flex: 1;">
+        ${monthlyChart}
+      </div>
+      <div style="width: 200px; display:flex; flex-direction:column; gap:3px;">
+        <div class="info-box">PERIODE : ${escapeHtml(meta.period.format("MMMM YYYY"))}</div>
+        <div class="info-box"><small>CUSTOMER</small>${escapeHtml(meta.customer)}</div>
+        <div class="result-box" style="background: ${resultColor};">
+          <small style="display:block;font-size:7px;font-weight:normal;">RESULT</small>${resultText}
+        </div>
+        <div class="info-box">TARGET DEFECT &le; ${meta.targetDefectPercent}%</div>
+      </div>
+    </div>
+
+    <!-- Monthly data table 12 cols -->
+    <table class="data-tbl mt-1">
+      <tr>
+        <th style="width: 90px;">MONTH</th>
+        ${MONTH_LABELS.map((m, i) => (i === monthIdx ? `<th style="background:#fde68a;">${m}</th>` : `<th>${m}</th>`)).join("")}
+      </tr>
+      ${monthlyTableRows}
+    </table>
+
+    <!-- Weekly Tendency + Pareto -->
+    <div class="flex gap-1 mt-1">
+      <div style="width: 30px; display:flex;">
+        <div class="section-lbl" style="flex:1;">WEEKLY TENDENCY</div>
+      </div>
+      <div class="chart-box" style="flex: 1;">
+        <div style="text-align:center;font-weight:bold;font-size:8px;">RECAPITULATION DATA DEFECT</div>
+        ${weeklyChart}
+      </div>
+      <div class="chart-box" style="flex: 1.3;">
+        <div style="text-align:center;font-weight:bold;font-size:8px;">PARETO DEFECT</div>
+        ${paretoChart}
+      </div>
+    </div>
+
+    <!-- Weekly + Defect List + Reject/Scrap tables -->
+    <div class="flex gap-1 mt-1">
+      <div style="flex: 1;">
+        <table class="data-tbl">
+          <tr>
+            <th style="width: 100px;">DATE</th>
+            <th>WEEK 1</th><th>WEEK 2</th><th>WEEK 3</th><th>WEEK 4</th><th>TOTAL</th>
+          </tr>
+          ${weeklyTableRows}
+        </table>
+      </div>
+      <div style="flex: 1.3;">
+        <table class="data-tbl">
+          <tr>
+            <th style="width: 100px;">DEFECT LIST</th>
+            ${defectListHeaderCols}
+            <th>TOTAL</th>
+          </tr>
+          ${defectListRows}
+        </table>
+      </div>
+      <div style="width: 170px;">
+        <table class="data-tbl">
+          <tr><th colspan="2">REJECT/SCRAP PART</th></tr>
+          <tr><td class="lbl">TOTAL CHECK</td><td>${formatNumber(scrap.totalCheck)}</td></tr>
+          <tr><td class="lbl">TOTAL REJECT/SCRAP PART</td><td>${formatNumber(scrap.totalScrap)}</td></tr>
+          <tr><td class="lbl">% SCRAP</td><td>${scrap.scrapPercent.toFixed(2)}%</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- Problem / Action Table -->
+    <table class="action-tbl mt-1">
+      <tr>
+        <th style="width: 15%;">PROBLEM DEFECT</th>
+        <th style="width: 15%;">CAUSE</th>
+        <th style="width: 20%;">CORECTIVE ACTION</th>
+        <th style="width: 20%;">PREVENTIVE ACTION</th>
+        <th style="width: 10%;">DATE</th>
+        <th style="width: 8%;">PIC</th>
+        <th style="width: 12%;">EVALUATION</th>
+      </tr>
+      ${emptyActionRows}
+    </table>
+
+    <div style="margin-top:4px; font-size:7px; color:#666; text-align:right;">
+      Generated ${escapeHtml(dayjs().format("YYYY-MM-DD HH:mm"))} from QC Dashboard
+    </div>
+  </div>
+</body>
+</html>`;
+};
+
+/**
+ * Membuat satu HTML multi-halaman untuk seluruh bulan yang memiliki data
+ * pada `rows`. Tiap bulan dirender sebagai satu "sheet" (page) FM-QA-029
+ * yang dipisah dengan CSS `page-break-after: always`, sehingga saat
+ * print/Save as PDF akan muncul sebagai halaman terpisah per bulan.
+ */
+const buildMonthlyReportsHtml = (
+  rows: QcDashboardProductionQcItem[],
+  metaBase: Omit<MonthlyReportMeta, "period">,
+) => {
+  // 1) Tentukan bucket (year, monthIdx) unik dari report_date.
+  const buckets: Array<{ year: number; monthIdx: number }> = [];
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (!r.report_date) continue;
+    const d = dayjs(r.report_date);
+    if (!d.isValid()) continue;
+    const y = d.year();
+    const m = d.month();
+    const key = `${y}-${m}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    buckets.push({ year: y, monthIdx: m });
+  }
+  buckets.sort((a, b) => a.year - b.year || a.monthIdx - b.monthIdx);
+  if (buckets.length === 0) {
+    const now = dayjs();
+    buckets.push({ year: now.year(), monthIdx: now.month() });
+  }
+
+  // 2) Render per-bucket dan extract .doc block dari HTML utuh yang
+  //    dikembalikan `buildMonthlyReportHtml` (single-month builder).
+  const startTag = '<div class="doc">';
+  const bodyEndTag = "</body>";
+  const docBlocks: string[] = [];
+  let headPart = "";
+  buckets.forEach(({ year, monthIdx }, idx) => {
+    const period = dayjs(new Date(year, monthIdx, 1));
+    const singleHtml = buildMonthlyReportHtml(rows, {
+      ...metaBase,
+      period,
+    });
+    if (idx === 0) {
+      const bodyOpen = singleHtml.indexOf("<body>");
+      if (bodyOpen >= 0) {
+        headPart = singleHtml.slice(0, bodyOpen + "<body>".length);
+      }
+    }
+    const start = singleHtml.indexOf(startTag);
+    const end = singleHtml.lastIndexOf(bodyEndTag);
+    if (start >= 0 && end > start) {
+      docBlocks.push(singleHtml.slice(start, end).trim());
+    }
+  });
+
+  // 3) Gabung semua page dengan page-break di antaranya.
+  const pageBreak =
+    '<div style="page-break-after: always; height:0; overflow:hidden;"></div>';
+  return `${headPart}
+${docBlocks.join("\n" + pageBreak + "\n")}
+</body>
+</html>`;
+};
+
 const printHtmlReport = (html: string) => {
   if (typeof document === "undefined") return;
   const iframe = document.createElement("iframe");
@@ -497,6 +1183,43 @@ export default function QcDashboardPage() {
     },
     [triggerFetchAllProductionQc],
   );
+  // ---- Monthly Report (FM-QA-029) — langsung print semua bulan ----
+  // Klik tombol Monthly Report akan langsung fetch seluruh data Production QC
+  // lalu men-generate satu file PDF multi-halaman: 1 sheet per bulan yang
+  // memiliki data (dipisah dengan CSS page-break-after: always).
+  const handleGenerateMonthlyReport = React.useCallback(async () => {
+    try {
+      const response = await triggerFetchAllProductionQc({
+        limit: 1000,
+        page: 1,
+      }).unwrap();
+      const allRows =
+        (response?.data ?? []) as QcDashboardProductionQcItem[];
+      if (allRows.length === 0) {
+        message.warning(
+          "Belum ada data Production QC untuk di-generate ke monthly report.",
+        );
+        return;
+      }
+      const html = buildMonthlyReportsHtml(allRows, {
+        line: "-",
+        customer: "-",
+        targetDefectPercent: 1,
+        approvedBy: "",
+        checkedBy: "",
+        preparedBy: "",
+      });
+      printHtmlReport(html);
+      message.success(
+        "Monthly report per bulan siap dicetak / Save as PDF.",
+      );
+    } catch (error) {
+      message.error(
+        getApiErrorMessage(error, "Gagal generate monthly report"),
+      );
+    }
+  }, [triggerFetchAllProductionQc]);
+
   const selectedQcType = Form.useWatch("qc_type", manualForm);
   const selectedReferenceNumber = Form.useWatch("reference_number", manualForm);
 
@@ -1210,9 +1933,18 @@ export default function QcDashboardPage() {
             </div>
           </div>
 
-          <Button type="primary" icon={<PlusOutlined />} onClick={openManual}>
-            Add QC Report
-          </Button>
+          <Space>
+            <Button
+              icon={<FileTextOutlined />}
+              onClick={handleGenerateMonthlyReport}
+              loading={fetchAllProductionQcState.isFetching}
+            >
+              Monthly Report
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openManual}>
+              Add QC Report
+            </Button>
+          </Space>
         </div>
 
         {!apiEnabled ? (
