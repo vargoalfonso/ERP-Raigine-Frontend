@@ -3529,14 +3529,6 @@ export default function PoBudgetPage() {
 
           <div className="flex items-center gap-2">
             <Button
-             type="primary"
-              className="!rounded-lg"
-              icon={<FileExcelOutlined />}
-              onClick={openBulkPoBudget}
-            >
-              Bulk PR Budget
-            </Button>
-            <Button
             
               className="!rounded-lg"
               icon={<PlusOutlined />}
@@ -3544,6 +3536,15 @@ export default function PoBudgetPage() {
             >
               Add Budget Entry
             </Button>
+            <Button
+             type="primary"
+              className="!rounded-lg"
+              icon={<FileExcelOutlined />}
+              onClick={openBulkPoBudget}
+            >
+              Bulk PR Budget
+            </Button>
+            
           </div>
         </div>
       </div>
