@@ -16,6 +16,7 @@ import {
 } from "@ant-design/icons";
 import {
   Button,
+  Dropdown,
   Form,
   Input,
   InputNumber,
@@ -26,6 +27,7 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import * as XLSX from "xlsx";
 import { BsBoxSeam } from "react-icons/bs";
 import { FiAlertTriangle } from "react-icons/fi";
 import { HiOutlineArchiveBox } from "react-icons/hi2";
@@ -39,6 +41,7 @@ import {
   type FinishedGoodListItem,
   useGetFinishedGoodParameterizedSummaryQuery,
   useGetFinishedGoodsQuery,
+  useLazyGetFinishedGoodsQuery,
   useGetFinishedGoodsSummaryQuery,
   useDeleteFinishedGoodMutation,
   useUpdateFinishedGoodMutation,
@@ -574,6 +577,11 @@ export default function FinishedGoodsPage() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  // Baris yang dicentang pengguna — dipakai untuk fitur Export Selected.
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [isExporting, setIsExporting] = useState(false);
+  // Lazy fetch untuk "Export All" — mengambil seluruh halaman FG sekaligus.
+  const [triggerFetchAllFG] = useLazyGetFinishedGoodsQuery();
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailRecord, setDetailRecord] = useState<FinishedGoodListItem | null>(
     null,
@@ -639,6 +647,111 @@ export default function FinishedGoodsPage() {
     setEditOpen(false);
     setEditRecord(null);
     if (saved) listQuery.refetch();
+  };
+
+  // ================================================================
+  // Export ke Excel (.xlsx)
+  // ----------------------------------------------------------------
+  // • "Export Selected"  → mengekspor baris yang dicentang saja.
+  // • "Export All"       → mem-fetch seluruh master FG (lintas halaman),
+  //                        lalu mengekspornya sekaligus.
+  // Kolom yang diekspor mengikuti kolom informasi utama pada tabel
+  // (Uniq, Part Number, Part Name, Model, WO Number, Warehouse, UOM,
+  // Stock Status, Last Updated). Kolom Actions tidak diekspor.
+  // ================================================================
+  const buildExportRows = (rows: FinishedGoodListItem[]) =>
+    rows.map((r) => ({
+      "Uniq Code": r.uniq_code || "",
+      "Part Number": r.part_number || "",
+      "Part Name": r.part_name || "",
+      Model: r.model || "",
+      "WO Number": r.wo_number || "",
+      "Warehouse Location": r.warehouse_location || "",
+      UOM: r.uom || "",
+      "Stock Status": statusMap[r.uniq_code] || "",
+      "Last Updated": r.updated_at
+        ? new Date(r.updated_at).toLocaleString()
+        : "",
+    }));
+
+  const downloadExcel = (rows: FinishedGoodListItem[], fileSuffix: string) => {
+    if (rows.length === 0) {
+      message.warning("Tidak ada data untuk diekspor");
+      return;
+    }
+    const worksheet = XLSX.utils.json_to_sheet(buildExportRows(rows));
+    // Set lebar kolom agar rapih di Excel.
+    worksheet["!cols"] = [
+      { wch: 14 }, // Uniq Code
+      { wch: 16 }, // Part Number
+      { wch: 28 }, // Part Name
+      { wch: 18 }, // Model
+      { wch: 16 }, // WO Number
+      { wch: 20 }, // Warehouse Location
+      { wch: 8 }, // UOM
+      { wch: 14 }, // Stock Status
+      { wch: 20 }, // Last Updated
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Finished Goods");
+    const dateStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(workbook, `finished-goods-${fileSuffix}-${dateStr}.xlsx`);
+    message.success(`Berhasil mengekspor ${rows.length} baris`);
+  };
+
+  const handleExportSelected = () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning("Pilih baris terlebih dahulu");
+      return;
+    }
+    // Gabungkan semua item yang saat ini terlihat (sortedItems) dan pilih
+    // yang cocok dengan key terpilih. Karena `preserveSelectedRowKeys: true`,
+    // seleksi lintas halaman ikut terjaga — tapi item lintas halaman tidak
+    // ada di `sortedItems`. Untuk itu kita fallback ke fetch-all supaya
+    // baris terpilih dari halaman lain tetap ikut terekspor.
+    const keySet = new Set(selectedRowKeys.map(String));
+    const inMemory = sortedItems.filter((r) =>
+      keySet.has(String(r.uuid || r.uniq_code)),
+    );
+    if (inMemory.length === selectedRowKeys.length) {
+      downloadExcel(inMemory, "selected");
+      return;
+    }
+    // Ada seleksi dari halaman lain — fetch semua lalu filter.
+    (async () => {
+      try {
+        setIsExporting(true);
+        const res = await triggerFetchAllFG(
+          { page: 1, limit: 10000 },
+          true,
+        ).unwrap();
+        const all = res?.items ?? [];
+        const filtered = all.filter((r) =>
+          keySet.has(String(r.uuid || r.uniq_code)),
+        );
+        downloadExcel(filtered, "selected");
+      } catch (e) {
+        message.error("Gagal mengambil data untuk ekspor");
+      } finally {
+        setIsExporting(false);
+      }
+    })();
+  };
+
+  const handleExportAll = async () => {
+    try {
+      setIsExporting(true);
+      const res = await triggerFetchAllFG(
+        { page: 1, limit: 10000 },
+        true,
+      ).unwrap();
+      const all = res?.items ?? [];
+      downloadExcel(all, "all");
+    } catch (e) {
+      message.error("Gagal mengambil data untuk ekspor");
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleDelete = (record: FinishedGoodListItem) => {
@@ -969,12 +1082,31 @@ export default function FinishedGoodsPage() {
                   { value: "overstock", label: "Overstock" },
                 ]}
               />
-              <Button
-                icon={<DownloadOutlined />}
-                onClick={() => message.info("Export (coming soon)")}
+              <Dropdown
+                menu={{
+                  items: [
+                    {
+                      key: "selected",
+                      label:
+                        selectedRowKeys.length > 0
+                          ? `Export Selected (${selectedRowKeys.length})`
+                          : "Export Selected",
+                      disabled: selectedRowKeys.length === 0,
+                      onClick: () => handleExportSelected(),
+                    },
+                    {
+                      key: "all",
+                      label: "Export All",
+                      onClick: () => handleExportAll(),
+                    },
+                  ],
+                }}
+                trigger={["click"]}
               >
-                Export
-              </Button>
+                <Button icon={<DownloadOutlined />} loading={isExporting}>
+                  Export
+                </Button>
+              </Dropdown>
             </div>
           </div>
         </div>
@@ -1004,7 +1136,11 @@ export default function FinishedGoodsPage() {
             columns={columns}
             dataSource={tab === "inventory" ? sortedItems : []}
             loading={apiEnabled ? listQuery.isFetching : false}
-            rowSelection={{}}
+            rowSelection={{
+              selectedRowKeys,
+              onChange: (keys) => setSelectedRowKeys(keys),
+              preserveSelectedRowKeys: true,
+            }}
             pagination={{
               current: currentPage,
               pageSize,
