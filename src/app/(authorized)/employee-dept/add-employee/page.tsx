@@ -172,23 +172,26 @@ export default function AddEmployeePage() {
     return ids;
   }, [rolesApiData]);
 
+  // Reports To dropdown — disamakan dengan dropdown pada halaman edit
+  // (page.tsx: reportsToOptionsApi). Menampilkan SEMUA employee (tidak
+  // di-filter khusus role "manager"), value berupa string ID, dan opsi
+  // "Top Level" (null) berada di paling atas.
   const supervisorOptions = useMemo(() => {
     if (!apiEnabled) {
       return [
-        ...employees
-          .filter((e) => Boolean(e.isManager))
-          .map((e) => ({ label: e.name, value: e.name })),
         { label: "Top Level", value: "Top Level" },
+        ...employees.map((e) => ({ label: e.name, value: e.name })),
       ];
     }
 
     return [
-      ...employeesApiData
-        .filter((e) => (e.role_id ? managerRoleIds.has(String(e.role_id)) : false))
-        .map((e) => ({ label: e.full_name, value: e.id })),
       { label: "Top Level", value: null },
+      ...employeesApiData.map((e) => ({
+        label: e.full_name,
+        value: String(e.id),
+      })),
     ];
-  }, [apiEnabled, employees, employeesApiData, managerRoleIds]);
+  }, [apiEnabled, employees, employeesApiData]);
 
   const employmentStatusOptions = [
     { label: "Active", value: "active" },
@@ -371,7 +374,7 @@ export default function AddEmployeePage() {
               >
                 <Select
                   className="!rounded-lg"
-                  placeholder="Select supervisor"
+                  placeholder="Select manager"
                   options={supervisorOptions}
                   allowClear
                 />
