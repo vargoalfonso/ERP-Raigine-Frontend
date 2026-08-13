@@ -2,9 +2,13 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button, DatePicker, Modal, message } from "antd";
+import dayjs, { type Dayjs } from "dayjs";
 import StatsCard from "@/components/StatsCard";
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
+  type ProcurementDnItem,
+  type ProcurementDnRecord,
   type ProcurementDnType,
   useGetProcurementDnByIdQuery,
   useLazyScanProcurementDnPackingQuery,
@@ -96,6 +100,11 @@ export default function DnManagementPage() {
     indirect: { page: 1, pageSize: 10 },
     subcon: { page: 1, pageSize: 10 },
   });
+
+  // [dn-export-per-day] State untuk modal export DN per hari.
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportDate, setExportDate] = useState<Dayjs>(() => dayjs());
+  const [exportBusy, setExportBusy] = useState(false);
 
   const [barcodeDnId, setBarcodeDnId] = useState<string | null>(null);
   const [barcodeCopies, setBarcodeCopies] = useState<number>(1);
@@ -378,6 +387,356 @@ export default function DnManagementPage() {
 
     return cards;
   }, [activeTab, barcodeData, barcodeItems, bomIndex]);
+
+  // [dn-export-per-day] Utilities untuk export Delivery Note per hari.
+  //
+  // Alur:
+  // 1. User klik Export -> muncul modal DatePicker (default hari ini).
+  // 2. User pilih tanggal -> filter semua DN pada tab aktif yang
+  //    `incoming_date`-nya sama dengan tanggal terpilih.
+  // 3. Untuk tiap DN yang cocok, render satu halaman print dengan layout
+  //    Delivery Note yang mengikuti template PT. MATRA RODA PIRANTI.
+  // 4. Buka jendela baru dan panggil window.print() supaya user bisa
+  //    Save-as-PDF via dialog browser.
+
+  // Formatter angka gaya Indonesia (ribuan pakai titik, desimal koma).
+  const formatIdNumber = (
+    value: number | undefined | null,
+    fractionDigits = 0,
+  ) => {
+    if (value == null || !Number.isFinite(value)) return "-";
+    return new Intl.NumberFormat("id-ID", {
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
+    }).format(value);
+  };
+
+  const formatIdDate = (value: string | undefined | null) => {
+    if (!value) return "-";
+    const d = dayjs(value);
+    if (!d.isValid()) return String(value);
+    const months = [
+      "Januari",
+      "Februari",
+      "Maret",
+      "April",
+      "Mei",
+      "Juni",
+      "Juli",
+      "Agustus",
+      "September",
+      "Oktober",
+      "November",
+      "Desember",
+    ];
+    return `${d.date()} ${months[d.month()]} ${d.year()}`;
+  };
+
+  // QR generator (public API, tanpa dependency baru).
+  const buildQrSrc = (payload: string) => {
+    const base = 'https://' + 'api.qrserver.com/v1/create-qr-code/';
+    const q = encodeURIComponent(payload || '-');
+    return `${base}?size=140x140&margin=0&data=${q}`;
+  }
+
+  const buildDnPageHtml = (
+    dn: ProcurementDnRecord,
+    printedAtLabel: string,
+  ): string => {
+    const dnNumber = String(dn.dn_number ?? "-").trim() || "-";
+    const supplierName =
+      dn.supplier?.supplier_name ?? dn.supplier_name ?? "-";
+    const supplierAddress = dn.supplier?.full_address ?? "-";
+    const dnDate = formatIdDate(dn.created_at);
+    const deliveryDate = formatIdDate(dn.incoming_date);
+    const cycleText =
+      dn.supplier?.delivery_lead_time_days != null
+        ? String(dn.supplier.delivery_lead_time_days)
+        : "-";
+    const rit =
+      dn.delivery_to != null && dn.delivery_total != null
+        ? `${dn.delivery_to} / ${dn.delivery_total}`
+        : dn.delivery_to != null
+          ? String(dn.delivery_to)
+          : "-";
+    const dnType = (dn.type ?? "-").toString().toUpperCase();
+    const status = (dn.status ?? "-").toString().toUpperCase();
+
+    let totalKbn = 0;
+    let totalUnit = 0;
+    const rowsHtml = (dn.items ?? [])
+      .map((it: ProcurementDnItem, index: number) => {
+        const uniq = it.item_uniq_code ?? "-";
+        const partNumber = bomIndex.partNumberByUniq[uniq] ?? "-";
+        const partName = bomIndex.partNameByUniq[uniq] ?? "-";
+        const packing = it.packing_number ?? "-";
+        const uom = (it.uom ?? "PCS").toString().toUpperCase();
+        const snp = it.pcs_per_kanban ?? 0;
+        const orderUnit = it.order_qty ?? 0;
+        const orderKbn = snp > 0 ? orderUnit / snp : 0;
+        totalKbn += orderKbn;
+        totalUnit += orderUnit;
+        return `
+          <tr>
+            <td class="c">${index + 1}</td>
+            <td class="c b">${escapeHtml(uniq)}</td>
+            <td>
+              <div class="b">${escapeHtml(partNumber)}</div>
+              <div class="muted">${escapeHtml(partName)}</div>
+            </td>
+            <td class="c">${escapeHtml(packing).toUpperCase()}</td>
+            <td class="c">-</td>
+            <td class="c">${escapeHtml(uom)}</td>
+            <td class="r">${formatIdNumber(snp)}</td>
+            <td class="r">${formatIdNumber(orderKbn, orderKbn % 1 === 0 ? 0 : 2)}</td>
+            <td class="r">${formatIdNumber(orderUnit)}</td>
+          </tr>`;
+      })
+      .join("");
+
+    return `
+      <section class="page">
+        <div class="frame">
+          <div class="top">
+            <div class="brand">
+              <div class="logo">
+                <div class="logo-mark">MRP</div>
+              </div>
+              <div>
+                <div class="brand-name">PT. MATRA RODA PIRANTI</div>
+                <div class="brand-sub">Department Logistics (PPIC)</div>
+              </div>
+            </div>
+            <div class="top-right">
+              <div class="dn-title">DELIVERY NOTE</div>
+              <div class="dn-number">${escapeHtml(dnNumber)}</div>
+              <div class="dn-print-date">PRINT DATE : ${escapeHtml(printedAtLabel)}</div>
+              <div class="dn-status"><span>STATUS : ${escapeHtml(status)}</span></div>
+            </div>
+          </div>
+
+          <div class="info">
+            <div class="info-col">
+              <div class="info-row"><span class="label">SUPPLIER</span><span class="sep">:</span><span class="value b">${escapeHtml(supplierName)}</span></div>
+              <div class="info-row"><span class="label">DATE</span><span class="sep">:</span><span class="value b">${escapeHtml(dnDate)}</span></div>
+              <div class="info-row info-row-multi"><span class="label">DEL. TO</span><span class="sep">:</span><span class="value">${escapeHtml(supplierAddress)}</span></div>
+              <div class="info-row"><span class="label">RECIPIENT</span><span class="sep">:</span><span class="value">PPIC / Receiving Warehouse</span></div>
+            </div>
+            <div class="info-qr">
+              <img src="${escapeHtml(buildQrSrc(dnNumber))}" alt="DN QR" />
+            </div>
+            <div class="info-col">
+              <div class="info-row"><span class="label">CYCLE</span><span class="sep">:</span><span class="value b">${escapeHtml(cycleText)}</span></div>
+              <div class="info-row"><span class="label">DELIVERY</span><span class="sep">:</span><span class="value b">${escapeHtml(deliveryDate)}</span></div>
+              <div class="info-row"><span class="label">RIT/TIME</span><span class="sep">:</span><span class="value b">${escapeHtml(rit)}</span></div>
+              <div class="info-row"><span class="label">AREA</span><span class="sep">:</span><span class="value">-</span></div>
+              <div class="info-row"><span class="label">TYPE</span><span class="sep">:</span><span class="value b">${escapeHtml(dnType === "RM" ? "NORMAL" : dnType)}</span></div>
+            </div>
+          </div>
+
+          <table class="items">
+            <thead>
+              <tr>
+                <th style="width:36px">NO.</th>
+                <th style="width:70px">UNIQ</th>
+                <th>PART NUMBER /<br/>PART NAME</th>
+                <th style="width:80px">PACKING</th>
+                <th style="width:70px">DROP<br/>ZONE</th>
+                <th style="width:50px">UNIT</th>
+                <th style="width:60px">SNP</th>
+                <th style="width:70px">ORDER<br/>KBN</th>
+                <th style="width:70px">ORDER<br/>UNIT</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml || `<tr><td colspan="9" class="c muted">Tidak ada item.</td></tr>`}</tbody>
+            <tfoot>
+              <tr>
+                <td colspan="7" class="r b">Total</td>
+                <td class="r b">${formatIdNumber(totalKbn, totalKbn % 1 === 0 ? 0 : 2)}</td>
+                <td class="r b">${formatIdNumber(totalUnit)}</td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <div class="remarks">
+            <div class="remarks-label">Remarks :</div>
+            <div class="remarks-body">&nbsp;</div>
+          </div>
+
+          <div class="plant-tag">MRP PLANT 2</div>
+
+          <div class="sig-grid">
+            <div class="sig-box">
+              <div class="sig-title">SECURITY</div>
+              <div class="sig-area"></div>
+              <div class="sig-date">Date:</div>
+            </div>
+            <div class="sig-box sig-box-double">
+              <div class="sig-titles">
+                <div>CONTROL MAN</div>
+                <div>RECEIVED</div>
+              </div>
+              <div class="sig-areas">
+                <div class="sig-area"></div>
+                <div class="sig-area"></div>
+              </div>
+              <div class="sig-dates">
+                <div>Date:</div>
+                <div>Date:</div>
+              </div>
+            </div>
+            <div class="sig-box sig-box-supplier">
+              <div class="sig-title">SUPPLIER</div>
+              <div class="sig-titles">
+                <div>APPROVED</div>
+                <div>PREPARED</div>
+              </div>
+              <div class="sig-areas">
+                <div class="sig-area"></div>
+                <div class="sig-area"></div>
+              </div>
+              <div class="sig-dates">
+                <div>Date:</div>
+                <div>Date:</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="page-number">Page 1</div>
+        </div>
+      </section>`;
+  };
+
+  const buildDnPrintHtml = (
+    dnList: ProcurementDnRecord[],
+    dateLabel: string,
+  ): string => {
+    const printedAtLabel = dateLabel;
+    const body = dnList
+      .map((dn) => buildDnPageHtml(dn, printedAtLabel))
+      .join("\n");
+    return `<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Delivery Notes - ${escapeHtml(dateLabel)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            html, body { margin: 0; padding: 0; background: #eef2f7; color: #111827; font-family: Arial, Helvetica, sans-serif; }
+            .page { padding: 18px; page-break-after: always; }
+            .page:last-child { page-break-after: auto; }
+            .frame { background: #fff; border: 2px solid #111827; border-radius: 4px; padding: 14px 16px; }
+            .top { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: flex-start; }
+            .brand { display: flex; align-items: center; gap: 10px; }
+            .logo { width: 42px; height: 42px; border: 1.5px solid #b91c1c; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #b91c1c; font-weight: 800; font-size: 11px; }
+            .brand-name { font-size: 15px; font-weight: 800; color: #111827; }
+            .brand-sub { font-size: 10px; color: #4b5563; margin-top: 2px; }
+            .top-right { text-align: right; }
+            .dn-title { font-size: 18px; font-weight: 800; letter-spacing: 0.02em; }
+            .dn-number { font-size: 12px; margin-top: 4px; font-weight: 700; }
+            .dn-print-date { font-size: 10px; color: #4b5563; margin-top: 2px; }
+            .dn-status { margin-top: 4px; }
+            .dn-status > span { border: 1px solid #111827; padding: 2px 8px; font-size: 10px; font-weight: 700; display: inline-block; }
+            .info { display: grid; grid-template-columns: 1fr 150px 1fr; gap: 12px; margin-top: 14px; padding: 10px 4px; border-top: 1px solid #111827; }
+            .info-col { display: flex; flex-direction: column; gap: 6px; font-size: 11px; }
+            .info-row { display: grid; grid-template-columns: 68px 8px 1fr; align-items: baseline; }
+            .info-row-multi .value { white-space: normal; }
+            .info-row .label { color: #4b5563; font-weight: 600; letter-spacing: 0.03em; }
+            .info-row .sep { color: #4b5563; }
+            .info-row .value { color: #111827; }
+            .info-qr { display: flex; align-items: center; justify-content: center; }
+            .info-qr img { width: 130px; height: 130px; border: 1px solid #111827; padding: 4px; background: #fff; }
+            .b { font-weight: 700; }
+            .muted { color: #4b5563; font-size: 10px; margin-top: 1px; }
+            .items { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 10.5px; }
+            .items th, .items td { border: 1px solid #111827; padding: 4px 6px; vertical-align: middle; }
+            .items thead th { background: #f3f4f6; text-align: center; font-weight: 700; }
+            .items td.c { text-align: center; }
+            .items td.r { text-align: right; }
+            .items tfoot td { background: #f9fafb; }
+            .remarks { border: 1px solid #111827; border-top: none; padding: 10px 8px; min-height: 42px; }
+            .remarks-label { font-size: 10px; color: #4b5563; }
+            .plant-tag { text-align: center; font-size: 10px; color: #4b5563; margin: 10px 0 6px; }
+            .sig-grid { display: grid; grid-template-columns: 1fr 1.5fr 1.4fr; gap: 8px; }
+            .sig-box { border: 1px solid #111827; padding: 8px; display: flex; flex-direction: column; font-size: 10px; min-height: 110px; }
+            .sig-title { text-align: center; font-weight: 700; letter-spacing: 0.04em; border-bottom: 1px solid #d1d5db; padding-bottom: 4px; }
+            .sig-area { flex: 1; }
+            .sig-date { border-top: 1px solid #d1d5db; padding-top: 4px; }
+            .sig-titles { display: grid; grid-template-columns: 1fr 1fr; text-align: center; font-weight: 700; letter-spacing: 0.04em; border-bottom: 1px solid #d1d5db; padding-bottom: 4px; }
+            .sig-titles > div + div { border-left: 1px solid #d1d5db; }
+            .sig-areas { display: grid; grid-template-columns: 1fr 1fr; flex: 1; }
+            .sig-areas > div + div { border-left: 1px solid #d1d5db; }
+            .sig-dates { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid #d1d5db; padding-top: 4px; }
+            .sig-dates > div + div { border-left: 1px solid #d1d5db; padding-left: 6px; }
+            .sig-box-supplier .sig-title { margin-bottom: 4px; }
+            .page-number { text-align: right; font-size: 10px; color: #4b5563; margin-top: 8px; }
+            @page { size: A4; margin: 8mm; }
+            @media print {
+              body { background: #fff; }
+              .page { padding: 0; }
+              .frame { border-width: 1.5px; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          ${body}
+          <div class="no-print" style="position:fixed; bottom:12px; right:12px;">
+            <button onclick="window.print()" style="padding:8px 14px; border-radius:6px; border:1px solid #111827; background:#111827; color:#fff; cursor:pointer;">Print / Save as PDF</button>
+          </div>
+        </body>
+      </html>`;
+  };
+
+  const handleExportDnByDate = () => {
+    if (!procurementApiAvailable) {
+      message.warning("Data DN belum tersedia.");
+      return;
+    }
+    if (!exportDate || !exportDate.isValid()) {
+      message.warning("Pilih tanggal terlebih dahulu.");
+      return;
+    }
+    setExportBusy(true);
+    try {
+      const selectedIso = exportDate.format("YYYY-MM-DD");
+      const type = tabToType(activeTab);
+      // [dn-export-per-day] Filter berdasarkan `created_at` DN
+      // (tanggal DN dibuat), bukan `incoming_date`, karena banyak DN
+      // yang belum punya `incoming_date` terisi sehingga tidak masuk
+      // filter. `created_at` selalu ada.
+      const list = (listQuery.data?.data ?? []).filter((dn) => {
+        if (String(dn.type ?? "").toUpperCase() !== type) return false;
+        const created = dn.created_at ? dayjs(dn.created_at) : null;
+        if (!created || !created.isValid()) return false;
+        return created.format("YYYY-MM-DD") === selectedIso;
+      });
+      if (list.length === 0) {
+        message.info(
+          `Tidak ada DN pada ${exportDate.format("DD MMM YYYY")} untuk tab ini.`,
+        );
+        return;
+      }
+      const html = buildDnPrintHtml(list, exportDate.format("DD MMM YYYY"));
+      const win = window.open("", "_blank", "width=900,height=1100");
+      if (!win) {
+        message.error(
+          "Popup diblokir browser. Izinkan popup untuk mengunduh DN.",
+        );
+        return;
+      }
+      win.document.write(html);
+      win.document.close();
+      win.focus();
+      setTimeout(() => win.print(), 400);
+      setExportOpen(false);
+    } catch (err) {
+      console.error("[dn-export-per-day] failed", err);
+      message.error("Gagal menyiapkan export DN.");
+    } finally {
+      setExportBusy(false);
+    }
+  };
 
   /** Prints through a hidden iframe so the app is never navigated away. */
   const handlePrintKanban = () => {
@@ -720,7 +1079,15 @@ export default function DnManagementPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
             </button>
-            <button type="button" className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white text-gray-700 border border-gray-200 text-sm hover:bg-gray-50">
+            {/* [dn-export-per-day] */}
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-white text-gray-700 border border-gray-200 text-sm hover:bg-gray-50"
+              onClick={() => {
+                setExportDate(dayjs());
+                setExportOpen(true);
+              }}
+            >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v12m0 0l-3-3m3 3l3-3" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
@@ -1148,6 +1515,58 @@ export default function DnManagementPage() {
           </div>
         </div>
       ) : null}
+
+      {/* [dn-export-per-day] Modal pilih tanggal untuk export Delivery Note */}
+      <Modal
+        title="Export Delivery Note per Hari"
+        open={exportOpen}
+        onCancel={() => (exportBusy ? null : setExportOpen(false))}
+        maskClosable={!exportBusy}
+        footer={[
+          <Button
+            key="cancel"
+            onClick={() => setExportOpen(false)}
+            disabled={exportBusy}
+          >
+            Batal
+          </Button>,
+          <Button
+            key="export"
+            type="primary"
+            loading={exportBusy}
+            onClick={handleExportDnByDate}
+          >
+            Download PDF
+          </Button>,
+        ]}
+      >
+        <div className="space-y-3">
+          <div className="text-sm text-gray-600">
+            Pilih tanggal DN dibuat (created at). Semua DN{" "}
+            <span className="font-semibold">
+              {activeTab === "raw"
+                ? "Raw Material"
+                : activeTab === "indirect"
+                  ? "Indirect"
+                  : "Sub-Con"}
+            </span>{" "}
+            yang dibuat pada tanggal tersebut akan dicetak dengan format
+            Delivery Note standar.
+          </div>
+          <div>
+            <div className="text-xs font-medium text-gray-700 mb-1">
+              Tanggal DN Dibuat
+            </div>
+            <DatePicker
+              className="w-full"
+              format="DD MMM YYYY"
+              value={exportDate}
+              onChange={(v) => v && setExportDate(v)}
+              allowClear={false}
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
