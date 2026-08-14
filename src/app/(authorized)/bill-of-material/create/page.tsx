@@ -25,7 +25,10 @@ import {
 } from "@ant-design/icons";
 
 import { useCreateBomMutation, useGetBomTreeQuery } from "@/lib/api/bom/api";
-import { useGetProcessesQuery, useGetUomsQuery } from "@/lib/api/system-settings/api";
+import {
+  useGetProcessesQuery,
+  useGetUomsQuery,
+} from "@/lib/api/system-settings/api";
 import {
   uploadFileInChunks,
   type CreateUploadSessionArgs,
@@ -103,8 +106,15 @@ type ChildUniqSelectProps = {
   getOptions: (category?: string) => Array<{ label: string; value: string }>;
 };
 
-const ChildUniqSelect = ({ itemPath, level, form, getOptions }: ChildUniqSelectProps) => {
-  const watchedCat = Form.useWatch([...itemPath, "category"], form) as string | undefined;
+const ChildUniqSelect = ({
+  itemPath,
+  level,
+  form,
+  getOptions,
+}: ChildUniqSelectProps) => {
+  const watchedCat = Form.useWatch([...itemPath, "category"], form) as
+    | string
+    | undefined;
   const opts = getOptions(watchedCat);
   return (
     <Select
@@ -126,7 +136,8 @@ const getLevelBadgeClass = (level: number) => {
   return "bg-gray-100 text-gray-700";
 };
 
-const toApiStatus = (value: unknown) => (String(value ?? "").trim() === "Inactive" ? "Inactive" : "Active");
+const toApiStatus = (value: unknown) =>
+  String(value ?? "").trim() === "Inactive" ? "Inactive" : "Active";
 
 const asFile = (v: unknown): File | null => (v instanceof File ? v : null);
 
@@ -151,13 +162,14 @@ export default function Page() {
   const [form] = Form.useForm<Step1Values>();
   const rootAddChildRef = useRef<(() => void) | null>(null);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
-  const [childFileLists, setChildFileLists] = useState<Record<string, UploadFile[]>>({});
+  const [childFileLists, setChildFileLists] = useState<
+    Record<string, UploadFile[]>
+  >({});
   const [step, setStep] = useState<number>(0);
-  const [openProcessRouteIndex, setOpenProcessRouteIndex] = useState<number | null>(null);
+  const [openProcessRouteIndex, setOpenProcessRouteIndex] = useState<
+    number | null
+  >(null);
   const apiEnabled = Boolean(apiBaseUrl);
-
-
- 
 
   const [createBom, { isLoading: isCreating }] = useCreateBomMutation();
 
@@ -181,7 +193,8 @@ export default function Page() {
   }, [existingBomTree]);
 
   const getUniqOptionsForCategory = (category?: string) => {
-    const desired = typeof category === "string" ? category.trim().toLowerCase() : "";
+    const desired =
+      typeof category === "string" ? category.trim().toLowerCase() : "";
     const mapCategory = (c: string) => {
       const s = c.trim().toLowerCase();
       if (s === "rm") return "raw";
@@ -195,7 +208,12 @@ export default function Page() {
       for (const n of arr) {
         const uniq = typeof n?.uniq_code === "string" ? n.uniq_code.trim() : "";
         const spec = n?.material_spec || n?.material_specifications || {};
-        const type = typeof spec?.type_material === "string" ? spec.type_material.trim().toLowerCase() : typeof n?.raw_material_type === "string" ? n.raw_material_type.trim().toLowerCase() : "";
+        const type =
+          typeof spec?.type_material === "string"
+            ? spec.type_material.trim().toLowerCase()
+            : typeof n?.raw_material_type === "string"
+              ? n.raw_material_type.trim().toLowerCase()
+              : "";
         if (uniq && (!desiredNormalized || type === desiredNormalized)) {
           out.push({ label: uniq, value: uniq });
         }
@@ -205,7 +223,8 @@ export default function Page() {
     if (Array.isArray(nodes)) walk(nodes);
     // fallback to unique set of existingUniqs if none matched
     if (out.length === 0) {
-      for (const u of Array.from(existingUniqs)) out.push({ label: u, value: u });
+      for (const u of Array.from(existingUniqs))
+        out.push({ label: u, value: u });
     }
     return out;
   };
@@ -218,15 +237,25 @@ export default function Page() {
   const { data: machines = [], isLoading: isMachinesLoading } =
     useGetMachinesQuery(undefined, { skip: !apiEnabled });
 
-  const processOptions = useMemo<Array<{ value: string | number; label: string; isAssembly: boolean; subCon: boolean }>>(() => {
+  const processOptions = useMemo<
+    Array<{
+      value: string | number;
+      label: string;
+      isAssembly: boolean;
+      subCon: boolean;
+    }>
+  >(() => {
     return (processes ?? [])
       .map((p: any) => {
         // Handle both snake_case (normalized) and PascalCase (raw Go response)
         const rawId = p?.id ?? p?.ID;
-        const idStr = typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
+        const idStr =
+          typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
         if (!idStr) return null;
         const asNumber = Number(idStr);
-        const value: string | number = Number.isFinite(asNumber) ? asNumber : idStr;
+        const value: string | number = Number.isFinite(asNumber)
+          ? asNumber
+          : idStr;
         const code = String(p?.process_code ?? p?.ProcessCode ?? "").trim();
         const name = String(p?.process_name ?? p?.ProcessName ?? "").trim();
         return {
@@ -237,29 +266,43 @@ export default function Page() {
         };
       })
       .filter(
-        (x): x is { value: string | number; label: string; isAssembly: boolean; subCon: boolean } =>
-          Boolean(x) && typeof (x as any).label === "string"
+        (
+          x,
+        ): x is {
+          value: string | number;
+          label: string;
+          isAssembly: boolean;
+          subCon: boolean;
+        } => Boolean(x) && typeof (x as any).label === "string",
       );
   }, [processes]);
 
-  const machineOptions = useMemo<Array<{ value: string | number; label: string }>>(() => {
+  const machineOptions = useMemo<
+    Array<{ value: string | number; label: string }>
+  >(() => {
     return (machines ?? [])
       .map((m: any) => {
         const rawId = m?.id;
-        const idStr = typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
+        const idStr =
+          typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
         if (!idStr) return null;
         const asNumber = Number(idStr);
-        const value: string | number = Number.isFinite(asNumber) ? asNumber : idStr;
-        const name = typeof m?.machine_name === "string" ? m.machine_name.trim() : "";
-        const number = typeof m?.machine_number === "string" ? m.machine_number.trim() : "";
+        const value: string | number = Number.isFinite(asNumber)
+          ? asNumber
+          : idStr;
+        const name =
+          typeof m?.machine_name === "string" ? m.machine_name.trim() : "";
+        const number =
+          typeof m?.machine_number === "string" ? m.machine_number.trim() : "";
         return {
           value,
-          label: number && name ? `${number} — ${name}` : name || number || idStr,
+          label:
+            number && name ? `${number} — ${name}` : name || number || idStr,
         };
       })
       .filter(
         (x): x is { value: string | number; label: string } =>
-          Boolean(x) && typeof (x as any).label === "string"
+          Boolean(x) && typeof (x as any).label === "string",
       );
   }, [machines]);
 
@@ -281,8 +324,12 @@ export default function Page() {
     return (uoms ?? [])
       .map((u) => {
         const id = String((u as any).id ?? "").trim();
-        const code = String((u as any).code ?? (u as any).unit_code ?? "").trim().toUpperCase();
-        const name = String((u as any).name ?? (u as any).unit_name ?? "").trim();
+        const code = String((u as any).code ?? (u as any).unit_code ?? "")
+          .trim()
+          .toUpperCase();
+        const name = String(
+          (u as any).name ?? (u as any).unit_name ?? "",
+        ).trim();
         if (!id || !code) return null;
 
         return {
@@ -291,7 +338,9 @@ export default function Page() {
           code,
         };
       })
-      .filter((x): x is { value: string; label: string; code: string } => Boolean(x));
+      .filter((x): x is { value: string; label: string; code: string } =>
+        Boolean(x),
+      );
   }, [uoms]);
 
   const uomCodeByValue = useMemo(() => {
@@ -308,10 +357,12 @@ export default function Page() {
       { value: "KG", label: "KG — Kilogram" },
       { value: "M", label: "M — Meter" },
     ],
-    []
+    [],
   );
 
-  const effectiveUomOptions = useMemo<Array<{ value: string; label: string }>>(() => {
+  const effectiveUomOptions = useMemo<
+    Array<{ value: string; label: string }>
+  >(() => {
     if (!apiEnabled) return seededUomOptions;
     if (uomOptions.length > 0) return uomOptions;
     if (uomIsForbidden) return [];
@@ -333,7 +384,7 @@ export default function Page() {
           return { label: name, value: supplierId };
         })
         .filter((x): x is { label: string; value: string } => Boolean(x)),
-    [suppliers]
+    [suppliers],
   );
 
   const supplierNameByValue = useMemo(() => {
@@ -361,14 +412,11 @@ export default function Page() {
         // length_mm: 300,
       },
     }),
-    []
+    [],
   );
 
-  const requirePositiveNumberForForms = (
-    forms: string[],
-    label: string
-  ) =>
-    async (_: unknown, value: unknown) => {
+  const requirePositiveNumberForForms =
+    (forms: string[], label: string) => async (_: unknown, value: unknown) => {
       const currentForm = form.getFieldValue(["material_spec", "form"]);
       if (!forms.includes(String(currentForm ?? ""))) return;
       const num = typeof value === "number" ? value : Number(value);
@@ -400,16 +448,22 @@ export default function Page() {
     const key = String(value ?? "").trim();
     if (!key) return false;
     return processOptions.some(
-      (option) => String(option.value).trim() === key && option.isAssembly === true
+      (option) =>
+        String(option.value).trim() === key && option.isAssembly === true,
     );
   };
 
   const isParentAssembly = useMemo(() => {
-    if (!Array.isArray(watchedParentProcessRoutes) || watchedParentProcessRoutes.length === 0) {
+    if (
+      !Array.isArray(watchedParentProcessRoutes) ||
+      watchedParentProcessRoutes.length === 0
+    ) {
       return false;
     }
 
-    return watchedParentProcessRoutes.some((route) => isAssemblyProcessValue(route?.process_id));
+    return watchedParentProcessRoutes.some((route) =>
+      isAssemblyProcessValue(route?.process_id),
+    );
   }, [watchedParentProcessRoutes, processOptions]);
 
   const addLevel1Child = () => {
@@ -419,7 +473,7 @@ export default function Page() {
   const renderProcessRoutesEditor = (
     fieldPath: Array<string | number>,
     absolutePath: Array<string | number>,
-    options?: { hideAddWhenAssembly?: boolean; isAssemblyMode?: boolean }
+    options?: { hideAddWhenAssembly?: boolean; isAssemblyMode?: boolean },
   ) => {
     const isAssemblyMode = options?.isAssemblyMode === true;
     const hideAddWhenAssembly = options?.hideAddWhenAssembly === true;
@@ -433,11 +487,15 @@ export default function Page() {
               icon={<PlusOutlined />}
               onClick={() => {
                 const dynamicForm = form as any;
-                const current = dynamicForm.getFieldValue([...absolutePath, "process_routes"]) ?? [];
-                dynamicForm.setFieldValue([...absolutePath, "process_routes"], [
-                  ...current,
-                  { sequence: (current.length ?? 0) + 1 },
-                ]);
+                const current =
+                  dynamicForm.getFieldValue([
+                    ...absolutePath,
+                    "process_routes",
+                  ]) ?? [];
+                dynamicForm.setFieldValue(
+                  [...absolutePath, "process_routes"],
+                  [...current, { sequence: (current.length ?? 0) + 1 }],
+                );
               }}
             >
               Add Process
@@ -457,10 +515,19 @@ export default function Page() {
               ) : null}
 
               {routeFields.map((routeField) => (
-                <div key={routeField.key} className="rounded-lg border border-gray-200 p-4">
+                <div
+                  key={routeField.key}
+                  className="rounded-lg border border-gray-200 p-4"
+                >
                   <div className="space-y-3">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <Form.Item name={[routeField.name, "process_id"]} label="Process" rules={[{ required: true, message: "Process is required" }]}> 
+                      <Form.Item
+                        name={[routeField.name, "process_id"]}
+                        label="Process"
+                        rules={[
+                          { required: true, message: "Process is required" },
+                        ]}
+                      >
                         <Select
                           size="large"
                           showSearch
@@ -469,13 +536,21 @@ export default function Page() {
                           loading={isProcessesLoading}
                           optionFilterProp="label"
                           filterOption={(input, option) =>
-                            String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                            String(option?.label ?? "")
+                              .toLowerCase()
+                              .includes(input.toLowerCase())
                           }
                           style={{ width: "100%" }}
                         />
                       </Form.Item>
 
-                      <Form.Item name={[routeField.name, "machine_id"]} label="Machine" rules={[{ required: true, message: "Machine is required" }]}> 
+                      <Form.Item
+                        name={[routeField.name, "machine_id"]}
+                        label="Machine"
+                        rules={[
+                          { required: true, message: "Machine is required" },
+                        ]}
+                      >
                         <Select
                           size="large"
                           showSearch
@@ -484,34 +559,76 @@ export default function Page() {
                           loading={isMachinesLoading}
                           optionFilterProp="label"
                           filterOption={(input, option) =>
-                            String(option?.label ?? "").toLowerCase().includes(input.toLowerCase())
+                            String(option?.label ?? "")
+                              .toLowerCase()
+                              .includes(input.toLowerCase())
                           }
                           style={{ width: "100%" }}
                         />
                       </Form.Item>
 
-                      <Form.Item name={[routeField.name, "sequence"]} label="Sequence">
-                        <InputNumber size="large" min={1} style={{ width: "100%" }} />
+                      <Form.Item
+                        name={[routeField.name, "sequence"]}
+                        label="Sequence"
+                      >
+                        <InputNumber
+                          size="large"
+                          min={1}
+                          style={{ width: "100%" }}
+                        />
                       </Form.Item>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <Form.Item name={[routeField.name, "tooling"]} label="Add Tooling">
-                        <Select size="large" placeholder="Select tooling" options={[{ label: "Dies", value: "Dies" },{ label: "JIG", value: "JIG" },{ label: "CF", value: "CF" }]} allowClear style={{ width: "100%" }} />
+                      <Form.Item
+                        name={[routeField.name, "tooling"]}
+                        label="Add Tooling"
+                      >
+                        <Select
+                          size="large"
+                          placeholder="Select tooling"
+                          options={[
+                            { label: "Dies", value: "Dies" },
+                            { label: "JIG", value: "JIG" },
+                            { label: "CF", value: "CF" },
+                          ]}
+                          allowClear
+                          style={{ width: "100%" }}
+                        />
                       </Form.Item>
-                      <Form.Item name={[routeField.name, "machine_stroke"]} label="Machine Stroke">
-                        <Input size="large" placeholder="machine stroke" style={{ width: "100%" }} />
+                      <Form.Item
+                        name={[routeField.name, "machine_stroke"]}
+                        label="Machine Stroke"
+                      >
+                        <Input
+                          size="large"
+                          placeholder="machine stroke"
+                          style={{ width: "100%" }}
+                        />
                       </Form.Item>
                     </div>
 
                     <div className="grid grid-cols-1 gap-3">
-                      <Form.Item name={[routeField.name, "remark"]} label="Remark / Catatan">
-                        <Input.TextArea rows={2} placeholder="Optional remark for this process route (Catatan)" />
+                      <Form.Item
+                        name={[routeField.name, "remark"]}
+                        label="Remark / Catatan"
+                      >
+                        <Input.TextArea
+                          rows={2}
+                          placeholder="Optional remark for this process route (Catatan)"
+                        />
                       </Form.Item>
                     </div>
 
                     <div className="flex items-end justify-end">
-                      <Button danger type="text" icon={<DeleteOutlined />} onClick={() => remove(routeField.name)}>Remove</Button>
+                      <Button
+                        danger
+                        type="text"
+                        icon={<DeleteOutlined />}
+                        onClick={() => remove(routeField.name)}
+                      >
+                        Remove
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -523,38 +640,122 @@ export default function Page() {
     );
   };
 
-  const renderMaterialSpecEditor = (fieldPath: Array<string | number>, disabled = false) => (
+  const renderMaterialSpecEditor = (
+    fieldPath: Array<string | number>,
+    disabled = false,
+  ) => (
     <div className="space-y-3">
       <Text strong>Material Specifications</Text>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Form.Item name={[...fieldPath, "material_spec", "material_code"]} label="Material Code" rules={disabled ? [] : [{ required: true, message: "Material Code is required" }]}>
+        <Form.Item
+          name={[...fieldPath, "material_spec", "material_code"]}
+          label="Material Code"
+          rules={
+            disabled
+              ? []
+              : [{ required: true, message: "Material Code is required" }]
+          }
+        >
           <Input placeholder="e.g., STKM550" size="large" disabled={disabled} />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "form"]} label="Form" rules={disabled ? [] : [{ required: true, message: "Form is required" }]}>
-          <Select placeholder="Select form" size="large" disabled={disabled} options={[{ label: "Plate", value: "Plate" },{ label: "Coil", value: "Coil" },{ label: "Pipe", value: "Pipe" },{ label: "Rod", value: "Rod" },{ label: "Wire", value: "Wire" },{ label: "Other", value: "Other" }]} allowClear />
+        <Form.Item
+          name={[...fieldPath, "material_spec", "form"]}
+          label="Form"
+          rules={
+            disabled ? [] : [{ required: true, message: "Form is required" }]
+          }
+        >
+          <Select
+            placeholder="Select form"
+            size="large"
+            disabled={disabled}
+            options={[
+              { label: "Plate", value: "Plate" },
+              { label: "Coil", value: "Coil" },
+              { label: "Pipe", value: "Pipe" },
+              { label: "Rod", value: "Rod" },
+              { label: "Wire", value: "Wire" },
+              { label: "Other", value: "Other" },
+            ]}
+            allowClear
+          />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "weight_kg"]} label="Weight (kg)">
-          <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={disabled} />
+        <Form.Item
+          name={[...fieldPath, "material_spec", "weight_kg"]}
+          label="Weight (kg)"
+        >
+          <InputNumber
+            min={0}
+            size="large"
+            style={{ width: "100%" }}
+            disabled={disabled}
+          />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "grade"]} label="Grade" rules={disabled ? [] : [{ required: true, message: "Grade is required" }]}>
+        <Form.Item
+          name={[...fieldPath, "material_spec", "grade"]}
+          label="Grade"
+          rules={
+            disabled ? [] : [{ required: true, message: "Grade is required" }]
+          }
+        >
           <Input placeholder="e.g., Grade A" size="large" disabled={disabled} />
         </Form.Item>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <Form.Item name={[...fieldPath, "material_spec", "width_mm"]} label="Width (mm)">
-          <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={disabled} />
+        <Form.Item
+          name={[...fieldPath, "material_spec", "width_mm"]}
+          label="Width (mm)"
+        >
+          <InputNumber
+            min={0}
+            size="large"
+            style={{ width: "100%" }}
+            disabled={disabled}
+          />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "diameter_mm"]} label="Diameter (mm)">
-          <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={disabled} />
+        <Form.Item
+          name={[...fieldPath, "material_spec", "diameter_mm"]}
+          label="Diameter (mm)"
+        >
+          <InputNumber
+            min={0}
+            size="large"
+            style={{ width: "100%" }}
+            disabled={disabled}
+          />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "thickness_mm"]} label="Thickness (mm)">
-          <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={disabled} />
+        <Form.Item
+          name={[...fieldPath, "material_spec", "thickness_mm"]}
+          label="Thickness (mm)"
+        >
+          <InputNumber
+            min={0}
+            size="large"
+            style={{ width: "100%" }}
+            disabled={disabled}
+          />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "length_mm"]} label="Length (mm)">
-          <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={disabled} />
+        <Form.Item
+          name={[...fieldPath, "material_spec", "length_mm"]}
+          label="Length (mm)"
+        >
+          <InputNumber
+            min={0}
+            size="large"
+            style={{ width: "100%" }}
+            disabled={disabled}
+          />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "type_material"]} label="Category">
-          <Select placeholder="Category" size="large" disabled={disabled} allowClear>
+        <Form.Item
+          name={[...fieldPath, "material_spec", "type_material"]}
+          label="Category"
+        >
+          <Select
+            placeholder="Category"
+            size="large"
+            disabled={disabled}
+            allowClear
+          >
             <Select.Option value="raw">Raw</Select.Option>
             <Select.Option value="indirect">Indirect</Select.Option>
             <Select.Option value="subcon">Subcon</Select.Option>
@@ -564,9 +765,15 @@ export default function Page() {
     </div>
   );
 
-  const renderChildProcessAndMaterial = (fieldPath: Array<string | number>, absolutePath: Array<string | number>) => (
+  const renderChildProcessAndMaterial = (
+    fieldPath: Array<string | number>,
+    absolutePath: Array<string | number>,
+  ) => (
     <div className="mt-6 space-y-6">
-      {renderProcessRoutesEditor(fieldPath, absolutePath, { hideAddWhenAssembly: false, isAssemblyMode: isParentAssembly })}
+      {renderProcessRoutesEditor(fieldPath, absolutePath, {
+        hideAddWhenAssembly: false,
+        isAssemblyMode: isParentAssembly,
+      })}
       {renderMaterialSpecEditor(fieldPath, isParentAssembly)}
     </div>
   );
@@ -576,9 +783,15 @@ export default function Page() {
     remove: (index: number | number[]) => void,
     listPath: FormPath,
     level: number,
-    parentNumbers: number[] = []
+    parentNumbers: number[] = [],
   ) => (
-    <div className={level === 1 ? "space-y-5" : "mt-5 space-y-4 border-l-2 border-gray-100 pl-4"}>
+    <div
+      className={
+        level === 1
+          ? "space-y-5"
+          : "mt-5 space-y-4 border-l-2 border-gray-100 pl-4"
+      }
+    >
       {fields.map((field, idx) => {
         const childFieldKey = field.key;
         const numbering = [...parentNumbers, idx + 1];
@@ -589,7 +802,9 @@ export default function Page() {
         return (
           <Card
             key={childFieldKey}
-            className={level <= 2 ? "border border-gray-200" : "border border-gray-100"}
+            className={
+              level <= 2 ? "border border-gray-200" : "border border-gray-100"
+            }
             styles={{ body: { paddingTop: 16 } }}
           >
             <div className="flex items-center justify-between mb-4">
@@ -620,7 +835,10 @@ export default function Page() {
                 label="UNIQ"
                 rules={[{ required: true, message: "UNIQ is required" }]}
               >
-                <Input placeholder={`e.g., LV7-001-${String.fromCharCode(64 + Math.min(level, 26))}`} size="large" />
+                <Input
+                  placeholder={`e.g., LV7-001-${String.fromCharCode(64 + Math.min(level, 26))}`}
+                  size="large"
+                />
               </Form.Item>
               <Form.Item
                 name={[field.name, "part_name"]}
@@ -639,7 +857,9 @@ export default function Page() {
               <Form.Item
                 name={[field.name, "model"]}
                 label="Product Model"
-                rules={[{ required: true, message: "Product model is required" }]}
+                rules={[
+                  { required: true, message: "Product model is required" },
+                ]}
               >
                 <Input placeholder="Enter product model" size="large" />
               </Form.Item>
@@ -653,10 +873,7 @@ export default function Page() {
               >
                 <InputNumber min={0} size="large" style={{ width: "100%" }} />
               </Form.Item>
-              <Form.Item
-                name={[field.name, "version"]}
-                label="Version"
-              >
+              <Form.Item name={[field.name, "version"]} label="Version">
                 <Input placeholder="v1.0" size="large" />
               </Form.Item>
               <Form.Item
@@ -698,7 +915,10 @@ export default function Page() {
 
             {canAddMoreLevels ? (
               <Form.List name={[field.name, "children"]}>
-                {(nestedFields, { add: addNestedField, remove: removeNestedField }) => (
+                {(
+                  nestedFields,
+                  { add: addNestedField, remove: removeNestedField },
+                ) => (
                   <div className="mt-6">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <Text strong>Level {level + 1} Children</Text>
@@ -707,7 +927,7 @@ export default function Page() {
                         onClick={() => {
                           if (nestedFields.length >= MAX_CHILDREN_PER_PARENT) {
                             messageApi.warning(
-                              `Maximum ${MAX_CHILDREN_PER_PARENT} child parts allowed for each parent.`
+                              `Maximum ${MAX_CHILDREN_PER_PARENT} child parts allowed for each parent.`,
                             );
                             return;
                           }
@@ -724,11 +944,16 @@ export default function Page() {
                         removeNestedField,
                         [...itemPath, "children"],
                         level + 1,
-                        numbering
+                        numbering,
                       )
                     ) : (
                       <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-4 text-sm text-gray-500">
-                        No level {level + 1} child yet. Klik <span className="font-medium">Add Child Level {level + 1}</span> untuk menambahkan UNIQ, Part Name, Part Number, Product Model, upload gambar, Process Routes, dan Material List.
+                        No level {level + 1} child yet. Klik{" "}
+                        <span className="font-medium">
+                          Add Child Level {level + 1}
+                        </span>{" "}
+                        untuk menambahkan UNIQ, Part Name, Part Number, Product
+                        Model, upload gambar, Process Routes, dan Material List.
                       </div>
                     )}
                   </div>
@@ -741,14 +966,18 @@ export default function Page() {
     </div>
   );
 
-  const renderChildList = (listPath: FormPath, level: number, parentNumbers: number[] = []) => (
+  const renderChildList = (
+    listPath: FormPath,
+    level: number,
+    parentNumbers: number[] = [],
+  ) => (
     <Form.List name={listPath}>
       {(fields, { add, remove }) => {
         if (level === 1) {
           rootAddChildRef.current = () => {
             if (fields.length >= MAX_CHILDREN_PER_PARENT) {
               messageApi.warning(
-                `Maximum ${MAX_CHILDREN_PER_PARENT} child parts allowed for each parent.`
+                `Maximum ${MAX_CHILDREN_PER_PARENT} child parts allowed for each parent.`,
               );
               return;
             }
@@ -812,7 +1041,7 @@ export default function Page() {
           remove,
           listPath,
           level,
-          parentNumbers
+          parentNumbers,
         );
       }}
     </Form.List>
@@ -835,7 +1064,9 @@ export default function Page() {
       const values = form.getFieldsValue(true) as Step1Values;
       const assemblyMode =
         Array.isArray(values.process_routes) &&
-        values.process_routes.some((route) => isAssemblyProcessValue(route?.process_id));
+        values.process_routes.some((route) =>
+          isAssemblyProcessValue(route?.process_id),
+        );
 
       if (!assemblyMode) {
         await form.validateFields([
@@ -885,7 +1116,8 @@ export default function Page() {
       const parentUomValue =
         parentUomSelection === undefined
           ? undefined
-          : uomCodeByValue.get(String(parentUomSelection)) ?? String(parentUomSelection);
+          : (uomCodeByValue.get(String(parentUomSelection)) ??
+            String(parentUomSelection));
 
       if (!parentUomValue) {
         messageApi.destroy("bom-save");
@@ -897,7 +1129,14 @@ export default function Page() {
         if (typeof v !== "string") return undefined;
         const raw = v.trim();
         if (!raw) return undefined;
-        const allowed = new Set(["Plate", "Coil", "Pipe", "Rod", "Wire", "Other"]);
+        const allowed = new Set([
+          "Plate",
+          "Coil",
+          "Pipe",
+          "Rod",
+          "Wire",
+          "Other",
+        ]);
         if (allowed.has(raw)) return raw;
 
         const lower = raw.toLowerCase();
@@ -935,10 +1174,15 @@ export default function Page() {
                 typeof r.machine_stroke === "string" && r.machine_stroke.trim()
                   ? r.machine_stroke.trim()
                   : undefined,
-              remark: typeof r.remark === "string" && r.remark.trim() ? r.remark.trim() : undefined,
+              remark:
+                typeof r.remark === "string" && r.remark.trim()
+                  ? r.remark.trim()
+                  : undefined,
             };
           })
-          .filter((r) => r.process_id !== undefined && r.machine_id !== undefined);
+          .filter(
+            (r) => r.process_id !== undefined && r.machine_id !== undefined,
+          );
 
       const mapMaterialSpec = (spec?: MaterialSpec) => {
         const s = spec ?? {};
@@ -958,14 +1202,17 @@ export default function Page() {
           customer_cycle: cleanText(s.customer_cycle),
         };
         const cleanedEntries = Object.entries(raw).filter(
-          ([, v]) => v !== undefined && v !== null && v !== ""
+          ([, v]) => v !== undefined && v !== null && v !== "",
         );
         if (cleanedEntries.length === 0) return undefined;
         return Object.fromEntries(cleanedEntries);
       };
 
       const skippedChildren: string[] = [];
-      const mapChildParts = (parts: ChildPart[] | undefined, level: number): any[] => {
+      const mapChildParts = (
+        parts: ChildPart[] | undefined,
+        level: number,
+      ): any[] => {
         const arr = Array.isArray(parts) ? parts : [];
         return arr
           .map((c, idx) => {
@@ -1019,7 +1266,9 @@ export default function Page() {
       }
 
       const parentRoutes = mapProcessRoutes(values.process_routes);
-      const parentSpec = assemblyMode ? undefined : mapMaterialSpec(values.material_spec);
+      const parentSpec = assemblyMode
+        ? undefined
+        : mapMaterialSpec(values.material_spec);
       if (!assemblyMode && !parentSpec) {
         messageApi.destroy("bom-save");
         messageApi.error("Material specifications are required.");
@@ -1028,7 +1277,9 @@ export default function Page() {
       const parentUniq = cleanText(values.parent_uniq);
       if (parentUniq && existingUniqs.has(parentUniq)) {
         messageApi.destroy("bom-save");
-        messageApi.error(`UNIQ '${parentUniq}' already exists. Please choose another UNIQ.`);
+        messageApi.error(
+          `UNIQ '${parentUniq}' already exists. Please choose another UNIQ.`,
+        );
         return;
       }
 
@@ -1036,7 +1287,9 @@ export default function Page() {
         const uniq = typeof c?.uniq_code === "string" ? c.uniq_code : "";
         if (uniq && existingUniqs.has(uniq)) {
           messageApi.destroy("bom-save");
-          messageApi.error(`Child UNIQ '${uniq}' already exists. Please change it.`);
+          messageApi.error(
+            `Child UNIQ '${uniq}' already exists. Please change it.`,
+          );
           return;
         }
       }
@@ -1057,7 +1310,7 @@ export default function Page() {
 
       if (skippedChildren.length > 0) {
         messageApi.warning(
-          `Skipped incomplete child rows: ${skippedChildren.join(", ")}. Fill UNIQ, Part Name, Part Number or remove the row.`
+          `Skipped incomplete child rows: ${skippedChildren.join(", ")}. Fill UNIQ, Part Name, Part Number or remove the row.`,
         );
       }
 
@@ -1105,13 +1358,18 @@ export default function Page() {
       // The upload session already receives item_id so the file can be attached server-side.
       if (bomId) {
         const token = getCookiesFromBrowser("Authorization");
-        const res = await fetch(`${apiBaseUrl}/products/bom/${encodeURIComponent(bomId)}`, {
-          method: "GET",
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        });
+        const res = await fetch(
+          `${apiBaseUrl}/products/bom/${encodeURIComponent(bomId)}`,
+          {
+            method: "GET",
+            headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+          },
+        );
         const detailJson = await res.json().catch(() => null);
         const detailData =
-          detailJson && typeof detailJson === "object" && (detailJson as any).data
+          detailJson &&
+          typeof detailJson === "object" &&
+          (detailJson as any).data
             ? (detailJson as any).data
             : detailJson;
         const childrenFromApi = Array.isArray(detailData?.children)
@@ -1139,7 +1397,10 @@ export default function Page() {
               toStrId(childNode?.bom_child_id);
             if (uniq && childId) uniqToChildId.set(uniq, childId);
 
-            if (Array.isArray(childNode?.children) && childNode.children.length > 0) {
+            if (
+              Array.isArray(childNode?.children) &&
+              childNode.children.length > 0
+            ) {
               collectChildIds(childNode.children);
             }
           }
@@ -1148,7 +1409,7 @@ export default function Page() {
 
         const uploadChildAssets = async (
           parts: ChildPart[] | undefined,
-          indexPath: number[] = []
+          indexPath: number[] = [],
         ): Promise<void> => {
           const arr = Array.isArray(parts) ? parts : [];
           for (let idx = 0; idx < arr.length; idx++) {
@@ -1157,12 +1418,16 @@ export default function Page() {
             const childFileKey = toChildFileKey([
               "child_parts",
               ...currentPath.flatMap((pathIndex, depth) =>
-                depth === 0 ? [pathIndex] : ["children", pathIndex]
+                depth === 0 ? [pathIndex] : ["children", pathIndex],
               ),
             ]);
-            const childFile = asFile(childFileLists?.[childFileKey]?.[0]?.originFileObj);
+            const childFile = asFile(
+              childFileLists?.[childFileKey]?.[0]?.originFileObj,
+            );
             const uniqCode = cleanText(child?.uniq);
-            const childItemId = uniqCode ? uniqToChildId.get(uniqCode) : undefined;
+            const childItemId = uniqCode
+              ? uniqToChildId.get(uniqCode)
+              : undefined;
 
             if (childFile && uniqCode && childItemId) {
               const childLabel = currentPath.map((n) => n + 1).join(".");
@@ -1223,17 +1488,19 @@ export default function Page() {
               ? String(anyErr.error)
               : anyErr?.message
                 ? String(anyErr.message)
-              : "";
+                : "";
 
       if (data && typeof data === "object" && (data as any).request_id) {
         const reqId = String((data as any).request_id);
         const status = (data as any).status;
         const msg = (data as any).message;
         messageApi.error(
-          `Failed to save BOM (request_id: ${reqId}${status ? `, status: ${status}` : ""})${msg ? `: ${msg}` : ""}`
+          `Failed to save BOM (request_id: ${reqId}${status ? `, status: ${status}` : ""})${msg ? `: ${msg}` : ""}`,
         );
       } else {
-        messageApi.error(detail ? `Failed to save BOM: ${detail}` : "Failed to save BOM");
+        messageApi.error(
+          detail ? `Failed to save BOM: ${detail}` : "Failed to save BOM",
+        );
       }
     }
   };
@@ -1267,7 +1534,10 @@ export default function Page() {
           current={step}
           items={[
             { title: "Step 1", description: "Parent Info & Specs" },
-            { title: "Step 2", description: `Add Child Parts (Up to Level ${MAX_BOM_LEVEL})` },
+            {
+              title: "Step 2",
+              description: `Add Child Parts (Up to Level ${MAX_BOM_LEVEL})`,
+            },
           ]}
         />
 
@@ -1281,8 +1551,8 @@ export default function Page() {
             {step === 0 ? (
               <>
                 <div className="bg-blue-50 border border-blue-100 text-blue-700 px-4 py-3 rounded-md mb-6 text-sm">
-                  Step 1: Enter the parent UNIQ information, define process routes,
-                  and specify material specifications
+                  Step 1: Enter the parent UNIQ information, define process
+                  routes, and specify material specifications
                 </div>
 
                 <Card
@@ -1294,7 +1564,9 @@ export default function Page() {
                     <Form.Item
                       name="parent_uniq"
                       label="Parent UNIQ"
-                      rules={[{ required: true, message: "Parent UNIQ is required" }]}
+                      rules={[
+                        { required: true, message: "Parent UNIQ is required" },
+                      ]}
                     >
                       <Input placeholder="e.g., LV7-001" size="large" />
                     </Form.Item>
@@ -1302,7 +1574,9 @@ export default function Page() {
                     <Form.Item
                       name="part_name"
                       label="Part Name"
-                      rules={[{ required: true, message: "Part name is required" }]}
+                      rules={[
+                        { required: true, message: "Part name is required" },
+                      ]}
                     >
                       <Input
                         placeholder="e.g., Engine Mount Assembly"
@@ -1313,7 +1587,9 @@ export default function Page() {
                     <Form.Item
                       name="part_number"
                       label="Part Number"
-                      rules={[{ required: true, message: "Part number is required" }]}
+                      rules={[
+                        { required: true, message: "Part number is required" },
+                      ]}
                     >
                       <Input placeholder="e.g., EMA-001-LV7" size="large" />
                     </Form.Item>
@@ -1321,7 +1597,12 @@ export default function Page() {
                     <Form.Item
                       name="model"
                       label="Product Model"
-                      rules={[{ required: true, message: "Product model is required" }]}
+                      rules={[
+                        {
+                          required: true,
+                          message: "Product model is required",
+                        },
+                      ]}
                     >
                       <Input placeholder="e.g., Model A" size="large" />
                     </Form.Item>
@@ -1379,12 +1660,7 @@ export default function Page() {
                       >
                         <Button icon={<UploadOutlined />}>Choose File</Button>
                       </Upload>
-<Form.Item name={[
-                      "material_spec",
-                      "cycle_time_sec",
-                    ]} label="Cycle Time (sec)">
-                      <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
-                    </Form.Item>
+
                       {/* <Button
                         icon={<UploadOutlined />}
                         onClick={() =>
@@ -1402,7 +1678,10 @@ export default function Page() {
                   </Form.Item>
 
                   <Form.Item name="description" label="Description">
-                    <TextArea placeholder="Enter component description" rows={4} />
+                    <TextArea
+                      placeholder="Enter component description"
+                      rows={4}
+                    />
                   </Form.Item>
                 </Card>
 
@@ -1411,7 +1690,10 @@ export default function Page() {
                     <div className="space-y-4">
                       {isParentAssembly ? (
                         <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
-                          Process yang dipilih bertipe <span className="font-semibold">Assembly</span>, parent tetap bisa menambah process route, material parent disabled, dan child minimal 2 item.
+                          Process yang dipilih bertipe{" "}
+                          <span className="font-semibold">Assembly</span>,
+                          parent tetap bisa menambah process route, material
+                          parent disabled, dan child minimal 2 item.
                         </div>
                       ) : null}
 
@@ -1421,7 +1703,8 @@ export default function Page() {
                           type="primary"
                           icon={<PlusOutlined />}
                           onClick={() => {
-                            const current = form.getFieldValue("process_routes") ?? [];
+                            const current =
+                              form.getFieldValue("process_routes") ?? [];
                             form.setFieldValue("process_routes", [
                               ...current,
                               { sequence: (current.length ?? 0) + 1 },
@@ -1450,7 +1733,7 @@ export default function Page() {
                         onChange={(key) => {
                           const next = Array.isArray(key) ? key[0] : key;
                           setOpenProcessRouteIndex(
-                            next === undefined ? null : Number(next)
+                            next === undefined ? null : Number(next),
                           );
                         }}
                         expandIcon={({ isActive }) => (
@@ -1494,7 +1777,8 @@ export default function Page() {
                           children: (
                             <div className="border border-gray-200 rounded-lg p-4">
                               {(() => {
-                                const { key: _ignoredKey, ...routeField } = field;
+                                const { key: _ignoredKey, ...routeField } =
+                                  field;
                                 return (
                                   <div className="space-y-3">
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1502,7 +1786,12 @@ export default function Page() {
                                         {...routeField}
                                         name={[field.name, "process_id"]}
                                         label="Process"
-                                        rules={[{ required: true, message: "Process is required" }]}
+                                        rules={[
+                                          {
+                                            required: true,
+                                            message: "Process is required",
+                                          },
+                                        ]}
                                       >
                                         <Select
                                           size="large"
@@ -1524,7 +1813,12 @@ export default function Page() {
                                         {...routeField}
                                         name={[field.name, "machine_id"]}
                                         label="Machine"
-                                        rules={[{ required: true, message: "Machine is required" }]}
+                                        rules={[
+                                          {
+                                            required: true,
+                                            message: "Machine is required",
+                                          },
+                                        ]}
                                       >
                                         <Select
                                           size="large"
@@ -1547,7 +1841,11 @@ export default function Page() {
                                         name={[field.name, "sequence"]}
                                         label="Sequence"
                                       >
-                                        <InputNumber size="large" min={1} style={{ width: "100%" }} />
+                                        <InputNumber
+                                          size="large"
+                                          min={1}
+                                          style={{ width: "100%" }}
+                                        />
                                       </Form.Item>
                                     </div>
 
@@ -1569,13 +1867,44 @@ export default function Page() {
                                           style={{ width: "100%" }}
                                         />
                                       </Form.Item>
-
+                                      <Form.Item
+                                        name={[
+                                          "material_spec",
+                                          "setup_time_min",
+                                        ]}
+                                        label="Setup Time (min)"
+                                      >
+                                        <InputNumber
+                                          min={0}
+                                          size="large"
+                                          style={{ width: "100%" }}
+                                          disabled={isParentAssembly}
+                                        />
+                                      </Form.Item>
                                       <Form.Item
                                         {...routeField}
                                         name={[field.name, "machine_stroke"]}
                                         label="Machine Stroke"
                                       >
-                                        <Input size="large" placeholder="machine stroke" style={{ width: "100%" }} />
+                                        <Input
+                                          size="large"
+                                          placeholder="machine stroke"
+                                          style={{ width: "100%" }}
+                                        />
+                                      </Form.Item>
+                                      <Form.Item
+                                        name={[
+                                          "material_spec",
+                                          "cycle_time_sec",
+                                        ]}
+                                        label="Cycle Time (sec)"
+                                      >
+                                        <InputNumber
+                                          min={0}
+                                          size="large"
+                                          style={{ width: "100%" }}
+                                          disabled={isParentAssembly}
+                                        />
                                       </Form.Item>
                                     </div>
 
@@ -1585,12 +1914,20 @@ export default function Page() {
                                         name={[field.name, "remark"]}
                                         label="Remark / Catatan"
                                       >
-                                        <Input.TextArea rows={2} placeholder="Optional remark for this process route (Catatan)" />
+                                        <Input.TextArea
+                                          rows={2}
+                                          placeholder="Optional remark for this process route (Catatan)"
+                                        />
                                       </Form.Item>
                                     </div>
 
                                     <div className="flex items-end justify-end">
-                                      <Button danger type="text" icon={<DeleteOutlined />} onClick={() => remove(field.name)}>
+                                      <Button
+                                        danger
+                                        type="text"
+                                        icon={<DeleteOutlined />}
+                                        onClick={() => remove(field.name)}
+                                      >
                                         Remove
                                       </Button>
                                     </div>
@@ -1623,15 +1960,32 @@ export default function Page() {
                     <Form.Item
                       name={["material_spec", "material_code"]}
                       label="Material Code"
-                      rules={isParentAssembly ? [] : [{ required: true, message: "Material Code is required" }]}
+                      rules={
+                        isParentAssembly
+                          ? []
+                          : [
+                              {
+                                required: true,
+                                message: "Material Code is required",
+                              },
+                            ]
+                      }
                     >
-                      <Input placeholder="e.g., STKM550" size="large" disabled={isParentAssembly} />
+                      <Input
+                        placeholder="e.g., STKM550"
+                        size="large"
+                        disabled={isParentAssembly}
+                      />
                     </Form.Item>
 
                     <Form.Item
                       name={["material_spec", "form"]}
                       label="Form"
-                      rules={isParentAssembly ? [] : [{ required: true, message: "Form is required" }]}
+                      rules={
+                        isParentAssembly
+                          ? []
+                          : [{ required: true, message: "Form is required" }]
+                      }
                     >
                       <Select
                         placeholder="Select form"
@@ -1648,16 +2002,24 @@ export default function Page() {
                       />
                     </Form.Item>
 
-                    <Form.Item name={["material_spec", "weight_kg"]} label="Weight (kg)">
-                      <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
+                    <Form.Item
+                      name={["material_spec", "weight_kg"]}
+                      label="Weight (kg)"
+                    >
+                      <InputNumber
+                        min={0}
+                        size="large"
+                        style={{ width: "100%" }}
+                        disabled={isParentAssembly}
+                      />
                     </Form.Item>
                     {/* <Form.Item name={[
                       "material_spec",
                       "cycle_time_sec",
                     ]} label="Cycle Time (sec)">
                       <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
-                    </Form.Item>
-                    <Form.Item name={[
+                    </Form.Item> */}
+                    {/* <Form.Item name={[
                       "material_spec",
                       "setup_time_min",
                     ]} label="Setup Time (min)">
@@ -1669,9 +2031,17 @@ export default function Page() {
                     <Form.Item
                       name={["material_spec", "grade"]}
                       label="Grade"
-                      rules={isParentAssembly ? [] : [{ required: true, message: "Grade is required" }]}
+                      rules={
+                        isParentAssembly
+                          ? []
+                          : [{ required: true, message: "Grade is required" }]
+                      }
                     >
-                      <Input placeholder="e.g., STKM550" size="large" disabled={isParentAssembly} />
+                      <Input
+                        placeholder="e.g., STKM550"
+                        size="large"
+                        disabled={isParentAssembly}
+                      />
                     </Form.Item>
                   </div>
 
@@ -1684,12 +2054,17 @@ export default function Page() {
                         {
                           validator: requirePositiveNumberForForms(
                             ["Plate", "Coil"],
-                            "Width (mm)"
+                            "Width (mm)",
                           ),
                         },
                       ]}
                     >
-                      <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
+                      <InputNumber
+                        min={0}
+                        size="large"
+                        style={{ width: "100%" }}
+                        disabled={isParentAssembly}
+                      />
                     </Form.Item>
 
                     <Form.Item
@@ -1700,12 +2075,17 @@ export default function Page() {
                         {
                           validator: requirePositiveNumberForForms(
                             ["Pipe", "Rod", "Wire"],
-                            "Diameter (mm)"
+                            "Diameter (mm)",
                           ),
                         },
                       ]}
                     >
-                      <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
+                      <InputNumber
+                        min={0}
+                        size="large"
+                        style={{ width: "100%" }}
+                        disabled={isParentAssembly}
+                      />
                     </Form.Item>
                     <Form.Item
                       name={["material_spec", "thickness_mm"]}
@@ -1715,12 +2095,17 @@ export default function Page() {
                         {
                           validator: requirePositiveNumberForForms(
                             ["Plate", "Coil", "Pipe"],
-                            "Thickness (mm)"
+                            "Thickness (mm)",
                           ),
                         },
                       ]}
                     >
-                      <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
+                      <InputNumber
+                        min={0}
+                        size="large"
+                        style={{ width: "100%" }}
+                        disabled={isParentAssembly}
+                      />
                     </Form.Item>
                     <Form.Item
                       name={["material_spec", "length_mm"]}
@@ -1730,12 +2115,17 @@ export default function Page() {
                         {
                           validator: requirePositiveNumberForForms(
                             ["Plate", "Pipe", "Rod"],
-                            "Length (mm)"
+                            "Length (mm)",
                           ),
                         },
                       ]}
                     >
-                      <InputNumber min={0} size="large" style={{ width: "100%" }} disabled={isParentAssembly} />
+                      <InputNumber
+                        min={0}
+                        size="large"
+                        style={{ width: "100%" }}
+                        disabled={isParentAssembly}
+                      />
                     </Form.Item>
                     <Form.Item
                       name={["material_spec", "type_material"]}
@@ -1753,11 +2143,12 @@ export default function Page() {
                       </Select>
                     </Form.Item>
                   </div>
-
                 </Card>
 
                 <div className="flex items-center justify-between">
-                  <Button onClick={() => router.push("/bill-of-material")}>Cancel</Button>
+                  <Button onClick={() => router.push("/bill-of-material")}>
+                    Cancel
+                  </Button>
                   <div className="flex items-center gap-3">
                     <Button
                       type="primary"
@@ -1775,48 +2166,51 @@ export default function Page() {
               </>
             ) : (
               <>
-              <div className="bg-blue-50 border border-blue-100 text-blue-700 px-4 py-3 rounded-md mb-6 text-sm">
-                Step 2: Add child components with their own process routes and material specs. Maksimal {MAX_CHILDREN_PER_PARENT} child per parent dan level maksimal {MAX_BOM_LEVEL}.
-              </div>
+                <div className="bg-blue-50 border border-blue-100 text-blue-700 px-4 py-3 rounded-md mb-6 text-sm">
+                  Step 2: Add child components with their own process routes and
+                  material specs. Maksimal {MAX_CHILDREN_PER_PARENT} child per
+                  parent dan level maksimal {MAX_BOM_LEVEL}.
+                </div>
 
-              <div className="flex items-center justify-between mb-4">
-                <Title level={4} className="!mb-0">
-                  Child Parts (Levels 1-{MAX_BOM_LEVEL})
-                </Title>
-                <Button
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  onClick={addLevel1Child}
-                  disabled={childPartsCount >= MAX_CHILDREN_PER_PARENT}
-                >
-                  Add Level 1 Child
-                </Button>
-              </div>
-
-              {renderChildList(["child_parts"], 1)}
-
-              <div className="flex items-center justify-between mt-6">
-                <Button onClick={() => setStep(0)} icon={<ArrowLeftOutlined />}
-                >
-                  Previous
-                </Button>
-
-                <div className="flex items-center gap-3">
-                  <Button onClick={() => router.push("/bill-of-material")}
-                  >
-                    Cancel
-                  </Button>
+                <div className="flex items-center justify-between mb-4">
+                  <Title level={4} className="!mb-0">
+                    Child Parts (Levels 1-{MAX_BOM_LEVEL})
+                  </Title>
                   <Button
                     type="primary"
-                    disabled={isCreating}
-                    loading={isCreating}
-                    onClick={onSaveBom}
+                    icon={<PlusOutlined />}
+                    onClick={addLevel1Child}
+                    disabled={childPartsCount >= MAX_CHILDREN_PER_PARENT}
                   >
-                    Save BOM
+                    Add Level 1 Child
                   </Button>
                 </div>
-              </div>
-            </>
+
+                {renderChildList(["child_parts"], 1)}
+
+                <div className="flex items-center justify-between mt-6">
+                  <Button
+                    onClick={() => setStep(0)}
+                    icon={<ArrowLeftOutlined />}
+                  >
+                    Previous
+                  </Button>
+
+                  <div className="flex items-center gap-3">
+                    <Button onClick={() => router.push("/bill-of-material")}>
+                      Cancel
+                    </Button>
+                    <Button
+                      type="primary"
+                      disabled={isCreating}
+                      loading={isCreating}
+                      onClick={onSaveBom}
+                    >
+                      Save BOM
+                    </Button>
+                  </div>
+                </div>
+              </>
             )}
           </Form>
         </div>
