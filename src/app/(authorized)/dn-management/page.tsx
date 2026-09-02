@@ -33,6 +33,8 @@ type TabPaginationState = Record<ProcurementTab, { page: number; pageSize: numbe
 type DnRow = {
   key: string;
   id: string;
+  // [dn-remark] Kolom Remark ditampilkan paling depan pada tabel DN.
+  remark: string;
   period: string;
   dnNumber: string;
   totalPo: number;
@@ -148,6 +150,8 @@ export default function DnManagementPage() {
         return {
           key: id,
           id,
+          // [dn-remark] Ambil dari record; kosongkan dengan "-" agar sel tabel tetap terisi.
+         
           period: formatPeriodDisplay(dn.period ?? "-"),
           dnNumber: String(dn.dn_number ?? "-"),
           totalPo,
@@ -159,6 +163,7 @@ export default function DnManagementPage() {
           supplier: String(dn.supplier_name ?? (dn.supplier_id ? `Supplier #${dn.supplier_id}` : "-")),
           deliveryTo: Number(dn.delivery_to ?? 0),
           deliveryTotal: Number(dn.delivery_total ?? 0),
+           remark: String(dn.remark ?? "").trim() || "-",
         };
       })
       .filter((row) => !hiddenDn.has(row.dnNumber));
@@ -1126,6 +1131,8 @@ export default function DnManagementPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 text-gray-600">
                   <tr>
+                    {/* [dn-remark] Kolom Remark di paling depan sesuai permintaan. */}
+                    
                     <th className="text-left font-medium px-4 py-3">PERIOD</th>
                     <th className="text-left font-medium px-4 py-3">DN NUMBER</th>
                     <th className="text-left font-medium px-4 py-3">TOTAL PO</th>
@@ -1134,6 +1141,7 @@ export default function DnManagementPage() {
                     <th className="text-left font-medium px-4 py-3">DELIVERY NOTES</th>
                     <th className="text-left font-medium px-4 py-3">SUPPLIER</th>
                     <th className="text-left font-medium px-4 py-3">PENGIRIMAN</th>
+                    <th className="text-left font-medium px-4 py-3">REMARK</th>
                     <th className="text-right font-medium px-4 py-3">ACTIONS</th>
                   </tr>
                 </thead>
@@ -1144,6 +1152,15 @@ export default function DnManagementPage() {
                     const progressColor = isComplete ? "bg-green-500" : "bg-orange-500";
                     return (
                       <tr key={r.key} className="text-gray-800">
+                        {/* [dn-remark] Sel kolom Remark. */}
+                        <td className="px-4 py-4 max-w-[220px]">
+                          <span
+                            className="block truncate text-sm text-gray-700"
+                            title={r.remark && r.remark !== "-" ? r.remark : undefined}
+                          >
+                            {r.remark}
+                          </span>
+                        </td>
                         <td className="px-4 py-4 whitespace-pre-line text-gray-500">{r.period}</td>
                         <td className="px-4 py-4 whitespace-nowrap">
                           <button type="button" onClick={() => openDetail(r.id)} className="text-blue-600 font-medium hover:underline">
@@ -1231,7 +1248,8 @@ export default function DnManagementPage() {
                   })}
                   {pagedRows.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="px-4 py-10 text-center text-sm text-gray-500">
+                      {/* [dn-remark] colSpan disesuaikan karena ada kolom Remark tambahan di depan. */}
+                      <td colSpan={10} className="px-4 py-10 text-center text-sm text-gray-500">
                         No delivery notes found.
                       </td>
                     </tr>

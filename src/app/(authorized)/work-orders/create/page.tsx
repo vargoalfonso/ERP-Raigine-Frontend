@@ -863,6 +863,8 @@ export default function CreateWorkOrderPage() {
           process_name: String(line.process ?? ""),
         })),
         notes: values.woNotes ? String(values.woNotes) : null,
+        // [wo-remark] Kirim remark ke backend agar bisa muncul di daftar WO.
+        remark: values.woRemark ? String(values.woRemark) : null,
         // [wo-estimated-time]
         estimated_time_minutes:
           estimatedTimeMinutes > 0 ? estimatedTimeMinutes : null,
@@ -1015,6 +1017,17 @@ export default function CreateWorkOrderPage() {
                     className="!rounded-lg"
                     rows={3}
                     placeholder="WO harian shift 1"
+                  />
+                </Form.Item>
+              </div>
+
+              {/* [wo-remark] Field Remark tambahan untuk Work Order. Nilainya juga tampil di kolom Remark tabel WO. */}
+              <div className="md:col-span-2">
+                <Form.Item name="woRemark" label="Remark">
+                  <TextArea
+                    className="!rounded-lg"
+                    rows={2}
+                    placeholder="Contoh: rush order, prioritas customer A"
                   />
                 </Form.Item>
               </div>

@@ -122,6 +122,8 @@ export type CreateWorkOrderRequest = {
   target_date: string;
   items: CreateWorkOrderItemRequest[];
   notes: string | null;
+  // [wo-remark] Field remark tambahan untuk WO.
+  remark?: string | null;
   // [wo-estimated-time] estimasi waktu produksi (menit) + komponen hitungannya
   estimated_time_minutes?: number | null;
   cycle_time_min?: number | null;
@@ -237,6 +239,8 @@ export type WorkOrderRecord = {
   uniq_closed?: number;
   aging_days?: number;
   notes?: string;
+  // [wo-remark] Catatan/keterangan tambahan (kolom Remark).
+  remark?: string;
   defect_reason?: string | null;
   // [wo-defect-reasons] semua Reason/Info (NG & Scrap) round 3 untuk tooltip
   defect_reasons?: Array<{ source: string; info: string; qty: number }>;
@@ -367,6 +371,11 @@ const toWorkOrderRecord = (raw: unknown): WorkOrderRecord => {
     ]),
     aging_days: getNumber(record, ["aging_days", "aging", "agingDays"]),
     notes: getString(record, ["notes", "note"]),
+    // [wo-remark] Fallback ke notes bila backend belum menyediakan field remark.
+    remark:
+      getString(record, ["remark", "remarks"]) ??
+      getString(record, ["notes", "note"]) ??
+      undefined,
     defect_reason: getString(record, ["defect_reason", "defectReason"]) ?? null,
     defect_reasons: (() => {
       const rawReasons =

@@ -98,6 +98,8 @@ type WorkOrderRow = {
   uniqTotal: number;
   uniqClosed: number;
   agingDays: number;
+  // [wo-remark] Nilai remark untuk kolom Remark di paling depan tabel WO.
+  remark: string;
   uniqDetails: UniqRow[];
 };
 
@@ -539,6 +541,8 @@ const toWorkOrderRow = (
         : uniqDetails.length,
     uniqClosed,
     agingDays: Number(record.aging_days ?? 0),
+    // [wo-remark] Pakai remark bila ada; fallback ke notes agar tidak kosong saat backend masih memakai field lama.
+    remark: String(record.remark ?? record.notes ?? "").trim() || "-",
     uniqDetails,
   };
 };
@@ -1165,6 +1169,7 @@ export default function WorkOrdersPage() {
         uniqTotal: row.uniqCount,
         uniqClosed: 0,
         agingDays: 0,
+        remark: "-",
         uniqDetails: [],
       },
       ...prev,
@@ -1207,6 +1212,7 @@ export default function WorkOrdersPage() {
   ];
 
   const columns: ColumnsType<WorkOrderRow> = [
+    
     {
       title: "WO Number",
       dataIndex: "woNumber",
@@ -1309,6 +1315,21 @@ export default function WorkOrdersPage() {
       key: "operator",
       width: 140,
       render: (v: string) => <span className="text-sm text-gray-800">{v}</span>,
+    },
+    {
+      // [wo-remark] Kolom Remark diletakkan paling depan sesuai permintaan.
+      title: "Remark",
+      dataIndex: "remark",
+      key: "remark",
+      width: 200,
+      render: (v: string) => (
+        <span
+          className="block max-w-[220px] truncate text-sm text-gray-700"
+          title={v && v !== "-" ? v : undefined}
+        >
+          {v || "-"}
+        </span>
+      ),
     },
     {
       title: "Actions",

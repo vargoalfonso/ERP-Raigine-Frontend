@@ -659,8 +659,16 @@ export default function DeliverySchedulingDnCreationCreatePage() {
                     >
                       <Input.TextArea rows={4} placeholder="Require QC certificate" />
                     </Form.Item>
-                    <Form.Item name={[entryField.name, "remarks"]} hidden>
-                      <Input />
+                    {/* [dn-remark] Field Remark ditampilkan (sebelumnya hidden) sesuai permintaan agar bisa diisi saat create DN. */}
+                    <Form.Item
+                      label="Remark"
+                      name={[entryField.name, "remarks"]}
+                      className="mt-2"
+                    >
+                      <Input.TextArea
+                        rows={2}
+                        placeholder="Contoh: kirim pagi, kendaraan double axle"
+                      />
                     </Form.Item>
                   </div>
                 ))}
