@@ -72,6 +72,8 @@ export type CreateProcurementDnRequest = {
   // "Pengiriman ke ..." (delivery sequence) + total pengiriman terjadwal (= cycle_time/lead time supplier).
   delivery_to?: number;
   delivery_total?: number;
+  // [dn-remark] Catatan/keterangan tambahan level DN.
+  remark?: string | null;
 };
 
 export type ProcurementDnItem = {
@@ -151,6 +153,8 @@ export type ProcurementDnRecord = {
   // "Pengiriman ke ..." berikut total pengiriman terjadwal (= cycle_time supplier).
   delivery_to?: number;
   delivery_total?: number;
+  // [dn-remark] Catatan/keterangan tambahan level DN. Dipakai untuk menampilkan kolom Remark di daftar DN.
+  remark?: string;
 };
 
 export type ProcurementDnPreview = {
@@ -285,6 +289,12 @@ const toDnRecord = (raw: unknown): ProcurementDnRecord => {
     items: Array.isArray(record.items) ? record.items.map(toDnItem) : [],
     delivery_to: toNumber(record.delivery_to),
     delivery_total: toNumber(record.delivery_total),
+    // [dn-remark] Ambil dari beberapa kemungkinan nama field backend.
+    remark:
+      toText((record as UnknownRecord).remark) ??
+      toText((record as UnknownRecord).remarks) ??
+      toText((record as UnknownRecord).note) ??
+      toText((record as UnknownRecord).notes),
   };
 };
 
