@@ -114,6 +114,7 @@ export const apiSlice = createApi({
     "SystemSettingsTypeParameter",
     "SystemSettingsProcess",
     "SystemSettingsGlobalParameters",
+    "SystemSettingsSupplierInfo",
   ],
   refetchOnFocus: false,
   baseQuery: async (args, api, extraOptions) => {

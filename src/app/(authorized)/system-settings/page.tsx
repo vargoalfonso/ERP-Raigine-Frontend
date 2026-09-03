@@ -65,6 +65,11 @@ import {
   useCreateSafetyStockMutation,
   useCreateStockdaysMutation,
   useCreateTypeParameterMutation,
+  useCreateSupplierInfoMutation,
+  useUpdateSupplierInfoMutation,
+  useDeleteSupplierInfoMutation,
+  useGetSupplierInfoListQuery,
+  type SupplierInfoRecord,
   useDeleteAccessControlMatrixMutation,
   useDeleteApprovalWorkflowMutation,
   useDeleteGlobalWorkingDaysMutation,
@@ -107,6 +112,7 @@ import {
 } from "@/lib/api/system-settings/api";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
+import { useListSupplierItemsQuery } from "@/lib/api/supplier-items/api";
 import { useGetInventoryListQuery } from "@/lib/api/inventory/api";
 import MachineSettingsPanel from "@/components/system-settings/MachineSettingsPanel";
 import {
@@ -272,7 +278,9 @@ type ModuleItem = {
 };
 
 const MODULE_PERMISSION_KEYS: Record<string, string[]> = {
+  
   "access-control-matrix": ["users"],
+  "supplier-info": ["supplier", "supplier_info", "supplier-info", "supplier_management"],
   roles: ["role"],
   "safety-stock": ["safety-stock"],
   stockdays: ["stockdays"],
@@ -394,7 +402,14 @@ const modules: ModuleItem[] = [
     iconTextClass: "text-indigo-700",
   },
   // Keep a realistic count like the screenshot
-
+{
+    id: "supplier-info",
+    name: "Supplier Info",
+    description: "Mapping UNIQ ke UNIQ Zahir supplier",
+    icon: <UserOutlined />,
+    iconBgClass: "bg-teal-50",
+    iconTextClass: "text-teal-700",
+  },
   {
     id: "process",
     name: "Process",
@@ -403,6 +418,7 @@ const modules: ModuleItem[] = [
     iconBgClass: "bg-green-50",
     iconTextClass: "text-green-700",
   },
+  
 ];
 
 const initialRows: ParameterRow[] = [
@@ -930,6 +946,8 @@ export default function SystemSettingsPage() {
   const shouldLoadBomTree =
     apiEnabled &&
     (selectedModuleId === "safety-stock" || selectedModuleId === "kanban");
+  const shouldLoadSupplierInfo = apiEnabled && selectedModuleId === "supplier-info";
+  const shouldLoadSupplierItemsForInfo = apiEnabled && selectedModuleId === "supplier-info";
 
   const toBackendStatus = (s: StatusType): string =>
     s === "Inactive" ? "inactive" : "active";
@@ -979,7 +997,10 @@ export default function SystemSettingsPage() {
           return [
             module.id,
             {
-              canView: !apiEnabled || hasPermission(permissions, keys, "view"),
+              canView:
+                module.id === "supplier-info" ||
+                !apiEnabled ||
+                hasPermission(permissions, keys, "view"),
               ...getModuleAccess(permissions, keys),
             },
           ];
@@ -1016,7 +1037,8 @@ export default function SystemSettingsPage() {
     canUpdate: !apiEnabled,
     canDelete: !apiEnabled,
   };
-  const canCreateSelectedModule = selectedModuleAccess.canCreate;
+  const canCreateSelectedModule =
+    selectedModuleId === "supplier-info" || selectedModuleAccess.canCreate;
   const { data: departmentsApiData } = useGetDepartmentsQuery(undefined, {
     skip: !shouldLoadDepartments,
   });
@@ -1108,6 +1130,16 @@ export default function SystemSettingsPage() {
 
   const { data: bomTreeApiData } = useGetBomTreeQuery(undefined, {
     skip: !shouldLoadBomTree,
+  });
+  // Supplier Info hooks
+  const { data: supplierInfoApiData } = useGetSupplierInfoListQuery(undefined, {
+    skip: !shouldLoadSupplierInfo,
+  });
+  const [createSupplierInfo] = useCreateSupplierInfoMutation();
+  const [updateSupplierInfo] = useUpdateSupplierInfoMutation();
+  const [deleteSupplierInfo] = useDeleteSupplierInfoMutation();
+  const { data: supplierItemsForInfoData } = useListSupplierItemsQuery(undefined, {
+    skip: !shouldLoadSupplierItemsForInfo,
   });
   const selectedModule = useMemo(
     () =>
@@ -1447,6 +1479,166 @@ export default function SystemSettingsPage() {
     "create" | "edit"
   >("edit");
   const [machinePatternForm] = Form.useForm<MachinePatternFormValues>();
+
+  // --- Supplier Info state ---
+  const [supplierInfoEditOpen, setSupplierInfoEditOpen] = useState(false);
+  const [supplierInfoEditingRow, setSupplierInfoEditingRow] = useState<SupplierInfoRecord | null>(null);
+  const [supplierInfoEditMode, setSupplierInfoEditMode] = useState<"create" | "edit">("edit");
+  const [supplierInfoForm] = Form.useForm<{ uniq: string; uniq_zahir: string; status: string }>();
+  const [supplierInfoDeleteOpen, setSupplierInfoDeleteOpen] = useState(false);
+  const [supplierInfoDeletingRow, setSupplierInfoDeletingRow] = useState<SupplierInfoRecord | null>(null);
+
+  // Dropdown UNIQ options dari supplier items (deduplicated)
+  const supplierInfoUniqOptions = React.useMemo(() => {
+    const items = supplierItemsForInfoData ?? [];
+    const seen = new Set<string>();
+    return items
+      .filter((item) => {
+        const u = String(item.uniq_code ?? "").trim();
+        if (!u || seen.has(u)) return false;
+        seen.add(u);
+        return true;
+      })
+      .map((item) => ({
+        value: String(item.uniq_code ?? ""),
+        label: String(item.uniq_code ?? ""),
+        supplier_name: String(item.supplier_name ?? ""),
+        type: String(item.type ?? ""),
+      }));
+  }, [supplierItemsForInfoData]);
+
+  // Watch UNIQ field to auto-fill supplier_name + type in form
+  const supplierInfoWatchedUniq = Form.useWatch("uniq", supplierInfoForm) as string | undefined;
+  const supplierInfoAutoFilled = React.useMemo(() => {
+    if (!supplierInfoWatchedUniq) return { supplier_name: "", type: "" };
+    const found = supplierInfoUniqOptions.find((o) => o.value === supplierInfoWatchedUniq);
+    if (!found) return { supplier_name: "", type: "" };
+    const typeMap: Record<string, string> = {
+      raw_material: "RM",
+      indirect: "IRM",
+      subcon: "SUBCON",
+    };
+    return {
+      supplier_name: found.supplier_name,
+      type: typeMap[found.type.toLowerCase()] ?? found.type.toUpperCase(),
+    };
+  }, [supplierInfoWatchedUniq, supplierInfoUniqOptions]);
+
+  // Supplier Info rows dari API
+  const supplierInfoRows: SupplierInfoRecord[] = React.useMemo(
+    () => supplierInfoApiData ?? [],
+    [supplierInfoApiData],
+  );
+  const filteredSupplierInfo = React.useMemo(() => {
+    const q = query.toLowerCase();
+    return supplierInfoRows.filter((r) =>
+      !q ||
+      r.uniq.toLowerCase().includes(q) ||
+      (r.uniq_zahir ?? "").toLowerCase().includes(q) ||
+      r.supplier_name.toLowerCase().includes(q) ||
+      r.type.toLowerCase().includes(q),
+    );
+  }, [supplierInfoRows, query]);
+
+  const supplierInfoColumns: ColumnsType<SupplierInfoRecord> = [
+    { title: "UNIQ", dataIndex: "uniq", key: "uniq", width: 160 },
+    { title: "UNIQ ZAHIR", dataIndex: "uniq_zahir", key: "uniq_zahir", width: 160, render: (v) => v ?? "-" },
+    { title: "Supplier Name", dataIndex: "supplier_name", key: "supplier_name" },
+    {
+      title: "Type",
+      dataIndex: "type",
+      key: "type",
+      width: 120,
+      render: (v: string) => {
+        const colorMap: Record<string, string> = { RM: "blue", IRM: "purple", SUBCON: "orange" };
+        return <Tag color={colorMap[v] ?? "default"}>{v}</Tag>;
+      },
+    },
+    {
+      title: "Status",
+      dataIndex: "status",
+      key: "status",
+      width: 100,
+      render: (v: string) => (
+        <Tag color={v === "active" ? "green" : "red"}>{v === "active" ? "Active" : "Inactive"}</Tag>
+      ),
+    },
+    {
+      title: "Action",
+      key: "action",
+      width: 120,
+      render: (_: unknown, record: SupplierInfoRecord) => (
+        <div className="flex gap-2">
+          <Button
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setSupplierInfoEditingRow(record);
+              setSupplierInfoEditMode("edit");
+              supplierInfoForm.setFieldsValue({
+                uniq: record.uniq,
+                uniq_zahir: record.uniq_zahir ?? "",
+                status: record.status,
+              });
+              setSupplierInfoEditOpen(true);
+            }}
+          />
+          <Button
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => {
+              setSupplierInfoDeletingRow(record);
+              setSupplierInfoDeleteOpen(true);
+            }}
+          />
+        </div>
+      ),
+    },
+  ];
+
+  const handleCreateSupplierInfo = () => {
+    setSupplierInfoEditingRow(null);
+    setSupplierInfoEditMode("create");
+    supplierInfoForm.resetFields();
+    setSupplierInfoEditOpen(true);
+  };
+
+  const handleSupplierInfoFormSave = async () => {
+    try {
+      const values = await supplierInfoForm.validateFields();
+      if (supplierInfoEditMode === "create") {
+        await createSupplierInfo({
+          uniq: values.uniq,
+          uniq_zahir: values.uniq_zahir,
+          supplier_name: supplierInfoAutoFilled.supplier_name,
+          type: supplierInfoAutoFilled.type,
+          status: values.status ?? "active",
+        }).unwrap();
+        message.success("Supplier Info berhasil ditambahkan");
+      } else if (supplierInfoEditingRow) {
+        await updateSupplierInfo({
+          id: supplierInfoEditingRow.id,
+          body: { uniq_zahir: values.uniq_zahir, status: values.status ?? "active" },
+        }).unwrap();
+        message.success("Supplier Info berhasil diperbarui");
+      }
+      setSupplierInfoEditOpen(false);
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Gagal menyimpan"));
+    }
+  };
+
+  const handleDeleteSupplierInfo = async () => {
+    if (!supplierInfoDeletingRow) return;
+    try {
+      await deleteSupplierInfo(supplierInfoDeletingRow.id).unwrap();
+      message.success("Supplier Info berhasil dihapus");
+      setSupplierInfoDeleteOpen(false);
+    } catch (err) {
+      message.error(getApiErrorMessage(err, "Gagal menghapus"));
+    }
+  };
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletingRow, setDeletingRow] = useState<ParameterRow | null>(null);
@@ -7170,6 +7362,10 @@ const handleImportKanban = async (file: File): Promise<boolean> => {
                           }
                           return;
                         }
+                        if (selectedModuleId === "supplier-info") {
+                          router.push("/system-settings/supplier-info/create");
+                          return;
+                        }
                         openCreate();
                       }}
                     >
@@ -7298,6 +7494,15 @@ const handleImportKanban = async (file: File): Promise<boolean> => {
                         pagination={false}
                         scroll={{ x: "max-content" }}
                       />
+                    ) : selectedModuleId === "supplier-info" ? (
+                      <Table<SupplierInfoRecord>
+                        columns={supplierInfoColumns}
+                        dataSource={filteredSupplierInfo}
+                        rowKey="id"
+                        pagination={false}
+                        sticky
+                        scroll={{ x: "max-content", y: 460 }}
+                      />
                     ) : (
                       <Table<ParameterRow>
                         columns={columns}
@@ -7314,6 +7519,106 @@ const handleImportKanban = async (file: File): Promise<boolean> => {
           )}
         </div>
       </div>
+
+      {/* ─────────────── Supplier Info Form Modal ─────────────── */}
+      <Modal
+        open={supplierInfoEditOpen}
+        title={
+          supplierInfoEditMode === "create"
+            ? "Tambah Supplier Info"
+            : "Edit Supplier Info"
+        }
+        onCancel={() => setSupplierInfoEditOpen(false)}
+        onOk={handleSupplierInfoFormSave}
+        okText="Simpan"
+        cancelText="Batal"
+        destroyOnClose
+      >
+        <Form
+          form={supplierInfoForm}
+          layout="vertical"
+          initialValues={{ status: "active" }}
+        >
+          {supplierInfoEditMode === "create" ? (
+            <Form.Item
+              label="UNIQ"
+              name="uniq"
+              rules={[{ required: true, message: "UNIQ wajib dipilih" }]}
+            >
+              <Select
+                showSearch
+                placeholder="Pilih UNIQ dari Supplier Item"
+                optionFilterProp="label"
+                options={supplierInfoUniqOptions.map((o) => ({
+                  value: o.value,
+                  label: o.label,
+                }))}
+              />
+            </Form.Item>
+          ) : (
+            <Form.Item label="UNIQ" name="uniq">
+              <Input disabled />
+            </Form.Item>
+          )}
+
+          <Form.Item label="Supplier Name">
+            <Input
+              value={
+                supplierInfoEditMode === "create"
+                  ? supplierInfoAutoFilled.supplier_name
+                  : supplierInfoEditingRow?.supplier_name ?? ""
+              }
+              disabled
+              placeholder="Otomatis dari UNIQ"
+            />
+          </Form.Item>
+
+          <Form.Item label="Type">
+            <Input
+              value={
+                supplierInfoEditMode === "create"
+                  ? supplierInfoAutoFilled.type
+                  : supplierInfoEditingRow?.type ?? ""
+              }
+              disabled
+              placeholder="Otomatis dari UNIQ"
+            />
+          </Form.Item>
+
+          <Form.Item label="UNIQ ZAHIR" name="uniq_zahir">
+            <Input placeholder="Masukkan UNIQ ZAHIR secara manual" />
+          </Form.Item>
+
+          <Form.Item
+            label="Status"
+            name="status"
+            rules={[{ required: true, message: "Status wajib diisi" }]}
+          >
+            <Select
+              options={[
+                { value: "active", label: "Active" },
+                { value: "inactive", label: "Inactive" },
+              ]}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ─────────────── Supplier Info Delete Confirm ─────────────── */}
+      <Modal
+        open={supplierInfoDeleteOpen}
+        title="Hapus Supplier Info"
+        onCancel={() => setSupplierInfoDeleteOpen(false)}
+        onOk={handleDeleteSupplierInfo}
+        okText="Hapus"
+        okButtonProps={{ danger: true }}
+        cancelText="Batal"
+      >
+        <p>
+          Yakin hapus Supplier Info untuk UNIQ{" "}
+          <strong>{supplierInfoDeletingRow?.uniq}</strong>?
+        </p>
+      </Modal>
     </div>
   );
 }

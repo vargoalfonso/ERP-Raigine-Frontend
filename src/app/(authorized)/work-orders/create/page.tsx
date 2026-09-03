@@ -310,6 +310,9 @@ export default function CreateWorkOrderPage() {
     }));
   }, [apiEnabled, bomIndex, processNameOptions, uniqOptionsQuery.data]);
 
+  const selectedWoType = Form.useWatch("woType", form) as
+    WorkOrderType | undefined;
+
   const uniqSelectOptions = useMemo(() => {
     const bomData = bomTreeRes?.data;
     const topNodes: any[] = Array.isArray(bomData)
@@ -327,13 +330,19 @@ export default function CreateWorkOrderPage() {
         return code ? { label: code, value: code } : null;
       })
       .filter(Boolean) as { label: string; value: string }[];
+
+    // Assembly: hanya tampilkan UNIQ parent (top-level BOM nodes)
+    if (selectedWoType === "Assembly") {
+      return fromBom;
+    }
+
     const fromApi = uniqOptions.map((u) => ({ label: u.uniq, value: u.uniq }));
     const map = new Map<string, { label: string; value: string }>();
     for (const it of [...fromBom, ...fromApi]) {
       if (!map.has(it.value)) map.set(it.value, it);
     }
     return Array.from(map.values());
-  }, [uniqOptions, bomIndex]);
+  }, [uniqOptions, bomIndex, bomTreeRes?.data, selectedWoType]);
 
   useEffect(() => {
     form.setFieldsValue({ woNumber });
@@ -887,9 +896,6 @@ export default function CreateWorkOrderPage() {
     }
   };
 
-  const selectedWoType = Form.useWatch("woType", form) as
-    WorkOrderType | undefined;
-
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
@@ -1043,6 +1049,11 @@ export default function CreateWorkOrderPage() {
                 <div className="text-xs text-gray-500 mt-1">
                   Add multiple UNIQs to this work order (1 UNIQ = 1 Kanban)
                 </div>
+                {selectedWoType === "Assembly" && (
+                  <div className="mt-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">
+                    Mode Assembly: hanya menampilkan UNIQ parent (BOM level 1)
+                  </div>
+                )}
               </div>
               <Button
                 className="!rounded-lg"
