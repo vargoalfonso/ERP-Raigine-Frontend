@@ -858,9 +858,11 @@ const buildMonthlyReportHtml = (
     <table class="hdr-tbl">
       <tr>
         <td rowspan="3" style="width: 110px; text-align: center;">
-          <div style="font-size:18px; font-weight:bold; color:#dc2626; letter-spacing:1px;">BT</div>
-          <div class="company">PT. BONECOM TRICOM</div>
-          <div style="font-size:7px; font-style: italic;">Quality Assurance Departement</div>
+          <img
+            src="https://ratama.co.id/wp-content/uploads/2017/10/PT-Matra-Roda-Piranti.png"
+            alt="PT Matra Roda Piranti"
+            style="display:block; width:100%; max-width:98px; max-height:54px; object-fit:contain; margin:0 auto;"
+          />
         </td>
         <td class="title">MONTHLY REPORT</td>
         <td rowspan="3" style="width: 260px; padding: 0;">
