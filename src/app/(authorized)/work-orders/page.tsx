@@ -40,6 +40,8 @@ import {
   useBulkApproveWorkOrdersMutation,
   useGetRmProcessingWorkOrdersQuery,
   useGetRmProcessingWorkOrdersSummaryQuery,
+  useGetRobotWorkOrderTasksQuery,
+  useApproveRobotWorkOrderTaskMutation,
   useGetWorkOrdersQuery,
   useGetWorkOrdersSummaryQuery,
 } from "@/lib/api/work-orders/api";
@@ -66,10 +68,6 @@ const isMissingRouteError = (error: unknown): boolean => {
 };
 
 type TabKey = "workOrder" | "bulkWo" | "rmProcessing" | "robotTask";
-
-type RobotUserApproval = "Pending" | "Approved (User)" | "Rejected";
-type RobotManagerApproval =
-  "Not Started" | "Awaiting Manager" | "Approved (Manager)" | "N/A";
 
 type ApprovalStatus = "Approved" | "Pending Approval" | "Rejected";
 
@@ -127,14 +125,15 @@ type RmProcessingRow = {
 
 type RobotTaskRow = {
   key: string;
+  id: string;
   woNumber: string;
-  robotId: string;
+  robotName: string;
+  automationJobId: string;
   uniqCount: number;
   type: WorkOrderRow["type"];
   createdDate: string;
   targetDate: string;
-  userApproval: RobotUserApproval;
-  managerApproval: RobotManagerApproval;
+  approvalStatus: ApprovalStatus;
 };
 
 type BulkWoRow = {
@@ -276,99 +275,6 @@ const withQuery = (
   const query = search.toString();
   return query ? `${path}?${query}` : path;
 };
-
-const robotUserApprovalTag = (s: RobotUserApproval) => {
-  if (s === "Approved (User)")
-    return (
-      <Tag color="green" className="!rounded-md">
-        Approved (User)
-      </Tag>
-    );
-  if (s === "Rejected")
-    return (
-      <Tag color="red" className="!rounded-md">
-        Rejected
-      </Tag>
-    );
-  return (
-    <Tag color="default" className="!rounded-md">
-      Pending
-    </Tag>
-  );
-};
-
-const robotManagerApprovalTag = (s: RobotManagerApproval) => {
-  if (s === "Approved (Manager)")
-    return (
-      <Tag color="green" className="!rounded-md">
-        Approved (Manager)
-      </Tag>
-    );
-  if (s === "Awaiting Manager")
-    return (
-      <Tag color="gold" className="!rounded-md">
-        Awaiting Manager
-      </Tag>
-    );
-  if (s === "N/A")
-    return (
-      <Tag color="default" className="!rounded-md">
-        N/A
-      </Tag>
-    );
-  return (
-    <Tag color="default" className="!rounded-md">
-      Not Started
-    </Tag>
-  );
-};
-
-const INITIAL_ROBOT_TASKS: RobotTaskRow[] = [
-  {
-    key: "rwo-1",
-    woNumber: "WO-2024-001",
-    robotId: "ROBOT-001",
-    uniqCount: 5,
-    type: "New",
-    createdDate: "2024-01-23",
-    targetDate: "2024-02-05",
-    userApproval: "Pending",
-    managerApproval: "Not Started",
-  },
-  {
-    key: "rwo-2",
-    woNumber: "WO-2024-002",
-    robotId: "ROBOT-002",
-    uniqCount: 3,
-    type: "Assembly",
-    createdDate: "2024-01-22",
-    targetDate: "2024-02-03",
-    userApproval: "Approved (User)",
-    managerApproval: "Awaiting Manager",
-  },
-  {
-    key: "rwo-3",
-    woNumber: "WO-2024-003",
-    robotId: "ROBOT-001",
-    uniqCount: 8,
-    type: "New",
-    createdDate: "2024-01-21",
-    targetDate: "2024-02-10",
-    userApproval: "Approved (User)",
-    managerApproval: "Approved (Manager)",
-  },
-  {
-    key: "rwo-4",
-    woNumber: "WO-2024-004",
-    robotId: "ROBOT-003",
-    uniqCount: 2,
-    type: "Rework",
-    createdDate: "2024-01-20",
-    targetDate: "2024-01-28",
-    userApproval: "Rejected",
-    managerApproval: "N/A",
-  },
-];
 
 // const INITIAL_WORK_ORDERS: WorkOrderRow[] = [
 //   {
@@ -571,6 +477,19 @@ const toRmProcessingRow = (
   qrDataUrl: record.qr_data_url ?? undefined,
 });
 
+const toRobotTaskRow = (record: WorkOrderRecord): RobotTaskRow => ({
+  key: record.id || record.wo_number,
+  id: record.id,
+  woNumber: formatWorkOrderDisplayNumber(record.wo_number) || "-",
+  robotName: record.robot_name || "Robot Automation",
+  automationJobId: record.automation_job_id || "-",
+  uniqCount: Number(record.uniq_total ?? record.items.length),
+  type: normalizeType(record.wo_type),
+  createdDate: formatDisplayDate(record.created_date ?? record.created_at),
+  targetDate: formatDisplayDate(record.target_date),
+  approvalStatus: normalizeApproval(record.approval_status),
+});
+
 const toBulkWoRow = (record: BulkWorkOrderRecordApi): BulkWoRow => ({
   key: record.id,
   id: record.id,
@@ -618,6 +537,8 @@ export default function WorkOrdersPage() {
   const [bulkWoPage, setBulkWoPage] = useState(1);
   const [bulkWoLimit, setBulkWoLimit] = useState(20);
   const [bulkWoSearch, setBulkWoSearch] = useState("");
+  const [robotPage, setRobotPage] = useState(1);
+  const [robotLimit, setRobotLimit] = useState(20);
   const apiEnabled = Boolean(apiBaseUrl);
 
   const [mockWorkOrders, setMockWorkOrders] = useState<WorkOrderRow[]>([]);
@@ -744,8 +665,6 @@ export default function WorkOrdersPage() {
         .some((v) => v.toLowerCase().includes(q)),
     );
   }, [bulkWoRowsAll, bulkWoSearch]);
-  const [robotTasks, setRobotTasks] =
-    useState<RobotTaskRow[]>(INITIAL_ROBOT_TASKS);
   const [mockRmProcessingRows] = useState<RmProcessingRow[]>(
     INITIAL_RM_PROCESSING_ROWS,
   );
@@ -772,6 +691,17 @@ export default function WorkOrdersPage() {
       skip: !apiEnabled,
     },
   );
+  const robotTasksQuery = useGetRobotWorkOrderTasksQuery(
+    { page: robotPage, limit: robotLimit },
+    { skip: !apiEnabled || activeTab !== "robotTask" },
+  );
+  const [approveRobotTask, approveRobotTaskState] =
+    useApproveRobotWorkOrderTaskMutation();
+  const robotTasks = useMemo(
+    () => robotTasksQuery.data?.items.map(toRobotTaskRow) ?? [],
+    [robotTasksQuery.data],
+  );
+
   const workOrdersSummaryQuery = useGetWorkOrdersSummaryQuery(undefined, {
     skip: !apiEnabled,
   });
@@ -1081,102 +1011,39 @@ export default function WorkOrdersPage() {
   const isRobotTaskTab = activeTab === "robotTask";
 
   const robotMetrics = useMemo(() => {
-    const pendingUser = robotTasks.filter(
-      (r) => r.userApproval === "Pending",
+    const pending = robotTasks.filter(
+      (row) => row.approvalStatus === "Pending Approval",
     ).length;
-    const pendingManager = robotTasks.filter(
-      (r) => r.managerApproval === "Awaiting Manager",
-    ).length;
-    const fullyApproved = robotTasks.filter(
-      (r) =>
-        r.userApproval === "Approved (User)" &&
-        r.managerApproval === "Approved (Manager)",
+    const approved = robotTasks.filter(
+      (row) => row.approvalStatus === "Approved",
     ).length;
     const rejected = robotTasks.filter(
-      (r) => r.userApproval === "Rejected",
+      (row) => row.approvalStatus === "Rejected",
     ).length;
-    return { pendingUser, pendingManager, fullyApproved, rejected };
+    return { total: robotTasks.length, pending, approved, rejected };
   }, [robotTasks]);
 
-  const approveRobotUser = (key: string) => {
-    setRobotTasks((prev) =>
-      prev.map((r) =>
-        r.key !== key
-          ? r
-          : {
-              ...r,
-              userApproval: "Approved (User)",
-              managerApproval:
-                r.managerApproval === "N/A"
-                  ? "Not Started"
-                  : "Awaiting Manager",
-            },
-      ),
-    );
-    message.success("User approval applied (mock)");
-  };
-
-  const rejectRobotUser = (key: string) => {
-    setRobotTasks((prev) =>
-      prev.map((r) =>
-        r.key !== key
-          ? r
-          : {
-              ...r,
-              userApproval: "Rejected",
-              managerApproval: "N/A",
-            },
-      ),
-    );
-    message.success("Rejected (mock)");
-  };
-
-  const approveRobotManager = (key: string) => {
-    setRobotTasks((prev) =>
-      prev.map((r) =>
-        r.key !== key
-          ? r
-          : {
-              ...r,
-              managerApproval: "Approved (Manager)",
-            },
-      ),
-    );
-    message.success("Manager approval applied (mock)");
-  };
-
-  const moveRobotWoToMain = (key: string) => {
-    const row = robotTasks.find((r) => r.key === key);
-    if (!row) return;
-    if (
-      row.userApproval !== "Approved (User)" ||
-      row.managerApproval !== "Approved (Manager)"
-    ) {
-      message.warning("WO must be fully approved first");
+  const submitRobotApproval = async (
+    row: RobotTaskRow,
+    decision: "approve" | "reject",
+  ) => {
+    if (!apiEnabled) {
+      message.warning("API connection is required for Robot Task approval");
       return;
     }
-
-    setMockWorkOrders((prev) => [
-      {
-        key: `wo-robot-${Date.now()}`,
-        woNumber: row.woNumber,
-        type: row.type,
-        status: "Draft",
-        approvalStatus: "Approved",
-        createDate: row.createdDate,
-        targetDate: row.targetDate,
-        operator: "Not Assigned",
-        uniqTotal: row.uniqCount,
-        uniqClosed: 0,
-        agingDays: 0,
-        remark: "-",
-        uniqDetails: [],
-      },
-      ...prev,
-    ]);
-
-    setRobotTasks((prev) => prev.filter((r) => r.key !== key));
-    message.success("Moved to main Work Order table (mock)");
+    try {
+      await approveRobotTask({
+        uuid: row.id,
+        body: { decision, notes: null },
+      }).unwrap();
+      message.success(
+        decision === "approve"
+          ? `${row.woNumber} approved and moved to Work Order automatically`
+          : `${row.woNumber} rejected`,
+      );
+    } catch {
+      message.error(`Failed to ${decision} ${row.woNumber}`);
+    }
   };
 
   const uniqColumns: ColumnsType<UniqRow> = [
@@ -1212,7 +1079,6 @@ export default function WorkOrdersPage() {
   ];
 
   const columns: ColumnsType<WorkOrderRow> = [
-    
     {
       title: "WO Number",
       dataIndex: "woNumber",
@@ -1377,96 +1243,95 @@ export default function WorkOrdersPage() {
       title: "WO Number",
       dataIndex: "woNumber",
       key: "woNumber",
-      width: 140,
-      render: (v: string) => (
+      width: 150,
+      render: (value: string) => (
         <span className="inline-flex items-center rounded-md border border-gray-200 bg-white px-2 py-0.5 text-xs font-semibold text-gray-700">
-          {v}
+          {value}
         </span>
       ),
     },
     {
-      title: "Robot ID",
-      dataIndex: "robotId",
-      key: "robotId",
-      width: 120,
-      render: (v: string) => (
+      title: "Robot",
+      dataIndex: "robotName",
+      key: "robotName",
+      width: 180,
+      render: (value: string) => (
         <span className="inline-flex items-center gap-2 text-sm text-gray-800">
-          <span className="inline-flex h-5 w-5 items-center justify-center rounded-md border border-blue-200 bg-blue-50 text-blue-600 text-xs font-bold">
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded-md border border-blue-200 bg-blue-50 text-xs font-bold text-blue-600">
             R
           </span>
-          {v}
+          {value}
         </span>
       ),
     },
     {
-      title: "UNIQs (Count)",
+      title: "Automation Job",
+      dataIndex: "automationJobId",
+      key: "automationJobId",
+      width: 180,
+      render: (value: string) => (
+        <span className="font-mono text-xs text-gray-600">{value}</span>
+      ),
+    },
+    {
+      title: "UNIQs",
       dataIndex: "uniqCount",
       key: "uniqCount",
-      width: 120,
-      render: (v: number) => (
-        <div className="text-sm text-gray-800">
-          <span className="font-semibold">{v}</span> UNIQs
-        </div>
-      ),
+      width: 90,
     },
     {
       title: "Type",
       dataIndex: "type",
       key: "type",
       width: 110,
-      render: (v: RobotTaskRow["type"]) => typeTag(v),
+      render: (value: RobotTaskRow["type"]) => typeTag(value),
     },
     {
       title: "Created Date",
       dataIndex: "createdDate",
       key: "createdDate",
       width: 120,
-      render: (v: string) => <span className="text-sm text-gray-800">{v}</span>,
     },
     {
       title: "Target Date",
       dataIndex: "targetDate",
       key: "targetDate",
       width: 120,
-      render: (v: string) => <span className="text-sm text-gray-800">{v}</span>,
     },
     {
-      title: "User Approval",
-      dataIndex: "userApproval",
-      key: "userApproval",
+      title: "Approval",
+      dataIndex: "approvalStatus",
+      key: "approvalStatus",
       width: 140,
-      render: (v: RobotUserApproval) => robotUserApprovalTag(v),
-    },
-    {
-      title: "Manager Approval",
-      dataIndex: "managerApproval",
-      key: "managerApproval",
-      width: 150,
-      render: (v: RobotManagerApproval) => robotManagerApprovalTag(v),
+      render: (value: ApprovalStatus) => approvalTag(value),
     },
     {
       title: "Actions",
       key: "actions",
-      width: 200,
+      width: 230,
       fixed: "right",
-      render: (_: unknown, r) => {
-        const canUserApprove = r.userApproval === "Pending";
-        const canManagerApprove =
-          r.userApproval === "Approved (User)" &&
-          r.managerApproval === "Awaiting Manager";
-        const canMove =
-          r.userApproval === "Approved (User)" &&
-          r.managerApproval === "Approved (Manager)";
-
+      render: (_: unknown, row) => {
+        const pending = row.approvalStatus === "Pending Approval";
         return (
           <div className="flex items-center justify-end gap-2">
-            {canUserApprove ? (
+            <Button
+              size="small"
+              type="text"
+              icon={<EyeOutlined />}
+              onClick={() =>
+                router.push(`/work-orders/detail/${encodeURIComponent(row.id)}`)
+              }
+            >
+              View
+            </Button>
+            {pending ? (
               <>
                 <Button
                   size="small"
                   type="primary"
                   className="!rounded-lg"
-                  onClick={() => approveRobotUser(r.key)}
+                  loading={approveRobotTaskState.isLoading}
+                  onClick={() => submitRobotApproval(row, "approve")}
                 >
                   Approve
                 </Button>
@@ -1474,41 +1339,12 @@ export default function WorkOrdersPage() {
                   size="small"
                   danger
                   className="!rounded-lg"
-                  onClick={() => rejectRobotUser(r.key)}
+                  loading={approveRobotTaskState.isLoading}
+                  onClick={() => submitRobotApproval(row, "reject")}
                 >
                   Reject
                 </Button>
               </>
-            ) : null}
-
-            {canManagerApprove ? (
-              <Button
-                size="small"
-                className="!rounded-lg"
-                onClick={() => approveRobotManager(r.key)}
-              >
-                Manager Review
-              </Button>
-            ) : null}
-
-            {canMove ? (
-              <Button
-                size="small"
-                className="!rounded-lg"
-                onClick={() => moveRobotWoToMain(r.key)}
-              >
-                Move to Main WO
-              </Button>
-            ) : null}
-
-            {!canUserApprove && !canManagerApprove && !canMove ? (
-              <Button
-                size="small"
-                type="text"
-                onClick={() => message.info(`View ${r.woNumber} (mock)`)}
-              >
-                View
-              </Button>
             ) : null}
           </div>
         );
@@ -2156,49 +1992,69 @@ export default function WorkOrdersPage() {
               <div className="text-sm font-semibold text-gray-900">
                 Robot-Created Work Orders
               </div>
-              <div className="text-xs text-gray-500 mt-1">
-                Review and approve work orders created by automation robots
-                (2-layer approval required)
+              <div className="mt-1 text-xs text-gray-500">
+                Work orders arrive automatically from Robot Automation. This
+                screen only sends the approve or reject decision.
               </div>
             </div>
 
             <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-700">
-              <span className="font-semibold">Approval Workflow:</span> Robot
-              creates WO → User approval → Manager approval → Moves to main Work
-              Order table
+              <span className="font-semibold">Workflow:</span> Robot Automation
+              creates WO → User approval → Approved WO appears in the main Work
+              Order table automatically
             </div>
 
-            <div className="mt-4">
-              <Table
+            {apiEnabled ? (
+              <div className="mt-4 text-xs text-gray-400">
+                {robotTasksQuery.isFetching
+                  ? "Loading data from /working-order/robot-tasks..."
+                  : "Live data connected to /working-order/robot-tasks"}
+              </div>
+            ) : (
+              <div className="mt-4 text-xs text-amber-600">
+                API base URL not configured; Robot Task approval is disabled.
+              </div>
+            )}
+
+            <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
+              <Table<RobotTaskRow>
                 columns={robotColumns}
                 dataSource={robotTasks}
-                pagination={false}
+                loading={apiEnabled && robotTasksQuery.isFetching}
                 rowKey="key"
-                scroll={{ x: 1100 }}
+                pagination={{
+                  current: robotPage,
+                  pageSize: robotLimit,
+                  total:
+                    robotTasksQuery.data?.pagination.total ?? robotTasks.length,
+                  showSizeChanger: true,
+                  pageSizeOptions: [10, 20, 50, 100],
+                  onChange: (nextPage, nextPageSize) => {
+                    setRobotPage(nextPage);
+                    setRobotLimit(nextPageSize);
+                  },
+                }}
+                scroll={{ x: 1250 }}
               />
             </div>
 
-            <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4 grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+            <div className="mt-4 grid grid-cols-1 gap-4 rounded-xl border border-gray-100 bg-gray-50 p-4 text-sm md:grid-cols-4">
               <div>
-                <div className="text-xs text-gray-500">
-                  Pending User Approval
-                </div>
+                <div className="text-xs text-gray-500">Total Robot Tasks</div>
                 <div className="text-lg font-bold text-gray-900">
-                  {robotMetrics.pendingUser}
+                  {robotMetrics.total}
                 </div>
               </div>
               <div>
-                <div className="text-xs text-gray-500">
-                  Pending Manager Approval
-                </div>
+                <div className="text-xs text-gray-500">Pending Approval</div>
                 <div className="text-lg font-bold text-gray-900">
-                  {robotMetrics.pendingManager}
+                  {robotMetrics.pending}
                 </div>
               </div>
               <div>
-                <div className="text-xs text-gray-500">Fully Approved</div>
+                <div className="text-xs text-gray-500">Approved</div>
                 <div className="text-lg font-bold text-gray-900">
-                  {robotMetrics.fullyApproved}
+                  {robotMetrics.approved}
                 </div>
               </div>
               <div>

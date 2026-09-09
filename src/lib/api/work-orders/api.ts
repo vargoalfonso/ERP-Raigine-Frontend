@@ -235,6 +235,9 @@ export type WorkOrderRecord = {
   target_date?: string;
   operator_name?: string;
   created_by_name?: string;
+  source_system?: string;
+  automation_job_id?: string;
+  robot_name?: string;
   uniq_total?: number;
   uniq_closed?: number;
   aging_days?: number;
@@ -319,7 +322,7 @@ const toWorkOrderItemQRResponse = (raw: unknown): WorkOrderItemQRResponse => {
   };
 };
 
-const toWorkOrderRecord = (raw: unknown): WorkOrderRecord => {
+export const toWorkOrderRecord = (raw: unknown): WorkOrderRecord => {
   const record = isRecord(raw) ? raw : {};
   const items = getArray(record, [
     "items",
@@ -357,6 +360,12 @@ const toWorkOrderRecord = (raw: unknown): WorkOrderRecord => {
       "createdByName",
       "created_by",
     ]),
+    source_system: getString(record, ["source_system", "sourceSystem"]),
+    automation_job_id: getString(record, [
+      "automation_job_id",
+      "automationJobId",
+    ]),
+    robot_name: getString(record, ["robot_name", "robotName"]),
     uniq_total:
       getNumber(record, [
         "uniq_total",
@@ -544,6 +553,25 @@ export const workOrdersApiSlice = apiSlice
           );
         },
       }),
+      getRobotWorkOrderTasks: builder.query<
+        Paginated<WorkOrderRecord>,
+        GetWorkOrdersParams
+      >({
+        query: ({ page, limit }) => ({
+          url: "/working-order/robot-tasks",
+          method: "GET",
+          params: { page, limit },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => {
+          const normalized = normalizePaginatedResponse<unknown>(response);
+          return {
+            items: normalized.items.map(toWorkOrderRecord),
+            pagination: normalized.pagination,
+          };
+        },
+        providesTags: [{ type: TAG, id: "ROBOT_TASKS" }],
+      }),
       getWorkOrderById: builder.query<WorkOrderRecord, string>({
         query: (id) => ({
           url: `/working-order/work-orders/${encodeURIComponent(id)}`,
@@ -642,6 +670,23 @@ export const workOrdersApiSlice = apiSlice
           { type: TAG, id: "SUMMARY" },
         ],
       }),
+      approveRobotWorkOrderTask: builder.mutation<
+        unknown,
+        { uuid: string; body: WorkOrderApprovalRequest }
+      >({
+        query: ({ uuid, body }) => ({
+          url: `/working-order/robot-tasks/${encodeURIComponent(uuid)}/approval`,
+          method: "POST",
+          body,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        invalidatesTags: (_r, _e, { uuid }) => [
+          { type: TAG, id: "ROBOT_TASKS" },
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: uuid },
+          { type: TAG, id: "SUMMARY" },
+        ],
+      }),
       bulkApproveWorkOrders: builder.mutation<
         unknown,
         WorkOrderBulkApprovalRequest
@@ -712,6 +757,7 @@ export const workOrdersApiSlice = apiSlice
 
 export const {
   useGetWorkOrdersQuery,
+  useGetRobotWorkOrderTasksQuery,
   useGetWorkOrderByIdQuery,
   useGetWorkOrderItemQRQuery,
   useCreateWorkOrderMutation,
@@ -719,6 +765,7 @@ export const {
   useGetWorkOrdersSummaryQuery,
   useGetWorkOrderUniqOptionsQuery,
   useApproveWorkOrderMutation,
+  useApproveRobotWorkOrderTaskMutation,
   useBulkApproveWorkOrdersMutation,
   useGetRmProcessingWorkOrdersQuery,
   useGetRmProcessingWorkOrdersSummaryQuery,
