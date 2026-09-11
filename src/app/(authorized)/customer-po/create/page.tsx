@@ -189,9 +189,10 @@ export default function CreateCustomerOrderPage() {
     return null;
   }
 
-  const customersQuery = useListCustomersQuery(undefined, {
-    skip: !apiEnabled,
-  });
+  const customersQuery = useListCustomersQuery(
+    { page: 1, limit: 10000 },
+    { skip: !apiEnabled },
+  );
   const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
   const uomsQuery = useGetUomsQuery(undefined, { skip: !apiEnabled });
 
