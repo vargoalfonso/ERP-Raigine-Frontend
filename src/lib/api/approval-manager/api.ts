@@ -342,12 +342,17 @@ export const approvalManagerApiSlice = apiSlice
     endpoints: (builder) => ({
       getApprovalManagerItems: builder.query<
         ApiResponse<ApprovalManagerItem[]>,
-        { type: ApprovalManagerType; page?: number; limit?: number }
+        {
+          type: ApprovalManagerType;
+          status?: string;
+          page?: number;
+          limit?: number;
+        }
       >({
-        query: ({ type, page = 1, limit = 20 }) => ({
+        query: ({ type, status, page = 1, limit = 20 }) => ({
           url: "/approval-manager/items",
           method: "GET",
-          params: { type, page, limit },
+          params: { type, status, page, limit },
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown, _meta, arg) => {

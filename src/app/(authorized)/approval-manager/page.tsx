@@ -247,8 +247,11 @@ export default function ApprovalManagerPage() {
     }
   }, [activeTab]);
 
+  const serverStatus =
+    statusFilter === "All Status" ? undefined : statusFilter.toLowerCase();
+
   const listQuery = useGetApprovalManagerItemsQuery(
-    { type, page, limit },
+    { type, status: serverStatus, page, limit },
     { skip: !apiEnabled },
   );
 
@@ -386,7 +389,7 @@ export default function ApprovalManagerPage() {
 
   useEffect(() => {
     setPage(1);
-  }, [activeTab, statusFilter]);
+  }, [activeTab]);
 
   useEffect(() => {
     setSelectedRowKeys((prev) =>
@@ -1508,7 +1511,7 @@ export default function ApprovalManagerPage() {
           />
         ) : null}
 
-        <div className="rounded-2xl bg-gray-100 p-1">
+        <div className="overflow-x-auto rounded-2xl bg-gray-100 p-1">
           <Segmented
             block
             options={TAB_OPTIONS}
@@ -1517,22 +1520,22 @@ export default function ApprovalManagerPage() {
               setActiveTab(value as ApprovalTab);
               setPage(1);
             }}
-            className="approval-manager-segmented"
+            className="approval-manager-segmented min-w-max"
           />
         </div>
 
         <div className="mt-6">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="mb-4 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-sm text-gray-500">
               {selectedRows.length > 0
                 ? `${selectedRows.length} row selected${selectedRows.length > 1 ? "s" : ""}`
                 : "Select pending rows to bulk approve or reject"}
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:items-center">
               <Select<ApprovalStatusFilter>
                 value={statusFilter}
                 onChange={(value) => setStatusFilter(value)}
-                className="min-w-[180px]"
+                className="w-full sm:min-w-[180px]"
                 options={[
                   { label: "All Status", value: "All Status" },
                   { label: "Pending", value: "Pending" },
@@ -1543,7 +1546,7 @@ export default function ApprovalManagerPage() {
               <Button
                 danger
                 icon={<CloseCircleOutlined />}
-                className="!border-red-200 !bg-red-50 !text-red-600 hover:!border-red-300 hover:!bg-red-100 hover:!text-red-700"
+                className="w-full !border-red-200 !bg-red-50 !text-red-600 hover:!border-red-300 hover:!bg-red-100 hover:!text-red-700 sm:w-auto"
                 disabled={selectedRejectableRows.length === 0}
                 loading={bulkActionLoading === "reject"}
                 onClick={() => handleBulkDecision("reject")}
@@ -1553,7 +1556,7 @@ export default function ApprovalManagerPage() {
               <Button
                 type="primary"
                 icon={<CheckCircleOutlined />}
-                className="!border-emerald-600 !bg-emerald-600 hover:!border-emerald-700 hover:!bg-emerald-700"
+                className="w-full !border-emerald-600 !bg-emerald-600 hover:!border-emerald-700 hover:!bg-emerald-700 sm:w-auto"
                 disabled={selectedApprovableRows.length === 0}
                 loading={bulkActionLoading === "approve"}
                 onClick={() => handleBulkDecision("approve")}
@@ -1650,10 +1653,9 @@ export default function ApprovalManagerPage() {
             pagination={{
               current: page,
               pageSize: limit,
-              total:
-                apiEnabled && statusFilter === "All Status"
-                  ? (listQuery.data?.pagination?.total ?? filteredRows.length)
-                  : filteredRows.length,
+              total: apiEnabled
+                ? (listQuery.data?.pagination?.total ?? filteredRows.length)
+                : filteredRows.length,
               showSizeChanger: true,
               pageSizeOptions: ["10", "20", "50", "100"],
               onChange: (nextPage, nextPageSize) => {
