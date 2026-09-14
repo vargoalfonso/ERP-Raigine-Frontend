@@ -16,13 +16,14 @@ const ROUTES = {
   globalWorkingDays: "/global-parameters",
   kanban: "/kanban",
   machinePattern: "/machine-patterns",
-  
+
   process: "/process",
   uom: "/unit-measurement",
   typeParameter: "/type-parameter",
   safetyStock: "/safety-stock",
   stockdays: "/stockdays",
   poSplit: "/po-split-setting",
+  supplierInfo: "/supplier-info",
 } as const;
 
 const normalizeArrayResponse = <T>(response: unknown): T[] => {
@@ -325,7 +326,7 @@ export type MachinePatternRecord = {
 
 export type CreateProcessRequest = {
   process_code: string;
-  category: string |null;
+  category: string | null;
   process_name: string;
   sequence: number | null;
   is_assembly?: boolean;
@@ -423,6 +424,7 @@ export type CreateSafetyStockRequest = {
   item_uniq_code: string;
   calculation_type: string;
   constanta: number;
+  status?: StatusType | string;
 };
 
 export type CreateSafetyStockBulkRequest = {
@@ -489,6 +491,51 @@ export type CreatePoSplitRequest = {
   split_rule: string;
   status?: StatusType;
 };
+
+// ── Supplier Info ─────────────────────────────────────────────
+export type CreateSupplierInfoRequest = {
+  uniq: string;
+  uniq_zahir?: string;
+  supplier_name: string;
+  type: string;
+  status?: string;
+};
+
+export type UpdateSupplierInfoRequest = {
+  uniq_zahir?: string;
+  status: string;
+};
+
+export type SupplierInfoRecord = {
+  id: string;
+  uniq: string;
+  uniq_zahir?: string | null;
+  supplier_name: string;
+  type: string;
+  status: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+const normalizeSupplierInfoRecord = (
+  record: unknown,
+): SupplierInfoRecord | null => {
+  if (!record || typeof record !== "object") return null;
+  const raw = record as Record<string, unknown>;
+  const id = raw.id ?? raw.ID ?? raw.uuid;
+  if (id == null || id === "") return null;
+  return {
+    id: String(id),
+    uniq: String(raw.uniq ?? raw.Uniq ?? ""),
+    uniq_zahir: raw.uniq_zahir == null ? null : String(raw.uniq_zahir),
+    supplier_name: String(raw.supplier_name ?? raw.SupplierName ?? ""),
+    type: String(raw.type ?? raw.Type ?? ""),
+    status: String(raw.status ?? raw.Status ?? "active"),
+    created_at: raw.created_at == null ? undefined : String(raw.created_at),
+    updated_at: raw.updated_at == null ? undefined : String(raw.updated_at),
+  };
+};
+// ── end Supplier Info ──────────────────────────────────────────
 
 export type PoSplitRecord = {
   id: string;
@@ -1205,11 +1252,14 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
             is_assembly:
               typeof (r.is_assembly ?? r.IsAssembly) === "boolean"
                 ? Boolean(r.is_assembly ?? r.IsAssembly)
-                : String(r.is_assembly ?? r.IsAssembly ?? "").toLowerCase() === "true",
+                : String(r.is_assembly ?? r.IsAssembly ?? "").toLowerCase() ===
+                  "true",
             sub_con:
               typeof (r.sub_con ?? r.subcon ?? r.SubCon) === "boolean"
                 ? Boolean(r.sub_con ?? r.subcon ?? r.SubCon)
-                : String(r.sub_con ?? r.subcon ?? r.SubCon ?? "").toLowerCase() === "true",
+                : String(
+                    r.sub_con ?? r.subcon ?? r.SubCon ?? "",
+                  ).toLowerCase() === "true",
             status: String(r.status ?? r.Status ?? ""),
           } satisfies ProcessRecord;
         }),
@@ -1687,10 +1737,82 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
         normalizeObjectResponse<PoSplitRecord>(response),
       providesTags: (_res, _err, id) => [{ type: "SystemSettingsPoSplit", id }],
     }),
+
+    // Supplier Info
+    createSupplierInfo: builder.mutation<
+      { message?: string; data?: SupplierInfoRecord },
+      CreateSupplierInfoRequest
+    >({
+      query: (body) => ({
+        url: `${ROUTES.supplierInfo}`,
+        method: "POST",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      invalidatesTags: [{ type: "SystemSettingsSupplierInfo", id: "LIST" }],
+    }),
+
+    updateSupplierInfo: builder.mutation<
+      { message?: string; data?: SupplierInfoRecord },
+      { id: string; body: UpdateSupplierInfoRequest }
+    >({
+      query: ({ id, body }) => ({
+        url: `${ROUTES.supplierInfo}/${id}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      invalidatesTags: (_res, _err, arg) => [
+        { type: "SystemSettingsSupplierInfo", id: "LIST" },
+        { type: "SystemSettingsSupplierInfo", id: arg.id },
+      ],
+    }),
+
+    deleteSupplierInfo: builder.mutation<{ message?: string }, string>({
+      query: (id) => ({
+        url: `${ROUTES.supplierInfo}/${id}`,
+        method: "DELETE",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      invalidatesTags: (_res, _err, id) => [
+        { type: "SystemSettingsSupplierInfo", id: "LIST" },
+        { type: "SystemSettingsSupplierInfo", id },
+      ],
+    }),
+
+    getSupplierInfoList: builder.query<SupplierInfoRecord[], void>({
+      query: () => ({
+        url: `${ROUTES.supplierInfo}`,
+        method: "GET",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) =>
+        normalizeArrayResponse<unknown>(response)
+          .map((item) => normalizeSupplierInfoRecord(item))
+          .filter((item): item is SupplierInfoRecord => Boolean(item)),
+      providesTags: (result) => {
+        const base = [
+          { type: "SystemSettingsSupplierInfo" as const, id: "LIST" },
+        ];
+        const ids = (result ?? [])
+          .map((r) => r?.id)
+          .filter((id): id is string => Boolean(id));
+        return base.concat(
+          ids.map((id) => ({
+            type: "SystemSettingsSupplierInfo" as const,
+            id,
+          })),
+        );
+      },
+    }),
   }),
 });
 
 export const {
+  useCreateSupplierInfoMutation,
+  useUpdateSupplierInfoMutation,
+  useDeleteSupplierInfoMutation,
+  useGetSupplierInfoListQuery,
   useCreateRoleMutation,
   useUpdateRoleMutation,
   useDeleteRoleMutation,

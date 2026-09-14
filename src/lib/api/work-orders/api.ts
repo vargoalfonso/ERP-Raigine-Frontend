@@ -122,9 +122,12 @@ export type CreateWorkOrderRequest = {
   target_date: string;
   items: CreateWorkOrderItemRequest[];
   notes: string | null;
+  // [wo-remark] Field remark tambahan untuk WO.
+  remark?: string | null;
   // [wo-estimated-time] estimasi waktu produksi (menit) + komponen hitungannya
   estimated_time_minutes?: number | null;
   cycle_time_min?: number | null;
+  setup_time_min?: number | null;
   machine_capacity?: number | null;
 };
 
@@ -221,6 +224,7 @@ export type WorkOrderRecord = {
   // [wo-estimated-time]
   estimated_time_minutes?: number;
   cycle_time_min?: number;
+  setup_time_min?: number;
   machine_capacity?: number;
   id: string;
   wo_number: string;
@@ -233,10 +237,15 @@ export type WorkOrderRecord = {
   target_date?: string;
   operator_name?: string;
   created_by_name?: string;
+  source_system?: string;
+  automation_job_id?: string;
+  robot_name?: string;
   uniq_total?: number;
   uniq_closed?: number;
   aging_days?: number;
   notes?: string;
+  // [wo-remark] Catatan/keterangan tambahan (kolom Remark).
+  remark?: string;
   defect_reason?: string | null;
   // [wo-defect-reasons] semua Reason/Info (NG & Scrap) round 3 untuk tooltip
   defect_reasons?: Array<{ source: string; info: string; qty: number }>;
@@ -315,7 +324,7 @@ const toWorkOrderItemQRResponse = (raw: unknown): WorkOrderItemQRResponse => {
   };
 };
 
-const toWorkOrderRecord = (raw: unknown): WorkOrderRecord => {
+export const toWorkOrderRecord = (raw: unknown): WorkOrderRecord => {
   const record = isRecord(raw) ? raw : {};
   const items = getArray(record, [
     "items",
@@ -353,6 +362,12 @@ const toWorkOrderRecord = (raw: unknown): WorkOrderRecord => {
       "createdByName",
       "created_by",
     ]),
+    source_system: getString(record, ["source_system", "sourceSystem"]),
+    automation_job_id: getString(record, [
+      "automation_job_id",
+      "automationJobId",
+    ]),
+    robot_name: getString(record, ["robot_name", "robotName"]),
     uniq_total:
       getNumber(record, [
         "uniq_total",
@@ -367,6 +382,11 @@ const toWorkOrderRecord = (raw: unknown): WorkOrderRecord => {
     ]),
     aging_days: getNumber(record, ["aging_days", "aging", "agingDays"]),
     notes: getString(record, ["notes", "note"]),
+    // [wo-remark] Fallback ke notes bila backend belum menyediakan field remark.
+    remark:
+      getString(record, ["remark", "remarks"]) ??
+      getString(record, ["notes", "note"]) ??
+      undefined,
     defect_reason: getString(record, ["defect_reason", "defectReason"]) ?? null,
     defect_reasons: (() => {
       const rawReasons =
@@ -389,6 +409,7 @@ const toWorkOrderRecord = (raw: unknown): WorkOrderRecord => {
       "estimatedTimeMinutes",
     ]),
     cycle_time_min: getNumber(record, ["cycle_time_min", "cycleTimeMin"]),
+    setup_time_min: getNumber(record, ["setup_time_min", "setupTimeMin"]),
     machine_capacity: getNumber(record, [
       "machine_capacity",
       "machineCapacity",
@@ -535,6 +556,25 @@ export const workOrdersApiSlice = apiSlice
           );
         },
       }),
+      getRobotWorkOrderTasks: builder.query<
+        Paginated<WorkOrderRecord>,
+        GetWorkOrdersParams
+      >({
+        query: ({ page, limit }) => ({
+          url: "/working-order/robot-tasks",
+          method: "GET",
+          params: { page, limit },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => {
+          const normalized = normalizePaginatedResponse<unknown>(response);
+          return {
+            items: normalized.items.map(toWorkOrderRecord),
+            pagination: normalized.pagination,
+          };
+        },
+        providesTags: [{ type: TAG, id: "ROBOT_TASKS" }],
+      }),
       getWorkOrderById: builder.query<WorkOrderRecord, string>({
         query: (id) => ({
           url: `/working-order/work-orders/${encodeURIComponent(id)}`,
@@ -633,6 +673,23 @@ export const workOrdersApiSlice = apiSlice
           { type: TAG, id: "SUMMARY" },
         ],
       }),
+      approveRobotWorkOrderTask: builder.mutation<
+        unknown,
+        { uuid: string; body: WorkOrderApprovalRequest }
+      >({
+        query: ({ uuid, body }) => ({
+          url: `/working-order/robot-tasks/${encodeURIComponent(uuid)}/approval`,
+          method: "POST",
+          body,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        invalidatesTags: (_r, _e, { uuid }) => [
+          { type: TAG, id: "ROBOT_TASKS" },
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: uuid },
+          { type: TAG, id: "SUMMARY" },
+        ],
+      }),
       bulkApproveWorkOrders: builder.mutation<
         unknown,
         WorkOrderBulkApprovalRequest
@@ -703,6 +760,7 @@ export const workOrdersApiSlice = apiSlice
 
 export const {
   useGetWorkOrdersQuery,
+  useGetRobotWorkOrderTasksQuery,
   useGetWorkOrderByIdQuery,
   useGetWorkOrderItemQRQuery,
   useCreateWorkOrderMutation,
@@ -710,6 +768,7 @@ export const {
   useGetWorkOrdersSummaryQuery,
   useGetWorkOrderUniqOptionsQuery,
   useApproveWorkOrderMutation,
+  useApproveRobotWorkOrderTaskMutation,
   useBulkApproveWorkOrdersMutation,
   useGetRmProcessingWorkOrdersQuery,
   useGetRmProcessingWorkOrdersSummaryQuery,

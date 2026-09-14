@@ -4,18 +4,26 @@ type UnknownRecord = Record<string, unknown>;
 
 const TAG = "StockOpnameSessions" as const;
 
-const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
 
-const getString = (record: UnknownRecord, keys: string[]): string | undefined => {
+const getString = (
+  record: UnknownRecord,
+  keys: string[],
+): string | undefined => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) return value.trim();
-    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    if (typeof value === "number" && Number.isFinite(value))
+      return String(value);
   }
   return undefined;
 };
 
-const getNumber = (record: UnknownRecord, keys: string[]): number | undefined => {
+const getNumber = (
+  record: UnknownRecord,
+  keys: string[],
+): number | undefined => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -27,7 +35,10 @@ const getNumber = (record: UnknownRecord, keys: string[]): number | undefined =>
   return undefined;
 };
 
-const getNullableNumber = (record: UnknownRecord, keys: string[]): number | null => {
+const getNullableNumber = (
+  record: UnknownRecord,
+  keys: string[],
+): number | null => {
   for (const key of keys) {
     const value = record[key];
     if (value === null) return null;
@@ -52,7 +63,7 @@ export type Paginated<T> = {
   pagination: Pagination;
 };
 
-const normalizeArrayResponse = <T,>(response: unknown): T[] => {
+const normalizeArrayResponse = <T>(response: unknown): T[] => {
   if (Array.isArray(response)) return response as T[];
   if (isRecord(response)) {
     const data = response.data;
@@ -62,13 +73,14 @@ const normalizeArrayResponse = <T,>(response: unknown): T[] => {
       if (Array.isArray(items)) return items as T[];
       const nested = (data as UnknownRecord).data;
       if (Array.isArray(nested)) return nested as T[];
-      if (isRecord(nested) && Array.isArray((nested as UnknownRecord).items)) return (nested as UnknownRecord).items as T[];
+      if (isRecord(nested) && Array.isArray((nested as UnknownRecord).items))
+        return (nested as UnknownRecord).items as T[];
     }
   }
   return [];
 };
 
-const normalizeObjectResponse = <T,>(response: unknown): T | null => {
+const normalizeObjectResponse = <T>(response: unknown): T | null => {
   if (isRecord(response)) {
     const data = response.data;
     if (isRecord(data)) {
@@ -80,7 +92,7 @@ const normalizeObjectResponse = <T,>(response: unknown): T | null => {
   return isRecord(response) ? (response as T) : null;
 };
 
-const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
+const normalizePaginatedResponse = <T>(response: unknown): Paginated<T> => {
   const empty: Paginated<T> = {
     items: [],
     pagination: { total: 0, page: 1, limit: 20, total_pages: 1 },
@@ -94,7 +106,9 @@ const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
   const paginationRaw = (data as UnknownRecord).pagination;
 
   const items = Array.isArray(itemsRaw) ? (itemsRaw as T[]) : [];
-  const paginationRecord = isRecord(paginationRaw) ? (paginationRaw as UnknownRecord) : {};
+  const paginationRecord = isRecord(paginationRaw)
+    ? (paginationRaw as UnknownRecord)
+    : {};
 
   return {
     items,
@@ -102,7 +116,9 @@ const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
       total: getNumber(paginationRecord, ["total"]) ?? empty.pagination.total,
       page: getNumber(paginationRecord, ["page"]) ?? empty.pagination.page,
       limit: getNumber(paginationRecord, ["limit"]) ?? empty.pagination.limit,
-      total_pages: getNumber(paginationRecord, ["total_pages", "totalPages"]) ?? empty.pagination.total_pages,
+      total_pages:
+        getNumber(paginationRecord, ["total_pages", "totalPages"]) ??
+        empty.pagination.total_pages,
     },
   };
 };
@@ -142,6 +158,26 @@ export type StockOpnameCreateRequest = {
   remarks?: string;
   approver?: string;
   items: StockOpnameCreateItemRequest[];
+};
+
+export type StockOpnameBulkCreateError = {
+  row: number;
+  uniq_code: string;
+  message: string;
+};
+
+export type StockOpnameBulkCreateResponse = {
+  created: number;
+  errors: StockOpnameBulkCreateError[];
+};
+
+const toBulkCreateError = (raw: unknown): StockOpnameBulkCreateError => {
+  const row = isRecord(raw) ? raw : {};
+  return {
+    row: getNumber(row, ["row"]) ?? 0,
+    uniq_code: getString(row, ["uniq_code", "uniqCode"]) ?? "",
+    message: getString(row, ["message"]) ?? "Failed to import row",
+  };
 };
 
 export type StockOpnameSessionListRecord = {
@@ -231,11 +267,15 @@ const toUniqOption = (raw: unknown): StockOpnameUniqOption => {
   return {
     uniq_code: getString(r, ["uniq_code", "uniq", "uniqCode"]) ?? "",
     part_number: getString(r, ["part_number", "partNumber"]) ?? "",
-    part_name: getString(r, ["part_name", "partName", "item_name", "itemName"]) ?? "",
+    part_name:
+      getString(r, ["part_name", "partName", "item_name", "itemName"]) ?? "",
     uom: getString(r, ["uom", "unit", "unit_measurement"]) ?? "",
-    system_qty: getNumber(r, ["system_qty", "systemQty", "system_quantity"]) ?? 0,
+    system_qty:
+      getNumber(r, ["system_qty", "systemQty", "system_quantity"]) ?? 0,
     weight_kg: getNullableNumber(r, ["weight_kg"]),
-    raw_material_type: (getString(r, ["raw_material_type", "rawMaterialType"]) ?? "")
+    raw_material_type: (
+      getString(r, ["raw_material_type", "rawMaterialType"]) ?? ""
+    )
       .trim()
       .toLowerCase(),
   };
@@ -247,7 +287,8 @@ const toSessionListRecord = (raw: unknown): StockOpnameSessionListRecord => {
     id: getNumber(r, ["id"]) ?? 0,
     uuid: getString(r, ["uuid"]) ?? "",
     session_number: getString(r, ["session_number", "sessionNumber"]) ?? "-",
-    inventory_type: (getString(r, ["inventory_type", "type"]) ?? "RM") as StockInventoryType,
+    inventory_type: (getString(r, ["inventory_type", "type"]) ??
+      "RM") as StockInventoryType,
     method: getString(r, ["method"]),
     period_month: getNumber(r, ["period_month"]) ?? undefined,
     period_year: getNumber(r, ["period_year"]) ?? undefined,
@@ -308,7 +349,8 @@ const toHistoryLogRecord = (raw: unknown): StockOpnameHistoryLogRecord => {
     qty_change: getNumber(r, ["qty_change", "qtyChange"]) ?? 0,
     reason: getString(r, ["reason"]) ?? "-",
     qty: getNumber(r, ["qty"]) ?? 0,
-    last_update: getString(r, ["last_update", "lastUpdate", "updated_at"]) ?? "-",
+    last_update:
+      getString(r, ["last_update", "lastUpdate", "updated_at"]) ?? "-",
   };
 };
 
@@ -328,11 +370,19 @@ export const stockOpnameApiSlice = apiSlice
   .enhanceEndpoints({ addTagTypes: [TAG] })
   .injectEndpoints({
     endpoints: (builder) => ({
-      getStockOpnameUniqOptions: builder.query<StockOpnameUniqOption[], { type: StockInventoryType; q: string; limit: number }>({
-        query: ({ type, q, limit }) => ({
+      getStockOpnameUniqOptions: builder.query<
+        StockOpnameUniqOption[],
+        {
+          type: StockInventoryType;
+          method?: StockOpnameMethod;
+          q: string;
+          limit: number;
+        }
+      >({
+        query: ({ type, method, q, limit }) => ({
           url: "/stock-opname-sessions/form-options/uniq",
           method: "GET",
-          params: { type, q, limit },
+          params: { type, method, q, limit },
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
         transformResponse: (response: unknown) =>
@@ -341,7 +391,10 @@ export const stockOpnameApiSlice = apiSlice
             .filter((x) => Boolean(x.uniq_code)),
       }),
 
-      createStockOpnameSession: builder.mutation<unknown, StockOpnameCreateRequest>({
+      createStockOpnameSession: builder.mutation<
+        unknown,
+        StockOpnameCreateRequest
+      >({
         query: (body) => ({
           url: "/stock-opname-sessions",
           method: "POST",
@@ -351,7 +404,33 @@ export const stockOpnameApiSlice = apiSlice
         invalidatesTags: [{ type: TAG, id: "LIST" }],
       }),
 
-      getStockOpnameSessions: builder.query<Paginated<StockOpnameSessionListRecord>, { type: StockInventoryType; page: number; limit: number }>({
+      bulkAddStockOpnameEntries: builder.mutation<
+        StockOpnameBulkCreateResponse,
+        { id: string | number; items: StockOpnameCreateItemRequest[] }
+      >({
+        query: ({ id, items }) => ({
+          url: `/stock-opname-sessions/${encodeURIComponent(String(id))}/entries/bulk`,
+          method: "POST",
+          body: { items },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (
+          response: unknown,
+        ): StockOpnameBulkCreateResponse => {
+          const data = normalizeObjectResponse<UnknownRecord>(response) ?? {};
+          const errorsRaw = Array.isArray(data.errors) ? data.errors : [];
+          return {
+            created: getNumber(data, ["created"]) ?? 0,
+            errors: errorsRaw.map(toBulkCreateError),
+          };
+        },
+        invalidatesTags: [{ type: TAG, id: "LIST" }],
+      }),
+
+      getStockOpnameSessions: builder.query<
+        Paginated<StockOpnameSessionListRecord>,
+        { type: StockInventoryType; page: number; limit: number }
+      >({
         query: ({ type, page, limit }) => ({
           url: "/stock-opname-sessions",
           method: "GET",
@@ -366,14 +445,21 @@ export const stockOpnameApiSlice = apiSlice
           };
         },
         providesTags: (result) => {
-          const base: Array<{ type: typeof TAG; id: string }> = [{ type: TAG, id: "LIST" }];
-          const ids = result?.items?.map((r) => r.uuid || String(r.id)).filter(Boolean) ?? [];
+          const base: Array<{ type: typeof TAG; id: string }> = [
+            { type: TAG, id: "LIST" },
+          ];
+          const ids =
+            result?.items?.map((r) => r.uuid || String(r.id)).filter(Boolean) ??
+            [];
           return base.concat(ids.map((id) => ({ type: TAG, id })));
         },
       }),
 
       // GET /stock-opname-sessions/:id => { session, entries, approval }
-      getStockOpnameSessionById: builder.query<StockOpnameSessionDetailResult | null, { id: string | number }>({
+      getStockOpnameSessionById: builder.query<
+        StockOpnameSessionDetailResult | null,
+        { id: string | number }
+      >({
         query: ({ id }) => ({
           url: `/stock-opname-sessions/${encodeURIComponent(String(id))}`,
           method: "GET",
@@ -392,7 +478,10 @@ export const stockOpnameApiSlice = apiSlice
         providesTags: (_r, _e, arg) => [{ type: TAG, id: String(arg.id) }],
       }),
 
-      getStockOpnameAuditLogs: builder.query<Paginated<StockOpnameAuditLogRecord>, { id: string | number; page: number; limit: number }>({
+      getStockOpnameAuditLogs: builder.query<
+        Paginated<StockOpnameAuditLogRecord>,
+        { id: string | number; page: number; limit: number }
+      >({
         query: ({ id, page, limit }) => ({
           url: `/stock-opname-sessions/${encodeURIComponent(String(id))}/audit-logs`,
           method: "GET",
@@ -409,7 +498,10 @@ export const stockOpnameApiSlice = apiSlice
         providesTags: (_r, _e, arg) => [{ type: TAG, id: String(arg.id) }],
       }),
 
-      approveStockOpnameSession: builder.mutation<unknown, { id: string | number; body: StockOpnameApprovalRequest }>({
+      approveStockOpnameSession: builder.mutation<
+        unknown,
+        { id: string | number; body: StockOpnameApprovalRequest }
+      >({
         query: ({ id, body }) => ({
           url: `/stock-opname-sessions/${encodeURIComponent(String(id))}/approve`,
           method: "PUT",
@@ -422,7 +514,10 @@ export const stockOpnameApiSlice = apiSlice
         ],
       }),
 
-      rejectStockOpnameSession: builder.mutation<unknown, { id: string | number; body: StockOpnameApprovalRequest }>({
+      rejectStockOpnameSession: builder.mutation<
+        unknown,
+        { id: string | number; body: StockOpnameApprovalRequest }
+      >({
         query: ({ id, body }) => ({
           url: `/stock-opname-sessions/${encodeURIComponent(String(id))}/approve`,
           method: "PUT",
@@ -435,7 +530,10 @@ export const stockOpnameApiSlice = apiSlice
         ],
       }),
 
-      deleteStockOpnameSession: builder.mutation<unknown, { id: string | number }>({
+      deleteStockOpnameSession: builder.mutation<
+        unknown,
+        { id: string | number }
+      >({
         query: ({ id }) => ({
           url: `/stock-opname-sessions/${encodeURIComponent(String(id))}`,
           method: "DELETE",
@@ -447,7 +545,15 @@ export const stockOpnameApiSlice = apiSlice
         ],
       }),
 
-      getStockOpnameHistoryLogs: builder.query<Paginated<StockOpnameHistoryLogRecord>, { type: StockInventoryType; uniq_code: string; page: number; limit: number }>({
+      getStockOpnameHistoryLogs: builder.query<
+        Paginated<StockOpnameHistoryLogRecord>,
+        {
+          type: StockInventoryType;
+          uniq_code: string;
+          page: number;
+          limit: number;
+        }
+      >({
         query: ({ type, uniq_code, page, limit }) => ({
           url: "/stock-opname-sessions/history-logs",
           method: "GET",
@@ -469,6 +575,7 @@ export const {
   useGetStockOpnameUniqOptionsQuery,
   useLazyGetStockOpnameUniqOptionsQuery,
   useCreateStockOpnameSessionMutation,
+  useBulkAddStockOpnameEntriesMutation,
   useGetStockOpnameSessionsQuery,
   useGetStockOpnameSessionByIdQuery,
   useGetStockOpnameAuditLogsQuery,

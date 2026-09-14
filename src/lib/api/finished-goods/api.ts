@@ -549,6 +549,7 @@ export const finishedGoodsSlice = apiSlice.injectEndpoints({
 
 export const {
   useGetFinishedGoodsQuery,
+  useLazyGetFinishedGoodsQuery,
   useGetFinishedGoodsSummaryQuery,
   useGetFinishedGoodParameterizedSummaryQuery,
   useLazyGetFinishedGoodParameterizedSummaryQuery,

@@ -578,7 +578,6 @@ export default function BomEditPage() {
       };
 
       const files: Array<{ key: string; file: File }> = [];
-      const seenUniqs = new Set<string>();
 
       const mapChildParts = (
         children: ChildPartForm[] | undefined,
@@ -600,8 +599,6 @@ export default function BomEditPage() {
           if (!uniqCode || !partName || !partNumber || !childUom) {
             throw new Error(`Child #${pathLabel || index + 1} belum lengkap.`);
           }
-          if (seenUniqs.has(uniqCode)) throw new Error(`Duplicate child UNIQ '${uniqCode}'.`);
-          seenUniqs.add(uniqCode);
 
           const childFileKey = toChildFileKey(currentPath);
           const childFile = asFile(childFileLists?.[childFileKey]?.[0]?.originFileObj);
@@ -634,7 +631,8 @@ export default function BomEditPage() {
             material_spec: mapMaterialSpec(child.material_spec),
             process_routes: mapProcessRoutes(child.process_routes),
             children: mapChildParts(child.children, level + 1, uniqCode, [...currentPath, "children"]),
-            raw_material_type: cleanText(child.category) ?? undefined,
+            raw_material_type:
+              cleanText(child.material_spec?.type_material) ?? cleanText(child.category) ?? undefined,
           };
         });
       };
@@ -784,7 +782,7 @@ export default function BomEditPage() {
                   onRemove={removeNodeAtKey}
                 />
 
-                <div className="min-w-0">
+               <div className="min-w-0 xl:sticky xl:top-24 xl:h-[calc(100vh-8rem)] xl:overflow-y-auto"> 
                   <BomDetailPanel
                     selectedNodeKey={selectedNodeKey}
                     selectedChildPath={selectedChildPath}

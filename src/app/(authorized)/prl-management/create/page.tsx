@@ -93,9 +93,13 @@ export default function AddForecastPage() {
   const [createPrl, createPrlState] = useCreatePrlMutation();
   const [createPrlsBulk, createPrlsBulkState] = useCreatePrlsBulkMutation();
   const [importPrls, importPrlsState] = useImportPrlsMutation();
-  const { data: customers = [] } = useListCustomersQuery(undefined, {
-    skip: !apiEnabled,
-  });
+  // Backend /customers default limit=10 (max 100 per request). Pakai limit
+  // besar supaya seluruh master customer ikut termuat di dropdown Customer
+  // Name — konsisten dengan halaman master-customer.
+  const { data: customers = [] } = useListCustomersQuery(
+    { limit: 1000 },
+    { skip: !apiEnabled },
+  );
   const { data: bomTreeRes } = useGetBomListQuery(undefined, {
     skip: !apiEnabled,
   });

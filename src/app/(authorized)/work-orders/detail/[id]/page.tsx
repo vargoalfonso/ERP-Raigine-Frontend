@@ -45,12 +45,24 @@ type DetailRow = {
   partNumber: string;
   model: string;
   quantity: string;
+  /** Nilai kuantitas mentah (angka) untuk perhitungan estimasi per-uniq. */
+  quantityNumber: number;
+  /** Estimasi waktu per-uniq (menit) = qty x cycle_time_min x machine_capacity. */
+  estimatedMinutes: number;
   processName: string;
   status: string;
   kanbanNumber: string;
   qrDataUrl?: string;
   /** Routing snapshot; each step carries the is_assembly flag. */
   processFlowJson: unknown;
+};
+
+// Format estimasi waktu (menit) untuk ditampilkan di tabel/detail.
+// Contoh: 0.5 -> "0.5 menit", 12 -> "12 menit", 0 / undefined -> "-".
+const formatEstimatedMinutes = (value?: number | null) => {
+  if (value == null || !Number.isFinite(value) || value <= 0) return "-";
+  const rounded = Math.round(value * 100) / 100;
+  return `${rounded} menit`;
 };
 
 type DetailFieldProps = {
@@ -132,26 +144,59 @@ export default function WorkOrderDetailPage() {
   );
 
   const detailRows = useMemo<DetailRow[]>(() => {
-    return (workOrder?.items ?? []).map((item, index) => ({
-      key: item.id || `${item.item_uniq_code}-${index}`,
-      id: item.id,
-      uniq: item.item_uniq_code,
-      partName:
-        item.part_name ?? bomIndex.partNameByUniq[item.item_uniq_code] ?? "-",
-      partNumber:
-        item.part_number ??
-        bomIndex.partNumberByUniq[item.item_uniq_code] ??
-        "-",
-      model:
-        item.model ?? bomIndex.assemblyCodeByUniq[item.item_uniq_code] ?? "-",
-      quantity: `${item.quantity} ${item.uom || "pcs"}`,
-      processName: item.process_name || "-",
-      status: item.status || "Pending",
-      kanbanNumber: item.kanban_number ?? "-",
-      qrDataUrl: item.qr_data_url,
-      processFlowJson: item.process_flow_json,
-    }));
-  }, [bomIndex, workOrder?.items]);
+    // [wo-estimated-time] Estimasi per-uniq mengikuti formula yang sama
+    // dengan halaman create WO: qty x cycle_time_min x machine_capacity.
+    // Nilai cycle_time_min & machine_capacity disimpan di level WO, jadi
+    // total = jumlah semua per-uniq (identik dengan estimated_time_minutes
+    // yang disimpan saat WO dibuat).
+    const cycleMin = Number(workOrder?.cycle_time_min ?? 0);
+    const capacity = Number(workOrder?.machine_capacity ?? 0);
+    return (workOrder?.items ?? []).map((item, index) => {
+      const qtyNumber = Number(item.quantity) || 0;
+      const perUniq =
+        cycleMin > 0 && capacity > 0 && qtyNumber > 0
+          ? Math.round(qtyNumber * cycleMin * capacity * 100) / 100
+          : 0;
+      return {
+        key: item.id || `${item.item_uniq_code}-${index}`,
+        id: item.id,
+        uniq: item.item_uniq_code,
+        partName:
+          item.part_name ?? bomIndex.partNameByUniq[item.item_uniq_code] ?? "-",
+        partNumber:
+          item.part_number ??
+          bomIndex.partNumberByUniq[item.item_uniq_code] ??
+          "-",
+        model:
+          item.model ?? bomIndex.assemblyCodeByUniq[item.item_uniq_code] ?? "-",
+        quantity: `${item.quantity} ${item.uom || "pcs"}`,
+        quantityNumber: qtyNumber,
+        estimatedMinutes: perUniq,
+        processName: item.process_name || "-",
+        status: item.status || "Pending",
+        kanbanNumber: item.kanban_number ?? "-",
+        qrDataUrl: item.qr_data_url,
+        processFlowJson: item.process_flow_json,
+      };
+    });
+  }, [
+    bomIndex,
+    workOrder?.items,
+    workOrder?.cycle_time_min,
+    workOrder?.machine_capacity,
+  ]);
+
+  // [wo-estimated-time] Total per-uniq (fallback bila WO belum menyimpan
+  // nilai estimated_time_minutes, mis. data lama). Kalau jumlah per-uniq > 0
+  // gunakan itu; jika tidak, pakai nilai yang tersimpan di WO.
+  const totalEstimatedMinutes = useMemo(() => {
+    const sumPerUniq = detailRows.reduce(
+      (acc, r) => acc + (r.estimatedMinutes || 0),
+      0,
+    );
+    if (sumPerUniq > 0) return Math.round(sumPerUniq * 100) / 100;
+    return Number(workOrder?.estimated_time_minutes ?? 0);
+  }, [detailRows, workOrder?.estimated_time_minutes]);
 
   useEffect(() => {
     if (detailRows.length === 0) {
@@ -365,6 +410,7 @@ export default function WorkOrderDetailPage() {
             <td>${escapePrint(row.quantity)}</td>
             <td>${escapePrint(row.processName)}</td>
             <td>${escapePrint(row.status)}</td>
+            <td>${escapePrint(formatEstimatedMinutes(row.estimatedMinutes))}</td>
           </tr>`,
       )
       .join("");
@@ -406,6 +452,7 @@ export default function WorkOrderDetailPage() {
             <div><span class="label">Aging:</span> ${escapePrint(displayAging)}</div>
             <div><span class="label">Total UNIQ:</span> ${escapePrint(String(totalUniq))}</div>
             <div><span class="label">Closed UNIQ:</span> ${escapePrint(String(closedUniq))}</div>
+            <div><span class="label">Estimasi Waktu (Total):</span> ${escapePrint(formatEstimatedMinutes(totalEstimatedMinutes))}</div>
           </div>
           <table>
             <thead>
@@ -415,6 +462,7 @@ export default function WorkOrderDetailPage() {
                 <th>Quantity</th>
                 <th>Process</th>
                 <th>Status</th>
+                <th>Estimasi</th>
               </tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
@@ -427,7 +475,14 @@ export default function WorkOrderDetailPage() {
     win.document.close();
     win.focus();
     setTimeout(() => win.print(), 300);
-  }, [closedUniq, detailRows, displayAging, totalUniq, workOrder]);
+  }, [
+    closedUniq,
+    detailRows,
+    displayAging,
+    totalEstimatedMinutes,
+    totalUniq,
+    workOrder,
+  ]);
 
   const printSelectedItem = () => {
     if (!selectedItem || !selectedItemQRSrc || hasBrokenSelectedQR) {
@@ -651,10 +706,10 @@ export default function WorkOrderDetailPage() {
                   />
                   {/* [wo-estimated-time] */}
                   <DetailField
-                    label="Estimasi Waktu"
+                    label="Estimasi Waktu (Total)"
                     value={
-                      workOrder?.estimated_time_minutes
-                        ? `${workOrder.estimated_time_minutes} menit`
+                      totalEstimatedMinutes > 0
+                        ? `${totalEstimatedMinutes} menit`
                         : "-"
                     }
                   />
@@ -756,11 +811,12 @@ export default function WorkOrderDetailPage() {
                 />
               ) : (
                 <div className="min-w-0">
-                  <div className="hidden grid-cols-[minmax(160px,1.2fr)_minmax(130px,1fr)_100px_minmax(110px,0.8fr)_88px] gap-3 bg-slate-50 px-4 py-2.5 text-xs font-medium text-slate-500 md:grid">
+                  <div className="hidden grid-cols-[minmax(160px,1.2fr)_minmax(130px,1fr)_100px_minmax(110px,0.8fr)_minmax(96px,0.8fr)_88px] gap-3 bg-slate-50 px-4 py-2.5 text-xs font-medium text-slate-500 md:grid">
                     <span>UNIQ</span>
                     <span>Kanban</span>
                     <span>Quantity</span>
                     <span>Status</span>
+                    <span>Estimasi</span>
                     <span className="text-right">Action</span>
                   </div>
                   {detailRows.map((row) => {
@@ -771,7 +827,7 @@ export default function WorkOrderDetailPage() {
                         type="button"
                         aria-pressed={selected}
                         onClick={() => setSelectedItemKey(row.key)}
-                        className={`grid min-h-14 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-t border-slate-100 px-4 py-3 text-left transition-colors duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-600 md:grid-cols-[minmax(160px,1.2fr)_minmax(130px,1fr)_100px_minmax(110px,0.8fr)_88px] ${
+                        className={`grid min-h-14 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-t border-slate-100 px-4 py-3 text-left transition-colors duration-150 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-600 md:grid-cols-[minmax(160px,1.2fr)_minmax(130px,1fr)_100px_minmax(110px,0.8fr)_minmax(96px,0.8fr)_88px] ${
                           selected
                             ? "bg-blue-50 shadow-[inset_3px_0_0_#2563eb]"
                             : "bg-white hover:bg-slate-50"
@@ -798,6 +854,10 @@ export default function WorkOrderDetailPage() {
                           >
                             {row.status}
                           </Tag>
+                        </span>
+                        {/* [wo-estimated-time] Estimasi per-uniq */}
+                        <span className="hidden font-mono text-xs text-slate-700 tabular-nums md:block">
+                          {formatEstimatedMinutes(row.estimatedMinutes)}
                         </span>
                         <span className="hidden justify-self-end text-sm font-semibold text-blue-700 md:block">
                           {selected ? "Selected" : "View"}

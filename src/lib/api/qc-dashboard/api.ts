@@ -443,6 +443,7 @@ export const qcDashboardApiSlice = apiSlice
 export const {
   useGetQcDashboardOverviewQuery,
   useGetQcDashboardProductionQcQuery,
+  useLazyGetQcDashboardProductionQcQuery,
   useGetQcDashboardProductionQcDetailQuery,
   useGetQcDashboardIncomingQcQuery,
   useGetQcDashboardDefectsQuery,

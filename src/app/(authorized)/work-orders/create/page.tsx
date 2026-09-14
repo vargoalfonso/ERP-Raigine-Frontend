@@ -202,11 +202,13 @@ export default function CreateWorkOrderPage() {
     return map;
   }, [machineRecords]);
 
-  // [wo-estimated-time] Cycle time (menit/pcs) + machine capacity per uniq, diambil dari BOM.
+  // [wo-estimated-time] Cycle/setup time per UNIQ, diambil dari BOM.
   // cycle_time_sec disimpan dalam detik di BOM, di sini dikonversi ke menit.
   const bomTimeMap = useMemo(() => {
-    const map: Record<string, { cycleMin: number; machineCapacity: number }> =
-      {};
+    const map: Record<
+      string,
+      { cycleMin: number; setupMin: number; machineCapacity: number }
+    > = {};
     const nodes: any[] = (() => {
       const anyRes = bomTreeRes as any;
       if (!anyRes) return [];
@@ -240,6 +242,11 @@ export default function CreateWorkOrderPage() {
         n?.cycle_time_sec,
         routes[0]?.cycle_time_sec,
       );
+      const setupMin = pickNumber(
+        spec?.setup_time_min,
+        n?.setup_time_min,
+        routes[0]?.setup_time_min,
+      );
       if (cycleSec <= 0) return;
       // Mesin yang dipakai uniq ini diambil dari process route BOM,
       // kapasitasnya dicari di master mesin (Machine Master Data).
@@ -266,6 +273,7 @@ export default function CreateWorkOrderPage() {
       }
       map[uniq] = {
         cycleMin: Math.round((cycleSec / 60) * 10000) / 10000,
+        setupMin: Math.round(setupMin * 10000) / 10000,
         machineCapacity: capacity > 0 ? capacity : 1,
       };
     };
@@ -310,6 +318,9 @@ export default function CreateWorkOrderPage() {
     }));
   }, [apiEnabled, bomIndex, processNameOptions, uniqOptionsQuery.data]);
 
+  const selectedWoType = Form.useWatch("woType", form) as
+    WorkOrderType | undefined;
+
   const uniqSelectOptions = useMemo(() => {
     const bomData = bomTreeRes?.data;
     const topNodes: any[] = Array.isArray(bomData)
@@ -327,13 +338,19 @@ export default function CreateWorkOrderPage() {
         return code ? { label: code, value: code } : null;
       })
       .filter(Boolean) as { label: string; value: string }[];
+
+    // Assembly: hanya tampilkan UNIQ parent (top-level BOM nodes)
+    if (selectedWoType === "Assembly") {
+      return fromBom;
+    }
+
     const fromApi = uniqOptions.map((u) => ({ label: u.uniq, value: u.uniq }));
     const map = new Map<string, { label: string; value: string }>();
     for (const it of [...fromBom, ...fromApi]) {
       if (!map.has(it.value)) map.set(it.value, it);
     }
     return Array.from(map.values());
-  }, [uniqOptions, bomIndex]);
+  }, [uniqOptions, bomIndex, bomTreeRes?.data, selectedWoType]);
 
   useEffect(() => {
     form.setFieldsValue({ woNumber });
@@ -377,6 +394,19 @@ export default function CreateWorkOrderPage() {
   };
 
   const onSelectUniq = (id: string, uniq: string) => {
+    // FIX: bersihkan children milik parent-line ini secara sinkron sebelum
+    // memuat children uniq baru. Sebelumnya, `applyChildLines` hanya jalan
+    // setelah fetch selesai — dan kalau uniq baru tidak punya children (atau
+    // fetch gagal / return kosong), children uniq lama tetap menempel &
+    // menumpuk saat user berganti-ganti uniq.
+    setLines((prev) => {
+      const cleaned = prev.filter((l) => l.parentId !== id);
+      return cleaned.map((l, idx) => ({
+        ...l,
+        kanbanNumber: nextKanbanNumber(idx),
+      }));
+    });
+
     const getFirstProcessName = (node: any): string | null => {
       if (!node) return null;
       const routes = Array.isArray(node.process_routes)
@@ -613,9 +643,16 @@ export default function CreateWorkOrderPage() {
       });
 
     // --- Helper: apply child lines ke state ---
+    // Selalu reset children milik parent id ini, bahkan jika detailChildren
+    // kosong (uniq baru memang tidak punya BOM child). Ini mencegah children
+    // uniq sebelumnya menempel/nyangkut saat user ganti uniq.
     const applyChildLines = (detailChildren: any[], detailRoot?: any) => {
-      if (!detailChildren.length) return;
       setLines((prev) => {
+        // Stale-guard: kalau user sudah ganti uniq lagi di parent line ini
+        // sebelum fetch async ini selesai, abaikan hasilnya supaya children
+        // stale tidak nempel ke uniq baru.
+        const currentParent = prev.find((l) => l.id === id);
+        if (!currentParent || currentParent.uniq !== uniq) return prev;
         const baseLines = prev.filter((l) => l.id !== id && l.parentId !== id);
         // QPU untuk parent: ambil dari qty_per_uniq di BOM node jika ada
         const parentQpu =
@@ -769,36 +806,53 @@ export default function CreateWorkOrderPage() {
     }
   }, [finishedQuery.data, finishedQuery.isError, requestedFinished]);
 
-  // [wo-estimated-time] Estimasi waktu (menit) = SUM(qty x cycle time menit x machine capacity).
-  // Dihitung ulang otomatis setiap qty / uniq berubah (on change).
+  // [wo-estimated-time] Estimasi waktu WO (menit) = SUM(qty x cycle) + setup
+  // hanya saat UNIQ berubah dari baris valid sebelumnya.
   const estimatedTimeBreakdown = useMemo(() => {
-    let total = 0;
+    let cycleTotal = 0;
+    let setupTotal = 0;
     let cycleMin: number | undefined;
     let capacity: number | undefined;
+    let previousUniq = "";
+
     for (const l of lines) {
       // Child ikut dihitung: tiap child punya uniq + qty (qty x qpu) sendiri.
-      const info = l.uniq ? bomTimeMap[l.uniq] : undefined;
+      const uniq = String(l.uniq ?? "").trim();
+      const info = uniq ? bomTimeMap[uniq] : undefined;
       const qty =
         typeof l.qty === "number" && Number.isFinite(l.qty) ? l.qty : 0;
       if (!info || qty <= 0) continue;
-      total += qty * info.cycleMin * info.machineCapacity;
+
+      cycleTotal += qty * info.cycleMin;
+      if (uniq !== previousUniq) setupTotal += info.setupMin;
+      previousUniq = uniq;
+
       if (cycleMin === undefined) {
         cycleMin = info.cycleMin;
         capacity = info.machineCapacity;
       }
     }
-    return { total: Math.round(total * 100) / 100, cycleMin, capacity };
+
+    const total = cycleTotal + setupTotal;
+    return {
+      total: Math.round(total * 100) / 100,
+      cycleTotal: Math.round(cycleTotal * 100) / 100,
+      setupTotal: Math.round(setupTotal * 100) / 100,
+      cycleMin,
+      capacity,
+    };
   }, [lines, bomTimeMap]);
 
   // [wo-estimated-time] Read-only: tidak bisa diketik, selalu auto-calculated.
   const estimatedTimeMinutes = estimatedTimeBreakdown.total;
 
-  // Estimasi waktu per baris = qty x cycle time (menit) x machine capacity.
+  // Estimasi waktu per baris = qty x cycle. Setup ditambahkan di total WO
+  // ketika UNIQ pada baris ini berbeda dari UNIQ valid sebelumnya.
   const lineEstimatedMinutes = (l: UniqLine) => {
     const info = l.uniq ? bomTimeMap[l.uniq] : undefined;
     const qty = typeof l.qty === "number" && Number.isFinite(l.qty) ? l.qty : 0;
     if (!info || qty <= 0) return 0;
-    return Math.round(qty * info.cycleMin * info.machineCapacity * 100) / 100;
+    return Math.round(qty * info.cycleMin * 100) / 100;
   };
 
   const validateLines = () => {
@@ -843,10 +897,13 @@ export default function CreateWorkOrderPage() {
           process_name: String(line.process ?? ""),
         })),
         notes: values.woNotes ? String(values.woNotes) : null,
+        // [wo-remark] Kirim remark ke backend agar bisa muncul di daftar WO.
+        remark: values.woRemark ? String(values.woRemark) : null,
         // [wo-estimated-time]
         estimated_time_minutes:
           estimatedTimeMinutes > 0 ? estimatedTimeMinutes : null,
         cycle_time_min: estimatedTimeBreakdown.cycleMin ?? null,
+        setup_time_min: estimatedTimeBreakdown.setupTotal,
         machine_capacity: estimatedTimeBreakdown.capacity ?? null,
       }).unwrap();
 
@@ -864,9 +921,6 @@ export default function CreateWorkOrderPage() {
         message.error(getApiErrorMessage(err, "Failed to create work order"));
     }
   };
-
-  const selectedWoType = Form.useWatch("woType", form) as
-    WorkOrderType | undefined;
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
@@ -998,6 +1052,17 @@ export default function CreateWorkOrderPage() {
                   />
                 </Form.Item>
               </div>
+
+              {/* [wo-remark] Field Remark tambahan untuk Work Order. Nilainya juga tampil di kolom Remark tabel WO. */}
+              <div className="md:col-span-2">
+                <Form.Item name="woRemark" label="Remark">
+                  <TextArea
+                    className="!rounded-lg"
+                    rows={2}
+                    placeholder="Contoh: rush order, prioritas customer A"
+                  />
+                </Form.Item>
+              </div>
             </div>
           </div>
 
@@ -1010,6 +1075,11 @@ export default function CreateWorkOrderPage() {
                 <div className="text-xs text-gray-500 mt-1">
                   Add multiple UNIQs to this work order (1 UNIQ = 1 Kanban)
                 </div>
+                {selectedWoType === "Assembly" && (
+                  <div className="mt-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">
+                    Mode Assembly: hanya menampilkan UNIQ parent (BOM level 1)
+                  </div>
+                )}
               </div>
               <Button
                 className="!rounded-lg"
@@ -1180,7 +1250,7 @@ export default function CreateWorkOrderPage() {
                         )}
                       </div>
 
-                      {/* [wo-estimated-time] Read-only, auto-calculated dari qty x cycle time x machine capacity */}
+                      {/* [wo-estimated-time] Read-only, auto-calculated dari qty x cycle + setup saat UNIQ berubah */}
                       <div className="col-span-2">
                         <Input
                           className="!rounded-lg"
@@ -1190,7 +1260,7 @@ export default function CreateWorkOrderPage() {
                         />
                         <div className="mt-1 text-[11px] text-gray-400">
                           {l.uniq && bomTimeMap[l.uniq]
-                            ? `Cycle ${bomTimeMap[l.uniq].cycleMin} mnt x kapasitas ${bomTimeMap[l.uniq].machineCapacity} x qty`
+                            ? `Cycle ${bomTimeMap[l.uniq].cycleMin} mnt x qty; setup WO dihitung saat UNIQ berubah`
                             : "Cycle time BOM belum diisi"}
                         </div>
                       </div>

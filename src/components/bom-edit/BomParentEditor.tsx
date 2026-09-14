@@ -75,9 +75,9 @@ export default function BomParentEditor(props: ParentEditorProps) {
             <Select showSearch disabled={disabled} loading={isUomsLoading} options={uomOptions} optionFilterProp="label" />
           </Form.Item>
           
-          <Form.Item name={["material_spec", "cycle_time_sec"]} label="Cycle Time (s)">
+          {/* <Form.Item name={["material_spec", "cycle_time_sec"]} label="Cycle Time (s)">
             <InputNumber min={0} className="w-full" disabled={disabled} />
-          </Form.Item>
+          </Form.Item> */}
  
         </div>
 

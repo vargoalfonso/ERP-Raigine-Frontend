@@ -53,20 +53,22 @@ export default function BomDetailPanel(props: BomDetailPanelProps) {
 
   if (selectedNodeKey === "parent") {
     return (
-      <BomParentEditor
-        form={form}
-        disabled={disabled}
-        isAssembly={isParentAssembly}
-        existingAssetUrl={existingParentAssetUrl}
-        fileList={parentFileList}
-        setFileList={setParentFileList}
-        processOptions={processOptions}
-        machineOptions={machineOptions}
-        isProcessesLoading={isProcessesLoading}
-        isMachinesLoading={isMachinesLoading}
-        isUomsLoading={isUomsLoading}
-        uomOptions={uomOptions}
-      />
+      <div className="max-h-[calc(100vh-10rem)] overflow-y-auto pr-1">
+        <BomParentEditor
+          form={form}
+          disabled={disabled}
+          isAssembly={isParentAssembly}
+          existingAssetUrl={existingParentAssetUrl}
+          fileList={parentFileList}
+          setFileList={setParentFileList}
+          processOptions={processOptions}
+          machineOptions={machineOptions}
+          isProcessesLoading={isProcessesLoading}
+          isMachinesLoading={isMachinesLoading}
+          isUomsLoading={isUomsLoading}
+          uomOptions={uomOptions}
+        />
+      </div>
     );
   }
 
@@ -79,22 +81,24 @@ export default function BomDetailPanel(props: BomDetailPanelProps) {
   }
 
   return (
-    <BomChildEditor
-      form={form}
-      fieldPath={selectedChildPath}
-      absolutePath={selectedChildPath}
-      disabled={disabled}
-      title={selectedChildLabel || "Child node"}
-      levelLabel={selectedChildLevelLabel || "L1"}
-      existingAssetUrl={selectedChildAssetUrl}
-      fileList={selectedChildFileList}
-      setFileList={setSelectedChildFileList}
-      processOptions={processOptions}
-      machineOptions={machineOptions}
-      isProcessesLoading={isProcessesLoading}
-      isMachinesLoading={isMachinesLoading}
-      isUomsLoading={isUomsLoading}
-      uomOptions={uomOptions}
-    />
+    <div className="max-h-[calc(100vh-10rem)] overflow-y-auto pr-1">
+      <BomChildEditor
+        form={form}
+        fieldPath={selectedChildPath}
+        absolutePath={selectedChildPath}
+        disabled={disabled}
+        title={selectedChildLabel || "Child node"}
+        levelLabel={selectedChildLevelLabel || "L1"}
+        existingAssetUrl={selectedChildAssetUrl}
+        fileList={selectedChildFileList}
+        setFileList={setSelectedChildFileList}
+        processOptions={processOptions}
+        machineOptions={machineOptions}
+        isProcessesLoading={isProcessesLoading}
+        isMachinesLoading={isMachinesLoading}
+        isUomsLoading={isUomsLoading}
+        uomOptions={uomOptions}
+      />
+    </div>
   );
 }

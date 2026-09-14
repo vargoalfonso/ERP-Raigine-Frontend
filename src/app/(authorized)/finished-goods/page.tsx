@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   CheckCircleFilled,
@@ -16,6 +16,7 @@ import {
 } from "@ant-design/icons";
 import {
   Button,
+  Dropdown,
   Form,
   Input,
   InputNumber,
@@ -26,6 +27,7 @@ import {
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import * as XLSX from "xlsx";
 import { BsBoxSeam } from "react-icons/bs";
 import { FiAlertTriangle } from "react-icons/fi";
 import { HiOutlineArchiveBox } from "react-icons/hi2";
@@ -39,6 +41,7 @@ import {
   type FinishedGoodListItem,
   useGetFinishedGoodParameterizedSummaryQuery,
   useGetFinishedGoodsQuery,
+  useLazyGetFinishedGoodsQuery,
   useGetFinishedGoodsSummaryQuery,
   useDeleteFinishedGoodMutation,
   useUpdateFinishedGoodMutation,
@@ -132,6 +135,37 @@ function StockStatusCell({ uniqCode }: { uniqCode: string }) {
       <StatusTag status={status} />
     </div>
   );
+}
+
+// Urutan urgensi stok: Low (paling atas) -> Normal -> Overstock (paling bawah).
+// Status yang belum termuat diletakkan paling akhir agar tidak mengganggu urutan.
+function stockStatusRank(status?: string) {
+  const normalized = (status ?? "").trim().toLowerCase();
+  if (!normalized) return 3;
+  if (normalized.includes("low")) return 0;
+  if (normalized.includes("over")) return 2;
+  return 1;
+}
+
+// Probe tak terlihat: memakai query summary yang sama dengan sel-sel baris (di-cache/dedupe
+// oleh RTK Query, jadi tanpa request tambahan) lalu melaporkan status stok ke parent untuk sorting.
+function StockStatusProbe({
+  uniqCode,
+  onResolved,
+}: {
+  uniqCode: string;
+  onResolved: (uniqCode: string, status: string) => void;
+}) {
+  const apiEnabled = Boolean(apiBaseUrl);
+  const q = useGetFinishedGoodParameterizedSummaryQuery(
+    { uniq_code: uniqCode },
+    { skip: !apiEnabled || !uniqCode },
+  );
+  const status = q.data?.status;
+  useEffect(() => {
+    if (status !== undefined) onResolved(uniqCode, status || "Normal");
+  }, [status, uniqCode, onResolved]);
+  return null;
 }
 
 function FinishedGoodsDetailModal({
@@ -543,6 +577,11 @@ export default function FinishedGoodsPage() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  // Baris yang dicentang pengguna — dipakai untuk fitur Export Selected.
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [isExporting, setIsExporting] = useState(false);
+  // Lazy fetch untuk "Export All" — mengambil seluruh halaman FG sekaligus.
+  const [triggerFetchAllFG] = useLazyGetFinishedGoodsQuery();
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailRecord, setDetailRecord] = useState<FinishedGoodListItem | null>(
     null,
@@ -551,6 +590,13 @@ export default function FinishedGoodsPage() {
   const [editRecord, setEditRecord] = useState<FinishedGoodListItem | null>(
     null,
   );
+  // Peta uniq_code -> status stok untuk mengurutkan tabel berdasarkan urgensi.
+  const [statusMap, setStatusMap] = useState<Record<string, string>>({});
+  const handleStatusResolved = useCallback((uniqCode: string, status: string) => {
+    setStatusMap((prev) =>
+      prev[uniqCode] === status ? prev : { ...prev, [uniqCode]: status },
+    );
+  }, []);
 
   const listQuery = useGetFinishedGoodsQuery(
     { page: currentPage, limit: pageSize },
@@ -603,6 +649,111 @@ export default function FinishedGoodsPage() {
     if (saved) listQuery.refetch();
   };
 
+  // ================================================================
+  // Export ke Excel (.xlsx)
+  // ----------------------------------------------------------------
+  // • "Export Selected"  → mengekspor baris yang dicentang saja.
+  // • "Export All"       → mem-fetch seluruh master FG (lintas halaman),
+  //                        lalu mengekspornya sekaligus.
+  // Kolom yang diekspor mengikuti kolom informasi utama pada tabel
+  // (Uniq, Part Number, Part Name, Model, WO Number, Warehouse, UOM,
+  // Stock Status, Last Updated). Kolom Actions tidak diekspor.
+  // ================================================================
+  const buildExportRows = (rows: FinishedGoodListItem[]) =>
+    rows.map((r) => ({
+      "Uniq Code": r.uniq_code || "",
+      "Part Number": r.part_number || "",
+      "Part Name": r.part_name || "",
+      Model: r.model || "",
+      "WO Number": r.wo_number || "",
+      "Warehouse Location": r.warehouse_location || "",
+      UOM: r.uom || "",
+      "Stock Status": statusMap[r.uniq_code] || "",
+      "Last Updated": r.updated_at
+        ? new Date(r.updated_at).toLocaleString()
+        : "",
+    }));
+
+  const downloadExcel = (rows: FinishedGoodListItem[], fileSuffix: string) => {
+    if (rows.length === 0) {
+      message.warning("Tidak ada data untuk diekspor");
+      return;
+    }
+    const worksheet = XLSX.utils.json_to_sheet(buildExportRows(rows));
+    // Set lebar kolom agar rapih di Excel.
+    worksheet["!cols"] = [
+      { wch: 14 }, // Uniq Code
+      { wch: 16 }, // Part Number
+      { wch: 28 }, // Part Name
+      { wch: 18 }, // Model
+      { wch: 16 }, // WO Number
+      { wch: 20 }, // Warehouse Location
+      { wch: 8 }, // UOM
+      { wch: 14 }, // Stock Status
+      { wch: 20 }, // Last Updated
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Finished Goods");
+    const dateStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(workbook, `finished-goods-${fileSuffix}-${dateStr}.xlsx`);
+    message.success(`Berhasil mengekspor ${rows.length} baris`);
+  };
+
+  const handleExportSelected = () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning("Pilih baris terlebih dahulu");
+      return;
+    }
+    // Gabungkan semua item yang saat ini terlihat (sortedItems) dan pilih
+    // yang cocok dengan key terpilih. Karena `preserveSelectedRowKeys: true`,
+    // seleksi lintas halaman ikut terjaga — tapi item lintas halaman tidak
+    // ada di `sortedItems`. Untuk itu kita fallback ke fetch-all supaya
+    // baris terpilih dari halaman lain tetap ikut terekspor.
+    const keySet = new Set(selectedRowKeys.map(String));
+    const inMemory = sortedItems.filter((r) =>
+      keySet.has(String(r.uuid || r.uniq_code)),
+    );
+    if (inMemory.length === selectedRowKeys.length) {
+      downloadExcel(inMemory, "selected");
+      return;
+    }
+    // Ada seleksi dari halaman lain — fetch semua lalu filter.
+    (async () => {
+      try {
+        setIsExporting(true);
+        const res = await triggerFetchAllFG(
+          { page: 1, limit: 10000 },
+          true,
+        ).unwrap();
+        const all = res?.items ?? [];
+        const filtered = all.filter((r) =>
+          keySet.has(String(r.uuid || r.uniq_code)),
+        );
+        downloadExcel(filtered, "selected");
+      } catch (e) {
+        message.error("Gagal mengambil data untuk ekspor");
+      } finally {
+        setIsExporting(false);
+      }
+    })();
+  };
+
+  const handleExportAll = async () => {
+    try {
+      setIsExporting(true);
+      const res = await triggerFetchAllFG(
+        { page: 1, limit: 10000 },
+        true,
+      ).unwrap();
+      const all = res?.items ?? [];
+      downloadExcel(all, "all");
+    } catch (e) {
+      message.error("Gagal mengambil data untuk ekspor");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleDelete = (record: FinishedGoodListItem) => {
     Modal.confirm({
       title: "Delete finished goods?",
@@ -622,6 +773,16 @@ export default function FinishedGoodsPage() {
     if (typeFilter === "all") return filteredItems;
     return filteredItems;
   }, [filteredItems, typeFilter]);
+
+  // Urutkan UNIQ berdasarkan urgensi stok: Low -> Normal -> Overstock.
+  // Array.sort stabil, jadi item dengan rank sama mempertahankan urutan aslinya.
+  const sortedItems = useMemo(() => {
+    return [...displayItems].sort(
+      (a, b) =>
+        stockStatusRank(statusMap[a.uniq_code]) -
+        stockStatusRank(statusMap[b.uniq_code]),
+    );
+  }, [displayItems, statusMap]);
 
   const columns: ColumnsType<FinishedGoodListItem> = [
     { title: "Uniq", dataIndex: "uniq_code", key: "uniq", width: 110 },
@@ -921,12 +1082,31 @@ export default function FinishedGoodsPage() {
                   { value: "overstock", label: "Overstock" },
                 ]}
               />
-              <Button
-                icon={<DownloadOutlined />}
-                onClick={() => message.info("Export (coming soon)")}
+              <Dropdown
+                menu={{
+                  items: [
+                    {
+                      key: "selected",
+                      label:
+                        selectedRowKeys.length > 0
+                          ? `Export Selected (${selectedRowKeys.length})`
+                          : "Export Selected",
+                      disabled: selectedRowKeys.length === 0,
+                      onClick: () => handleExportSelected(),
+                    },
+                    {
+                      key: "all",
+                      label: "Export All",
+                      onClick: () => handleExportAll(),
+                    },
+                  ],
+                }}
+                trigger={["click"]}
               >
-                Export
-              </Button>
+                <Button icon={<DownloadOutlined />} loading={isExporting}>
+                  Export
+                </Button>
+              </Dropdown>
             </div>
           </div>
         </div>
@@ -941,12 +1121,26 @@ export default function FinishedGoodsPage() {
             </div>
           </div>
 
+          {tab === "inventory"
+            ? displayItems.map((it) => (
+                <StockStatusProbe
+                  key={`probe-${it.uniq_code}`}
+                  uniqCode={it.uniq_code}
+                  onResolved={handleStatusResolved}
+                />
+              ))
+            : null}
+
           <Table<FinishedGoodListItem>
             rowKey={(r) => r.uuid || r.uniq_code}
             columns={columns}
-            dataSource={tab === "inventory" ? displayItems : []}
+            dataSource={tab === "inventory" ? sortedItems : []}
             loading={apiEnabled ? listQuery.isFetching : false}
-            rowSelection={{}}
+            rowSelection={{
+              selectedRowKeys,
+              onChange: (keys) => setSelectedRowKeys(keys),
+              preserveSelectedRowKeys: true,
+            }}
             pagination={{
               current: currentPage,
               pageSize,

@@ -1,12 +1,20 @@
 import { apiSlice } from "@/lib/api/instance";
+import {
+  toWorkOrderRecord,
+  type WorkOrderRecord,
+} from "@/lib/api/work-orders/api";
 
 type UnknownRecord = Record<string, unknown>;
 
 const TAG = "WorkOrdersBulk" as const;
 
-const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
 
-const getString = (record: UnknownRecord, keys: string[]): string | undefined => {
+const getString = (
+  record: UnknownRecord,
+  keys: string[],
+): string | undefined => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) return value.trim();
@@ -14,7 +22,10 @@ const getString = (record: UnknownRecord, keys: string[]): string | undefined =>
   return undefined;
 };
 
-const getNumber = (record: UnknownRecord, keys: string[]): number | undefined => {
+const getNumber = (
+  record: UnknownRecord,
+  keys: string[],
+): number | undefined => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -38,7 +49,7 @@ export type Paginated<T> = {
   pagination: Pagination;
 };
 
-const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
+const normalizePaginatedResponse = <T>(response: unknown): Paginated<T> => {
   const empty: Paginated<T> = {
     items: [],
     pagination: { total: 0, page: 1, limit: 20, total_pages: 1 },
@@ -52,7 +63,9 @@ const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
   const paginationRaw = (data as UnknownRecord).pagination;
 
   const items = Array.isArray(itemsRaw) ? (itemsRaw as T[]) : [];
-  const paginationRecord = isRecord(paginationRaw) ? (paginationRaw as UnknownRecord) : {};
+  const paginationRecord = isRecord(paginationRaw)
+    ? (paginationRaw as UnknownRecord)
+    : {};
 
   return {
     items,
@@ -60,12 +73,14 @@ const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
       total: getNumber(paginationRecord, ["total"]) ?? empty.pagination.total,
       page: getNumber(paginationRecord, ["page"]) ?? empty.pagination.page,
       limit: getNumber(paginationRecord, ["limit"]) ?? empty.pagination.limit,
-      total_pages: getNumber(paginationRecord, ["total_pages", "totalPages"]) ?? empty.pagination.total_pages,
+      total_pages:
+        getNumber(paginationRecord, ["total_pages", "totalPages"]) ??
+        empty.pagination.total_pages,
     },
   };
 };
 
-const normalizeArrayResponse = <T,>(response: unknown): T[] => {
+const normalizeArrayResponse = <T>(response: unknown): T[] => {
   if (Array.isArray(response)) return response as T[];
   if (isRecord(response)) {
     const data = response.data;
@@ -83,7 +98,7 @@ const normalizeArrayResponse = <T,>(response: unknown): T[] => {
   return [];
 };
 
-const normalizeObjectResponse = <T,>(response: unknown): T | null => {
+const normalizeObjectResponse = <T>(response: unknown): T | null => {
   if (isRecord(response)) {
     const data = response.data;
     if (isRecord(data)) {
@@ -165,10 +180,21 @@ export type BulkWorkOrderSummary = Record<string, unknown> & {
 const toBulkDocumentItemOption = (raw: unknown): BulkDocumentItemOption => {
   const r = isRecord(raw) ? raw : {};
   return {
-    source_line_id: getString(r, ["source_line_id", "sourceLineId", "line_id", "lineId", "id"]) ?? "",
-    item_uniq_code: getString(r, ["item_uniq_code", "uniq", "uniq_code", "itemUniqCode"]) ?? "",
-    part_name: getString(r, ["part_name", "partName", "item_name"]) ?? undefined,
-    part_number: getString(r, ["part_number", "partNumber", "item_number"]) ?? undefined,
+    source_line_id:
+      getString(r, [
+        "source_line_id",
+        "sourceLineId",
+        "line_id",
+        "lineId",
+        "id",
+      ]) ?? "",
+    item_uniq_code:
+      getString(r, ["item_uniq_code", "uniq", "uniq_code", "itemUniqCode"]) ??
+      "",
+    part_name:
+      getString(r, ["part_name", "partName", "item_name"]) ?? undefined,
+    part_number:
+      getString(r, ["part_number", "partNumber", "item_number"]) ?? undefined,
     uom: getString(r, ["uom", "unit"]) ?? undefined,
     quantity: getNumber(r, ["quantity", "qty"]) ?? undefined,
     kanban_qty: getNumber(r, ["kanban_qty", "kanbanQty"]) ?? undefined,
@@ -179,28 +205,53 @@ const toBulkDocumentItemOption = (raw: unknown): BulkDocumentItemOption => {
 
 const toBulkWorkOrderRecord = (raw: unknown): BulkWorkOrderRecord => {
   const r = isRecord(raw) ? raw : {};
-  const itemsRaw = Array.isArray((r as UnknownRecord).items) ? ((r as UnknownRecord).items as unknown[]) : [];
+  const itemsRaw = Array.isArray((r as UnknownRecord).items)
+    ? ((r as UnknownRecord).items as unknown[])
+    : [];
   const items = itemsRaw.filter(isRecord) as UnknownRecord[];
-  const firstModel = items.map((it) => getString(it, ["model", "product_model"])).find(Boolean);
-  const totalQtyFromItems = items.reduce((sum, it) => sum + (getNumber(it, ["quantity", "qty"]) ?? 0), 0);
+  const firstModel = items
+    .map((it) => getString(it, ["model", "product_model"]))
+    .find(Boolean);
+  const totalQtyFromItems = items.reduce(
+    (sum, it) => sum + (getNumber(it, ["quantity", "qty"]) ?? 0),
+    0,
+  );
   return {
-    id: getString(r, ["id", "uuid", "work_order_id", "wo_id"]) ?? getString(r, ["wo_number"]) ?? "",
+    id:
+      getString(r, ["id", "uuid", "work_order_id", "wo_id"]) ??
+      getString(r, ["wo_number"]) ??
+      "",
     wo_number: getString(r, ["wo_number", "woNumber", "number"]) ?? "-",
     wo_type: getString(r, ["wo_type", "woType"]) ?? undefined,
     status: getString(r, ["status"]) ?? undefined,
-    approval_status: getString(r, ["approval_status", "approvalStatus"]) ?? undefined,
-    created_date: getString(r, ["created_date", "createdDate", "created_at", "createdAt"]) ?? undefined,
+    approval_status:
+      getString(r, ["approval_status", "approvalStatus"]) ?? undefined,
+    created_date:
+      getString(r, [
+        "created_date",
+        "createdDate",
+        "created_at",
+        "createdAt",
+      ]) ?? undefined,
     target_date: getString(r, ["target_date", "targetDate"]) ?? undefined,
-    source_document_id: getString(r, ["source_document_id", "sourceDocumentId"]) ?? undefined,
-    source_document_type: getString(r, ["source_document_type", "sourceDocumentType"]) ?? undefined,
+    source_document_id:
+      getString(r, ["source_document_id", "sourceDocumentId"]) ?? undefined,
+    source_document_type:
+      getString(r, ["source_document_type", "sourceDocumentType"]) ?? undefined,
     notes: getString(r, ["notes", "note"]) ?? undefined,
-    total_items: getNumber(r, ["total_items", "items_count", "item_count"]) ?? undefined,
+    total_items:
+      getNumber(r, ["total_items", "items_count", "item_count"]) ?? undefined,
     customer_name: getString(r, ["customer_name", "customerName"]) ?? undefined,
     model: getString(r, ["model", "product_model"]) ?? firstModel ?? undefined,
     uniq_count: getNumber(r, ["uniq_count", "uniqCount"]) ?? undefined,
-    kanban_count: getNumber(r, ["kanban_count", "item_count", "itemCount"]) ?? undefined,
-    total_qty: getNumber(r, ["total_qty", "totalQty"]) ?? (totalQtyFromItems > 0 ? totalQtyFromItems : undefined),
-    source_uniqs: items.map((it) => getString(it, ["item_uniq_code", "uniq_code", "uniq"]) ?? "").filter(Boolean),
+    kanban_count:
+      getNumber(r, ["kanban_count", "item_count", "itemCount"]) ?? undefined,
+    total_qty:
+      getNumber(r, ["total_qty", "totalQty"]) ??
+      (totalQtyFromItems > 0 ? totalQtyFromItems : undefined),
+    source_uniqs: items
+      .map((it) => getString(it, ["item_uniq_code", "uniq_code", "uniq"]) ?? "")
+      .filter(Boolean),
   };
 };
 
@@ -208,7 +259,10 @@ export const workOrdersBulkApiSlice = apiSlice
   .enhanceEndpoints({ addTagTypes: [TAG] })
   .injectEndpoints({
     endpoints: (builder) => ({
-      getBulkDocumentItems: builder.query<BulkDocumentItemOption[], { document_id: string }>({
+      getBulkDocumentItems: builder.query<
+        BulkDocumentItemOption[],
+        { document_id: string }
+      >({
         query: ({ document_id }) => ({
           url: "/working-order/bulk/form-options/document-items",
           method: "GET",
@@ -218,20 +272,31 @@ export const workOrdersBulkApiSlice = apiSlice
         transformResponse: (response: unknown) =>
           normalizeArrayResponse<unknown>(response)
             .map(toBulkDocumentItemOption)
-            .filter((x) => Boolean(x.source_line_id) && Boolean(x.item_uniq_code)),
+            .filter(
+              (x) => Boolean(x.source_line_id) && Boolean(x.item_uniq_code),
+            ),
       }),
 
-      createBulkWorkOrders: builder.mutation<unknown, BulkCreateWorkOrdersRequest>({
+      createBulkWorkOrders: builder.mutation<
+        unknown,
+        BulkCreateWorkOrdersRequest
+      >({
         query: (body) => ({
           url: "/working-order/bulk/work-orders",
           method: "POST",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        invalidatesTags: [{ type: TAG, id: "LIST" }, { type: TAG, id: "SUMMARY" }],
+        invalidatesTags: [
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: "SUMMARY" },
+        ],
       }),
 
-      listBulkWorkOrders: builder.query<Paginated<BulkWorkOrderRecord>, { page: number; limit: number }>({
+      listBulkWorkOrders: builder.query<
+        Paginated<BulkWorkOrderRecord>,
+        { page: number; limit: number }
+      >({
         query: ({ page, limit }) => ({
           url: "/working-order/bulk/work-orders",
           method: "GET",
@@ -246,10 +311,23 @@ export const workOrdersBulkApiSlice = apiSlice
           };
         },
         providesTags: (result) => {
-          const base: Array<{ type: typeof TAG; id: "LIST" | string }> = [{ type: TAG, id: "LIST" }];
+          const base: Array<{ type: typeof TAG; id: "LIST" | string }> = [
+            { type: TAG, id: "LIST" },
+          ];
           const ids = result?.items?.map((r) => r.id).filter(Boolean) ?? [];
           return base.concat(ids.map((id) => ({ type: TAG, id })));
         },
+      }),
+
+      getBulkWorkOrderById: builder.query<WorkOrderRecord, string>({
+        query: (id) => ({
+          url: `/working-order/bulk/work-orders/${encodeURIComponent(id)}`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) =>
+          toWorkOrderRecord(normalizeObjectResponse(response) ?? {}),
+        providesTags: (_result, _error, id) => [{ type: TAG, id }],
       }),
 
       getBulkWorkOrdersSummary: builder.query<BulkWorkOrderSummary, void>({
@@ -258,11 +336,16 @@ export const workOrdersBulkApiSlice = apiSlice
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => (normalizeObjectResponse<BulkWorkOrderSummary>(response) ?? {}) as BulkWorkOrderSummary,
+        transformResponse: (response: unknown) =>
+          (normalizeObjectResponse<BulkWorkOrderSummary>(response) ??
+            {}) as BulkWorkOrderSummary,
         providesTags: [{ type: TAG, id: "SUMMARY" }],
       }),
 
-      bulkApproveBulkWorkOrders: builder.mutation<unknown, BulkWorkOrderApprovalRequest>({
+      bulkApproveBulkWorkOrders: builder.mutation<
+        unknown,
+        BulkWorkOrderApprovalRequest
+      >({
         query: (body) => ({
           url: "/working-order/bulk/work-orders/bulk-approval",
           method: "POST",
@@ -273,7 +356,10 @@ export const workOrdersBulkApiSlice = apiSlice
           },
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        invalidatesTags: [{ type: TAG, id: "LIST" }, { type: TAG, id: "SUMMARY" }],
+        invalidatesTags: [
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: "SUMMARY" },
+        ],
       }),
     }),
   });
@@ -283,6 +369,7 @@ export const {
   useLazyGetBulkDocumentItemsQuery,
   useCreateBulkWorkOrdersMutation,
   useListBulkWorkOrdersQuery,
+  useGetBulkWorkOrderByIdQuery,
   useGetBulkWorkOrdersSummaryQuery,
   useBulkApproveBulkWorkOrdersMutation,
 } = workOrdersBulkApiSlice;

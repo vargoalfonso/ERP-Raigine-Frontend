@@ -33,11 +33,13 @@ import {
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
   type StockInventoryType,
+  type StockOpnameBulkCreateError,
   type StockOpnameUniqOption,
   useCreateStockOpnameSessionMutation,
   useLazyGetStockOpnameUniqOptionsQuery,
 } from "@/lib/api/stock-opname/api";
 import { getCurrentUserDisplayName } from "@/lib/utils/currentUser";
+import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetEmployeesQuery } from "@/lib/api/system-settings/api";
 import { useListWarehousesQuery } from "@/lib/api/warehouse/api";
 
@@ -60,7 +62,8 @@ type Entry = {
 
 // A Raw Material uniq is weight-tracked (needs a Weight input) when its
 // raw_material_type is "wire".
-const isWireType = (t?: string | null) => (t ?? "").trim().toLowerCase() === "wire";
+const isWireType = (t?: string | null) =>
+  (t ?? "").trim().toLowerCase() === "wire";
 
 const TAB_TO_INVENTORY_TYPE: Record<string, StockInventoryType> = {
   finished: "FG",
@@ -78,6 +81,7 @@ type BulkRow = {
   model: string;
   countedQty: number;
   userCounted: string;
+  plant: string;
   warehouseLocation: string;
 };
 
@@ -98,6 +102,7 @@ const BULK_TEMPLATE_HEADERS = [
   "Uniq",
   "Counted Qty",
   "User Counted",
+  "Plant",
   "Warehouse Location",
 ] as const;
 
@@ -125,12 +130,42 @@ function mapExcelRow(row: Record<string, unknown>, index: number): BulkRow {
   return {
     key: `bulk-${index}-${Math.floor(Math.random() * 1e6)}`,
     uniq: pickCell(row, ["Uniq", "uniq", "Uniq Code", "uniq_code", "UniqCode"]),
-    partNumber: pickCell(row, ["Part Number", "part_number", "partNumber", "Part No"]),
+    partNumber: pickCell(row, [
+      "Part Number",
+      "part_number",
+      "partNumber",
+      "Part No",
+    ]),
     partName: pickCell(row, ["Part Name", "part_name", "partName"]),
     model: pickCell(row, ["Model", "model"]),
-    countedQty: pickNumber(row, ["Counted Qty", "Counted Quantity", "counted_qty", "countedQty", "Qty"]),
-    userCounted: pickCell(row, ["User Counted", "user_counted", "userCounted", "User Counter", "user_counter"]),
-    warehouseLocation: pickCell(row, ["Warehouse Location", "warehouse_location", "warehouseLocation", "WRH Location", "Warehouse"]),
+    countedQty: pickNumber(row, [
+      "Counted Qty",
+      "Counted Quantity",
+      "counted_qty",
+      "countedQty",
+      "Qty",
+    ]),
+    userCounted: pickCell(row, [
+      "User Counted",
+      "user_counted",
+      "userCounted",
+      "User Counter",
+      "user_counter",
+    ]),
+    plant: pickCell(row, [
+      "Plant",
+      "plant",
+      "Plant ID",
+      "plant_id",
+      "plant_name",
+    ]),
+    warehouseLocation: pickCell(row, [
+      "Warehouse Location",
+      "warehouse_location",
+      "warehouseLocation",
+      "WRH Location",
+      "Warehouse",
+    ]),
   };
 }
 
@@ -149,8 +184,14 @@ function readExcelFile(file: File): Promise<BulkRow[]> {
           return;
         }
         const sheet = workbook.Sheets[sheetName];
-        const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-        resolve(json.map((row, index) => mapExcelRow(row, index)).filter((row) => row.uniq));
+        const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+          defval: "",
+        });
+        resolve(
+          json
+            .map((row, index) => mapExcelRow(row, index))
+            .filter((row) => row.uniq),
+        );
       } catch (err) {
         reject(err);
       }
@@ -184,29 +225,49 @@ function StockOpnameStartCountPageContent() {
   }, [tab]);
 
   const [form] = Form.useForm();
-  const uniqSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const uniqSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [method, setMethod] = useState<Method>("manual");
-  const [period, setPeriod] = useState<Dayjs>(dayjs("2024-01-01"));
+  const [period, setPeriod] = useState<Dayjs>(dayjs());
   const [scheduleDate, setScheduleDate] = useState<Dayjs>(dayjs());
   const [countedDate, setCountedDate] = useState<Dayjs>(dayjs());
 
   const [bulkFileName, setBulkFileName] = useState<string | null>(null);
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
 
-  const [getUniqOptions, { data: uniqSearchResults = [], isFetching: uniqLoading }] =
-    useLazyGetStockOpnameUniqOptionsQuery();
-  const [createStockOpnameSession, { isLoading: saving }] = useCreateStockOpnameSessionMutation();
+  const [
+    getUniqOptions,
+    { data: uniqSearchResults = [], isFetching: uniqLoading },
+  ] = useLazyGetStockOpnameUniqOptionsQuery();
+  const [createStockOpnameSession, { isLoading: saving }] =
+    useCreateStockOpnameSessionMutation();
   const [warehouseLocation, setWarehouseLocation] = useState<string>();
-  const { data: warehouseList = [] } = useListWarehousesQuery(undefined, { skip: !apiEnabled });
+  const { data: warehouseList = [] } = useListWarehousesQuery(undefined, {
+    skip: !apiEnabled,
+  });
   const warehouseOptions = useMemo(
     () =>
       warehouseList
         .map((w) => ({
           value: w.warehouse_name ?? w.id ?? "",
-          label: w.type_warehouse ? `${w.warehouse_name ?? w.id ?? "-"} — ${w.type_warehouse}` : w.warehouse_name ?? w.id ?? "-",
+          label: w.type_warehouse
+            ? `${w.warehouse_name ?? w.id ?? "-"} — ${w.type_warehouse}`
+            : (w.warehouse_name ?? w.id ?? "-"),
         }))
         .filter((o) => Boolean(o.value)),
-    [warehouseList]
+    [warehouseList],
+  );
+  const plantOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          warehouseList
+            .map((w) => w.plant_name ?? w.plant_id ?? "")
+            .filter(Boolean),
+        ),
+      ).map((plant) => ({ value: plant, label: plant })),
+    [warehouseList],
   );
   const fallbackUniqOptions = useMemo(
     () => [
@@ -216,7 +277,7 @@ function StockOpnameStartCountPageContent() {
       { label: "RM-010", value: "RM-010" },
       { label: "WIP-007", value: "WIP-007" },
     ],
-    []
+    [],
   );
 
   const systemStockByUniq = useMemo<Record<string, number>>(
@@ -227,7 +288,7 @@ function StockOpnameStartCountPageContent() {
       "RM-010": 1200,
       "WIP-007": 32,
     }),
-    []
+    [],
   );
 
   const employeesQuery = useGetEmployeesQuery(undefined, { skip: !apiEnabled });
@@ -244,7 +305,15 @@ function StockOpnameStartCountPageContent() {
   const [entries, setEntries] = useState<Entry[]>(() =>
     apiEnabled
       ? [{ id: toId("entry"), systemStock: 0 }]
-      : [{ id: toId("entry"), uniq: "FG-001", systemStock: 250, countedQty: 245, userCounter: "John Meijer" }]
+      : [
+          {
+            id: toId("entry"),
+            uniq: "FG-001",
+            systemStock: 250,
+            countedQty: 245,
+            userCounter: "John Meijer",
+          },
+        ],
   );
 
   // Keep every entry's counter in sync with the current user (also covers newly added rows).
@@ -265,22 +334,22 @@ function StockOpnameStartCountPageContent() {
     () =>
       apiEnabled
         ? uniqSearchResults.map((item) => ({
-          label: `${item.uniq_code} - ${item.part_number} - ${item.part_name} `,
-          value: item.uniq_code,
-        }))
+            label: `${item.uniq_code} - ${item.part_number} - ${item.part_name} `,
+            value: item.uniq_code,
+          }))
         : fallbackUniqOptions,
-    [apiEnabled, fallbackUniqOptions, uniqSearchResults]
+    [apiEnabled, fallbackUniqOptions, uniqSearchResults],
   );
 
   const uniqLookup = useMemo(
     () => new Map(uniqSearchResults.map((item) => [item.uniq_code, item])),
-    [uniqSearchResults]
+    [uniqSearchResults],
   );
 
   useEffect(() => {
     if (!apiEnabled) return;
-    void getUniqOptions({ type: inventoryType, q: "", limit: 10 });
-  }, [apiEnabled, getUniqOptions, inventoryType]);
+    void getUniqOptions({ type: inventoryType, method, q: "", limit: 10000 });
+  }, [apiEnabled, getUniqOptions, inventoryType, method]);
 
   useEffect(() => {
     return () => {
@@ -295,18 +364,56 @@ function StockOpnameStartCountPageContent() {
     return `${entries.length} entry`;
   }, [bulkRows.length, entries.length, method]);
 
-  // Generates and downloads a ready-to-fill .xlsx template with an example row.
-  function handleDownloadTemplate() {
-    const exampleRow: Record<string, string | number> = {
-      Uniq: uniqOptions[0]?.value ?? "FG-001",
+  // Generates a complete template. Each row remains a separate item row, and
+  // Plant/Warehouse Location are kept on the row so the save flow can create
+  // one SO session per item in the correct plant.
+  async function handleDownloadTemplate() {
+    let templateUniqs = uniqSearchResults;
+    if (apiEnabled) {
+      try {
+        templateUniqs = await getUniqOptions({
+          type: inventoryType,
+          method,
+          q: "",
+          limit: 10000,
+        }).unwrap();
+      } catch {
+        // Use the options already loaded when the full lookup is unavailable.
+      }
+    }
+
+    const tabName = tab.toLowerCase();
+    const preferredWarehouse =
+      warehouseList.find((warehouse) => {
+        const name = (warehouse.warehouse_name ?? "").toLowerCase();
+        if (tabName === "wip") return name.includes("wip");
+        if (tabName === "finished") {
+          return name.includes("finish") && !name.includes("wip");
+        }
+        return (warehouse.type_warehouse ?? "").toLowerCase().includes(tabName);
+      }) ?? warehouseList[0];
+    const defaultWarehouse =
+      preferredWarehouse?.warehouse_name ?? warehouseOptions[0]?.value ?? "";
+    const defaultPlant =
+      preferredWarehouse?.plant_name ?? preferredWarehouse?.plant_id ?? "";
+    const templateRows = (
+      templateUniqs.length > 0
+        ? templateUniqs
+        : [{ uniq_code: uniqOptions[0]?.value ?? "FG-001" }]
+    ).map((item) => ({
+      Uniq: item.uniq_code,
       "Counted Qty": 0,
       "User Counted": currentUserName,
-      "Warehouse Location": warehouseOptions[0]?.value ?? "",
-    };
-    const worksheet = XLSX.utils.json_to_sheet([exampleRow], {
+      Plant: defaultPlant,
+      "Warehouse Location": defaultWarehouse,
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(templateRows, {
       header: [...BULK_TEMPLATE_HEADERS],
     });
-    worksheet["!cols"] = BULK_TEMPLATE_HEADERS.map((h) => ({ wch: Math.max(14, h.length + 2) }));
+    worksheet["!cols"] = BULK_TEMPLATE_HEADERS.map((h) => ({
+      wch: Math.max(14, h.length + 2),
+    }));
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, BULK_TEMPLATE_SHEET);
 
@@ -320,12 +427,14 @@ function StockOpnameStartCountPageContent() {
             Plant: w.plant_name ?? w.plant_id ?? "",
           }))
         : [{ "Warehouse Name": "", Type: "", Plant: "" }];
-    const masterSheet = XLSX.utils.json_to_sheet(masterRows, { header: masterHeaders });
+    const masterSheet = XLSX.utils.json_to_sheet(masterRows, {
+      header: masterHeaders,
+    });
     masterSheet["!cols"] = [{ wch: 28 }, { wch: 16 }, { wch: 22 }];
     XLSX.utils.book_append_sheet(workbook, masterSheet, "Master Warehouse");
 
     XLSX.writeFile(workbook, `stock-opname-template-${tab}.xlsx`);
-    message.success("Template downloaded");
+    message.success(`${templateRows.length} item template downloaded`);
   }
 
   // Auto-fills Part Number / Part Name from the Uniq for each row, resolving
@@ -333,7 +442,9 @@ function StockOpnameStartCountPageContent() {
   async function enrichBulkRows(rows: BulkRow[]): Promise<BulkRow[]> {
     const details = new Map<string, StockOpnameUniqOption>();
     if (apiEnabled) {
-      const uniqueCodes = Array.from(new Set(rows.map((row) => row.uniq).filter(Boolean)));
+      const uniqueCodes = Array.from(
+        new Set(rows.map((row) => row.uniq).filter(Boolean)),
+      );
       await Promise.all(
         uniqueCodes.map(async (code) => {
           const cached = uniqLookup.get(code);
@@ -342,13 +453,19 @@ function StockOpnameStartCountPageContent() {
             return;
           }
           try {
-            const results = await getUniqOptions({ type: inventoryType, q: code, limit: 5 }).unwrap();
-            const match = results.find((item) => item.uniq_code === code) ?? results[0];
+            const results = await getUniqOptions({
+              type: inventoryType,
+              method,
+              q: code,
+              limit: 5,
+            }).unwrap();
+            const match =
+              results.find((item) => item.uniq_code === code) ?? results[0];
             if (match) details.set(code, match);
           } catch {
             // Leave autofill empty if the code cannot be resolved.
           }
-        })
+        }),
       );
     }
     return rows.map((row) => {
@@ -375,7 +492,9 @@ function StockOpnameStartCountPageContent() {
       readExcelFile(file)
         .then(async (rows) => {
           if (rows.length === 0) {
-            message.warning("Tidak ada baris valid. Pastikan kolom Uniq terisi.");
+            message.warning(
+              "Tidak ada baris valid. Pastikan kolom Uniq terisi.",
+            );
             return;
           }
           // Part Number / Part Name auto-fill from the Uniq; User Counted falls
@@ -394,7 +513,9 @@ function StockOpnameStartCountPageContent() {
   };
 
   function setEntry(id: string, patch: Partial<Entry>) {
-    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    setEntries((prev) =>
+      prev.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+    );
   }
 
   function addEntry() {
@@ -409,10 +530,69 @@ function StockOpnameStartCountPageContent() {
   function validateManual() {
     for (const e of entries) {
       if (!e.uniq) return "Uniq is required";
-      if (typeof e.countedQty !== "number") return "Counted Quantity is required";
+      if (typeof e.countedQty !== "number")
+        return "Counted Quantity is required";
       if (!e.userCounter) return "User Counter is required";
     }
     return null;
+  }
+
+  function downloadBulkErrorTemplate(errors: StockOpnameBulkCreateError[]) {
+    const failedRows = errors.map((error) => {
+      const source = bulkRows[error.row - 1];
+      return {
+        Uniq: source?.uniq ?? error.uniq_code,
+        "Part Number": source?.partNumber ?? "",
+        "Part Name": source?.partName ?? "",
+        Model: source?.model ?? "",
+        "Counted Qty": source?.countedQty ?? 0,
+        "User Counted": source?.userCounted ?? currentUserName,
+        Plant: source?.plant ?? "",
+        "Warehouse Location": source?.warehouseLocation ?? "",
+        Error: error.message,
+      };
+    });
+    const worksheet = XLSX.utils.json_to_sheet(failedRows);
+    worksheet["!cols"] = [
+      { wch: 18 },
+      { wch: 20 },
+      { wch: 32 },
+      { wch: 20 },
+      { wch: 16 },
+      { wch: 24 },
+      { wch: 18 },
+      { wch: 28 },
+      { wch: 60 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Failed Rows");
+    XLSX.writeFile(
+      workbook,
+      `stock-opname-failed-${tab}-${dayjs().format("YYYYMMDD-HHmmss")}.xlsx`,
+    );
+  }
+
+  function getPlantForWarehouse(warehouseName: string) {
+    const warehouse = warehouseList.find(
+      (item) => (item.warehouse_name ?? item.id ?? "") === warehouseName,
+    );
+    return warehouse?.plant_name ?? warehouse?.plant_id ?? "";
+  }
+
+  function getWarehouseForPlant(plant: string) {
+    const warehouse = warehouseList.find((item) => {
+      const itemPlant = String(
+        item.plant_name ?? item.plant_id ?? "",
+      ).toLowerCase();
+      return itemPlant === plant.toLowerCase();
+    });
+    return warehouse?.warehouse_name ?? "";
+  }
+
+  function resolveBulkWarehouse(row?: BulkRow) {
+    if (row?.warehouseLocation) return row.warehouseLocation;
+    if (row?.plant) return getWarehouseForPlant(row.plant) || null;
+    return warehouseLocation ?? null;
   }
 
   async function onSave() {
@@ -458,19 +638,22 @@ function StockOpnameStartCountPageContent() {
       const items =
         method === "manual"
           ? entries.map((entry) => ({
-            uniq_code: entry.uniq ?? "",
-            counted_qty: entry.countedQty ?? 0,
-            user_counter: entry.userCounter ?? "",
-            weight_kg: entry.weightKg ?? uniqLookup.get(entry.uniq ?? "")?.weight_kg ?? null,
-          }))
+              uniq_code: entry.uniq ?? "",
+              counted_qty: entry.countedQty ?? 0,
+              user_counter: entry.userCounter ?? "",
+              weight_kg:
+                entry.weightKg ??
+                uniqLookup.get(entry.uniq ?? "")?.weight_kg ??
+                null,
+            }))
           : bulkRows.map((row) => ({
-            uniq_code: row.uniq,
-            counted_qty: row.countedQty,
-            user_counter: row.userCounted || "",
-            weight_kg: null,
-          }));
+              uniq_code: row.uniq,
+              counted_qty: row.countedQty,
+              user_counter: row.userCounted || "",
+              weight_kg: null,
+            }));
 
-      await createStockOpnameSession({
+      const sessionPayload = {
         inventory_type: inventoryType,
         method,
         period_month: period.month() + 1,
@@ -478,17 +661,61 @@ function StockOpnameStartCountPageContent() {
         schedule_date: scheduleDate.format("YYYY-MM-DD"),
         counted_date: countedDate.format("YYYY-MM-DD"),
         remarks: "",
+      };
+
+      if (method === "bulk") {
+        // Keep the same semantics as manual Create: one item creates one SO
+        // session number (for example SO-WIP-012024-001), not one bulk SO with
+        // many entries. Sequential calls also prevent duplicate session numbers.
+        const failedRows: StockOpnameBulkCreateError[] = [];
+        let created = 0;
+        for (let index = 0; index < items.length; index += 1) {
+          const row = bulkRows[index];
+          try {
+            await createStockOpnameSession({
+              ...sessionPayload,
+              items: [items[index]],
+              warehouse_location: resolveBulkWarehouse(row),
+            }).unwrap();
+            created += 1;
+          } catch (rowError) {
+            failedRows.push({
+              row: index + 1,
+              uniq_code: items[index].uniq_code,
+              message: getApiErrorMessage(rowError, "Failed to save row"),
+            });
+          }
+        }
+
+        if (failedRows.length > 0) {
+          downloadBulkErrorTemplate(failedRows);
+          const summary = `${created} row berhasil disimpan, ${failedRows.length} row gagal. Template gagal diunduh.`;
+          if (created > 0) {
+            message.warning(summary);
+            router.push(`/stock-opname?tab=${tab}`);
+          } else {
+            message.error(summary);
+          }
+          return;
+        }
+
+        message.success(`${created} Stock Opname berhasil disimpan`);
+        router.push(`/stock-opname?tab=${tab}`);
+        return;
+      }
+
+      await createStockOpnameSession({
+        ...sessionPayload,
         items,
-        warehouse_location:
-          method === "bulk"
-            ? bulkRows.find((row) => row.warehouseLocation)?.warehouseLocation ?? warehouseLocation ?? null
-            : warehouseLocation ?? null,
+        warehouse_location: warehouseLocation ?? null,
       }).unwrap();
 
       message.success("Stock Opname saved successfully");
       router.push(`/stock-opname?tab=${tab}`);
-    } catch {
-      message.error("Failed to save stock opname");
+    } catch (saveError) {
+      message.error(
+        getApiErrorMessage(saveError, "Failed to save stock opname"),
+      );
     }
   }
 
@@ -506,10 +733,19 @@ function StockOpnameStartCountPageContent() {
         </button>
 
         <div className="flex items-center gap-2">
-          <Button className="!rounded-lg" onClick={() => router.push(`/stock-opname?tab=${tab}`)}>
+          <Button
+            className="!rounded-lg"
+            onClick={() => router.push(`/stock-opname?tab=${tab}`)}
+          >
             Cancel
           </Button>
-          <Button type="primary" className="!rounded-lg" icon={<SaveOutlined />} loading={saving} onClick={onSave}>
+          <Button
+            type="primary"
+            className="!rounded-lg"
+            icon={<SaveOutlined />}
+            loading={saving}
+            onClick={onSave}
+          >
             Save Stock Opname
           </Button>
         </div>
@@ -519,9 +755,12 @@ function StockOpnameStartCountPageContent() {
       <div className="mb-5">
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">Stock Opname</h1>
+            <h1 className="text-2xl font-bold text-gray-900 mb-1">
+              Stock Opname
+            </h1>
             <div className="text-sm text-gray-500">
-              Initialize new stock opname session for physical inventory counting
+              Initialize new stock opname session for physical inventory
+              counting
               <span className="mx-2">•</span>
               <span className="text-gray-400">{entryCountLabel}</span>
             </div>
@@ -536,17 +775,27 @@ function StockOpnameStartCountPageContent() {
           title={
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-semibold text-gray-900">Step 1: Select Method & Period</div>
-                <div className="text-xs text-gray-500">Choose Period to start Stock Opname</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Step 1: Select Method & Period
+                </div>
+                <div className="text-xs text-gray-500">
+                  Choose Period to start Stock Opname
+                </div>
               </div>
-              <Tag color="blue" className="!rounded-full !text-xs !px-3 !py-0.5">
+              <Tag
+                color="blue"
+                className="!rounded-full !text-xs !px-3 !py-0.5"
+              >
                 Required
               </Tag>
             </div>
           }
         >
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-            <Radio.Group value={method} onChange={(e) => setMethod(e.target.value)}>
+            <Radio.Group
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+            >
               <Radio value="manual">Manual Input</Radio>
               <Radio value="bulk">Bulk Upload</Radio>
             </Radio.Group>
@@ -603,13 +852,19 @@ function StockOpnameStartCountPageContent() {
           title={
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-sm font-semibold text-gray-900">Step 2: Input Data</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Step 2: Input Data
+                </div>
                 <div className="text-xs text-gray-500">
-                  {method === "manual" ? "Manual Input selected. You've chosen to enter data manually." : "Bulk Upload selected."}
+                  {method === "manual"
+                    ? "Manual Input selected. You've chosen to enter data manually."
+                    : "Bulk Upload selected."}
                 </div>
               </div>
               {method === "manual" ? (
-                <Tag className="!rounded-full !text-xs !px-3 !py-0.5">Entry 1</Tag>
+                <Tag className="!rounded-full !text-xs !px-3 !py-0.5">
+                  Entry 1
+                </Tag>
               ) : (
                 <Button
                   type="primary"
@@ -625,7 +880,11 @@ function StockOpnameStartCountPageContent() {
         >
           {method === "manual" && (
             <div className="flex items-center justify-end mb-3">
-              <Button className="!rounded-lg" icon={<FileAddOutlined />} onClick={addEntry}>
+              <Button
+                className="!rounded-lg"
+                icon={<FileAddOutlined />}
+                onClick={addEntry}
+              >
                 Add Entry
               </Button>
             </div>
@@ -637,9 +896,14 @@ function StockOpnameStartCountPageContent() {
                 const diff = difference(e.systemStock, e.countedQty);
                 const diffText = `${diff > 0 ? "+" : ""}${diff}`;
                 return (
-                  <div key={e.id} className="rounded-xl border border-gray-100 bg-white p-4">
+                  <div
+                    key={e.id}
+                    className="rounded-xl border border-gray-100 bg-white p-4"
+                  >
                     <div className="flex items-center justify-between mb-3">
-                      <div className="text-xs text-gray-500">Entry {idx + 1}</div>
+                      <div className="text-xs text-gray-500">
+                        Entry {idx + 1}
+                      </div>
                       {entries.length > 1 && (
                         <Button
                           danger
@@ -651,7 +915,6 @@ function StockOpnameStartCountPageContent() {
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
-
                       {/* Uniq */}
                       <div className="xl:col-span-2">
                         <label className="flex items-center gap-2 text-xs font-semibold text-gray-600 mb-2">
@@ -676,13 +939,17 @@ function StockOpnameStartCountPageContent() {
 
                             const normalizedValue = value.trim();
 
-                            if (normalizedValue.length > 0 && normalizedValue.length < 2) {
+                            if (
+                              normalizedValue.length > 0 &&
+                              normalizedValue.length < 2
+                            ) {
                               return;
                             }
 
                             uniqSearchTimeoutRef.current = setTimeout(() => {
                               void getUniqOptions({
                                 type: inventoryType,
+                                method,
                                 q: normalizedValue,
                                 limit: 10,
                               });
@@ -699,7 +966,8 @@ function StockOpnameStartCountPageContent() {
                                 systemStock: selected?.system_qty ?? 0,
                                 uom: selected?.uom,
                                 weightKg: selected?.weight_kg ?? null,
-                                rawMaterialType: selected?.raw_material_type ?? "",
+                                rawMaterialType:
+                                  selected?.raw_material_type ?? "",
                               });
 
                               return;
@@ -715,7 +983,9 @@ function StockOpnameStartCountPageContent() {
 
                       {/* System Stock */}
                       <div>
-                        <div className="text-xs text-gray-500 mb-1">Counted Quantity</div>
+                        <div className="text-xs text-gray-500 mb-1">
+                          Counted Quantity
+                        </div>
                         <InputNumber
                           className="!w-full"
                           value={e.countedQty}
@@ -780,7 +1050,9 @@ function StockOpnameStartCountPageContent() {
                       {isWireType(e.rawMaterialType) && (
                         <div>
                           <div className="flex items-center gap-2 mb-1">
-                            <div className="text-xs text-gray-500">Weight (Kg)</div>
+                            <div className="text-xs text-gray-500">
+                              Weight (Kg)
+                            </div>
                             <InfoCircleOutlined className="text-blue-600" />
                           </div>
                           <InputNumber
@@ -790,7 +1062,9 @@ function StockOpnameStartCountPageContent() {
                             step={0.0001}
                             placeholder="Enter weight in kg"
                             onChange={(v) =>
-                              setEntry(e.id, { weightKg: typeof v === "number" ? v : null })
+                              setEntry(e.id, {
+                                weightKg: typeof v === "number" ? v : null,
+                              })
                             }
                           />
                         </div>
@@ -813,13 +1087,13 @@ function StockOpnameStartCountPageContent() {
                 );
               })}
             </div>
-          )
-          }
+          )}
 
           {method === "bulk" && (
             <div className="mt-2">
               <div className="text-xs text-gray-500 mb-3">
-                Bulk Upload. You&apos;ve chosen to upload data directly from excel sheets.
+                Bulk Upload. You&apos;ve chosen to upload data directly from
+                excel sheets.
               </div>
 
               <Upload.Dragger
@@ -830,15 +1104,25 @@ function StockOpnameStartCountPageContent() {
               >
                 <div className="py-6">
                   <InboxOutlined className="text-3xl text-slate-400" />
-                  <div className="mt-2 text-sm font-semibold text-slate-700">Upload Excel File</div>
-                  <div className="text-xs text-slate-500">Drag and drop your Excel file here, or click to browse</div>
+                  <div className="mt-2 text-sm font-semibold text-slate-700">
+                    Upload Excel File
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Drag and drop your Excel file here, or click to browse
+                  </div>
                   <div className="mt-3">
-                    <Button type="primary" className="!rounded-lg" icon={<UploadOutlined />}>
+                    <Button
+                      type="primary"
+                      className="!rounded-lg"
+                      icon={<UploadOutlined />}
+                    >
                       Choose File
                     </Button>
                   </div>
                   {bulkFileName && (
-                    <div className="mt-2 text-xs text-slate-500">Selected: {bulkFileName}</div>
+                    <div className="mt-2 text-xs text-slate-500">
+                      Selected: {bulkFileName}
+                    </div>
                   )}
                 </div>
               </Upload.Dragger>
@@ -853,9 +1137,12 @@ function StockOpnameStartCountPageContent() {
               className="!rounded-xl !border-gray-100 !shadow-sm"
               title={
                 <div>
-                  <div className="text-sm font-semibold text-gray-900">Step 3: Review Uploaded Data</div>
+                  <div className="text-sm font-semibold text-gray-900">
+                    Step 3: Review Uploaded Data
+                  </div>
                   <div className="text-xs text-gray-500">
-                    Please validate the data from your Excel upload before proceeding. Ensure all entries are correct and complete.
+                    Please validate the data from your Excel upload before
+                    proceeding. Ensure all entries are correct and complete.
                   </div>
                 </div>
               }
@@ -865,7 +1152,8 @@ function StockOpnameStartCountPageContent() {
                 showIcon={false}
                 message={
                   <div className="text-xs text-slate-600">
-                    <span className="font-semibold">Note:</span> You can edit stock quantity for each item.
+                    <span className="font-semibold">Note:</span> You can edit
+                    stock quantity for each item.
                   </div>
                 }
                 className="!rounded-xl"
@@ -877,15 +1165,32 @@ function StockOpnameStartCountPageContent() {
                   rowKey="key"
                   pagination={false}
                   size="middle"
+                  scroll={{ x: 1380 }}
                   columns={[
-                    { title: "Uniq", dataIndex: "uniq", key: "uniq", width: 110 },
-                    { title: "Part Number", dataIndex: "partNumber", key: "partNumber", width: 160 },
-                    { title: "Part Name", dataIndex: "partName", key: "partName" },
+                    {
+                      title: "Uniq",
+                      dataIndex: "uniq",
+                      key: "uniq",
+                      width: 110,
+                    },
+                    {
+                      title: "Part Number",
+                      dataIndex: "partNumber",
+                      key: "partNumber",
+                      width: 160,
+                    },
+                    {
+                      title: "Part Name",
+                      dataIndex: "partName",
+                      key: "partName",
+                    },
                     {
                       title: "Model",
                       dataIndex: "model",
                       key: "model",
-                      render: (v: string) => <span className="text-sm text-slate-500">{v}</span>,
+                      render: (v: string) => (
+                        <span className="text-sm text-slate-500">{v}</span>
+                      ),
                     },
                     {
                       title: "Counted Qty",
@@ -899,12 +1204,54 @@ function StockOpnameStartCountPageContent() {
                           min={0}
                           onChange={(v) => {
                             const next = typeof v === "number" ? v : 0;
-                            setBulkRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, countedQty: next } : x)));
+                            setBulkRows((prev) =>
+                              prev.map((x) =>
+                                x.key === r.key
+                                  ? { ...x, countedQty: next }
+                                  : x,
+                              ),
+                            );
                           }}
                         />
                       ),
                     },
-                    { title: "User Counted", dataIndex: "userCounted", key: "userCounted", width: 140 },
+                    {
+                      title: "User Counted",
+                      dataIndex: "userCounted",
+                      key: "userCounted",
+                      width: 140,
+                    },
+                    {
+                      title: "Plant",
+                      dataIndex: "plant",
+                      key: "plant",
+                      width: 130,
+                      render: (_: string, r: BulkRow) => (
+                        <Select
+                          className="w-full"
+                          placeholder="Select Plant"
+                          value={r.plant || undefined}
+                          options={plantOptions}
+                          showSearch
+                          optionFilterProp="label"
+                          onChange={(next) => {
+                            setBulkRows((prev) =>
+                              prev.map((x) =>
+                                x.key === r.key
+                                  ? {
+                                      ...x,
+                                      plant: next,
+                                      warehouseLocation:
+                                        getWarehouseForPlant(next) ||
+                                        x.warehouseLocation,
+                                    }
+                                  : x,
+                              ),
+                            );
+                          }}
+                        />
+                      ),
+                    },
                     {
                       title: "Warehouse Location",
                       dataIndex: "warehouseLocation",
@@ -919,13 +1266,28 @@ function StockOpnameStartCountPageContent() {
                           showSearch
                           optionFilterProp="label"
                           onChange={(next) => {
-                            setBulkRows((prev) => prev.map((x) => (x.key === r.key ? { ...x, warehouseLocation: next } : x)));
+                            setBulkRows((prev) =>
+                              prev.map((x) =>
+                                x.key === r.key
+                                  ? {
+                                      ...x,
+                                      warehouseLocation: next,
+                                      plant:
+                                        getPlantForWarehouse(next) || x.plant,
+                                    }
+                                  : x,
+                              ),
+                            );
                           }}
                         />
                       ),
                     },
                   ]}
-                  locale={{ emptyText: bulkFileName ? "No rows loaded" : "Upload an Excel file to preview rows" }}
+                  locale={{
+                    emptyText: bulkFileName
+                      ? "No rows loaded"
+                      : "Upload an Excel file to preview rows",
+                  }}
                 />
               </div>
             </Card>

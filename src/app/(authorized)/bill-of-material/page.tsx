@@ -624,6 +624,29 @@ const filterBomRowsByUniq = (rows: BomRow[], query: string): BomRow[] => {
   }, []);
 };
 
+// [where-used-parent-with-children-dropdown]
+// Satu baris di tabel Where Used mewakili SATU parent BOM.
+// Field `matchedChildren` berisi daftar child (di level manapun) yang
+// cocok dengan search term — di-render sebagai expandable dropdown
+// di bawah baris parent.
+type WhereUsedChildEntry = {
+  key: string;
+  childCode: string;
+  childName: string;
+  // [where-used-material-code-column] material_code asli dari node (dari
+  // material_specifications.material_code / material_grade / material_code
+  // langsung). Ditampilkan sebagai kolom terpisah supaya user bisa lihat
+  // material dasar tanpa tercampur dengan UNIQ.
+  materialCode: string;
+  type: string;
+  qtyUse: string;
+  yieldValue: string;
+  scrap: string;
+  position: string;
+  substitution: string;
+  note: string;
+};
+
 type WhereUsedRow = {
   key: string;
   parentCode: string;
@@ -638,6 +661,7 @@ type WhereUsedRow = {
   status: BomStatus;
   note: string;
   targetBomId?: string;
+  matchedChildren: WhereUsedChildEntry[];
 };
 
 // "Where Used" = reverse BOM lookup. Given a MATERIAL CODE, walk the whole BOM
@@ -667,7 +691,31 @@ const collectWhereUsedRows = (
         spec?.material_grade ??
         "",
     ).trim();
-    if (parent && materialCode && materialCode.toLowerCase().includes(q)) {
+    // [where-used-server-search] Selain material_code, cocokkan juga
+    // uniq_code / part_number / part_name / model child. Backend
+    // sekarang bisa menemukan parent BOM lewat child uniq di level
+    // manapun (via bom_lines EXISTS); walker lokal ini ikut memakai
+    // field yang sama supaya baris yang di-render konsisten dengan
+    // hasil query backend.
+    const childUniq = String(
+      (node as UnknownRecord).uniq_code ??
+        (node as UnknownRecord).uniq ??
+        "",
+    ).trim();
+    const childPartNumber = String(
+      (node as UnknownRecord).part_number ?? "",
+    ).trim();
+    const childPartName = String(
+      (node as UnknownRecord).part_name ?? "",
+    ).trim();
+    const childModel = String((node as UnknownRecord).model ?? "").trim();
+    const matchedByAny =
+      (materialCode && materialCode.toLowerCase().includes(q)) ||
+      (childUniq && childUniq.toLowerCase().includes(q)) ||
+      (childPartNumber && childPartNumber.toLowerCase().includes(q)) ||
+      (childPartName && childPartName.toLowerCase().includes(q)) ||
+      (childModel && childModel.toLowerCase().includes(q));
+    if (parent && matchedByAny) {
       const parentCode =
         String(parent.uniq_code ?? parent.uniq ?? "").trim() || "-";
       const parentName = String(parent.part_name ?? "").trim() || "-";
@@ -703,28 +751,65 @@ const collectWhereUsedRows = (
         String(parent.bom_id ?? parent.id ?? parent.uuid ?? "").trim() ||
         undefined;
 
+      // Prioritas untuk kode child: UNIQ code dulu (sama seperti yang
+      // dilihat user di tabel BOM utama), lalu part_number, baru
+      // material_code sebagai fallback terakhir. Sebelumnya
+      // material_code diprioritaskan, sehingga hasilnya jadi beda
+      // dengan UNIQ yang tampil di tree BOM.
+      const childCode =
+        childUniq || childPartNumber || materialCode || "-";
+      const childName = childPartName || "-";
+      const positionStr =
+        String((node as UnknownRecord).position ?? "").trim() || "-";
+      const substitutionStr =
+        String(
+          (node as UnknownRecord).substitution ??
+            (node as UnknownRecord).substitute ??
+            "",
+        ).trim() || "-";
+      const qtyUseStr = qtyNum ? String(qtyNum) : "-";
+      const yieldStr = yieldNum ? String(yieldNum) : "-";
+      const scrapStr = String(scrapNum);
+
       counter += 1;
-      rows.push({
-        key: `${parentCode}-${materialCode}-${counter}`,
-        parentCode,
-        parentName,
+      // Cari row parent yang sudah ada supaya semua child yang cocok
+      // dari parent yang sama di-group jadi satu baris + dropdown.
+      const existing = rows.find((r) => r.parentCode === parentCode);
+      const childEntry: WhereUsedChildEntry = {
+        key: `${parentCode}-${childCode}-${counter}`,
+        childCode,
+        childName,
+        materialCode: materialCode || "-",
         type,
-        qtyUse: qtyNum ? String(qtyNum) : "-",
-        yieldValue: yieldNum ? String(yieldNum) : "-",
-        scrap: String(scrapNum),
-        position:
-          String((node as UnknownRecord).position ?? "").trim() || "-",
-        substitution:
-          String(
-            (node as UnknownRecord).substitution ??
-              (node as UnknownRecord).substitute ??
-              "",
-          ).trim() || "-",
-        rev,
-        status,
+        qtyUse: qtyUseStr,
+        yieldValue: yieldStr,
+        scrap: scrapStr,
+        position: positionStr,
+        substitution: substitutionStr,
         note,
-        targetBomId,
-      });
+      };
+      if (existing) {
+        existing.matchedChildren.push(childEntry);
+      } else {
+        rows.push({
+          key: `${parentCode}-${counter}`,
+          parentCode,
+          parentName,
+          // Baris parent tetap menampilkan info dari child yang PERTAMA
+          // cocok (behaviour lama untuk kolom Type/Qty/Yield/dst).
+          type,
+          qtyUse: qtyUseStr,
+          yieldValue: yieldStr,
+          scrap: scrapStr,
+          position: positionStr,
+          substitution: substitutionStr,
+          rev,
+          status,
+          note,
+          targetBomId,
+          matchedChildren: [childEntry],
+        });
+      }
     }
     if (Array.isArray(node.children)) {
       node.children.forEach((child) => walk(child, node));
@@ -1415,6 +1500,105 @@ export default function BillOfMaterialPage() {
             showTotal: (total, range) => `(${range[1]} of ${total}) baris`,
           }}
           scroll={{ x: "max-content", y: 420 }}
+          /*
+           * [where-used-parent-with-children-dropdown]
+           * Dropdown expand per parent — tampilkan daftar child yang cocok
+           * (bisa dari material_code ATAU dari uniq/part_number/part_name/
+           * model child). Expand disembunyikan kalau hanya ada 1 child dan
+           * itu adalah material_code (behavior lama), tapi kalau match dari
+           * child uniq/part number/dll, dropdown akan otomatis muncul.
+           */
+          expandable={{
+            rowExpandable: (record) => record.matchedChildren.length > 0,
+            expandedRowRender: (record) => (
+              <div className="bg-gray-50 p-3 rounded">
+                <div className="text-xs font-semibold text-gray-700 mb-2">
+                  Child yang cocok ({record.matchedChildren.length})
+                </div>
+                <Table<WhereUsedChildEntry>
+                  size="small"
+                  bordered
+                  pagination={false}
+                  rowKey="key"
+                  dataSource={record.matchedChildren}
+                  columns={[
+                    {
+                      title: "Child Code",
+                      dataIndex: "childCode",
+                      key: "childCode",
+                      width: 130,
+                      render: (v: string) => (
+                        <span className="font-semibold text-emerald-600">
+                          {v}
+                        </span>
+                      ),
+                    },
+                    {
+                      title: "Child Name",
+                      dataIndex: "childName",
+                      key: "childName",
+                      width: 220,
+                    },
+                    {
+                      title: "Material Code",
+                      dataIndex: "materialCode",
+                      key: "materialCode",
+                      width: 140,
+                      render: (v: string) => (
+                        <span className="font-medium text-orange-600">
+                          {v}
+                        </span>
+                      ),
+                    },
+                    {
+                      title: "Type",
+                      dataIndex: "type",
+                      key: "type",
+                      width: 110,
+                    },
+                    {
+                      title: "Qty/Use",
+                      dataIndex: "qtyUse",
+                      key: "qtyUse",
+                      width: 90,
+                    },
+                    {
+                      title: "Yield",
+                      dataIndex: "yieldValue",
+                      key: "yieldValue",
+                      width: 80,
+                    },
+                    {
+                      title: "Scrap %",
+                      dataIndex: "scrap",
+                      key: "scrap",
+                      width: 90,
+                    },
+                    {
+                      title: "Posisi",
+                      dataIndex: "position",
+                      key: "position",
+                      width: 90,
+                    },
+                    {
+                      title: "Substitusi",
+                      dataIndex: "substitution",
+                      key: "substitution",
+                      width: 110,
+                    },
+                    {
+                      title: "Note",
+                      dataIndex: "note",
+                      key: "note",
+                      render: (v: string) => (
+                        <span className="text-xs text-gray-500">{v}</span>
+                      ),
+                    },
+                  ]}
+                />
+              </div>
+            ),
+          }}
           locale={{
             emptyText: whereUsedCode.trim()
               ? "Tidak ada parent yang memakai material code ini."
