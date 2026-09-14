@@ -64,6 +64,7 @@ import {
   DatePicker,
   Table,
   Tag,
+  Tooltip,
   message,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -1319,6 +1320,31 @@ export default function PoBudgetPage() {
     );
   }, [prls]);
 
+  const resolvePoBudgetSupplierDisplay = (row: PoBudgetRow) => {
+    const names = new Set<string>();
+    const storedParents = getStoredParents(row.detailJson);
+    storedParents.forEach((parent) => {
+      (parent.children ?? []).forEach((child) => {
+        (child.suppliers ?? []).forEach((supplier) => {
+          const name = String(supplier.supplier_name ?? "").trim();
+          if (name) names.add(name);
+        });
+      });
+    });
+
+    if (names.size === 0) {
+      findSupplierItemsForProduct(row.uniq, row.partNumber).forEach(
+        (supplierItem) => {
+          const name = String(supplierItem.supplier_name ?? "").trim();
+          if (name) names.add(name);
+        },
+      );
+    }
+
+    if (names.size > 0) return Array.from(names).join(", ");
+    return resolveSupplierName(row.supplier as unknown, supplierNameByCode);
+  };
+
   const filteredRows = useMemo(() => {
     const sourceRows = useApi
       ? rowsByTab[activeTab]
@@ -1334,10 +1360,7 @@ export default function PoBudgetPage() {
         row.productModel || bomIndex.assemblyCodeByUniq[row.uniq] || "-",
       partName: row.partName || bomIndex.partNameByUniq[row.uniq] || "-",
       materialSpec: row.materialSpec ?? bomIndex.materialSpecByUniq[row.uniq],
-      supplier: resolveSupplierName(
-        row.supplier as unknown,
-        supplierNameByCode,
-      ),
+      supplier: resolvePoBudgetSupplierDisplay(row),
       key:
         row.key ||
         [
@@ -1682,6 +1705,7 @@ export default function PoBudgetPage() {
         return {
           id: `auto-${idx + 1}`,
           supplier: supplierValue,
+          supplierName: String(si.supplier_name ?? supplierValue).trim(),
           qty: pct > 0 ? Math.round((totalQty * pct) / 100) : 0,
           percentage: pct > 0 ? pct : undefined,
         };
@@ -1802,6 +1826,7 @@ export default function PoBudgetPage() {
       return {
         id: `auto-${idx + 1}`,
         supplier: supplierValue,
+        supplierName: String(si.supplier_name ?? supplierValue).trim(),
         qty,
         percentage: pct > 0 ? pct : undefined,
       };
@@ -2981,7 +3006,11 @@ export default function PoBudgetPage() {
                 ? null
                 : Number(resolvedId),
             supplier_name: String(
-              option?.supplierName ?? option?.label ?? supplier.supplier ?? "",
+              option?.supplierName ??
+                option?.label ??
+                supplier.supplierName ??
+                supplier.supplier ??
+                "",
             ).trim(),
             quantity: Number(supplier.qty || 0),
           };
@@ -3196,9 +3225,33 @@ export default function PoBudgetPage() {
         title: "Supplier",
         dataIndex: "supplier",
         key: "supplier",
-        render: (v: string) => (
-          <span className="text-sm text-gray-700">{v}</span>
-        ),
+        render: (v: string) => {
+          const suppliers = String(v ?? "")
+            .split(",")
+            .map((supplier) => supplier.trim())
+            .filter(Boolean);
+          if (suppliers.length <= 1) {
+            return <span className="text-sm text-gray-700">{v || "-"}</span>;
+          }
+          return (
+            <div className="flex items-center gap-1 text-sm text-gray-700">
+              <span>Multiple</span>
+              <Tooltip
+                title={
+                  <div className="space-y-1">
+                    {suppliers.map((supplier) => (
+                      <div key={supplier}>{supplier}</div>
+                    ))}
+                  </div>
+                }
+              >
+                <span className="inline-flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-blue-100 text-[11px] font-bold text-blue-700">
+                  !
+                </span>
+              </Tooltip>
+            </div>
+          );
+        },
       },
       {
         title: "Type",
@@ -3540,6 +3593,12 @@ export default function PoBudgetPage() {
             <div className="space-y-2">
               {r.suppliers.map((s) => (
                 <div key={s.id} className="flex items-center gap-2">
+                  <span
+                    className="min-w-[120px] max-w-[160px] truncate text-xs font-medium text-gray-700"
+                    title={s.supplierName || s.supplier}
+                  >
+                    {s.supplierName || s.supplier || "-"}
+                  </span>
                   <Select
                     value={s.supplier}
                     onChange={(v) => {
@@ -3560,6 +3619,7 @@ export default function PoBudgetPage() {
                           : s.qty;
                       bulkUpdateSupplier(r.key, s.id, {
                         supplier: v,
+                        supplierName: opt?.supplierName ?? opt?.label,
                         qty: autoQty,
                         percentage: pct,
                       });

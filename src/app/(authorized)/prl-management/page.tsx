@@ -523,11 +523,16 @@ export default function PrlManagementPage() {
       rows = rows.filter((r) => String(r.uniq) === String(uniqFilter));
     if (search) {
       const s = search.trim().toLowerCase();
-      rows = rows.filter(
-        (r) =>
-          (r.uniq ?? "").toLowerCase().includes(s) ||
-          (r.partName ?? "").toLowerCase().includes(s),
-      );
+      rows = rows.filter((r) => {
+        const searchableValues = [
+          r.uniq,
+          r.prlId,
+          r.customer,
+          r.customerId,
+          r.partName,
+        ].map((value) => String(value ?? "").toLowerCase());
+        return searchableValues.some((value) => value.includes(s));
+      });
     }
     return rows;
   }, [resolvedForecastRows, prlIdFilter, uniqFilter, search]);
@@ -1717,7 +1722,7 @@ export default function PrlManagementPage() {
           <div className="flex-1 max-w-xl">
             <Input
               prefix={<span className="text-gray-400">⌕</span>}
-              placeholder="Search by Uniq or Machine Name..."
+              placeholder="Search by UNIQ, PRL ID, or Customer..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="!rounded-lg"
