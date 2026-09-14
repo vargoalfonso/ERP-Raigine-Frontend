@@ -685,7 +685,7 @@ function MasterSupplierCreatePageContent() {
     },
   );
 
-  const BOM_PAGE_SIZE = 500;
+  const BOM_PAGE_SIZE = 1000;
 
   const { data: bomPageResult, isFetching: bomSearchFetching } =
     useGetBomTreeQuery(
