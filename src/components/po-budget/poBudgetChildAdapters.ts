@@ -10,6 +10,7 @@ import type {
 export type PoBudgetChildRowSupplier = {
   id: string;
   supplier: string;
+  supplierName?: string;
   qty: number;
   percentage?: number;
 };
@@ -80,6 +81,7 @@ const toChildRow = (
     ? child.suppliers.map((supplier, supplierIndex) => ({
         id: `seed-${supplierIndex + 1}`,
         supplier: text(supplier.supplier_name),
+        supplierName: text(supplier.supplier_name),
         qty: num(supplier.quantity),
       }))
     : [],
