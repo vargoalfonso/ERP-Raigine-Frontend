@@ -54,7 +54,8 @@ import {
   type BulkImportOutcome,
 } from "@/lib/utils/excel/bulkImportTypes";
 
-type SupplierSection = "supplier-only" | "raw-material" | "indirect-raw-material" | "subcon";
+type SupplierSection =
+  "supplier-only" | "raw-material" | "indirect-raw-material" | "subcon";
 type SupplierItemSection = Exclude<SupplierSection, "supplier-only">;
 
 type SupplierRow = {
@@ -132,7 +133,8 @@ const pickText = (...values: unknown[]) => {
       const trimmed = value.trim();
       if (trimmed) return trimmed;
     }
-    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    if (typeof value === "number" && Number.isFinite(value))
+      return String(value);
   }
   return "";
 };
@@ -155,7 +157,9 @@ const normalizeSection = (value: unknown): SupplierItemSection => {
   return "raw-material";
 };
 
-const normalizeMaterialCategory = (value: unknown): (typeof SUPPLIER_CATEGORY_OPTIONS)[number]["value"] => {
+const normalizeMaterialCategory = (
+  value: unknown,
+): (typeof SUPPLIER_CATEGORY_OPTIONS)[number]["value"] => {
   const raw = pickText(value).toLowerCase();
   if (raw.includes("indirect")) return "Indirect Raw Material";
   if (raw.includes("sub")) return "Subcon";
@@ -163,7 +167,8 @@ const normalizeMaterialCategory = (value: unknown): (typeof SUPPLIER_CATEGORY_OP
 };
 
 const sectionLabel = (section: SupplierSection) =>
-  SECTION_OPTIONS.find((option) => option.value === section)?.label ?? "Raw Material";
+  SECTION_OPTIONS.find((option) => option.value === section)?.label ??
+  "Raw Material";
 
 const sectionToItemType = (section: SupplierSection): string | undefined => {
   if (section === "indirect-raw-material") return "indirect";
@@ -172,13 +177,18 @@ const sectionToItemType = (section: SupplierSection): string | undefined => {
   return undefined;
 };
 
-const toSupplierRow = (record: SupplierItemRecord, index: number): SupplierRow => {
+const toSupplierRow = (
+  record: SupplierItemRecord,
+  index: number,
+): SupplierRow => {
   const section = normalizeSection(record.material_type ?? record.type);
   const grade = pickText(record.grade);
   const size = pickText(record.size);
 
   return {
-    key: String(record.id ?? record.supplier_item_uuid ?? record.uniq_code ?? index),
+    key: String(
+      record.id ?? record.supplier_item_uuid ?? record.uniq_code ?? index,
+    ),
     id: pickText(record.id, record.supplier_item_uuid),
     section,
     supplierUuid: pickText(record.supplier_uuid),
@@ -188,7 +198,8 @@ const toSupplierRow = (record: SupplierItemRecord, index: number): SupplierRow =
     sebangoCode: pickText(record.sebango_code) || "-",
     type: pickText(record.type, record.material_type) || "-",
     productModel: pickText(record.product_model) || "-",
-    partName: pickText(record.part_name, record.description, record.uniq_code) || "-",
+    partName:
+      pickText(record.part_name, record.description, record.uniq_code) || "-",
     partNumber: pickText(record.part_number) || "-",
     gradeSize: [grade, size].filter(Boolean).join(" / ") || "-",
     quantity: pickNumber(record.quantity),
@@ -202,7 +213,10 @@ const toSupplierRow = (record: SupplierItemRecord, index: number): SupplierRow =
   };
 };
 
-const toSupplierOnlyRow = (record: SupplierRecord, index: number): SupplierOnlyRow => ({
+const toSupplierOnlyRow = (
+  record: SupplierRecord,
+  index: number,
+): SupplierOnlyRow => ({
   key: String(record.id ?? record.supplier_code ?? index),
   id: record.id == null ? undefined : String(record.id),
   supplierCode: String(record.supplier_code ?? "-"),
@@ -214,7 +228,7 @@ const toSupplierOnlyRow = (record: SupplierRecord, index: number): SupplierOnlyR
     record.material_category ??
       (record as Record<string, unknown>).materialCategory ??
       (record as Record<string, unknown>).category ??
-      "Raw Material"
+      "Raw Material",
   ),
   city: String(record.city ?? "-"),
   paymentTerms: String(record.payment_terms ?? "-"),
@@ -227,29 +241,41 @@ export default function MasterSupplierPage() {
   const router = useRouter();
   const apiEnabled = Boolean(apiBaseUrl);
   const [messageApi, contextHolder] = message.useMessage();
-  const [activeSection, setActiveSection] = useState<SupplierSection>("supplier-only");
+  const [activeSection, setActiveSection] =
+    useState<SupplierSection>("supplier-only");
   const [searchValue, setSearchValue] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>();
-  const [supplierCategoryFilter, setSupplierCategoryFilter] = useState<string>();
-  const [selectedSupplierOnlyRow, setSelectedSupplierOnlyRow] = useState<SupplierOnlyRow | null>(null);
+  const [supplierCategoryFilter, setSupplierCategoryFilter] =
+    useState<string>();
+  const [selectedSupplierOnlyRow, setSelectedSupplierOnlyRow] =
+    useState<SupplierOnlyRow | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
 
   const itemTypeFilter = sectionToItemType(activeSection);
   const supplierItemsQuery = useListSupplierItemsQuery(
-    itemTypeFilter != null ? { type: itemTypeFilter, page: 1, limit: 1000 } : { page: 1, limit: 1000 },
-    { skip: !apiEnabled || activeSection === "supplier-only" }
+    itemTypeFilter != null
+      ? { type: itemTypeFilter, page: 1, limit: 1000 }
+      : { page: 1, limit: 1000 },
+    { skip: !apiEnabled || activeSection === "supplier-only" },
   );
-  const suppliersQuery = useListSuppliersQuery({ page: 1, limit: 1000 }, { skip: !apiEnabled });
-  const [deleteSupplierItem, deleteSupplierItemState] = useDeleteSupplierItemMutation();
+  const suppliersQuery = useListSuppliersQuery(
+    { page: 1, limit: 1000 },
+    { skip: !apiEnabled },
+  );
+  const [deleteSupplierItem, deleteSupplierItemState] =
+    useDeleteSupplierItemMutation();
   const [deleteSupplier, deleteSupplierState] = useDeleteSupplierMutation();
   const [bulkImportSuppliers] = useBulkImportSuppliersMutation();
 
   const selectedSupplierId = selectedSupplierOnlyRow?.id;
-  const supplierDetailQuery = useGetSupplierByIdQuery(selectedSupplierId ?? "", {
-    skip: !apiEnabled || !detailOpen || !selectedSupplierId,
-  });
+  const supplierDetailQuery = useGetSupplierByIdQuery(
+    selectedSupplierId ?? "",
+    {
+      skip: !apiEnabled || !detailOpen || !selectedSupplierId,
+    },
+  );
 
   useEffect(() => {
     const flash = consumeFlashMessage("/master-supplier");
@@ -259,12 +285,18 @@ export default function MasterSupplierPage() {
   }, [messageApi]);
 
   const supplierRows = useMemo(
-    () => (supplierItemsQuery.data ?? []).map((record, index) => toSupplierRow(record, index)),
-    [supplierItemsQuery.data]
+    () =>
+      (supplierItemsQuery.data ?? []).map((record, index) =>
+        toSupplierRow(record, index),
+      ),
+    [supplierItemsQuery.data],
   );
   const supplierOnlyRows = useMemo(
-    () => (suppliersQuery.data ?? []).map((record, index) => toSupplierOnlyRow(record, index)),
-    [suppliersQuery.data]
+    () =>
+      (suppliersQuery.data ?? []).map((record, index) =>
+        toSupplierOnlyRow(record, index),
+      ),
+    [suppliersQuery.data],
   );
 
   const typeOptions = useMemo(() => {
@@ -274,10 +306,23 @@ export default function MasterSupplierPage() {
       supplierRows
         .filter((row) => row.section === activeSection)
         .map((row) => row.type)
-        .filter((value) => value && value !== "-")
+        .filter((value) => value && value !== "-"),
     );
 
     return Array.from(uniqueTypes)
+      .sort((left, right) => left.localeCompare(right))
+      .map((value) => ({ label: value, value }));
+  }, [activeSection, supplierRows]);
+
+  const uniqOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        supplierRows
+          .filter((row) => row.section === activeSection)
+          .map((row) => row.uniqCode.trim())
+          .filter(Boolean),
+      ),
+    )
       .sort((left, right) => left.localeCompare(right))
       .map((value) => ({ label: value, value }));
   }, [activeSection, supplierRows]);
@@ -289,20 +334,7 @@ export default function MasterSupplierPage() {
       .filter((row) => (typeFilter ? row.type === typeFilter : true))
       .filter((row) => {
         if (!query) return true;
-        return [
-          row.supplierName,
-          row.uniqCode,
-          row.sebangoCode,
-          row.type,
-          row.productModel,
-          row.partName,
-          row.partNumber,
-          row.gradeSize,
-          row.warehouse,
-        ]
-          .join(" ")
-          .toLowerCase()
-          .includes(query);
+        return row.uniqCode.trim().toLowerCase() === query;
       });
   }, [activeSection, supplierRows, searchValue, typeFilter]);
 
@@ -310,7 +342,8 @@ export default function MasterSupplierPage() {
     const grouped = new Map<string, Array<SupplierRow & { isGroup?: false }>>();
 
     filteredSupplierRows.forEach((row) => {
-      const groupKey = row.supplierUuid || row.supplierCode || row.supplierName || row.key;
+      const groupKey =
+        row.supplierUuid || row.supplierCode || row.supplierName || row.key;
       const current = grouped.get(groupKey) ?? [];
       current.push({ ...row, isGroup: false });
       grouped.set(groupKey, current);
@@ -332,7 +365,11 @@ export default function MasterSupplierPage() {
   const filteredSupplierOnlyRows = useMemo(() => {
     const query = searchValue.trim().toLowerCase();
     return supplierOnlyRows
-      .filter((row) => (supplierCategoryFilter ? row.materialCategory === supplierCategoryFilter : true))
+      .filter((row) =>
+        supplierCategoryFilter
+          ? row.materialCategory === supplierCategoryFilter
+          : true,
+      )
       .filter((row) => {
         if (!query) return true;
         return [
@@ -350,8 +387,13 @@ export default function MasterSupplierPage() {
       });
   }, [searchValue, supplierCategoryFilter, supplierOnlyRows]);
 
-  const openCreatePage = (mode: "create" | "edit" | "view", row?: SupplierRow) => {
-    const targetSection = row?.section ?? (activeSection === "supplier-only" ? "raw-material" : activeSection);
+  const openCreatePage = (
+    mode: "create" | "edit" | "view",
+    row?: SupplierRow,
+  ) => {
+    const targetSection =
+      row?.section ??
+      (activeSection === "supplier-only" ? "raw-material" : activeSection);
     const params = new URLSearchParams({ section: targetSection });
 
     if (mode !== "create") params.set("mode", mode);
@@ -361,14 +403,16 @@ export default function MasterSupplierPage() {
   };
 
   const handleBulkImport = async (
-    payloads: CreateSupplierRequest[]
+    payloads: CreateSupplierRequest[],
   ): Promise<BulkImportOutcome> => {
     try {
       return await bulkImportSuppliers(payloads).unwrap();
     } catch (error) {
       const parsed = extractBulkOutcome((error as { data?: unknown })?.data);
       if (parsed) return parsed;
-      throw new Error(getApiErrorMessage(error, "Gagal mengimport data supplier."));
+      throw new Error(
+        getApiErrorMessage(error, "Gagal mengimport data supplier."),
+      );
     }
   };
 
@@ -398,7 +442,9 @@ export default function MasterSupplierPage() {
         bank_account_name: s.bank_account_name ?? "",
         payment_terms: s.payment_terms ?? "",
         delivery_lead_time_days:
-          s.delivery_lead_time_days == null ? "" : String(s.delivery_lead_time_days),
+          s.delivery_lead_time_days == null
+            ? ""
+            : String(s.delivery_lead_time_days),
         status: s.status ?? "",
       })),
     });
@@ -415,7 +461,9 @@ export default function MasterSupplierPage() {
       await deleteSupplierItem(row.id).unwrap();
       messageApi.success(`Deleted ${row.partName}`);
     } catch (deleteError) {
-      messageApi.error(getApiErrorMessage(deleteError, "Failed to delete supplier item"));
+      messageApi.error(
+        getApiErrorMessage(deleteError, "Failed to delete supplier item"),
+      );
     }
   };
 
@@ -429,8 +477,13 @@ export default function MasterSupplierPage() {
         if (row.isGroup) {
           return (
             <div>
-              <div className="font-semibold text-gray-900">{row.supplierName}</div>
-              <div className="text-xs text-gray-500">{row.supplierCode} • {row.itemCount} item{row.itemCount > 1 ? "s" : ""}</div>
+              <div className="font-semibold text-gray-900">
+                {row.supplierName}
+              </div>
+              <div className="text-xs text-gray-500">
+                {row.supplierCode} • {row.itemCount} item
+                {row.itemCount > 1 ? "s" : ""}
+              </div>
             </div>
           );
         }
@@ -452,32 +505,85 @@ export default function MasterSupplierPage() {
           </span>
         ),
     },
-    { title: "Material Code", dataIndex: "sebangoCode", key: "sebangoCode", width: 150, render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
+    {
+      title: "Material Code",
+      dataIndex: "sebangoCode",
+      key: "sebangoCode",
+      width: 150,
+      render: (value: string, row) =>
+        row.isGroup ? <span className="text-gray-400">—</span> : value,
+    },
     {
       title: "Type",
       dataIndex: "type",
       key: "type",
       width: 170,
-      render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : <Tag color="purple">{value}</Tag>,
+      render: (value: string, row) =>
+        row.isGroup ? (
+          <span className="text-gray-400">—</span>
+        ) : (
+          <Tag color="purple">{value}</Tag>
+        ),
     },
-    { title: "Product Model", dataIndex: "productModel", key: "productModel", width: 160, render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
+    {
+      title: "Product Model",
+      dataIndex: "productModel",
+      key: "productModel",
+      width: 160,
+      render: (value: string, row) =>
+        row.isGroup ? <span className="text-gray-400">—</span> : value,
+    },
     {
       title: "Part Name",
       dataIndex: "partName",
       key: "partName",
       width: 220,
-      render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : <span className="font-semibold text-gray-900">{value}</span>,
+      render: (value: string, row) =>
+        row.isGroup ? (
+          <span className="text-gray-400">—</span>
+        ) : (
+          <span className="font-semibold text-gray-900">{value}</span>
+        ),
     },
-    { title: "Part Number", dataIndex: "partNumber", key: "partNumber", width: 160, render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
-    { title: "Grade / Size", dataIndex: "gradeSize", key: "gradeSize", width: 160, render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
-    { title: "Qty", dataIndex: "quantity", key: "quantity", width: 100, render: (value: number, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
-    { title: "Pcs / Kanban", dataIndex: "pcsPerKanban", key: "pcsPerKanban", width: 120, render: (value: number, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
+    {
+      title: "Part Number",
+      dataIndex: "partNumber",
+      key: "partNumber",
+      width: 160,
+      render: (value: string, row) =>
+        row.isGroup ? <span className="text-gray-400">—</span> : value,
+    },
+    {
+      title: "Grade / Size",
+      dataIndex: "gradeSize",
+      key: "gradeSize",
+      width: 160,
+      render: (value: string, row) =>
+        row.isGroup ? <span className="text-gray-400">—</span> : value,
+    },
+    {
+      title: "Qty",
+      dataIndex: "quantity",
+      key: "quantity",
+      width: 100,
+      render: (value: number, row) =>
+        row.isGroup ? <span className="text-gray-400">—</span> : value,
+    },
+    {
+      title: "Pcs / Kanban",
+      dataIndex: "pcsPerKanban",
+      key: "pcsPerKanban",
+      width: 120,
+      render: (value: number, row) =>
+        row.isGroup ? <span className="text-gray-400">—</span> : value,
+    },
     {
       title: "Cycle",
       dataIndex: "customerCycle",
       key: "customerCycle",
       width: 100,
-      render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) =>
+        row.isGroup ? <span className="text-gray-400">—</span> : value,
     },
     {
       title: "Lead Time",
@@ -493,9 +599,30 @@ export default function MasterSupplierPage() {
           "-"
         ),
     },
-    { title: "UOM", dataIndex: "uom", key: "uom", width: 100, render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
-    { title: "Weight", dataIndex: "weight", key: "weight", width: 100, render: (value: number, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
-    { title: "Warehouse", dataIndex: "warehouse", key: "warehouse", width: 180, render: (value: string, row) => row.isGroup ? <span className="text-gray-400">—</span> : value },
+    {
+      title: "UOM",
+      dataIndex: "uom",
+      key: "uom",
+      width: 100,
+      render: (value: string, row) =>
+        row.isGroup ? <span className="text-gray-400">—</span> : value,
+    },
+    {
+      title: "Weight",
+      dataIndex: "weight",
+      key: "weight",
+      width: 100,
+      render: (value: number, row) =>
+        row.isGroup ? <span className="text-gray-400">—</span> : value,
+    },
+    {
+      title: "Warehouse",
+      dataIndex: "warehouse",
+      key: "warehouse",
+      width: 180,
+      render: (value: string, row) =>
+        row.isGroup ? <span className="text-gray-400">—</span> : value,
+    },
     {
       title: "Status",
       dataIndex: "status",
@@ -504,7 +631,9 @@ export default function MasterSupplierPage() {
       render: (value: string, row) => {
         if (row.isGroup) return <span className="text-gray-400">—</span>;
         const lowered = value.toLowerCase();
-        return <Tag color={lowered === "active" ? "green" : "default"}>{value}</Tag>;
+        return (
+          <Tag color={lowered === "active" ? "green" : "default"}>{value}</Tag>
+        );
       },
     },
     {
@@ -512,24 +641,41 @@ export default function MasterSupplierPage() {
       key: "actions",
       width: 140,
       fixed: "right",
-      render: (_value, row) => (
+      render: (_value, row) =>
         row.isGroup ? null : (
           <div className="flex items-center gap-1">
-            <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => openCreatePage("view", row)} />
-            <Button type="text" size="small" icon={<EditOutlined />} onClick={() => openCreatePage("edit", row)} />
+            <Button
+              type="text"
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => openCreatePage("view", row)}
+            />
+            <Button
+              type="text"
+              size="small"
+              icon={<EditOutlined />}
+              onClick={() => openCreatePage("edit", row)}
+            />
             <Popconfirm
               title="Delete supplier item?"
               description={`Remove ${row.partName} from ${sectionLabel(row.section)}.`}
               okText="Delete"
               cancelText="Cancel"
-              okButtonProps={{ danger: true, loading: deleteSupplierItemState.isLoading }}
+              okButtonProps={{
+                danger: true,
+                loading: deleteSupplierItemState.isLoading,
+              }}
               onConfirm={() => handleDeleteSupplierItem(row)}
             >
-              <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+              <Button
+                type="text"
+                size="small"
+                danger
+                icon={<DeleteOutlined />}
+              />
             </Popconfirm>
           </div>
-        )
-      ),
+        ),
     },
   ];
 
@@ -550,7 +696,9 @@ export default function MasterSupplierPage() {
       dataIndex: "supplierName",
       key: "supplierName",
       width: 220,
-      render: (value: string) => <span className="font-semibold text-gray-900">{value}</span>,
+      render: (value: string) => (
+        <span className="font-semibold text-gray-900">{value}</span>
+      ),
     },
     {
       title: "Contact",
@@ -563,14 +711,26 @@ export default function MasterSupplierPage() {
         </div>
       ),
     },
-    { title: "Email", dataIndex: "emailAddress", key: "emailAddress", width: 220 },
-    { title: "Category", dataIndex: "materialCategory", key: "materialCategory", width: 180 },
+    {
+      title: "Email",
+      dataIndex: "emailAddress",
+      key: "emailAddress",
+      width: 220,
+    },
+    {
+      title: "Category",
+      dataIndex: "materialCategory",
+      key: "materialCategory",
+      width: 180,
+    },
     {
       title: "Lead Time",
       dataIndex: "leadTimeDays",
       key: "leadTimeDays",
       width: 120,
-      render: (value: number) => <span className="text-gray-700">{value} days</span>,
+      render: (value: number) => (
+        <span className="text-gray-700">{value} days</span>
+      ),
     },
     {
       title: "Status",
@@ -579,7 +739,8 @@ export default function MasterSupplierPage() {
       width: 100,
       render: (value: string) => {
         const lowered = String(value ?? "").toLowerCase();
-        const isActive = lowered === "active" || lowered === "1" || lowered === "true";
+        const isActive =
+          lowered === "active" || lowered === "1" || lowered === "true";
         return <Tag color={isActive ? "green" : "default"}>{value}</Tag>;
       },
     },
@@ -608,7 +769,9 @@ export default function MasterSupplierPage() {
                 messageApi.error("Missing supplier id");
                 return;
               }
-              router.push(`/master-supplier/only/${encodeURIComponent(String(row.id))}/edit`);
+              router.push(
+                `/master-supplier/only/${encodeURIComponent(String(row.id))}/edit`,
+              );
             }}
           />
           <Button
@@ -627,7 +790,9 @@ export default function MasterSupplierPage() {
   ];
 
   const isSupplierOnly = activeSection === "supplier-only";
-  const visibleCount = isSupplierOnly ? filteredSupplierOnlyRows.length : groupedSupplierRows.length;
+  const visibleCount = isSupplierOnly
+    ? filteredSupplierOnlyRows.length
+    : groupedSupplierRows.length;
 
   return (
     <div className="p-6 space-y-6 bg-gray-50 min-h-screen">
@@ -640,7 +805,8 @@ export default function MasterSupplierPage() {
               Master Supplier
             </Typography.Title>
             <Typography.Text type="secondary">
-              Manage supplier only and supplier item mappings for raw material, indirect raw material, and subcon.
+              Manage supplier only and supplier item mappings for raw material,
+              indirect raw material, and subcon.
             </Typography.Text>
           </div>
 
@@ -696,8 +862,13 @@ export default function MasterSupplierPage() {
           type="error"
           showIcon
           message="Failed to load supplier items"
-          description={getApiErrorMessage(supplierItemsQuery.error, "Unable to load supplier item data")}
-          action={<Button onClick={() => supplierItemsQuery.refetch()}>Retry</Button>}
+          description={getApiErrorMessage(
+            supplierItemsQuery.error,
+            "Unable to load supplier item data",
+          )}
+          action={
+            <Button onClick={() => supplierItemsQuery.refetch()}>Retry</Button>
+          }
         />
       ) : null}
 
@@ -706,8 +877,13 @@ export default function MasterSupplierPage() {
           type="error"
           showIcon
           message="Failed to load supplier-only data"
-          description={getApiErrorMessage(suppliersQuery.error, "Unable to load supplier-only data")}
-          action={<Button onClick={() => suppliersQuery.refetch()}>Retry</Button>}
+          description={getApiErrorMessage(
+            suppliersQuery.error,
+            "Unable to load supplier-only data",
+          )}
+          action={
+            <Button onClick={() => suppliersQuery.refetch()}>Retry</Button>
+          }
         />
       ) : null}
 
@@ -724,18 +900,33 @@ export default function MasterSupplierPage() {
             }}
           />
 
-          <div className="text-sm text-gray-500">{visibleCount} {isSupplierOnly ? "suppliers" : "items"}</div>
+          <div className="text-sm text-gray-500">
+            {visibleCount} {isSupplierOnly ? "suppliers" : "items"}
+          </div>
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
-          <Input
-            allowClear
-            value={searchValue}
-            onChange={(event) => setSearchValue(event.target.value)}
-            placeholder={isSupplierOnly ? "Search supplier name, code, contact..." : "Search by uniq, part, supplier, warehouse..."}
-            prefix={<SearchOutlined />}
-            className="w-full md:w-[360px]"
-          />
+          {isSupplierOnly ? (
+            <Input
+              allowClear
+              value={searchValue}
+              onChange={(event) => setSearchValue(event.target.value)}
+              placeholder="Search supplier name, code, contact..."
+              prefix={<SearchOutlined />}
+              className="w-full md:w-[360px]"
+            />
+          ) : (
+            <Select
+              showSearch
+              allowClear
+              value={searchValue || undefined}
+              onChange={(value) => setSearchValue(String(value ?? ""))}
+              placeholder="Filter by UNIQ"
+              options={uniqOptions}
+              optionFilterProp="label"
+              className="w-full md:w-[360px]"
+            />
+          )}
 
           {!isSupplierOnly ? (
             <Select
@@ -775,7 +966,8 @@ export default function MasterSupplierPage() {
             loading={apiEnabled && supplierItemsQuery.isLoading}
             pagination={{ pageSize: 10 }}
             expandable={{
-              rowExpandable: (record) => Boolean(record.isGroup && record.children.length > 0),
+              rowExpandable: (record) =>
+                Boolean(record.isGroup && record.children.length > 0),
             }}
             rowClassName={(record) => (record.isGroup ? "bg-gray-50" : "")}
             scroll={{ x: 1800 }}
@@ -801,7 +993,11 @@ export default function MasterSupplierPage() {
           const leadTimeRaw = (row.delivery_lead_time_days ?? "").trim();
           const leadTime = leadTimeRaw ? Number(leadTimeRaw) : undefined;
           if (leadTimeRaw && !Number.isFinite(leadTime)) {
-            return { ok: false, label, error: "Lead Time (days) harus berupa angka." };
+            return {
+              ok: false,
+              label,
+              error: "Lead Time (days) harus berupa angka.",
+            };
           }
           const supplierCode = (row.supplier_code ?? "").trim();
           const materialCategory = (row.material_category ?? "").trim();
@@ -816,7 +1012,10 @@ export default function MasterSupplierPage() {
               contact_number: (row.contact_number ?? "").trim(),
               email_address: (row.email_address ?? "").trim(),
               ...(materialCategory
-                ? { material_category: normalizeMaterialCategoryImport(materialCategory) }
+                ? {
+                    material_category:
+                      normalizeMaterialCategoryImport(materialCategory),
+                  }
                 : {}),
               full_address: (row.full_address ?? "").trim(),
               city: (row.city ?? "").trim(),
@@ -860,46 +1059,139 @@ export default function MasterSupplierPage() {
             <div className="text-sm text-gray-500">Loading detail...</div>
           ) : supplierDetailQuery.isError ? (
             <div className="text-sm text-red-600">
-              {getApiErrorMessage(supplierDetailQuery.error, "Failed to load supplier detail")}
+              {getApiErrorMessage(
+                supplierDetailQuery.error,
+                "Failed to load supplier detail",
+              )}
             </div>
           ) : (
             (() => {
               const detail = supplierDetailQuery.data;
-              const supplierCode = String(detail?.supplier_code ?? selectedSupplierOnlyRow.supplierCode ?? "-");
-              const supplierName = String(detail?.supplier_name ?? selectedSupplierOnlyRow.supplierName ?? "-");
-              const contactPerson = String(detail?.contact_person ?? selectedSupplierOnlyRow.contactPerson ?? "-");
-              const contactNumber = String(detail?.contact_number ?? selectedSupplierOnlyRow.contactNumber ?? "-");
-              const emailAddress = String(detail?.email_address ?? selectedSupplierOnlyRow.emailAddress ?? "-");
-              const materialCategory = String(detail?.material_category ?? selectedSupplierOnlyRow.materialCategory ?? "-");
-              const paymentTerms = String(detail?.payment_terms ?? selectedSupplierOnlyRow.paymentTerms ?? "-");
-              const leadTimeDays = Number(detail?.delivery_lead_time_days ?? selectedSupplierOnlyRow.leadTimeDays ?? 0);
-              const fullAddress = String(detail?.full_address ?? selectedSupplierOnlyRow.fullAddress ?? "-");
+              const supplierCode = String(
+                detail?.supplier_code ??
+                  selectedSupplierOnlyRow.supplierCode ??
+                  "-",
+              );
+              const supplierName = String(
+                detail?.supplier_name ??
+                  selectedSupplierOnlyRow.supplierName ??
+                  "-",
+              );
+              const contactPerson = String(
+                detail?.contact_person ??
+                  selectedSupplierOnlyRow.contactPerson ??
+                  "-",
+              );
+              const contactNumber = String(
+                detail?.contact_number ??
+                  selectedSupplierOnlyRow.contactNumber ??
+                  "-",
+              );
+              const emailAddress = String(
+                detail?.email_address ??
+                  selectedSupplierOnlyRow.emailAddress ??
+                  "-",
+              );
+              const materialCategory = String(
+                detail?.material_category ??
+                  selectedSupplierOnlyRow.materialCategory ??
+                  "-",
+              );
+              const paymentTerms = String(
+                detail?.payment_terms ??
+                  selectedSupplierOnlyRow.paymentTerms ??
+                  "-",
+              );
+              const leadTimeDays = Number(
+                detail?.delivery_lead_time_days ??
+                  selectedSupplierOnlyRow.leadTimeDays ??
+                  0,
+              );
+              const fullAddress = String(
+                detail?.full_address ??
+                  selectedSupplierOnlyRow.fullAddress ??
+                  "-",
+              );
               const city = String(detail?.city ?? "-");
               const province = String(detail?.province ?? "-");
               const country = String(detail?.country ?? "-");
               const taxId = String(detail?.tax_id_npwp ?? "-");
               const bankName = String(detail?.bank_name ?? "-");
-              const bankAccountNumber = String(detail?.bank_account_number ?? "-");
+              const bankAccountNumber = String(
+                detail?.bank_account_number ?? "-",
+              );
               const bankAccountName = String(detail?.bank_account_name ?? "-");
 
               return (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                  <div><div className="text-gray-500">Supplier Code</div><div className="font-semibold text-gray-900">{supplierCode}</div></div>
-                  <div><div className="text-gray-500">Supplier Name</div><div className="font-semibold text-gray-900">{supplierName}</div></div>
-                  <div><div className="text-gray-500">Contact Person</div><div className="text-gray-900">{contactPerson}</div></div>
-                  <div><div className="text-gray-500">Contact Number</div><div className="text-gray-900">{contactNumber}</div></div>
-                  <div><div className="text-gray-500">Email</div><div className="text-gray-900">{emailAddress}</div></div>
-                  <div><div className="text-gray-500">Category</div><div className="text-gray-900">{materialCategory}</div></div>
-                  <div><div className="text-gray-500">Payment Terms</div><div className="text-gray-900">{paymentTerms}</div></div>
-                  <div><div className="text-gray-500">Lead Time</div><div className="text-gray-900">{leadTimeDays} days</div></div>
-                  <div><div className="text-gray-500">City</div><div className="text-gray-900">{city}</div></div>
-                  <div><div className="text-gray-500">Province</div><div className="text-gray-900">{province}</div></div>
-                  <div><div className="text-gray-500">Country</div><div className="text-gray-900">{country}</div></div>
-                  <div><div className="text-gray-500">NPWP</div><div className="text-gray-900">{taxId}</div></div>
-                  <div><div className="text-gray-500">Bank</div><div className="text-gray-900">{bankName}</div></div>
-                  <div><div className="text-gray-500">Bank Account No</div><div className="text-gray-900">{bankAccountNumber}</div></div>
-                  <div><div className="text-gray-500">Bank Account Name</div><div className="text-gray-900">{bankAccountName}</div></div>
-                  <div className="md:col-span-2"><div className="text-gray-500">Address</div><div className="text-gray-900">{fullAddress}</div></div>
+                  <div>
+                    <div className="text-gray-500">Supplier Code</div>
+                    <div className="font-semibold text-gray-900">
+                      {supplierCode}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Supplier Name</div>
+                    <div className="font-semibold text-gray-900">
+                      {supplierName}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Contact Person</div>
+                    <div className="text-gray-900">{contactPerson}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Contact Number</div>
+                    <div className="text-gray-900">{contactNumber}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Email</div>
+                    <div className="text-gray-900">{emailAddress}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Category</div>
+                    <div className="text-gray-900">{materialCategory}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Payment Terms</div>
+                    <div className="text-gray-900">{paymentTerms}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Lead Time</div>
+                    <div className="text-gray-900">{leadTimeDays} days</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">City</div>
+                    <div className="text-gray-900">{city}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Province</div>
+                    <div className="text-gray-900">{province}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Country</div>
+                    <div className="text-gray-900">{country}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">NPWP</div>
+                    <div className="text-gray-900">{taxId}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Bank</div>
+                    <div className="text-gray-900">{bankName}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Bank Account No</div>
+                    <div className="text-gray-900">{bankAccountNumber}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-500">Bank Account Name</div>
+                    <div className="text-gray-900">{bankAccountName}</div>
+                  </div>
+                  <div className="md:col-span-2">
+                    <div className="text-gray-500">Address</div>
+                    <div className="text-gray-900">{fullAddress}</div>
+                  </div>
                 </div>
               );
             })()
@@ -914,23 +1206,36 @@ export default function MasterSupplierPage() {
           setSelectedSupplierOnlyRow(null);
         }}
         okText="Delete"
-        okButtonProps={{ danger: true, className: "!rounded-lg", loading: deleteSupplierState.isLoading }}
+        okButtonProps={{
+          danger: true,
+          className: "!rounded-lg",
+          loading: deleteSupplierState.isLoading,
+        }}
         cancelButtonProps={{ className: "!rounded-lg" }}
         onOk={async () => {
           try {
-            if (!selectedSupplierOnlyRow?.id) throw new Error("Missing supplier id");
+            if (!selectedSupplierOnlyRow?.id)
+              throw new Error("Missing supplier id");
             await deleteSupplier(selectedSupplierOnlyRow.id).unwrap();
             messageApi.success("Supplier deleted");
             setDeleteOpen(false);
             setSelectedSupplierOnlyRow(null);
             suppliersQuery.refetch();
           } catch (error) {
-            messageApi.error(getApiErrorMessage(error, "Failed to delete supplier"));
+            messageApi.error(
+              getApiErrorMessage(error, "Failed to delete supplier"),
+            );
           }
         }}
         title="Delete supplier?"
       >
-        <div>Delete <span className="font-semibold">{selectedSupplierOnlyRow?.supplierName}</span> from Supplier Only?</div>
+        <div>
+          Delete{" "}
+          <span className="font-semibold">
+            {selectedSupplierOnlyRow?.supplierName}
+          </span>{" "}
+          from Supplier Only?
+        </div>
       </Modal>
     </div>
   );
