@@ -45,7 +45,7 @@ type DetailRow = {
   quantity: string;
   /** Nilai kuantitas mentah (angka) untuk perhitungan estimasi per-uniq. */
   quantityNumber: number;
-  /** Estimasi waktu per-uniq (menit) = qty x cycle_time_min x machine_capacity. */
+  /** Estimasi waktu per-uniq (menit) = qty x cycle_time_min. */
   estimatedMinutes: number;
   processName: string;
   status: string;
@@ -61,6 +61,64 @@ const formatEstimatedMinutes = (value?: number | null) => {
   if (value == null || !Number.isFinite(value) || value <= 0) return "-";
   const rounded = Math.round(value * 100) / 100;
   return `${rounded} menit`;
+};
+
+type ProcessTiming = {
+  cycleMin: number;
+  setupMin: number;
+};
+
+const getProcessTiming = (
+  processFlowJson: unknown,
+  processName?: string,
+): ProcessTiming => {
+  const steps = Array.isArray(processFlowJson)
+    ? processFlowJson
+    : typeof processFlowJson === "object" && processFlowJson !== null
+      ? ((processFlowJson as Record<string, unknown>).steps ??
+        (processFlowJson as Record<string, unknown>).items ??
+        [])
+      : [];
+  if (!Array.isArray(steps)) return { cycleMin: 0, setupMin: 0 };
+
+  const normalizedProcess = String(processName ?? "")
+    .trim()
+    .toLowerCase();
+  const selected =
+    steps.find((step) => {
+      if (typeof step !== "object" || step === null) return false;
+      const record = step as Record<string, unknown>;
+      return (
+        normalizedProcess !== "" &&
+        String(record.process_name ?? record.processName ?? "")
+          .trim()
+          .toLowerCase() === normalizedProcess
+      );
+    }) ?? steps[0];
+
+  if (typeof selected !== "object" || selected === null) {
+    return { cycleMin: 0, setupMin: 0 };
+  }
+  const record = selected as Record<string, unknown>;
+  const cycleSeconds = Number(
+    record.cycle_time_sec ?? record.cycleTimeSec ?? 0,
+  );
+  const cycleMinutes = Number(
+    record.cycle_time_min ?? record.cycleTimeMin ?? 0,
+  );
+  const setupMinutes = Number(
+    record.setup_time_min ?? record.setupTimeMin ?? 0,
+  );
+  return {
+    cycleMin:
+      cycleMinutes > 0
+        ? cycleMinutes
+        : cycleSeconds > 0
+          ? cycleSeconds / 60
+          : 0,
+    setupMin:
+      Number.isFinite(setupMinutes) && setupMinutes > 0 ? setupMinutes : 0,
+  };
 };
 
 type DetailFieldProps = {
@@ -145,20 +203,27 @@ export default function BulkWorkOrderDetailPage() {
   );
 
   const detailRows = useMemo<DetailRow[]>(() => {
-    // [wo-estimated-time] Estimasi per-uniq mengikuti formula yang sama
-    // dengan halaman create WO: qty x cycle_time_min x machine_capacity.
-    // Nilai cycle_time_min & machine_capacity disimpan di level WO, jadi
-    // total = jumlah semua per-uniq (identik dengan estimated_time_minutes
-    // yang disimpan saat WO dibuat).
-    const cycleMin = Number(workOrder?.cycle_time_min ?? 0);
-    const capacity = Number(workOrder?.machine_capacity ?? 0);
-    return (workOrder?.items ?? []).map((item, index) => {
+    // [wo-estimated-time] Bulk detail membaca cycle/setup dari snapshot BOM
+    // pada process_flow_json setiap item, sehingga bulk WO juga memiliki
+    // estimasi walaupun header bulk lama tidak menyimpan cycle_time_min.
+    const rows: DetailRow[] = [];
+    let previousUniq = "";
+
+    for (const [index, item] of (workOrder?.items ?? []).entries()) {
+      const uniq = String(item.item_uniq_code ?? "").trim();
       const qtyNumber = Number(item.quantity) || 0;
+      const timing = getProcessTiming(
+        item.process_flow_json,
+        item.process_name,
+      );
+      const setup =
+        qtyNumber > 0 && uniq !== previousUniq ? timing.setupMin : 0;
       const perUniq =
-        cycleMin > 0 && capacity > 0 && qtyNumber > 0
-          ? Math.round(qtyNumber * cycleMin * capacity * 100) / 100
+        qtyNumber > 0
+          ? Math.round((qtyNumber * timing.cycleMin + setup) * 100) / 100
           : 0;
-      return {
+
+      rows.push({
         key: item.id || `${item.item_uniq_code}-${index}`,
         id: item.id,
         uniq: item.item_uniq_code,
@@ -178,18 +243,15 @@ export default function BulkWorkOrderDetailPage() {
         kanbanNumber: item.kanban_number ?? "-",
         qrDataUrl: item.qr_data_url,
         processFlowJson: item.process_flow_json,
-      };
-    });
-  }, [
-    bomIndex,
-    workOrder?.items,
-    workOrder?.cycle_time_min,
-    workOrder?.machine_capacity,
-  ]);
+      });
 
-  // [wo-estimated-time] Total per-uniq (fallback bila WO belum menyimpan
-  // nilai estimated_time_minutes, mis. data lama). Kalau jumlah per-uniq > 0
-  // gunakan itu; jika tidak, pakai nilai yang tersimpan di WO.
+      if (qtyNumber > 0) previousUniq = uniq;
+    }
+    return rows;
+  }, [bomIndex, workOrder?.items]);
+
+  // [wo-estimated-time] Total = SUM(Qty x Cycle Time from BOM) + setup
+  // from BOM only when the UNIQ changes from the previous bulk line.
   const totalEstimatedMinutes = useMemo(() => {
     const sumPerUniq = detailRows.reduce(
       (acc, r) => acc + (r.estimatedMinutes || 0),

@@ -202,11 +202,13 @@ export default function CreateWorkOrderPage() {
     return map;
   }, [machineRecords]);
 
-  // [wo-estimated-time] Cycle time (menit/pcs) + machine capacity per uniq, diambil dari BOM.
+  // [wo-estimated-time] Cycle/setup time per UNIQ, diambil dari BOM.
   // cycle_time_sec disimpan dalam detik di BOM, di sini dikonversi ke menit.
   const bomTimeMap = useMemo(() => {
-    const map: Record<string, { cycleMin: number; machineCapacity: number }> =
-      {};
+    const map: Record<
+      string,
+      { cycleMin: number; setupMin: number; machineCapacity: number }
+    > = {};
     const nodes: any[] = (() => {
       const anyRes = bomTreeRes as any;
       if (!anyRes) return [];
@@ -240,6 +242,11 @@ export default function CreateWorkOrderPage() {
         n?.cycle_time_sec,
         routes[0]?.cycle_time_sec,
       );
+      const setupMin = pickNumber(
+        spec?.setup_time_min,
+        n?.setup_time_min,
+        routes[0]?.setup_time_min,
+      );
       if (cycleSec <= 0) return;
       // Mesin yang dipakai uniq ini diambil dari process route BOM,
       // kapasitasnya dicari di master mesin (Machine Master Data).
@@ -266,6 +273,7 @@ export default function CreateWorkOrderPage() {
       }
       map[uniq] = {
         cycleMin: Math.round((cycleSec / 60) * 10000) / 10000,
+        setupMin: Math.round(setupMin * 10000) / 10000,
         machineCapacity: capacity > 0 ? capacity : 1,
       };
     };
@@ -798,36 +806,53 @@ export default function CreateWorkOrderPage() {
     }
   }, [finishedQuery.data, finishedQuery.isError, requestedFinished]);
 
-  // [wo-estimated-time] Estimasi waktu (menit) = SUM(qty x cycle time menit x machine capacity).
-  // Dihitung ulang otomatis setiap qty / uniq berubah (on change).
+  // [wo-estimated-time] Estimasi waktu WO (menit) = SUM(qty x cycle) + setup
+  // hanya saat UNIQ berubah dari baris valid sebelumnya.
   const estimatedTimeBreakdown = useMemo(() => {
-    let total = 0;
+    let cycleTotal = 0;
+    let setupTotal = 0;
     let cycleMin: number | undefined;
     let capacity: number | undefined;
+    let previousUniq = "";
+
     for (const l of lines) {
       // Child ikut dihitung: tiap child punya uniq + qty (qty x qpu) sendiri.
-      const info = l.uniq ? bomTimeMap[l.uniq] : undefined;
+      const uniq = String(l.uniq ?? "").trim();
+      const info = uniq ? bomTimeMap[uniq] : undefined;
       const qty =
         typeof l.qty === "number" && Number.isFinite(l.qty) ? l.qty : 0;
       if (!info || qty <= 0) continue;
-      total += qty * info.cycleMin * info.machineCapacity;
+
+      cycleTotal += qty * info.cycleMin;
+      if (uniq !== previousUniq) setupTotal += info.setupMin;
+      previousUniq = uniq;
+
       if (cycleMin === undefined) {
         cycleMin = info.cycleMin;
         capacity = info.machineCapacity;
       }
     }
-    return { total: Math.round(total * 100) / 100, cycleMin, capacity };
+
+    const total = cycleTotal + setupTotal;
+    return {
+      total: Math.round(total * 100) / 100,
+      cycleTotal: Math.round(cycleTotal * 100) / 100,
+      setupTotal: Math.round(setupTotal * 100) / 100,
+      cycleMin,
+      capacity,
+    };
   }, [lines, bomTimeMap]);
 
   // [wo-estimated-time] Read-only: tidak bisa diketik, selalu auto-calculated.
   const estimatedTimeMinutes = estimatedTimeBreakdown.total;
 
-  // Estimasi waktu per baris = qty x cycle time (menit) x machine capacity.
+  // Estimasi waktu per baris = qty x cycle. Setup ditambahkan di total WO
+  // ketika UNIQ pada baris ini berbeda dari UNIQ valid sebelumnya.
   const lineEstimatedMinutes = (l: UniqLine) => {
     const info = l.uniq ? bomTimeMap[l.uniq] : undefined;
     const qty = typeof l.qty === "number" && Number.isFinite(l.qty) ? l.qty : 0;
     if (!info || qty <= 0) return 0;
-    return Math.round(qty * info.cycleMin * info.machineCapacity * 100) / 100;
+    return Math.round(qty * info.cycleMin * 100) / 100;
   };
 
   const validateLines = () => {
@@ -878,6 +903,7 @@ export default function CreateWorkOrderPage() {
         estimated_time_minutes:
           estimatedTimeMinutes > 0 ? estimatedTimeMinutes : null,
         cycle_time_min: estimatedTimeBreakdown.cycleMin ?? null,
+        setup_time_min: estimatedTimeBreakdown.setupTotal,
         machine_capacity: estimatedTimeBreakdown.capacity ?? null,
       }).unwrap();
 
@@ -1224,7 +1250,7 @@ export default function CreateWorkOrderPage() {
                         )}
                       </div>
 
-                      {/* [wo-estimated-time] Read-only, auto-calculated dari qty x cycle time x machine capacity */}
+                      {/* [wo-estimated-time] Read-only, auto-calculated dari qty x cycle + setup saat UNIQ berubah */}
                       <div className="col-span-2">
                         <Input
                           className="!rounded-lg"
@@ -1234,7 +1260,7 @@ export default function CreateWorkOrderPage() {
                         />
                         <div className="mt-1 text-[11px] text-gray-400">
                           {l.uniq && bomTimeMap[l.uniq]
-                            ? `Cycle ${bomTimeMap[l.uniq].cycleMin} mnt x kapasitas ${bomTimeMap[l.uniq].machineCapacity} x qty`
+                            ? `Cycle ${bomTimeMap[l.uniq].cycleMin} mnt x qty; setup WO dihitung saat UNIQ berubah`
                             : "Cycle time BOM belum diisi"}
                         </div>
                       </div>
