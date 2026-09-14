@@ -348,7 +348,7 @@ function StockOpnameStartCountPageContent() {
 
   useEffect(() => {
     if (!apiEnabled) return;
-    void getUniqOptions({ type: inventoryType, method, q: "", limit: 10 });
+    void getUniqOptions({ type: inventoryType, method, q: "", limit: 10000 });
   }, [apiEnabled, getUniqOptions, inventoryType, method]);
 
   useEffect(() => {

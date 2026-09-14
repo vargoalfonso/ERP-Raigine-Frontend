@@ -278,9 +278,13 @@ type ModuleItem = {
 };
 
 const MODULE_PERMISSION_KEYS: Record<string, string[]> = {
-  
   "access-control-matrix": ["users"],
-  "supplier-info": ["supplier", "supplier_info", "supplier-info", "supplier_management"],
+  "supplier-info": [
+    "supplier",
+    "supplier_info",
+    "supplier-info",
+    "supplier_management",
+  ],
   roles: ["role"],
   "safety-stock": ["safety-stock"],
   stockdays: ["stockdays"],
@@ -402,7 +406,7 @@ const modules: ModuleItem[] = [
     iconTextClass: "text-indigo-700",
   },
   // Keep a realistic count like the screenshot
-{
+  {
     id: "supplier-info",
     name: "Supplier Info",
     description: "Mapping UNIQ ke UNIQ Zahir supplier",
@@ -418,7 +422,6 @@ const modules: ModuleItem[] = [
     iconBgClass: "bg-green-50",
     iconTextClass: "text-green-700",
   },
-  
 ];
 
 const initialRows: ParameterRow[] = [
@@ -813,19 +816,15 @@ const PURCHASE_ORDER_STATUS_OPTIONS = [
 const SAFETY_STOCK_PARAMETER_OPTIONS = [
   {
     label: "Using PRL/working days * days (C)",
-    value: "Using PRL/working days * days (C)",
+    value: "days",
   },
   {
     label: "Using PRL/working days * percentage (C)",
-    value: "Using PRL/working days * percentage (C)",
+    value: "percentage",
   },
   {
     label: "Demand Forecasting result for each Uniq",
-    value: "Demand Forecasting result for each Uniq",
-  },
-  {
-    label: "Using PRL/working days * machine pattern",
-    value: "Using PRL/working days * machine pattern",
+    value: "forecast",
   },
 ];
 
@@ -946,8 +945,10 @@ export default function SystemSettingsPage() {
   const shouldLoadBomTree =
     apiEnabled &&
     (selectedModuleId === "safety-stock" || selectedModuleId === "kanban");
-  const shouldLoadSupplierInfo = apiEnabled && selectedModuleId === "supplier-info";
-  const shouldLoadSupplierItemsForInfo = apiEnabled && selectedModuleId === "supplier-info";
+  const shouldLoadSupplierInfo =
+    apiEnabled && selectedModuleId === "supplier-info";
+  const shouldLoadSupplierItemsForInfo =
+    apiEnabled && selectedModuleId === "supplier-info";
 
   const toBackendStatus = (s: StatusType): string =>
     s === "Inactive" ? "inactive" : "active";
@@ -1079,9 +1080,12 @@ export default function SystemSettingsPage() {
     { skip: !shouldLoadMachinePatterns },
   );
   const [deleteMachinePattern] = useDeleteMachinePatternMutation();
-  const { data: machinesApiData = [] } = useGetMachinesQuery({ page: 1, limit: 1000 }, {
-    skip: !shouldLoadMachineMaster,
-  });
+  const { data: machinesApiData = [] } = useGetMachinesQuery(
+    { page: 1, limit: 1000 },
+    {
+      skip: !shouldLoadMachineMaster,
+    },
+  );
 
   const { data: processesApiData } = useGetProcessesQuery(undefined, {
     skip: !shouldLoadProcesses,
@@ -1138,9 +1142,12 @@ export default function SystemSettingsPage() {
   const [createSupplierInfo] = useCreateSupplierInfoMutation();
   const [updateSupplierInfo] = useUpdateSupplierInfoMutation();
   const [deleteSupplierInfo] = useDeleteSupplierInfoMutation();
-  const { data: supplierItemsForInfoData } = useListSupplierItemsQuery(undefined, {
-    skip: !shouldLoadSupplierItemsForInfo,
-  });
+  const { data: supplierItemsForInfoData } = useListSupplierItemsQuery(
+    undefined,
+    {
+      skip: !shouldLoadSupplierItemsForInfo,
+    },
+  );
   const selectedModule = useMemo(
     () =>
       visibleModules.find((m) => m.id === selectedModuleId) ??
@@ -1482,11 +1489,19 @@ export default function SystemSettingsPage() {
 
   // --- Supplier Info state ---
   const [supplierInfoEditOpen, setSupplierInfoEditOpen] = useState(false);
-  const [supplierInfoEditingRow, setSupplierInfoEditingRow] = useState<SupplierInfoRecord | null>(null);
-  const [supplierInfoEditMode, setSupplierInfoEditMode] = useState<"create" | "edit">("edit");
-  const [supplierInfoForm] = Form.useForm<{ uniq: string; uniq_zahir: string; status: string }>();
+  const [supplierInfoEditingRow, setSupplierInfoEditingRow] =
+    useState<SupplierInfoRecord | null>(null);
+  const [supplierInfoEditMode, setSupplierInfoEditMode] = useState<
+    "create" | "edit"
+  >("edit");
+  const [supplierInfoForm] = Form.useForm<{
+    uniq: string;
+    uniq_zahir: string;
+    status: string;
+  }>();
   const [supplierInfoDeleteOpen, setSupplierInfoDeleteOpen] = useState(false);
-  const [supplierInfoDeletingRow, setSupplierInfoDeletingRow] = useState<SupplierInfoRecord | null>(null);
+  const [supplierInfoDeletingRow, setSupplierInfoDeletingRow] =
+    useState<SupplierInfoRecord | null>(null);
 
   // Dropdown UNIQ options dari supplier items (deduplicated)
   const supplierInfoUniqOptions = React.useMemo(() => {
@@ -1508,10 +1523,13 @@ export default function SystemSettingsPage() {
   }, [supplierItemsForInfoData]);
 
   // Watch UNIQ field to auto-fill supplier_name + type in form
-  const supplierInfoWatchedUniq = Form.useWatch("uniq", supplierInfoForm) as string | undefined;
+  const supplierInfoWatchedUniq = Form.useWatch("uniq", supplierInfoForm) as
+    string | undefined;
   const supplierInfoAutoFilled = React.useMemo(() => {
     if (!supplierInfoWatchedUniq) return { supplier_name: "", type: "" };
-    const found = supplierInfoUniqOptions.find((o) => o.value === supplierInfoWatchedUniq);
+    const found = supplierInfoUniqOptions.find(
+      (o) => o.value === supplierInfoWatchedUniq,
+    );
     if (!found) return { supplier_name: "", type: "" };
     const typeMap: Record<string, string> = {
       raw_material: "RM",
@@ -1531,26 +1549,41 @@ export default function SystemSettingsPage() {
   );
   const filteredSupplierInfo = React.useMemo(() => {
     const q = query.toLowerCase();
-    return supplierInfoRows.filter((r) =>
-      !q ||
-      r.uniq.toLowerCase().includes(q) ||
-      (r.uniq_zahir ?? "").toLowerCase().includes(q) ||
-      r.supplier_name.toLowerCase().includes(q) ||
-      r.type.toLowerCase().includes(q),
+    return supplierInfoRows.filter(
+      (r) =>
+        !q ||
+        r.uniq.toLowerCase().includes(q) ||
+        (r.uniq_zahir ?? "").toLowerCase().includes(q) ||
+        r.supplier_name.toLowerCase().includes(q) ||
+        r.type.toLowerCase().includes(q),
     );
   }, [supplierInfoRows, query]);
 
   const supplierInfoColumns: ColumnsType<SupplierInfoRecord> = [
     { title: "UNIQ", dataIndex: "uniq", key: "uniq", width: 160 },
-    { title: "UNIQ ZAHIR", dataIndex: "uniq_zahir", key: "uniq_zahir", width: 160, render: (v) => v ?? "-" },
-    { title: "Supplier Name", dataIndex: "supplier_name", key: "supplier_name" },
+    {
+      title: "UNIQ ZAHIR",
+      dataIndex: "uniq_zahir",
+      key: "uniq_zahir",
+      width: 160,
+      render: (v) => v ?? "-",
+    },
+    {
+      title: "Supplier Name",
+      dataIndex: "supplier_name",
+      key: "supplier_name",
+    },
     {
       title: "Type",
       dataIndex: "type",
       key: "type",
       width: 120,
       render: (v: string) => {
-        const colorMap: Record<string, string> = { RM: "blue", IRM: "purple", SUBCON: "orange" };
+        const colorMap: Record<string, string> = {
+          RM: "blue",
+          IRM: "purple",
+          SUBCON: "orange",
+        };
         return <Tag color={colorMap[v] ?? "default"}>{v}</Tag>;
       },
     },
@@ -1560,7 +1593,9 @@ export default function SystemSettingsPage() {
       key: "status",
       width: 100,
       render: (v: string) => (
-        <Tag color={v === "active" ? "green" : "red"}>{v === "active" ? "Active" : "Inactive"}</Tag>
+        <Tag color={v === "active" ? "green" : "red"}>
+          {v === "active" ? "Active" : "Inactive"}
+        </Tag>
       ),
     },
     {
@@ -1619,7 +1654,10 @@ export default function SystemSettingsPage() {
       } else if (supplierInfoEditingRow) {
         await updateSupplierInfo({
           id: supplierInfoEditingRow.id,
-          body: { uniq_zahir: values.uniq_zahir, status: values.status ?? "active" },
+          body: {
+            uniq_zahir: values.uniq_zahir,
+            status: values.status ?? "active",
+          },
         }).unwrap();
         message.success("Supplier Info berhasil diperbarui");
       }
@@ -2073,16 +2111,14 @@ export default function SystemSettingsPage() {
 
     return stockdaysApiData
       .filter((record) => Boolean(record?.id))
-      .map(
-        (record): StockdaysRow => ({
-          id: Number(record.id), // fix number
-          inventoryType: String(record.inventory_type ?? ""),
-          itemCode: String(record.item_code ?? ""),
-          calculationType: String(record.calculation_type ?? ""),
-          constanta: Number(record.constanta ?? 0),
-          status: fromBackendStatus(record.status),
-        }),
-      );
+      .map((record): StockdaysRow => ({
+        id: Number(record.id), // fix number
+        inventoryType: String(record.inventory_type ?? ""),
+        itemCode: String(record.item_code ?? ""),
+        calculationType: String(record.calculation_type ?? ""),
+        constanta: Number(record.constanta ?? 0),
+        status: fromBackendStatus(record.status),
+      }));
   }, [apiEnabled, stockdaysApiData, stockdaysRows]);
 
   const filteredStockdays = useMemo(() => {
@@ -2587,55 +2623,63 @@ export default function SystemSettingsPage() {
     purchaseOrderForm.resetFields();
   };
 
- const handleDownloadTemplateKanban = () => {
-  window.open(
-    `${apiBaseUrl}/template/kanban`,
-    "_blank",
-  );
-};
+  const handleDownloadTemplateKanban = () => {
+    window.open(`${apiBaseUrl}/template/kanban`, "_blank");
+  };
 
-const handleImportKanban = async (file: File): Promise<boolean> => {
-  const formData = new FormData();
-  formData.append("file", file);
+  const handleImportKanban = async (file: File): Promise<boolean> => {
+    const formData = new FormData();
+    formData.append("file", file);
 
-  try {
-    const headers = await generateHeaders({
-      useAuthorization: true,
-      contentType: "multipart/form-data",
-    });
-
-    const res = await fetch(`${apiBaseUrl}/import/kanban`, {
-      method: "POST",
-      headers,
-      body: formData,
-    });
-
-    const text = await res.text();
-    let payload: any = null;
     try {
-      payload = text ? JSON.parse(text) : null;
-    } catch {
-      payload = null;
+      const headers = await generateHeaders({
+        useAuthorization: true,
+        contentType: "multipart/form-data",
+      });
+
+      const res = await fetch(`${apiBaseUrl}/import/kanban`, {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+
+      const text = await res.text();
+      let payload: any = null;
+      try {
+        payload = text ? JSON.parse(text) : null;
+      } catch {
+        payload = null;
+      }
+
+      if (!res.ok) {
+        throw new Error(
+          payload?.message ||
+            payload?.detail ||
+            `Import failed with status ${res.status}`,
+        );
+      }
+
+      const successCount = payload?.data?.success ?? 0;
+      const failedCount = payload?.data?.failed ?? 0;
+      message.success(
+        `Import selesai. Success ${successCount}, Failed ${failedCount}`,
+      );
+
+      if (payload?.data?.failed_file) {
+        window.open(
+          `${apiBaseUrl}/import/kanban/failed/${payload.data.failed_file}`,
+          "_blank",
+        );
+      }
+
+      return true;
+    } catch (err: unknown) {
+      message.error(
+        err instanceof Error ? err.message : "Failed to import kanban data",
+      );
+      return false;
     }
-
-    if (!res.ok) {
-      throw new Error(payload?.message || payload?.detail || `Import failed with status ${res.status}`);
-    }
-
-    const successCount = payload?.data?.success ?? 0;
-    const failedCount = payload?.data?.failed ?? 0;
-    message.success(`Import selesai. Success ${successCount}, Failed ${failedCount}`);
-
-    if (payload?.data?.failed_file) {
-      window.open(`${apiBaseUrl}/import/kanban/failed/${payload.data.failed_file}`, "_blank");
-    }
-
-    return true;
-  } catch (err: unknown) {
-    message.error(err instanceof Error ? err.message : "Failed to import kanban data");
-    return false;
-  }
-};
+  };
 
   const resetPurchaseOrderEdit = () => {
     if (purchaseOrderEditMode === "edit" && purchaseOrderEditingRow) {
@@ -6938,7 +6982,11 @@ const handleImportKanban = async (file: File): Promise<boolean> => {
       </Drawer>
 
       <Drawer
-        title={(processEditMode as string) === "create" ? "Add Process" : "Edit Process"}
+        title={
+          (processEditMode as string) === "create"
+            ? "Add Process"
+            : "Edit Process"
+        }
         placement="right"
         open={processEditOpen}
         onClose={closeProcessEdit}
@@ -7216,7 +7264,9 @@ const handleImportKanban = async (file: File): Promise<boolean> => {
                     accept=".xlsx,.xls,.csv"
                     showUploadList={false}
                     beforeUpload={async (file) => {
-                      const isExcelLike = /\.(xlsx|xls|csv)$/i.test(file.name ?? "");
+                      const isExcelLike = /\.(xlsx|xls|csv)$/i.test(
+                        file.name ?? "",
+                      );
                       if (!isExcelLike) {
                         message.error("Only Excel/CSV files are supported");
                         return Upload.LIST_IGNORE;
@@ -7566,7 +7616,7 @@ const handleImportKanban = async (file: File): Promise<boolean> => {
               value={
                 supplierInfoEditMode === "create"
                   ? supplierInfoAutoFilled.supplier_name
-                  : supplierInfoEditingRow?.supplier_name ?? ""
+                  : (supplierInfoEditingRow?.supplier_name ?? "")
               }
               disabled
               placeholder="Otomatis dari UNIQ"
@@ -7578,7 +7628,7 @@ const handleImportKanban = async (file: File): Promise<boolean> => {
               value={
                 supplierInfoEditMode === "create"
                   ? supplierInfoAutoFilled.type
-                  : supplierInfoEditingRow?.type ?? ""
+                  : (supplierInfoEditingRow?.type ?? "")
               }
               disabled
               placeholder="Otomatis dari UNIQ"
