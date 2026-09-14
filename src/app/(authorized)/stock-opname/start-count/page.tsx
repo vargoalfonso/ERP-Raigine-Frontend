@@ -229,7 +229,7 @@ function StockOpnameStartCountPageContent() {
     null,
   );
   const [method, setMethod] = useState<Method>("manual");
-  const [period, setPeriod] = useState<Dayjs>(dayjs("2024-01-01"));
+  const [period, setPeriod] = useState<Dayjs>(dayjs());
   const [scheduleDate, setScheduleDate] = useState<Dayjs>(dayjs());
   const [countedDate, setCountedDate] = useState<Dayjs>(dayjs());
 
