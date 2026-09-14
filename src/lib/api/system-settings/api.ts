@@ -16,7 +16,7 @@ const ROUTES = {
   globalWorkingDays: "/global-parameters",
   kanban: "/kanban",
   machinePattern: "/machine-patterns",
-  
+
   process: "/process",
   uom: "/unit-measurement",
   typeParameter: "/type-parameter",
@@ -326,7 +326,7 @@ export type MachinePatternRecord = {
 
 export type CreateProcessRequest = {
   process_code: string;
-  category: string |null;
+  category: string | null;
   process_name: string;
   sequence: number | null;
   is_assembly?: boolean;
@@ -424,6 +424,7 @@ export type CreateSafetyStockRequest = {
   item_uniq_code: string;
   calculation_type: string;
   constanta: number;
+  status?: StatusType | string;
 };
 
 export type CreateSafetyStockBulkRequest = {
@@ -516,7 +517,9 @@ export type SupplierInfoRecord = {
   updated_at?: string;
 };
 
-const normalizeSupplierInfoRecord = (record: unknown): SupplierInfoRecord | null => {
+const normalizeSupplierInfoRecord = (
+  record: unknown,
+): SupplierInfoRecord | null => {
   if (!record || typeof record !== "object") return null;
   const raw = record as Record<string, unknown>;
   const id = raw.id ?? raw.ID ?? raw.uuid;
@@ -1249,11 +1252,14 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
             is_assembly:
               typeof (r.is_assembly ?? r.IsAssembly) === "boolean"
                 ? Boolean(r.is_assembly ?? r.IsAssembly)
-                : String(r.is_assembly ?? r.IsAssembly ?? "").toLowerCase() === "true",
+                : String(r.is_assembly ?? r.IsAssembly ?? "").toLowerCase() ===
+                  "true",
             sub_con:
               typeof (r.sub_con ?? r.subcon ?? r.SubCon) === "boolean"
                 ? Boolean(r.sub_con ?? r.subcon ?? r.SubCon)
-                : String(r.sub_con ?? r.subcon ?? r.SubCon ?? "").toLowerCase() === "true",
+                : String(
+                    r.sub_con ?? r.subcon ?? r.SubCon ?? "",
+                  ).toLowerCase() === "true",
             status: String(r.status ?? r.Status ?? ""),
           } satisfies ProcessRecord;
         }),
@@ -1785,11 +1791,18 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
           .map((item) => normalizeSupplierInfoRecord(item))
           .filter((item): item is SupplierInfoRecord => Boolean(item)),
       providesTags: (result) => {
-        const base = [{ type: "SystemSettingsSupplierInfo" as const, id: "LIST" }];
+        const base = [
+          { type: "SystemSettingsSupplierInfo" as const, id: "LIST" },
+        ];
         const ids = (result ?? [])
           .map((r) => r?.id)
           .filter((id): id is string => Boolean(id));
-        return base.concat(ids.map((id) => ({ type: "SystemSettingsSupplierInfo" as const, id })));
+        return base.concat(
+          ids.map((id) => ({
+            type: "SystemSettingsSupplierInfo" as const,
+            id,
+          })),
+        );
       },
     }),
   }),
