@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   DatePicker,
@@ -27,6 +27,7 @@ import {
   type PoBudgetPrlDetail,
 } from "@/lib/api/po-budget/api";
 import { useListPrlsQuery } from "@/lib/api/prl/api";
+import { useGetKanbanStandardsQuery } from "@/lib/api/system-settings/api";
 
 type WorkOrderType = "New" | "Assembly" | "Rework" | "Additional";
 
@@ -60,9 +61,10 @@ const num = (value: unknown, fallback = 0) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const text = (value: unknown, fallback = "") => String(value ?? fallback).trim();
+const text = (value: unknown, fallback = "") =>
+  String(value ?? fallback).trim();
 
-const DEFAULT_KANBAN_QTY = 100;
+const DEFAULT_KANBAN_QTY = 0;
 
 const computeKanbanCount = (quantity: number, kanbanQty: number) => {
   const q = Number(quantity) || 0;
@@ -113,7 +115,9 @@ const buildRowsFromPrlDetail = (
       });
 
       const perChildQty =
-        children.length > 0 ? Math.round(parentQty / children.length) : parentQty;
+        children.length > 0
+          ? Math.round(parentQty / children.length)
+          : parentQty;
 
       children.forEach((child, cIdx) => {
         const qty = num(child.quantity) || perChildQty;
@@ -165,6 +169,30 @@ export default function CreateBulkWorkOrderPage() {
   const [loadPrlDetail, prlDetailQuery] = useLazyGetPoBudgetPrlDetailQuery();
   const [createBulkWorkOrders, createBulkState] =
     useCreateBulkWorkOrdersMutation();
+  const { data: kanbanStandards = [], isFetching: kanbanFetching } =
+    useGetKanbanStandardsQuery(undefined, { skip: !apiEnabled });
+
+  const kanbanQtyByUniq = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const standard of kanbanStandards) {
+      const status = text(standard.status).toLowerCase();
+      if (status && status !== "active") continue;
+      const uniq = text(standard.item_uniq_code).toLowerCase();
+      const qty = num(standard.kanban_qty);
+      if (uniq && qty > 0) map.set(uniq, qty);
+    }
+    return map;
+  }, [kanbanStandards]);
+
+  const applyKanbanStandards = (sourceRows: BulkRow[]) =>
+    sourceRows.map((row) => {
+      const kanbanQty = kanbanQtyByUniq.get(row.uniq.toLowerCase()) ?? 0;
+      return {
+        ...row,
+        kanbanQty,
+        kanbanCount: computeKanbanCount(row.quantity, kanbanQty),
+      };
+    });
 
   const [prlSearch, setPrlSearch] = useState("");
   const { data: prlsResponse, isFetching: prlsFetching } = useListPrlsQuery(
@@ -175,6 +203,13 @@ export default function CreateBulkWorkOrderPage() {
   const [rows, setRows] = useState<BulkRow[]>([]);
   const [loadedPrlId, setLoadedPrlId] = useState<string>("");
   const [note, setNote] = useState("");
+
+  useEffect(() => {
+    if (!apiEnabled || kanbanFetching || kanbanQtyByUniq.size === 0) return;
+    setRows((previous) => applyKanbanStandards(previous));
+    // The map changes only when System Settings data changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiEnabled, kanbanFetching, kanbanQtyByUniq]);
 
   // PRL options grouped by PRL id (one PRL that covers many UNIQ = one option).
   const prlOptions = useMemo(() => {
@@ -259,7 +294,7 @@ export default function CreateBulkWorkOrderPage() {
           },
         ],
       };
-      setRows(buildRowsFromPrlDetail(mock));
+      setRows(applyKanbanStandards(buildRowsFromPrlDetail(mock)));
       setLoadedPrlId(prlId);
       message.success("PRL items loaded (mock)");
       return;
@@ -270,7 +305,7 @@ export default function CreateBulkWorkOrderPage() {
         { id: prlId, budgetType: "raw-material" },
         true,
       ).unwrap();
-      const built = buildRowsFromPrlDetail(result.data);
+      const built = applyKanbanStandards(buildRowsFromPrlDetail(result.data));
       setRows(built);
       setLoadedPrlId(prlId);
       if (built.length === 0) {
@@ -346,7 +381,9 @@ export default function CreateBulkWorkOrderPage() {
       router.push("/work-orders");
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      message.error(getApiErrorMessage(err, "Failed to create bulk work order"));
+      message.error(
+        getApiErrorMessage(err, "Failed to create bulk work order"),
+      );
     }
   };
 
@@ -430,12 +467,14 @@ export default function CreateBulkWorkOrderPage() {
                 <Select
                   className="!rounded-lg"
                   placeholder="Select type"
-                  options={[
-                    { label: "New", value: "New" },
-                    { label: "Assembly", value: "Assembly" },
-                    { label: "Additional", value: "Additional" },
-                    { label: "Rework", value: "Rework" },
-                  ] satisfies Array<{ label: string; value: WorkOrderType }>}
+                  options={
+                    [
+                      { label: "New", value: "New" },
+                      { label: "Assembly", value: "Assembly" },
+                      { label: "Additional", value: "Additional" },
+                      { label: "Rework", value: "Rework" },
+                    ] satisfies Array<{ label: string; value: WorkOrderType }>
+                  }
                 />
               </Form.Item>
 
@@ -474,16 +513,17 @@ export default function CreateBulkWorkOrderPage() {
             </div>
 
             <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-xs text-blue-700">
-              1 UNIQ = 1 Kanban. Kanban count is auto-calculated from quantity
-              (per {DEFAULT_KANBAN_QTY} units).
+              Kanban Qty diambil dari System Settings berdasarkan UNIQ. Kanban =
+              CEILING(Quantity / Kanban Qty).
             </div>
 
             <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
               <div className="px-4 py-3 bg-gray-50 text-xs font-semibold text-gray-600 grid grid-cols-12 gap-3">
                 <div className="col-span-2">UNIQ</div>
-                <div className="col-span-3">Part Name</div>
+                <div className="col-span-2">Part Name</div>
                 <div className="col-span-2">Part Number</div>
                 <div className="col-span-2">Quantity</div>
+                <div className="col-span-1">Kanban Qty</div>
                 <div className="col-span-1">Kanban</div>
                 <div className="col-span-2">Target Date</div>
               </div>
@@ -524,7 +564,7 @@ export default function CreateBulkWorkOrderPage() {
                             </div>
                           ) : null}
                         </div>
-                        <div className="col-span-3 text-sm text-gray-800">
+                        <div className="col-span-2 text-sm text-gray-800">
                           {r.partName}
                         </div>
                         <div className="col-span-2 text-sm text-gray-700">
@@ -543,7 +583,10 @@ export default function CreateBulkWorkOrderPage() {
                           />
                         </div>
                         <div className="col-span-1 text-sm text-gray-800">
-                          {r.kanbanCount}
+                          {r.kanbanQty > 0 ? r.kanbanQty : "-"}
+                        </div>
+                        <div className="col-span-1 text-sm font-semibold text-gray-800">
+                          {r.kanbanCount > 0 ? r.kanbanCount : "-"}
                         </div>
                         <div className="col-span-2">
                           <DatePicker
