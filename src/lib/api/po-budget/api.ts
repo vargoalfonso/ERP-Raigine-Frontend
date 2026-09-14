@@ -197,6 +197,7 @@ export type PoBudgetRow = {
   uom?: string;
   weightKg?: number;
   description?: string;
+  materialSpec?: Record<string, unknown>;
   detailJson?: PoBudgetStoredDetail;
   status: "approved" | "pending";
   approval: "Approved" | "Pending";
@@ -249,7 +250,11 @@ export type PoBudgetGroupedDetail = {
   }>;
 };
 
-const ok = <T,>(data: T, message = "OK", pagination?: ApiResponse<T>["pagination"]): ApiResponse<T> => ({
+const ok = <T>(
+  data: T,
+  message = "OK",
+  pagination?: ApiResponse<T>["pagination"],
+): ApiResponse<T> => ({
   message,
   status: "success",
   data,
@@ -258,18 +263,26 @@ const ok = <T,>(data: T, message = "OK", pagination?: ApiResponse<T>["pagination
 
 type UnknownRecord = Record<string, unknown>;
 
-const isRecord = (value: unknown): value is UnknownRecord => typeof value === "object" && value !== null;
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === "object" && value !== null;
 
-const getString = (record: UnknownRecord, keys: string[]): string | undefined => {
+const getString = (
+  record: UnknownRecord,
+  keys: string[],
+): string | undefined => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "string" && value.trim()) return value.trim();
-    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    if (typeof value === "number" && Number.isFinite(value))
+      return String(value);
   }
   return undefined;
 };
 
-const getNumber = (record: UnknownRecord, keys: string[]): number | undefined => {
+const getNumber = (
+  record: UnknownRecord,
+  keys: string[],
+): number | undefined => {
   for (const key of keys) {
     const value = record[key];
     if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -286,24 +299,34 @@ const normalizeListResponse = (response: unknown): unknown[] => {
   if (!isRecord(response)) return [];
 
   if (Array.isArray(response.data)) return response.data;
-  if (isRecord(response.data) && Array.isArray(response.data.data)) return response.data.data;
-  if (isRecord(response.data) && Array.isArray(response.data.items)) return response.data.items;
+  if (isRecord(response.data) && Array.isArray(response.data.data))
+    return response.data.data;
+  if (isRecord(response.data) && Array.isArray(response.data.items))
+    return response.data.items;
 
   return [];
 };
 
 const normalizeObjectResponse = (response: unknown): unknown => {
   if (!isRecord(response)) return response;
-  if (isRecord(response.data) && isRecord(response.data.data)) return response.data.data;
+  if (isRecord(response.data) && isRecord(response.data.data))
+    return response.data.data;
   if (isRecord(response.data)) return response.data;
   return response;
 };
 
-const parsePagination = (response: unknown): ApiResponse<unknown>["pagination"] | undefined => {
+const parsePagination = (
+  response: unknown,
+): ApiResponse<unknown>["pagination"] | undefined => {
   if (!isRecord(response)) return undefined;
 
-  const direct = isRecord(response.pagination) ? response.pagination : undefined;
-  const nested = isRecord(response.data) && isRecord(response.data.pagination) ? response.data.pagination : undefined;
+  const direct = isRecord(response.pagination)
+    ? response.pagination
+    : undefined;
+  const nested =
+    isRecord(response.data) && isRecord(response.data.pagination)
+      ? response.data.pagination
+      : undefined;
   const source = direct ?? nested;
   if (!source) return undefined;
 
@@ -320,20 +343,31 @@ const toPoBudgetSummary = (payload: unknown): PoBudgetSummary => {
 
   return {
     total_entries: getNumber(record, ["total_entries", "totalEntries"]) ?? 0,
-    total_sales_plan: getNumber(record, ["total_sales_plan", "totalSalesPlan", "sales_plan_total"]) ?? 0,
+    total_sales_plan:
+      getNumber(record, [
+        "total_sales_plan",
+        "totalSalesPlan",
+        "sales_plan_total",
+      ]) ?? 0,
     total_po: getNumber(record, ["total_po", "totalPo"]) ?? 0,
     total_prl: getNumber(record, ["total_prl", "totalPrl"]) ?? 0,
-    delta_apo_prl: getNumber(record, ["delta_apo_prl", "deltaApoPrl", "apo_prl_delta"]) ?? 0,
-    pending_approvals: getNumber(record, ["pending_approvals", "pendingApprovals"]) ?? 0,
+    delta_apo_prl:
+      getNumber(record, ["delta_apo_prl", "deltaApoPrl", "apo_prl_delta"]) ?? 0,
+    pending_approvals:
+      getNumber(record, ["pending_approvals", "pendingApprovals"]) ?? 0,
   };
 };
 
-const toPoBudgetStoredDetail = (value: unknown): PoBudgetStoredDetail | undefined => {
+const toPoBudgetStoredDetail = (
+  value: unknown,
+): PoBudgetStoredDetail | undefined => {
   if (!isRecord(value)) return undefined;
 
   // New format: {prl_id, period, parents: [...]}
   if (Array.isArray(value.parents)) {
-    const parents: PoBudgetStoredDetailParent[] = (value.parents as unknown[]).map((p) => {
+    const parents: PoBudgetStoredDetailParent[] = (
+      value.parents as unknown[]
+    ).map((p) => {
       if (!isRecord(p)) return { children: [] as PoBudgetPrlChild[] };
       return {
         prl_row_id: getString(p, ["prl_row_id"]),
@@ -392,27 +426,52 @@ const toPoBudgetStoredDetail = (value: unknown): PoBudgetStoredDetail | undefine
 const toPoBudgetRow = (item: unknown, index: number): PoBudgetRow => {
   const record = isRecord(item) ? item : {};
   const salesPlan = getNumber(record, ["sales_plan", "salesPlan"]) ?? 0;
-  const purchaseRequest = getNumber(record, ["purchase_request", "purchaseRequest", "pr_qty"]) ?? 0;
+  const purchaseRequest =
+    getNumber(record, ["purchase_request", "purchaseRequest", "pr_qty"]) ?? 0;
   const prl = getNumber(record, ["prl", "prl_amount", "prl_qty"]) ?? 0;
   const po1Pct = getNumber(record, ["po1_pct", "po1_percent"]) ?? 0;
   const po2Pct = getNumber(record, ["po2_pct", "po2_percent"]) ?? 0;
-  const po1 = getNumber(record, ["po1_amount", "po1", "po1_qty"]) ?? Math.round((purchaseRequest * po1Pct) / 100);
-  const po2 = getNumber(record, ["po2_amount", "po2", "po2_qty"]) ?? Math.round((purchaseRequest * po2Pct) / 100);
+  const po1 =
+    getNumber(record, ["po1_amount", "po1", "po1_qty"]) ??
+    Math.round((purchaseRequest * po1Pct) / 100);
+  const po2 =
+    getNumber(record, ["po2_amount", "po2", "po2_qty"]) ??
+    Math.round((purchaseRequest * po2Pct) / 100);
   const totalPo = getNumber(record, ["total_po", "totalPo"]) ?? po1 + po2;
-  const apoPrl = getNumber(record, ["apo_prl_abs", "apo_prl", "apoPrl"]) ?? Math.abs(totalPo - prl);
-  const rawStatus = getString(record, ["status", "approval_status", "apo_prl_state"]);
-  const status: PoBudgetRow["status"] = String(rawStatus ?? "pending").toLowerCase() === "approved" ? "approved" : "pending";
+  const apoPrl =
+    getNumber(record, ["apo_prl_abs", "apo_prl", "apoPrl"]) ??
+    Math.abs(totalPo - prl);
+  const rawStatus = getString(record, [
+    "status",
+    "approval_status",
+    "apo_prl_state",
+  ]);
+  const status: PoBudgetRow["status"] =
+    String(rawStatus ?? "pending").toLowerCase() === "approved"
+      ? "approved"
+      : "pending";
 
   return {
-    key: getString(record, ["id", "po_budget_ref", "key"]) ?? `po-budget-${index + 1}`,
+    key:
+      getString(record, ["id", "po_budget_ref", "key"]) ??
+      `po-budget-${index + 1}`,
     id: getString(record, ["id"]),
     poBudgetRef: getString(record, ["po_budget_ref"]),
-    uniq: getString(record, ["uniq_code", "uniq", "item_uniq_code"]) ?? `ITEM-${index + 1}`,
+    uniq:
+      getString(record, ["uniq_code", "uniq", "item_uniq_code"]) ??
+      `ITEM-${index + 1}`,
     prlRef: getString(record, ["prl_ref"]),
     customer: getString(record, ["customer_name", "customer"]) ?? "-",
     customerId: getString(record, ["customer_id"]),
-    contactPerson: getString(record, ["contact_person", "contactPerson", "pic_name", "pic", "contact_name"]),
-    productModel: getString(record, ["product_model", "productModel", "model"]) ?? "",
+    contactPerson: getString(record, [
+      "contact_person",
+      "contactPerson",
+      "pic_name",
+      "pic",
+      "contact_name",
+    ]),
+    productModel:
+      getString(record, ["product_model", "productModel", "model"]) ?? "",
     partName: getString(record, ["part_name", "partName", "description"]) ?? "",
     partNumber: getString(record, ["part_number", "partNumber"]),
     supplier: getString(record, ["supplier_name", "supplier"]) ?? "-",
@@ -434,6 +493,11 @@ const toPoBudgetRow = (item: unknown, index: number): PoBudgetRow => {
     uom: getString(record, ["uom"]),
     weightKg: getNumber(record, ["weight_kg", "weightKg"]),
     description: getString(record, ["description", "notes"]),
+    materialSpec: isRecord(record.material_spec)
+      ? record.material_spec
+      : isRecord(record.materialSpec)
+        ? record.materialSpec
+        : undefined,
     detailJson: toPoBudgetStoredDetail(
       record.detail_jsonb ?? record.detailJson ?? record.detail_json,
     ),
@@ -446,17 +510,31 @@ export const poBudgetSlice = apiSlice
   .enhanceEndpoints({ addTagTypes: ["PoBudget"] })
   .injectEndpoints({
     endpoints: (builder) => ({
-      getPoBudgetSummary: builder.query<ApiResponse<PoBudgetSummary>, { type: PoBudgetType }>({
+      getPoBudgetSummary: builder.query<
+        ApiResponse<PoBudgetSummary>,
+        { type: PoBudgetType }
+      >({
         query: ({ type }) => ({
           url: `/po-budget/${type}/budget/summary`,
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => ok(toPoBudgetSummary(normalizeObjectResponse(response))),
-        providesTags: (_result, _error, arg) => [{ type: "PoBudget", id: arg.type }],
+        transformResponse: (response: unknown) =>
+          ok(toPoBudgetSummary(normalizeObjectResponse(response))),
+        providesTags: (_result, _error, arg) => [
+          { type: "PoBudget", id: arg.type },
+        ],
       }),
 
-      getPoBudgetList: builder.query<ApiResponse<PoBudgetRow[]>, { type: PoBudgetType; page?: number; limit?: number; budgetSubtype?: "adhoc" | "regular" | string }>({
+      getPoBudgetList: builder.query<
+        ApiResponse<PoBudgetRow[]>,
+        {
+          type: PoBudgetType;
+          page?: number;
+          limit?: number;
+          budgetSubtype?: "adhoc" | "regular" | string;
+        }
+      >({
         query: ({ type, page = 1, limit = 20, budgetSubtype }) => ({
           url: `/po-budget/${type}/budget?limit=${limit}&page=${page}${budgetSubtype ? `&budget_subtype=${encodeURIComponent(budgetSubtype)}` : ""}`,
           method: "GET",
@@ -464,46 +542,73 @@ export const poBudgetSlice = apiSlice
         }),
         transformResponse: (response: unknown) =>
           ok(
-            normalizeListResponse(response).map((item, index) => toPoBudgetRow(item, index)),
+            normalizeListResponse(response).map((item, index) =>
+              toPoBudgetRow(item, index),
+            ),
             "OK",
             parsePagination(response),
           ),
-        providesTags: (_result, _error, arg) => [{ type: "PoBudget", id: arg.type }],
+        providesTags: (_result, _error, arg) => [
+          { type: "PoBudget", id: arg.type },
+        ],
       }),
 
-      addPoBudgetEntry: builder.mutation<ApiResponse<PoBudgetRow>, { type: PoBudgetType; body: PoBudgetEntryRequest }>({
+      addPoBudgetEntry: builder.mutation<
+        ApiResponse<PoBudgetRow>,
+        { type: PoBudgetType; body: PoBudgetEntryRequest }
+      >({
         query: ({ type, body }) => ({
           url: `/po-budget/${type}/budget`,
           method: "POST",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => ok(toPoBudgetRow(normalizeObjectResponse(response), 0)),
-        invalidatesTags: (_result, _error, arg) => [{ type: "PoBudget", id: arg.type }],
+        transformResponse: (response: unknown) =>
+          ok(toPoBudgetRow(normalizeObjectResponse(response), 0)),
+        invalidatesTags: (_result, _error, arg) => [
+          { type: "PoBudget", id: arg.type },
+        ],
       }),
 
-      addPoBudgetBulk: builder.mutation<ApiResponse<PoBudgetBulkResult>, { type: PoBudgetType; body: PoBudgetBulkRequest }>({
+      addPoBudgetBulk: builder.mutation<
+        ApiResponse<PoBudgetBulkResult>,
+        { type: PoBudgetType; body: PoBudgetBulkRequest }
+      >({
         query: ({ type, body }) => ({
           url: `/po-budget/${type}/budget/bulk`,
           method: "POST",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => ok((normalizeObjectResponse(response) ?? {}) as PoBudgetBulkResult),
-        invalidatesTags: (_result, _error, arg) => [{ type: "PoBudget", id: arg.type }],
+        transformResponse: (response: unknown) =>
+          ok((normalizeObjectResponse(response) ?? {}) as PoBudgetBulkResult),
+        invalidatesTags: (_result, _error, arg) => [
+          { type: "PoBudget", id: arg.type },
+        ],
       }),
 
-      getPoBudgetDetail: builder.query<ApiResponse<PoBudgetGroupedDetail>, { type: PoBudgetType; id: string | number }>({
+      getPoBudgetDetail: builder.query<
+        ApiResponse<PoBudgetGroupedDetail>,
+        { type: PoBudgetType; id: string | number }
+      >({
         query: ({ type, id }) => ({
           url: `/po-budget/${type}/budget/${encodeURIComponent(String(id))}/detail?format=grouped`,
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => ok((normalizeObjectResponse(response) ?? {}) as PoBudgetGroupedDetail),
-        providesTags: (_result, _error, arg) => [{ type: "PoBudget", id: `${arg.type}-${arg.id}` }],
+        transformResponse: (response: unknown) =>
+          ok(
+            (normalizeObjectResponse(response) ?? {}) as PoBudgetGroupedDetail,
+          ),
+        providesTags: (_result, _error, arg) => [
+          { type: "PoBudget", id: `${arg.type}-${arg.id}` },
+        ],
       }),
 
-      getPoBudgetPrlDetail: builder.query<ApiResponse<PoBudgetPrlDetail>, { id: string; budgetType: PoBudgetType }>({
+      getPoBudgetPrlDetail: builder.query<
+        ApiResponse<PoBudgetPrlDetail>,
+        { id: string; budgetType: PoBudgetType }
+      >({
         query: ({ id, budgetType }) => ({
           url: `/po-budget/prl/${encodeURIComponent(id)}?budget_type=${encodeURIComponent(budgetType.replaceAll("-", "_"))}`,
           method: "GET",
@@ -511,17 +616,23 @@ export const poBudgetSlice = apiSlice
         }),
         transformResponse: (response: unknown) =>
           ok((normalizeObjectResponse(response) ?? {}) as PoBudgetPrlDetail),
-        providesTags: (_result, _error, arg) => [{ type: "PoBudget", id: `PRL-${arg.id}-${arg.budgetType}` }],
+        providesTags: (_result, _error, arg) => [
+          { type: "PoBudget", id: `PRL-${arg.id}-${arg.budgetType}` },
+        ],
       }),
 
-      updatePoBudgetEntry: builder.mutation<ApiResponse<PoBudgetRow>, { type: PoBudgetType; id: string | number; body: PoBudgetUpdateRequest }>({
+      updatePoBudgetEntry: builder.mutation<
+        ApiResponse<PoBudgetRow>,
+        { type: PoBudgetType; id: string | number; body: PoBudgetUpdateRequest }
+      >({
         query: ({ type, id, body }) => ({
           url: `/po-budget/${type}/budget/${encodeURIComponent(String(id))}`,
           method: "PUT",
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        transformResponse: (response: unknown) => ok(toPoBudgetRow(normalizeObjectResponse(response), 0)),
+        transformResponse: (response: unknown) =>
+          ok(toPoBudgetRow(normalizeObjectResponse(response), 0)),
         invalidatesTags: (_result, _error, arg) => [
           { type: "PoBudget", id: arg.type },
           { type: "PoBudget", id: `${arg.type}-${arg.id}` },

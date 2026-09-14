@@ -60,7 +60,9 @@ export type BomUniqIndex = {
   rawMaterialTypeByUniq: Record<string, string>;
   rmSourceByUniq: Record<string, string>;
   weightKgByUniq: Record<string, number>;
+  qtyPerUniqByUniq: Record<string, number>;
   childUniqsByUniq: Record<string, string[]>;
+  materialSpecByUniq: Record<string, Record<string, unknown>>;
   // uniq-uniq yang dikelompokkan per material code (dari material specification
   // di BOM). Key = material code (lowercase), value = daftar uniq_code.
   uniqsByMaterialCode: Record<string, string[]>;
@@ -78,7 +80,9 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
   const rawMaterialTypeByUniq: Record<string, string> = {};
   const rmSourceByUniq: Record<string, string> = {};
   const weightKgByUniq: Record<string, number> = {};
+  const qtyPerUniqByUniq: Record<string, number> = {};
   const childUniqsByUniq: Record<string, string[]> = {};
+  const materialSpecByUniq: Record<string, Record<string, unknown>> = {};
   const uniqsByMaterialCode: Record<string, string[]> = {};
 
   const pickString = (...values: unknown[]): string => {
@@ -162,6 +166,11 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
       n.weightKg,
       n.weight,
     );
+    const qtyPerUniq = pickNumber(
+      (n as Record<string, unknown>).qty_per_uniq,
+      (n as Record<string, unknown>).qpu,
+      (n as Record<string, unknown>).quantity,
+    );
     if (uniq) {
       uniqSet.add(uniq);
       if (partName && !partNameByUniq[uniq]) partNameByUniq[uniq] = partName;
@@ -182,6 +191,8 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
       if (rmSource && !rmSourceByUniq[uniq]) rmSourceByUniq[uniq] = rmSource;
       if (typeof weightKg === "number" && !(uniq in weightKgByUniq))
         weightKgByUniq[uniq] = weightKg;
+      if (typeof qtyPerUniq === "number" && !(uniq in qtyPerUniqByUniq))
+        qtyPerUniqByUniq[uniq] = qtyPerUniq;
     }
 
     // "Child Uniq" = uniq-uniq yang material code-nya (di material specification)
@@ -199,6 +210,9 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
       specRecord?.material_grade,
       specRecord?.grade,
     );
+    if (uniq && specRecord && !materialSpecByUniq[uniq]) {
+      materialSpecByUniq[uniq] = specRecord;
+    }
     if (uniq && materialCode) {
       const key = materialCode.toLowerCase();
       if (!uniqsByMaterialCode[key]) uniqsByMaterialCode[key] = [];
@@ -267,7 +281,9 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
     rawMaterialTypeByUniq,
     rmSourceByUniq,
     weightKgByUniq,
+    qtyPerUniqByUniq,
     childUniqsByUniq,
+    materialSpecByUniq,
     uniqsByMaterialCode,
   };
 };

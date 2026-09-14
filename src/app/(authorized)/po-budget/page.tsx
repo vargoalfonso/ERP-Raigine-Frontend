@@ -15,6 +15,7 @@ import {
   type PoBudgetType,
   type PoBudgetEntryRequest,
   type PoBudgetGroupedDetail,
+  type PoBudgetPrlChild,
   type PoBudgetPrlDetail,
   type PoBudgetUpdateRequest,
 } from "@/lib/api/po-budget/api";
@@ -103,7 +104,9 @@ function budgetTypeToPrlType(budgetType: BulkBudgetType): PrlType {
   return budgetType === "adhoc" ? "additional" : "reguler";
 }
 
-const PRL_LAZY_PAGE_SIZE = 100;
+// PRL options are loaded in one request; the selector no longer exposes
+// scroll/page loading and therefore always contains the complete result set.
+const PRL_LAZY_PAGE_SIZE = 1000;
 
 type BulkSupplierLine = PoBudgetChildRowSupplier;
 
@@ -141,6 +144,7 @@ type PoBudgetRow = {
   apoPrl: number;
   period: string;
   detailJson?: ApiPoBudgetRow["detailJson"];
+  materialSpec?: Record<string, unknown>;
   status: "approved" | "pending";
   approval: "Approved" | "Pending";
 };
@@ -434,6 +438,36 @@ export default function PoBudgetPage() {
     () => buildBomUniqIndex(bomTreeNodes),
     [bomTreeNodes],
   );
+  const bomChildrenByParentUniq = useMemo<
+    Record<string, PoBudgetPrlChild[]>
+  >(() => {
+    const lookup: Record<string, PoBudgetPrlChild[]> = {};
+    Object.keys(bomIndex.childUniqsByUniq).forEach((parentUniq) => {
+      const childUniqs: string[] = bomIndex.childUniqsByUniq[parentUniq] ?? [];
+      lookup[parentUniq.toLowerCase()] = childUniqs.map((uniqCode) => ({
+        uniq: uniqCode,
+        uniq_code: uniqCode,
+        part_name: bomIndex.partNameByUniq[uniqCode],
+        part_number: bomIndex.partNumberByUniq[uniqCode],
+        model: bomIndex.modelByUniq[uniqCode],
+        qty_per_uniq: bomIndex.qtyPerUniqByUniq[uniqCode] ?? 0,
+        weight_kg: bomIndex.weightKgByUniq[uniqCode],
+        uom: bomIndex.uomByUniq[uniqCode],
+        material_spec: bomIndex.materialSpecByUniq[uniqCode] as
+          PoBudgetPrlChild["material_spec"] | undefined,
+      }));
+    });
+    return lookup;
+  }, [
+    bomIndex.childUniqsByUniq,
+    bomIndex.materialSpecByUniq,
+    bomIndex.modelByUniq,
+    bomIndex.partNameByUniq,
+    bomIndex.partNumberByUniq,
+    bomIndex.qtyPerUniqByUniq,
+    bomIndex.uomByUniq,
+    bomIndex.weightKgByUniq,
+  ]);
 
   const [activeTab, setActiveTab] = useState<BudgetTabId>("raw");
   const [paginationByTab, setPaginationByTab] = useState<TabPaginationState>({
@@ -718,11 +752,6 @@ export default function PoBudgetPage() {
   ]);
 
   const prls = prlCache;
-  const bulkPrlPagination = prlsResponse?.pagination;
-  const canLoadMoreBulkPrls = Boolean(
-    bulkPrlPagination && bulkPrlPage < bulkPrlPagination.total_pages,
-  );
-
   const handleBulkPrlSearch = (value: string) => {
     setBulkPrlSearch(value);
     setBulkPrlPage(1);
@@ -738,13 +767,6 @@ export default function PoBudgetPage() {
     if (shouldFetchPrls) refetchPrls();
   }, [activePrlTypeFilter]);
 
-  const handleBulkPrlPopupScroll = (event: React.UIEvent<HTMLDivElement>) => {
-    const target = event.currentTarget;
-    const nearBottom =
-      target.scrollTop + target.clientHeight >= target.scrollHeight - 24;
-    if (!nearBottom || prlsFetching || !canLoadMoreBulkPrls) return;
-    setBulkPrlPage((prev) => prev + 1);
-  };
   const customerPos = customerPosResponse ?? [];
 
   const paginationMetaByTab = useMemo(
@@ -1311,6 +1333,7 @@ export default function PoBudgetPage() {
       productModel:
         row.productModel || bomIndex.assemblyCodeByUniq[row.uniq] || "-",
       partName: row.partName || bomIndex.partNameByUniq[row.uniq] || "-",
+      materialSpec: row.materialSpec ?? bomIndex.materialSpecByUniq[row.uniq],
       supplier: resolveSupplierName(
         row.supplier as unknown,
         supplierNameByCode,
@@ -1331,6 +1354,7 @@ export default function PoBudgetPage() {
     supplierNameByCode,
     bomIndex.assemblyCodeByUniq,
     bomIndex.partNameByUniq,
+    bomIndex.materialSpecByUniq,
     initialRawRows,
     initialSubconRows,
     initialIndirectRows,
@@ -1554,7 +1578,12 @@ export default function PoBudgetPage() {
           true,
         ).unwrap();
         if (cancelled) return;
-        setSingleChildRows(buildSingleChildRowsFromPrlDetail(result.data));
+        setSingleChildRows(
+          buildSingleChildRowsFromPrlDetail(
+            result.data,
+            bomChildrenByParentUniq,
+          ),
+        );
       } catch (error) {
         if (cancelled) return;
         setSingleChildRows([]);
@@ -1564,7 +1593,12 @@ export default function PoBudgetPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, loadPoBudgetPrlDetail, selectedSinglePrlId]);
+  }, [
+    activeTab,
+    bomChildrenByParentUniq,
+    loadPoBudgetPrlDetail,
+    selectedSinglePrlId,
+  ]);
 
   useEffect(() => {
     if (
@@ -1609,6 +1643,7 @@ export default function PoBudgetPage() {
     };
   }, [
     activeTab,
+    bomChildrenByParentUniq,
     bulkOpen,
     bulkPrlDetailCache,
     bulkPrlIds,
@@ -1850,13 +1885,44 @@ export default function PoBudgetPage() {
         usedChildPrlIds.add(parsed.prlId);
         const detail = bulkPrlDetailCache[parsed.prlId];
         if (!detail) continue;
-        const childRows = buildBulkChildRowsFromPrlDetail(detail).map(
-          (row) => ({
+        const childRows = buildBulkChildRowsFromPrlDetail(
+          detail,
+          bomChildrenByParentUniq,
+        ).map((row) => ({
+          ...row,
+          suppliers: buildChildAutoSuppliers(row),
+        }));
+        const rowsWithParentMaterialFallback: BulkItemRow[] = [];
+        childRows.forEach((row, index) => {
+          rowsWithParentMaterialFallback.push(row);
+          if (!row.isHeader) return;
+
+          const nextRow = childRows[index + 1];
+          if (nextRow && !nextRow.isHeader) return;
+
+          const parentUniqCode = row.parentUniqCode || row.uniq;
+          const parentSupplierItem = findSupplierItemsForProduct(
+            parentUniqCode,
+            row.partNumber,
+          )[0];
+          const fallbackRow: BulkItemRow = {
             ...row,
-            suppliers: buildChildAutoSuppliers(row),
-          }),
-        );
-        rows.push(...childRows);
+            key: `${row.key}-material-spec`,
+            uniq: parentUniqCode,
+            childUniqCode: parentUniqCode,
+            isHeader: false,
+            childCount: undefined,
+            level: 1,
+            materialSpec: bomIndex.materialSpecByUniq[parentUniqCode],
+            existingRawMaterial: String(
+              parentSupplierItem?.description ?? row.existingRawMaterial ?? "-",
+            ),
+            suppliers: [],
+          };
+          fallbackRow.suppliers = buildChildAutoSuppliers(fallbackRow);
+          rowsWithParentMaterialFallback.push(fallbackRow);
+        });
+        rows.push(...rowsWithParentMaterialFallback);
         continue;
       }
 
@@ -3088,6 +3154,44 @@ export default function PoBudgetPage() {
           <span className="text-sm text-gray-700">{v}</span>
         ),
       },
+      ...[
+        {
+          title: "Material Specification",
+          dataIndex: "materialSpec",
+          key: "materialSpec",
+          width: 260,
+          render: (spec: Record<string, unknown> | undefined) => {
+            const entries = Object.entries(spec ?? {}).filter(([, value]) => {
+              if (value == null) return false;
+              if (typeof value === "string") return value.trim() !== "";
+              return true;
+            });
+
+            if (entries.length === 0) {
+              return <span className="text-sm text-gray-400">-</span>;
+            }
+
+            return (
+              <div className="space-y-0.5 text-xs text-gray-600">
+                {entries.map(([key, value]) => {
+                  const displayValue =
+                    typeof value === "object"
+                      ? JSON.stringify(value)
+                      : String(value);
+                  return (
+                    <div key={key} className="flex gap-1">
+                      <span className="font-medium text-gray-700">
+                        {key.replaceAll("_", " ")}:
+                      </span>
+                      <span>{displayValue}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          },
+        },
+      ],
       {
         title: "Supplier",
         dataIndex: "supplier",
@@ -3295,6 +3399,11 @@ export default function PoBudgetPage() {
         width: 160,
         render: (value: string, record) => (
           <div>
+            {record.level && record.level > 0 ? (
+              <span className="mr-1 text-[10px] text-gray-400">
+                L{record.level}
+              </span>
+            ) : null}
             {isChildBudgetType(getApiType(activeTab)) ? (
               <Tag
                 color="blue"
@@ -3325,6 +3434,38 @@ export default function PoBudgetPage() {
         dataIndex: "partNumber",
         key: "partNumber",
         width: 120,
+      },
+      {
+        title: "Material Specification",
+        dataIndex: "materialSpec",
+        key: "materialSpec",
+        width: 260,
+        render: (spec: Record<string, unknown> | undefined) => {
+          const entries = Object.entries(spec ?? {}).filter(([, value]) => {
+            if (value == null) return false;
+            if (typeof value === "string") return value.trim() !== "";
+            return true;
+          });
+          if (entries.length === 0) {
+            return <span className="text-sm text-gray-400">-</span>;
+          }
+          return (
+            <div className="space-y-0.5 text-xs text-gray-600">
+              {entries.map(([key, value]) => (
+                <div key={key} className="flex gap-1">
+                  <span className="font-medium text-gray-700">
+                    {key.replaceAll("_", " ")}:
+                  </span>
+                  <span>
+                    {typeof value === "object"
+                      ? JSON.stringify(value)
+                      : String(value)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          );
+        },
       },
       {
         title: "Weight (kg)",
@@ -3529,7 +3670,6 @@ export default function PoBudgetPage() {
 
           <div className="flex items-center gap-2">
             <Button
-            
               className="!rounded-lg"
               icon={<PlusOutlined />}
               onClick={openAddBudget}
@@ -3537,14 +3677,13 @@ export default function PoBudgetPage() {
               Add Budget Entry
             </Button>
             <Button
-             type="primary"
+              type="primary"
               className="!rounded-lg"
               icon={<FileExcelOutlined />}
               onClick={openBulkPoBudget}
             >
               Bulk PR Budget
             </Button>
-            
           </div>
         </div>
       </div>
@@ -4266,7 +4405,6 @@ export default function PoBudgetPage() {
                         syncBulkItemsFromPrl(values);
                       }}
                       onSearch={handleBulkPrlSearch}
-                      onPopupScroll={handleBulkPrlPopupScroll}
                       options={bulkPrlOptions}
                       className="w-full"
                       placeholder="Search and select one or more PRL UNIQ"
