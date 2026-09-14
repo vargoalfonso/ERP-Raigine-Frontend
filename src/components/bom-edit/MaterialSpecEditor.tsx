@@ -1,6 +1,6 @@
 "use client";
 
-import { Form, Input, InputNumber, Select, Typography } from "antd";
+import { Checkbox, Form, Input, InputNumber, Select, Typography } from "antd";
 import type { FormPath } from "./bom-edit.types";
 
 const { Text } = Typography;
@@ -10,7 +10,10 @@ type MaterialSpecEditorProps = {
   disabled?: boolean;
 };
 
-export default function MaterialSpecEditor({ fieldPath, disabled }: MaterialSpecEditorProps) {
+export default function MaterialSpecEditor({
+  fieldPath,
+  disabled,
+}: MaterialSpecEditorProps) {
   return (
     <div className="space-y-4">
       <Text strong>Material specification</Text>
@@ -19,14 +22,20 @@ export default function MaterialSpecEditor({ fieldPath, disabled }: MaterialSpec
         <Form.Item
           name={[...fieldPath, "material_spec", "material_grade"]}
           label="Material Grade"
-          rules={disabled ? [] : [{ required: true, message: "Material Grade is required" }]}
+          rules={
+            disabled
+              ? []
+              : [{ required: true, message: "Material Grade is required" }]
+          }
         >
           <Input placeholder="e.g., STKM550" disabled={disabled} />
         </Form.Item>
         <Form.Item
           name={[...fieldPath, "material_spec", "form"]}
           label="Form"
-          rules={disabled ? [] : [{ required: true, message: "Form is required" }]}
+          rules={
+            disabled ? [] : [{ required: true, message: "Form is required" }]
+          }
         >
           <Select
             allowClear
@@ -45,14 +54,19 @@ export default function MaterialSpecEditor({ fieldPath, disabled }: MaterialSpec
         <Form.Item
           name={[...fieldPath, "material_spec", "grade"]}
           label="Grade"
-          rules={disabled ? [] : [{ required: true, message: "Grade is required" }]}
+          rules={
+            disabled ? [] : [{ required: true, message: "Grade is required" }]
+          }
         >
           <Input placeholder="e.g., STKM550" disabled={disabled} />
         </Form.Item>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Form.Item name={[...fieldPath, "material_spec", "type_material"]} label="Category">
+        <Form.Item
+          name={[...fieldPath, "material_spec", "type_material"]}
+          label="Category"
+        >
           <Select
             disabled={disabled}
             allowClear
@@ -60,23 +74,44 @@ export default function MaterialSpecEditor({ fieldPath, disabled }: MaterialSpec
             options={[
               { label: "Raw Material", value: "raw" },
               { label: "Indirect Raw Material", value: "indirect" },
-              { label: "Subcon", value: "subcon" },
             ]}
           />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "weight_kg"]} label="Weight (kg)">
+        <Form.Item
+          name={[...fieldPath, "material_spec", "is_subcon"]}
+          valuePropName="checked"
+          className="mt-8"
+        >
+          <Checkbox disabled={disabled}>Subcon</Checkbox>
+        </Form.Item>
+        <Form.Item
+          name={[...fieldPath, "material_spec", "weight_kg"]}
+          label="Weight (kg)"
+        >
           <InputNumber min={0} className="w-full" disabled={disabled} />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "width_mm"]} label="Width (mm)">
+        <Form.Item
+          name={[...fieldPath, "material_spec", "width_mm"]}
+          label="Width (mm)"
+        >
           <InputNumber min={0} className="w-full" disabled={disabled} />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "diameter_mm"]} label="Diameter (mm)">
+        <Form.Item
+          name={[...fieldPath, "material_spec", "diameter_mm"]}
+          label="Diameter (mm)"
+        >
           <InputNumber min={0} className="w-full" disabled={disabled} />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "thickness_mm"]} label="Thickness (mm)">
+        <Form.Item
+          name={[...fieldPath, "material_spec", "thickness_mm"]}
+          label="Thickness (mm)"
+        >
           <InputNumber min={0} className="w-full" disabled={disabled} />
         </Form.Item>
-        <Form.Item name={[...fieldPath, "material_spec", "length_mm"]} label="Length (mm)">
+        <Form.Item
+          name={[...fieldPath, "material_spec", "length_mm"]}
+          label="Length (mm)"
+        >
           <InputNumber min={0} className="w-full" disabled={disabled} />
         </Form.Item>
       </div>

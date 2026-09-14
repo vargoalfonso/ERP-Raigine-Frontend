@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Button,
   Card,
+  Checkbox,
   Collapse,
   Form,
   Input,
@@ -64,6 +65,7 @@ type MaterialSpec = {
   cycle_time_sec?: number;
   setup_time_min?: number;
   customer_cycle?: string;
+  is_subcon?: boolean;
 };
 
 type ChildPart = {
@@ -113,8 +115,7 @@ const ChildUniqSelect = ({
   getOptions,
 }: ChildUniqSelectProps) => {
   const watchedCat = Form.useWatch([...itemPath, "category"], form) as
-    | string
-    | undefined;
+    string | undefined;
   const opts = getOptions(watchedCat);
   return (
     <Select
@@ -758,8 +759,14 @@ export default function Page() {
           >
             <Select.Option value="raw">Raw</Select.Option>
             <Select.Option value="indirect">Indirect</Select.Option>
-            <Select.Option value="subcon">Subcon</Select.Option>
           </Select>
+        </Form.Item>
+        <Form.Item
+          name={[...fieldPath, "material_spec", "is_subcon"]}
+          valuePropName="checked"
+          className="mt-8"
+        >
+          <Checkbox disabled={disabled}>Subcon</Checkbox>
         </Form.Item>
       </div>
     </div>
@@ -1190,7 +1197,7 @@ export default function Page() {
         const raw: Record<string, unknown> = {
           grade: cleanText(s.grade),
           material_grade: cleanText(s.material_code),
-          type_material: cleanText(s.type_material),
+          type_material: s.is_subcon ? "subcon" : cleanText(s.type_material),
           form,
           width_mm: s.width_mm,
           diameter_mm: s.diameter_mm,
@@ -1247,7 +1254,9 @@ export default function Page() {
               qty_per_uniq:
                 typeof c.qpu === "number" && Number.isFinite(c.qpu) ? c.qpu : 1,
             };
-            const rawMatType = c.material_spec?.type_material ?? c.category;
+            const rawMatType = c.material_spec?.is_subcon
+              ? "subcon"
+              : (c.material_spec?.type_material ?? c.category);
             if (rawMatType) childBody.raw_material_type = rawMatType;
             if (childRoutes.length > 0) childBody.process_routes = childRoutes;
             if (childSpec !== undefined) childBody.material_spec = childSpec;
@@ -2139,8 +2148,14 @@ export default function Page() {
                       >
                         <Select.Option value="raw">Raw</Select.Option>
                         <Select.Option value="indirect">Indirect</Select.Option>
-                        <Select.Option value="subcon">Subcon</Select.Option>
                       </Select>
+                    </Form.Item>
+                    <Form.Item
+                      name={["material_spec", "is_subcon"]}
+                      valuePropName="checked"
+                      className="mt-8"
+                    >
+                      <Checkbox disabled={isParentAssembly}>Subcon</Checkbox>
                     </Form.Item>
                   </div>
                 </Card>

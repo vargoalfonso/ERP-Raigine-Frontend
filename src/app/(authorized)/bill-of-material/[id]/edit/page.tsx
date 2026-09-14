@@ -29,7 +29,10 @@ import {
 } from "@/lib/api/bom/api";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetMachinesQuery } from "@/lib/api/machines/api";
-import { useGetProcessesQuery, useGetUomsQuery } from "@/lib/api/system-settings/api";
+import {
+  useGetProcessesQuery,
+  useGetUomsQuery,
+} from "@/lib/api/system-settings/api";
 
 const { Text } = Typography;
 
@@ -52,9 +55,11 @@ const cleanText = (value: unknown): string | undefined => {
   return trimmed ? trimmed : undefined;
 };
 
-const cleanNullableText = (value: unknown): string | null => cleanText(value) ?? null;
+const cleanNullableText = (value: unknown): string | null =>
+  cleanText(value) ?? null;
 
-const asFile = (value: unknown): File | null => (value instanceof File ? value : null);
+const asFile = (value: unknown): File | null =>
+  value instanceof File ? value : null;
 
 const normalizeMaterialForm = (value: unknown): string | undefined => {
   if (typeof value !== "string") return undefined;
@@ -97,9 +102,12 @@ export default function BomEditPage() {
   const params = useParams<{ id?: string | string[] }>();
   const [messageApi, contextHolder] = message.useMessage();
   const [form] = Form.useForm<EditValues>();
-  const [selectedNodeKey, setSelectedNodeKey] = useState<BomSelectedNodePath>("parent");
+  const [selectedNodeKey, setSelectedNodeKey] =
+    useState<BomSelectedNodePath>("parent");
   const [fileList, setFileList] = useState<UploadFile[]>([]);
-  const [childFileLists, setChildFileLists] = useState<Record<string, UploadFile[]>>({});
+  const [childFileLists, setChildFileLists] = useState<
+    Record<string, UploadFile[]>
+  >({});
 
   const apiEnabled = Boolean(process.env.NEXT_PUBLIC_API_URL);
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id;
@@ -123,10 +131,13 @@ export default function BomEditPage() {
   // `preserve: true` is required so useWatch returns the FULL form store
   // (getFieldsValue(true)) including child_parts nodes that aren't currently
   // mounted as Form.Items — otherwise the BOM structure tree renders empty.
-  const valuesSnapshot = Form.useWatch([], { form, preserve: true }) as EditValues | undefined;
+  const valuesSnapshot = Form.useWatch([], { form, preserve: true }) as
+    EditValues | undefined;
   const watchedPartName = Form.useWatch("part_name", form);
   const watchedParentProcessRoutes = Form.useWatch("process_routes", form);
-  const existingParentAssetUrl = resolveAssetUrl(Form.useWatch("asset_url", form));
+  const existingParentAssetUrl = resolveAssetUrl(
+    Form.useWatch("asset_url", form),
+  );
   const rootUniq = String(Form.useWatch("parent_uniq", form) ?? "").trim();
   const currentStatus = String(Form.useWatch("status", form) ?? "").trim();
 
@@ -135,12 +146,15 @@ export default function BomEditPage() {
       return watchedPartName.trim();
     }
     const bomPartName = (bom as any)?.part_name;
-    return typeof bomPartName === "string" && bomPartName.trim() ? bomPartName.trim() : "";
+    return typeof bomPartName === "string" && bomPartName.trim()
+      ? bomPartName.trim()
+      : "";
   }, [bom, watchedPartName]);
 
   const canonicalBomId = useMemo(() => {
     const bomId = (bom as any)?.bom_id;
-    if (typeof bomId === "number" && Number.isFinite(bomId)) return String(bomId);
+    if (typeof bomId === "number" && Number.isFinite(bomId))
+      return String(bomId);
     if (typeof bomId === "string" && bomId.trim()) return bomId.trim();
     return id;
   }, [bom, id]);
@@ -163,18 +177,25 @@ export default function BomEditPage() {
 
   useEffect(() => {
     if (canonicalBomId && id && canonicalBomId !== id) {
-      router.replace(`/bill-of-material/${encodeURIComponent(canonicalBomId)}/edit`);
+      router.replace(
+        `/bill-of-material/${encodeURIComponent(canonicalBomId)}/edit`,
+      );
     }
   }, [canonicalBomId, id, router]);
 
-  const processOptions = useMemo<Array<{ value: string | number; label: string; isAssembly: boolean }>>(() => {
+  const processOptions = useMemo<
+    Array<{ value: string | number; label: string; isAssembly: boolean }>
+  >(() => {
     return (processes ?? [])
       .map((p: any) => {
         const rawId = p?.id ?? p?.ID;
-        const idStr = typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
+        const idStr =
+          typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
         if (!idStr) return null;
         const asNumber = Number(idStr);
-        const value: string | number = Number.isFinite(asNumber) ? asNumber : idStr;
+        const value: string | number = Number.isFinite(asNumber)
+          ? asNumber
+          : idStr;
         const code = String(p?.process_code ?? p?.ProcessCode ?? "").trim();
         const name = String(p?.process_name ?? p?.ProcessName ?? "").trim();
         return {
@@ -184,7 +205,13 @@ export default function BomEditPage() {
         };
       })
       .filter(
-        (item): item is { value: string | number; label: string; isAssembly: boolean } => Boolean(item)
+        (
+          item,
+        ): item is {
+          value: string | number;
+          label: string;
+          isAssembly: boolean;
+        } => Boolean(item),
       );
   }, [processes]);
 
@@ -192,7 +219,8 @@ export default function BomEditPage() {
     const map = new Map<string, number>();
     for (const p of processes ?? []) {
       const rawId = (p as any)?.id ?? (p as any)?.ID;
-      const idStr = typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
+      const idStr =
+        typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
       if (!idStr) continue;
       const seq = Number((p as any)?.sequence ?? (p as any)?.Sequence);
       map.set(idStr, Number.isFinite(seq) ? seq : Number.MAX_SAFE_INTEGER);
@@ -200,22 +228,36 @@ export default function BomEditPage() {
     return map;
   }, [processes]);
 
-  const machineOptions = useMemo<Array<{ value: string | number; label: string }>>(() => {
+  const machineOptions = useMemo<
+    Array<{ value: string | number; label: string }>
+  >(() => {
     return (machines ?? [])
       .map((machine: any) => {
         const rawId = machine?.id ?? machine?.ID;
-        const idStr = typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
+        const idStr =
+          typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
         if (!idStr) return null;
         const asNumber = Number(idStr);
-        const value: string | number = Number.isFinite(asNumber) ? asNumber : idStr;
-        const name = typeof machine?.machine_name === "string" ? machine.machine_name.trim() : "";
-        const number = typeof machine?.machine_number === "string" ? machine.machine_number.trim() : "";
+        const value: string | number = Number.isFinite(asNumber)
+          ? asNumber
+          : idStr;
+        const name =
+          typeof machine?.machine_name === "string"
+            ? machine.machine_name.trim()
+            : "";
+        const number =
+          typeof machine?.machine_number === "string"
+            ? machine.machine_number.trim()
+            : "";
         return {
           value,
-          label: number && name ? `${number} — ${name}` : name || number || idStr,
+          label:
+            number && name ? `${number} — ${name}` : name || number || idStr,
         };
       })
-      .filter((item): item is { value: string | number; label: string } => Boolean(item));
+      .filter((item): item is { value: string | number; label: string } =>
+        Boolean(item),
+      );
   }, [machines]);
 
   const uomIsForbidden = useMemo(() => {
@@ -224,27 +266,41 @@ export default function BomEditPage() {
     return Number(status) === 403;
   }, [uomsError]);
 
-  const seededUomOptions = useMemo<Array<{ value: string; label: string; code: string }>>(
+  const seededUomOptions = useMemo<
+    Array<{ value: string; label: string; code: string }>
+  >(
     () => [
       { value: "PCS", label: "PCS — Pieces", code: "PCS" },
       { value: "KG", label: "KG — Kilogram", code: "KG" },
       { value: "M", label: "M — Meter", code: "M" },
       { value: "MM", label: "MM — Millimeter", code: "MM" },
     ],
-    []
+    [],
   );
 
-  const uomOptions = useMemo<Array<{ value: string; label: string; code: string }>>(() => {
+  const uomOptions = useMemo<
+    Array<{ value: string; label: string; code: string }>
+  >(() => {
     if (!apiEnabled) return seededUomOptions;
     const mapped = (uoms ?? [])
       .map((uom) => {
         const idValue = String((uom as any).id ?? "").trim();
-        const code = String((uom as any).code ?? (uom as any).unit_code ?? "").trim().toUpperCase();
-        const name = String((uom as any).name ?? (uom as any).unit_name ?? "").trim();
+        const code = String((uom as any).code ?? (uom as any).unit_code ?? "")
+          .trim()
+          .toUpperCase();
+        const name = String(
+          (uom as any).name ?? (uom as any).unit_name ?? "",
+        ).trim();
         if (!idValue || !code) return null;
-        return { value: idValue, label: code && name ? `${code} — ${name}` : code, code };
+        return {
+          value: idValue,
+          label: code && name ? `${code} — ${name}` : code,
+          code,
+        };
       })
-      .filter((item): item is { value: string; label: string; code: string } => Boolean(item));
+      .filter((item): item is { value: string; label: string; code: string } =>
+        Boolean(item),
+      );
     if (mapped.length > 0) return mapped;
     return uomIsForbidden ? [] : seededUomOptions;
   }, [apiEnabled, seededUomOptions, uomIsForbidden, uoms]);
@@ -269,15 +325,21 @@ export default function BomEditPage() {
     const key = String(value ?? "").trim();
     if (!key) return false;
     return processOptions.some(
-      (option) => String(option.value).trim() === key && option.isAssembly === true
+      (option) =>
+        String(option.value).trim() === key && option.isAssembly === true,
     );
   };
 
   const isParentAssembly = useMemo(() => {
-    if (!Array.isArray(watchedParentProcessRoutes) || watchedParentProcessRoutes.length === 0) {
+    if (
+      !Array.isArray(watchedParentProcessRoutes) ||
+      watchedParentProcessRoutes.length === 0
+    ) {
       return false;
     }
-    return watchedParentProcessRoutes.some((route) => isAssemblyProcessValue(route?.process_id));
+    return watchedParentProcessRoutes.some((route) =>
+      isAssemblyProcessValue(route?.process_id),
+    );
   }, [watchedParentProcessRoutes, processOptions]);
 
   useEffect(() => {
@@ -286,11 +348,22 @@ export default function BomEditPage() {
       route_id: route?.route_id ?? route?.id ?? undefined,
       op_seq: typeof route?.op_seq === "number" ? route.op_seq : undefined,
       process_id: route?.process_id ?? undefined,
-      machine_id: route?.machine_id != null ? Number(route.machine_id) || null : null,
-      cycle_time_sec: typeof route?.cycle_time_sec === "number" ? route.cycle_time_sec : undefined,
-      setup_time_min: typeof route?.setup_time_min === "number" ? route.setup_time_min : undefined,
-      machine_stroke: typeof route?.machine_stroke === "string" ? route.machine_stroke : undefined,
-      tooling_ref: typeof route?.tooling_ref === "string" ? route.tooling_ref : undefined,
+      machine_id:
+        route?.machine_id != null ? Number(route.machine_id) || null : null,
+      cycle_time_sec:
+        typeof route?.cycle_time_sec === "number"
+          ? route.cycle_time_sec
+          : undefined,
+      setup_time_min:
+        typeof route?.setup_time_min === "number"
+          ? route.setup_time_min
+          : undefined,
+      machine_stroke:
+        typeof route?.machine_stroke === "string"
+          ? route.machine_stroke
+          : undefined,
+      tooling_ref:
+        typeof route?.tooling_ref === "string" ? route.tooling_ref : undefined,
       tooling_type: Array.isArray(route?.toolings)
         ? typeof route.toolings[0]?.tooling_type === "string"
           ? route.toolings[0].tooling_type
@@ -298,43 +371,61 @@ export default function BomEditPage() {
         : undefined,
     });
 
-    const mapMaterialSpecFromApi = (spec: any): MaterialSpecForm | undefined => {
+    const mapMaterialSpecFromApi = (
+      spec: any,
+    ): MaterialSpecForm | undefined => {
       if (!spec || typeof spec !== "object") return undefined;
+      const typeMaterial =
+        typeof spec.type_material === "string"
+          ? spec.type_material
+          : typeof spec.raw_material_type === "string"
+            ? spec.raw_material_type
+            : undefined;
       return {
         material_grade:
           typeof spec.material_grade === "string"
             ? spec.material_grade
             : typeof spec.material_code === "string"
               ? spec.material_code
-            : typeof spec.grade === "string"
-              ? spec.grade
-              : undefined,
+              : typeof spec.grade === "string"
+                ? spec.grade
+                : undefined,
         form: typeof spec.form === "string" ? spec.form : undefined,
-        type_material:
-          typeof spec.type_material === "string"
-            ? spec.type_material
-            : typeof spec.raw_material_type === "string"
-              ? spec.raw_material_type
-              : undefined,
+        type_material: typeMaterial,
+        is_subcon: typeMaterial?.trim().toLowerCase() === "subcon",
         grade:
           typeof spec.grade === "string"
             ? spec.grade
             : typeof spec.material_grade === "string"
               ? spec.material_grade
               : undefined,
-        weight_kg: typeof spec.weight_kg === "number" ? spec.weight_kg : undefined,
+        weight_kg:
+          typeof spec.weight_kg === "number" ? spec.weight_kg : undefined,
         width_mm: typeof spec.width_mm === "number" ? spec.width_mm : undefined,
-        diameter_mm: typeof spec.diameter_mm === "number" ? spec.diameter_mm : undefined,
-        thickness_mm: typeof spec.thickness_mm === "number" ? spec.thickness_mm : undefined,
-        length_mm: typeof spec.length_mm === "number" ? spec.length_mm : undefined,
-        cycle_time_sec: typeof spec.cycle_time_sec === "number" ? spec.cycle_time_sec : undefined,
-        setup_time_min: typeof spec.setup_time_min === "number" ? spec.setup_time_min : undefined,
-        customer_cycle: typeof spec.customer_cycle === "string" ? spec.customer_cycle : undefined,
+        diameter_mm:
+          typeof spec.diameter_mm === "number" ? spec.diameter_mm : undefined,
+        thickness_mm:
+          typeof spec.thickness_mm === "number" ? spec.thickness_mm : undefined,
+        length_mm:
+          typeof spec.length_mm === "number" ? spec.length_mm : undefined,
+        cycle_time_sec:
+          typeof spec.cycle_time_sec === "number"
+            ? spec.cycle_time_sec
+            : undefined,
+        setup_time_min:
+          typeof spec.setup_time_min === "number"
+            ? spec.setup_time_min
+            : undefined,
+        customer_cycle:
+          typeof spec.customer_cycle === "string"
+            ? spec.customer_cycle
+            : undefined,
       };
     };
 
     const mapUomToFormValue = (rawUom: unknown) => {
-      const code = typeof rawUom === "string" ? rawUom.trim().toUpperCase() : "";
+      const code =
+        typeof rawUom === "string" ? rawUom.trim().toUpperCase() : "";
       if (!code) return undefined;
       return uomValueByCode.get(code) ?? code;
     };
@@ -342,9 +433,12 @@ export default function BomEditPage() {
     const mapChildFromApi = (child: any): ChildPartForm => ({
       child_id: child?.child_id ?? null,
       line_id: child?.line_id ?? null,
-      uniq_code: typeof child?.uniq_code === "string" ? child.uniq_code : undefined,
+      uniq_code:
+        typeof child?.uniq_code === "string" ? child.uniq_code : undefined,
       parent_uniq_code:
-        typeof child?.parent_uniq_code === "string" ? child.parent_uniq_code : undefined,
+        typeof child?.parent_uniq_code === "string"
+          ? child.parent_uniq_code
+          : undefined,
       level: typeof child?.level === "number" ? child.level : undefined,
       qty_per_uniq:
         typeof child?.qty_per_uniq === "number"
@@ -352,30 +446,58 @@ export default function BomEditPage() {
           : typeof child?.qpu === "number"
             ? child.qpu
             : 1,
-      scrap_factor: typeof child?.scrap_factor === "number" ? child.scrap_factor : 0,
+      scrap_factor:
+        typeof child?.scrap_factor === "number" ? child.scrap_factor : 0,
       is_phantom: Boolean(child?.is_phantom),
-      part_name: typeof child?.part_name === "string" ? child.part_name : undefined,
-      part_number: typeof child?.part_number === "string" ? child.part_number : undefined,
+      part_name:
+        typeof child?.part_name === "string" ? child.part_name : undefined,
+      part_number:
+        typeof child?.part_number === "string" ? child.part_number : undefined,
       model: typeof child?.model === "string" ? child.model : undefined,
       uom: mapUomToFormValue(child?.uom),
       asset_id: child?.asset?.id ?? null,
       asset_url: typeof child?.asset?.url === "string" ? child.asset.url : null,
       material_spec: mapMaterialSpecFromApi(child?.material_spec),
-      process_routes: Array.isArray(child?.process_routes) ? child.process_routes.map(mapRouteFromApi) : [],
-      children: Array.isArray(child?.children) ? child.children.map(mapChildFromApi) : [],
+      process_routes: Array.isArray(child?.process_routes)
+        ? child.process_routes.map(mapRouteFromApi)
+        : [],
+      children: Array.isArray(child?.children)
+        ? child.children.map(mapChildFromApi)
+        : [],
     });
 
     form.setFieldsValue({
       change_note: "",
-      parent_uniq: typeof (bom as any)?.uniq_code === "string" ? (bom as any).uniq_code : undefined,
-      part_name: typeof (bom as any)?.part_name === "string" ? (bom as any).part_name : undefined,
-      part_number: typeof (bom as any)?.part_number === "string" ? (bom as any).part_number : undefined,
-      model: typeof (bom as any)?.model === "string" ? (bom as any).model : undefined,
+      parent_uniq:
+        typeof (bom as any)?.uniq_code === "string"
+          ? (bom as any).uniq_code
+          : undefined,
+      part_name:
+        typeof (bom as any)?.part_name === "string"
+          ? (bom as any).part_name
+          : undefined,
+      part_number:
+        typeof (bom as any)?.part_number === "string"
+          ? (bom as any).part_number
+          : undefined,
+      model:
+        typeof (bom as any)?.model === "string"
+          ? (bom as any).model
+          : undefined,
       uom: mapUomToFormValue((bom as any)?.uom),
-      status: typeof (bom as any)?.status === "string" ? (bom as any).status : "Draft",
-      description: typeof (bom as any)?.description === "string" ? (bom as any).description : undefined,
+      status:
+        typeof (bom as any)?.status === "string"
+          ? (bom as any).status
+          : "Draft",
+      description:
+        typeof (bom as any)?.description === "string"
+          ? (bom as any).description
+          : undefined,
       asset_id: (bom as any)?.asset?.id ?? null,
-      asset_url: typeof (bom as any)?.asset?.url === "string" ? (bom as any).asset.url : null,
+      asset_url:
+        typeof (bom as any)?.asset?.url === "string"
+          ? (bom as any).asset.url
+          : null,
       material_spec: mapMaterialSpecFromApi((bom as any)?.material_spec),
       process_routes: Array.isArray((bom as any)?.process_routes)
         ? (bom as any).process_routes.map(mapRouteFromApi)
@@ -394,11 +516,15 @@ export default function BomEditPage() {
   }, [valuesSnapshot]);
 
   const selectedChildPath = useMemo(() => {
-    return selectedNodeKey === "parent" ? undefined : keyToChildPath(selectedNodeKey);
+    return selectedNodeKey === "parent"
+      ? undefined
+      : keyToChildPath(selectedNodeKey);
   }, [selectedNodeKey]);
 
   const selectedChild = useMemo(() => {
-    return selectedNodeKey === "parent" ? undefined : getChildAtPath(valuesSnapshot ?? {}, selectedNodeKey);
+    return selectedNodeKey === "parent"
+      ? undefined
+      : getChildAtPath(valuesSnapshot ?? {}, selectedNodeKey);
   }, [selectedNodeKey, valuesSnapshot]);
 
   const selectedChildFileKey = useMemo(() => {
@@ -408,7 +534,9 @@ export default function BomEditPage() {
   const addLevel1Child = () => {
     const current = form.getFieldValue(["child_parts"]) ?? [];
     if (current.length >= MAX_CHILDREN_PER_PARENT) {
-      messageApi.warning(`Maximum ${MAX_CHILDREN_PER_PARENT} child parts allowed for each parent.`);
+      messageApi.warning(
+        `Maximum ${MAX_CHILDREN_PER_PARENT} child parts allowed for each parent.`,
+      );
       return;
     }
     form.setFieldValue(["child_parts"], [...current, createDefaultChild()]);
@@ -416,10 +544,13 @@ export default function BomEditPage() {
 
   const addChildAtKey = (key: BomSelectedNodePath) => {
     const dynamicForm = form as any;
-    const path = key === "parent" ? ["child_parts"] : [...keyToChildPath(key), "children"];
+    const path =
+      key === "parent" ? ["child_parts"] : [...keyToChildPath(key), "children"];
     const current = dynamicForm.getFieldValue(path) ?? [];
     if (current.length >= MAX_CHILDREN_PER_PARENT) {
-      messageApi.warning(`Maximum ${MAX_CHILDREN_PER_PARENT} child parts allowed for each parent.`);
+      messageApi.warning(
+        `Maximum ${MAX_CHILDREN_PER_PARENT} child parts allowed for each parent.`,
+      );
       return;
     }
     dynamicForm.setFieldValue(path, [...current, createDefaultChild()]);
@@ -435,7 +566,7 @@ export default function BomEditPage() {
     const current = dynamicForm.getFieldValue(listPath) ?? [];
     dynamicForm.setFieldValue(
       listPath,
-      current.filter((_: unknown, idx: number) => idx !== index)
+      current.filter((_: unknown, idx: number) => idx !== index),
     );
     setSelectedNodeKey("parent");
   };
@@ -443,14 +574,18 @@ export default function BomEditPage() {
   const onSave = async () => {
     try {
       if (!isLatest) {
-        messageApi.error("Tidak bisa edit historical version. Pilih latest version dulu, lalu edit.");
+        messageApi.error(
+          "Tidak bisa edit historical version. Pilih latest version dulu, lalu edit.",
+        );
         return;
       }
 
       const values = form.getFieldsValue(true) as EditValues;
       const assemblyMode =
         Array.isArray(values.process_routes) &&
-        values.process_routes.some((route) => isAssemblyProcessValue(route?.process_id));
+        values.process_routes.some((route) =>
+          isAssemblyProcessValue(route?.process_id),
+        );
 
       // Parent required fields are validated from the full form store — not via
       // form.validateFields — because only one node editor is mounted at a time,
@@ -463,7 +598,9 @@ export default function BomEditPage() {
       if (!cleanText(values.status)) missingParent.push("Status");
       if (missingParent.length > 0) {
         setSelectedNodeKey("parent");
-        messageApi.error(`Lengkapi field wajib parent: ${missingParent.join(", ")}.`);
+        messageApi.error(
+          `Lengkapi field wajib parent: ${missingParent.join(", ")}.`,
+        );
         return;
       }
 
@@ -503,34 +640,48 @@ export default function BomEditPage() {
         const payload: Record<string, unknown> = {
           grade: resolvedGrade,
           material_grade: resolvedMaterialGrade,
-          type_material: cleanText(spec?.type_material) ?? null,
+          type_material: spec?.is_subcon
+            ? "subcon"
+            : (cleanText(spec?.type_material) ?? null),
           form: normalizedForm ?? null,
           width_mm:
-            typeof spec?.width_mm === "number" && Number.isFinite(spec.width_mm) ? spec.width_mm : null,
+            typeof spec?.width_mm === "number" && Number.isFinite(spec.width_mm)
+              ? spec.width_mm
+              : null,
           diameter_mm:
-            typeof spec?.diameter_mm === "number" && Number.isFinite(spec.diameter_mm)
+            typeof spec?.diameter_mm === "number" &&
+            Number.isFinite(spec.diameter_mm)
               ? spec.diameter_mm
               : null,
           thickness_mm:
-            typeof spec?.thickness_mm === "number" && Number.isFinite(spec.thickness_mm)
+            typeof spec?.thickness_mm === "number" &&
+            Number.isFinite(spec.thickness_mm)
               ? spec.thickness_mm
               : null,
           length_mm:
-            typeof spec?.length_mm === "number" && Number.isFinite(spec.length_mm) ? spec.length_mm : null,
+            typeof spec?.length_mm === "number" &&
+            Number.isFinite(spec.length_mm)
+              ? spec.length_mm
+              : null,
           weight_kg:
-            typeof spec?.weight_kg === "number" && Number.isFinite(spec.weight_kg) ? spec.weight_kg : null,
+            typeof spec?.weight_kg === "number" &&
+            Number.isFinite(spec.weight_kg)
+              ? spec.weight_kg
+              : null,
           cycle_time_sec:
-            typeof spec?.cycle_time_sec === "number" && Number.isFinite(spec.cycle_time_sec)
+            typeof spec?.cycle_time_sec === "number" &&
+            Number.isFinite(spec.cycle_time_sec)
               ? spec.cycle_time_sec
               : null,
           setup_time_min:
-            typeof spec?.setup_time_min === "number" && Number.isFinite(spec.setup_time_min)
+            typeof spec?.setup_time_min === "number" &&
+            Number.isFinite(spec.setup_time_min)
               ? spec.setup_time_min
               : null,
           customer_cycle: cleanText(spec?.customer_cycle) ?? null,
         };
         const hasMeaningfulValue = Object.values(payload).some(
-          (value) => value !== null && value !== undefined && value !== ""
+          (value) => value !== null && value !== undefined && value !== "",
         );
         return hasMeaningfulValue ? payload : null;
       };
@@ -541,9 +692,11 @@ export default function BomEditPage() {
             const processId = toNumberId(route.process_id);
             if (processId === undefined) return null;
             const body: Record<string, unknown> = {
-              route_id: toNumberId(route.route_id) ?? route.route_id ?? undefined,
+              route_id:
+                toNumberId(route.route_id) ?? route.route_id ?? undefined,
               op_seq:
-                typeof route.op_seq === "number" && Number.isFinite(route.op_seq)
+                typeof route.op_seq === "number" &&
+                Number.isFinite(route.op_seq)
                   ? route.op_seq
                   : (index + 1) * 10,
               process_id: processId,
@@ -552,14 +705,22 @@ export default function BomEditPage() {
                   ? route.machine_id
                   : null,
             };
-            if (typeof route.cycle_time_sec === "number" && Number.isFinite(route.cycle_time_sec)) {
+            if (
+              typeof route.cycle_time_sec === "number" &&
+              Number.isFinite(route.cycle_time_sec)
+            ) {
               body.cycle_time_sec = route.cycle_time_sec;
             }
-            if (typeof route.setup_time_min === "number" && Number.isFinite(route.setup_time_min)) {
+            if (
+              typeof route.setup_time_min === "number" &&
+              Number.isFinite(route.setup_time_min)
+            ) {
               body.setup_time_min = route.setup_time_min;
             }
-            if (cleanText(route.machine_stroke)) body.machine_stroke = cleanText(route.machine_stroke);
-            if (cleanText(route.tooling_ref)) body.tooling_ref = cleanText(route.tooling_ref);
+            if (cleanText(route.machine_stroke))
+              body.machine_stroke = cleanText(route.machine_stroke);
+            if (cleanText(route.tooling_ref))
+              body.tooling_ref = cleanText(route.tooling_ref);
             body.toolings = cleanText(route.tooling_type)
               ? [{ tooling_type: cleanText(route.tooling_type) }]
               : [];
@@ -571,7 +732,9 @@ export default function BomEditPage() {
           .map((body, index) => ({
             body,
             index,
-            seq: processSequenceByValue.get(String(body.process_id)) ?? Number.MAX_SAFE_INTEGER,
+            seq:
+              processSequenceByValue.get(String(body.process_id)) ??
+              Number.MAX_SAFE_INTEGER,
           }))
           .sort((a, b) => a.seq - b.seq || a.index - b.index)
           .map((entry, i) => ({ ...entry.body, op_seq: (i + 1) * 10 }));
@@ -583,7 +746,7 @@ export default function BomEditPage() {
         children: ChildPartForm[] | undefined,
         level: number,
         parentUniq: string,
-        basePath: Array<string | number>
+        basePath: Array<string | number>,
       ): any[] => {
         const list = Array.isArray(children) ? children : [];
         return list.map((child, index) => {
@@ -601,11 +764,17 @@ export default function BomEditPage() {
           }
 
           const childFileKey = toChildFileKey(currentPath);
-          const childFile = asFile(childFileLists?.[childFileKey]?.[0]?.originFileObj);
+          const childFile = asFile(
+            childFileLists?.[childFileKey]?.[0]?.originFileObj,
+          );
           const childUploadKey = childFile
-            ? childFile.name.replace(/\.[^.]+$/, "").replace(/\s+/g, "_").toLowerCase()
+            ? childFile.name
+                .replace(/\.[^.]+$/, "")
+                .replace(/\s+/g, "_")
+                .toLowerCase()
             : null;
-          if (childFile && childUploadKey) files.push({ key: `upload_${childUploadKey}`, file: childFile });
+          if (childFile && childUploadKey)
+            files.push({ key: `upload_${childUploadKey}`, file: childFile });
 
           return {
             child_id: child.child_id ?? null,
@@ -614,11 +783,13 @@ export default function BomEditPage() {
             parent_uniq_code: parentUniq,
             level,
             qty_per_uniq:
-              typeof child.qty_per_uniq === "number" && Number.isFinite(child.qty_per_uniq)
+              typeof child.qty_per_uniq === "number" &&
+              Number.isFinite(child.qty_per_uniq)
                 ? child.qty_per_uniq
                 : 1,
             scrap_factor:
-              typeof child.scrap_factor === "number" && Number.isFinite(child.scrap_factor)
+              typeof child.scrap_factor === "number" &&
+              Number.isFinite(child.scrap_factor)
                 ? child.scrap_factor
                 : 0,
             is_phantom: child.is_phantom === true,
@@ -626,13 +797,19 @@ export default function BomEditPage() {
             part_number: partNumber,
             model: cleanNullableText(child.model),
             uom: childUom,
-            asset_id: childFile ? null : child.asset_id ?? null,
+            asset_id: childFile ? null : (child.asset_id ?? null),
             upload_key: childUploadKey ?? null,
             material_spec: mapMaterialSpec(child.material_spec),
             process_routes: mapProcessRoutes(child.process_routes),
-            children: mapChildParts(child.children, level + 1, uniqCode, [...currentPath, "children"]),
-            raw_material_type:
-              cleanText(child.material_spec?.type_material) ?? cleanText(child.category) ?? undefined,
+            children: mapChildParts(child.children, level + 1, uniqCode, [
+              ...currentPath,
+              "children",
+            ]),
+            raw_material_type: child.material_spec?.is_subcon
+              ? "subcon"
+              : (cleanText(child.material_spec?.type_material) ??
+                cleanText(child.category) ??
+                undefined),
           };
         });
       };
@@ -660,7 +837,12 @@ export default function BomEditPage() {
           ? { cycle_time_sec: parentCycleTimeSec }
           : null
         : mapMaterialSpec(values.material_spec);
-      const childrenPayload = mapChildParts(values.child_parts, 1, rootUniqValue, ["child_parts"]);
+      const childrenPayload = mapChildParts(
+        values.child_parts,
+        1,
+        rootUniqValue,
+        ["child_parts"],
+      );
 
       if (assemblyMode && childrenPayload.length < 2) {
         messageApi.error("Assembly parent must have at least 2 child parts.");
@@ -682,7 +864,7 @@ export default function BomEditPage() {
           uom: parentUom,
           status: cleanText(values.status) ?? "Draft",
           description: cleanNullableText(values.description),
-          asset_id: parentFile ? null : values.asset_id ?? null,
+          asset_id: parentFile ? null : (values.asset_id ?? null),
           upload_key: parentFile ? "parent" : null,
           material_spec: parentMaterialSpec,
           process_routes: parentRoutes,
@@ -705,8 +887,10 @@ export default function BomEditPage() {
       const pickMessage = (value: unknown): string => {
         if (!value || typeof value !== "object") return "";
         const obj = value as Record<string, unknown>;
-        if (typeof obj.message === "string" && obj.message.trim()) return obj.message.trim();
-        if (typeof obj.error === "string" && obj.error.trim()) return obj.error.trim();
+        if (typeof obj.message === "string" && obj.message.trim())
+          return obj.message.trim();
+        if (typeof obj.error === "string" && obj.error.trim())
+          return obj.error.trim();
         const nested = pickMessage(obj.data);
         if (nested) return nested;
         return "";
@@ -732,7 +916,9 @@ export default function BomEditPage() {
         isLatest={isLatest}
         isSaving={replaceState.isLoading}
         disabled={!isLatest}
-        onBack={() => router.push(`/bill-of-material/${encodeURIComponent(resolvedBomId)}`)}
+        onBack={() =>
+          router.push(`/bill-of-material/${encodeURIComponent(resolvedBomId)}`)
+        }
         onSave={onSave}
       />
 
@@ -767,7 +953,12 @@ export default function BomEditPage() {
               />
             ) : null}
 
-            <Form layout="vertical" form={form} disabled={!isLatest} requiredMark={false}>
+            <Form
+              layout="vertical"
+              form={form}
+              disabled={!isLatest}
+              requiredMark={false}
+            >
               <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
                 <BomStructurePanel
                   activeKey={selectedNodeKey}
@@ -782,7 +973,7 @@ export default function BomEditPage() {
                   onRemove={removeNodeAtKey}
                 />
 
-               <div className="min-w-0 xl:sticky xl:top-24 xl:h-[calc(100vh-8rem)] xl:overflow-y-auto"> 
+                <div className="min-w-0 xl:sticky xl:top-24 xl:h-[calc(100vh-8rem)] xl:overflow-y-auto">
                   <BomDetailPanel
                     selectedNodeKey={selectedNodeKey}
                     selectedChildPath={selectedChildPath}
@@ -799,16 +990,27 @@ export default function BomEditPage() {
                     existingParentAssetUrl={existingParentAssetUrl}
                     parentFileList={fileList}
                     setParentFileList={setFileList}
-                    selectedChildAssetUrl={selectedChild?.asset_url ? resolveAssetUrl(selectedChild.asset_url) : ""}
-                    selectedChildFileList={childFileLists[selectedChildFileKey] ?? []}
+                    selectedChildAssetUrl={
+                      selectedChild?.asset_url
+                        ? resolveAssetUrl(selectedChild.asset_url)
+                        : ""
+                    }
+                    selectedChildFileList={
+                      childFileLists[selectedChildFileKey] ?? []
+                    }
                     setSelectedChildFileList={(files) =>
-                      setChildFileLists((prev) => ({ ...prev, [selectedChildFileKey]: files }))
+                      setChildFileLists((prev) => ({
+                        ...prev,
+                        [selectedChildFileKey]: files,
+                      }))
                     }
                     processOptions={processOptions}
                     machineOptions={machineOptions}
                     isProcessesLoading={isProcessesLoading}
                     isMachinesLoading={isMachinesLoading}
-                    isUomsLoading={apiEnabled && isUomsLoading && !uomIsForbidden}
+                    isUomsLoading={
+                      apiEnabled && isUomsLoading && !uomIsForbidden
+                    }
                     uomOptions={uomOptions}
                   />
                 </div>
