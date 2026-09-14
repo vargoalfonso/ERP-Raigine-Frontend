@@ -127,6 +127,7 @@ export type CreateWorkOrderRequest = {
   // [wo-estimated-time] estimasi waktu produksi (menit) + komponen hitungannya
   estimated_time_minutes?: number | null;
   cycle_time_min?: number | null;
+  setup_time_min?: number | null;
   machine_capacity?: number | null;
 };
 
@@ -223,6 +224,7 @@ export type WorkOrderRecord = {
   // [wo-estimated-time]
   estimated_time_minutes?: number;
   cycle_time_min?: number;
+  setup_time_min?: number;
   machine_capacity?: number;
   id: string;
   wo_number: string;
@@ -407,6 +409,7 @@ export const toWorkOrderRecord = (raw: unknown): WorkOrderRecord => {
       "estimatedTimeMinutes",
     ]),
     cycle_time_min: getNumber(record, ["cycle_time_min", "cycleTimeMin"]),
+    setup_time_min: getNumber(record, ["setup_time_min", "setupTimeMin"]),
     machine_capacity: getNumber(record, [
       "machine_capacity",
       "machineCapacity",
