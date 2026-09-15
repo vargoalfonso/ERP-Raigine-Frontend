@@ -19,6 +19,7 @@ export type MaterialSpecForm = {
   form?: string;
   grade?: string;
   type_material?: string;
+  is_subcon?: boolean;
   weight_kg?: number;
   width_mm?: number;
   diameter_mm?: number;
