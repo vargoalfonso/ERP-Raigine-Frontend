@@ -63,6 +63,11 @@ export type BomUniqIndex = {
   qtyPerUniqByUniq: Record<string, number>;
   childUniqsByUniq: Record<string, string[]>;
   materialSpecByUniq: Record<string, Record<string, unknown>>;
+  materialCodeByUniq: Record<string, string>;
+  gradeByUniq: Record<string, string>;
+  sizeByUniq: Record<string, string>;
+  cycleTimeByUniq: Record<string, number>;
+  customerCycleByUniq: Record<string, string>;
   // uniq-uniq yang dikelompokkan per material code (dari material specification
   // di BOM). Key = material code (lowercase), value = daftar uniq_code.
   uniqsByMaterialCode: Record<string, string[]>;
@@ -83,6 +88,11 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
   const qtyPerUniqByUniq: Record<string, number> = {};
   const childUniqsByUniq: Record<string, string[]> = {};
   const materialSpecByUniq: Record<string, Record<string, unknown>> = {};
+  const materialCodeByUniq: Record<string, string> = {};
+  const gradeByUniq: Record<string, string> = {};
+  const sizeByUniq: Record<string, string> = {};
+  const cycleTimeByUniq: Record<string, number> = {};
+  const customerCycleByUniq: Record<string, string> = {};
   const uniqsByMaterialCode: Record<string, string[]> = {};
 
   const pickString = (...values: unknown[]): string => {
@@ -171,6 +181,72 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
       (n as Record<string, unknown>).qpu,
       (n as Record<string, unknown>).quantity,
     );
+    // "Child Uniq" = uniq-uniq yang material code-nya (di material specification)
+    // sama dengan material code baris ini. Ambil langsung dari BOM: cek
+    // material_code / material_grade di material spec tiap node, lalu
+    // kelompokkan uniq_code-nya per material code.
+    const specRecord = isRecord(n.material_specifications)
+      ? (n.material_specifications as Record<string, unknown>)
+      : isRecord(n.material_spec)
+        ? (n.material_spec as Record<string, unknown>)
+        : undefined;
+    const materialCode = pickString(
+      specRecord?.material_code,
+      n.material_code,
+      specRecord?.material_grade,
+      (n as Record<string, unknown>).materialCode,
+    );
+    const grade = pickString(
+      specRecord?.grade,
+      (n as Record<string, unknown>).grade,
+      n.grade_size,
+      n.gradeSize,
+    );
+    const diameter = pickString(
+      specRecord?.diameter_mm,
+      (n as Record<string, unknown>).diameter_mm,
+    );
+    const thickness = pickString(
+      specRecord?.thickness_mm,
+      (n as Record<string, unknown>).thickness_mm,
+    );
+    const width = pickString(
+      specRecord?.width_mm,
+      (n as Record<string, unknown>).width_mm,
+    );
+    const length = pickString(
+      specRecord?.length_mm,
+      (n as Record<string, unknown>).length_mm,
+    );
+    const dimParts = [
+      diameter ? `Ø${diameter}` : "",
+      width ? `W${width}` : "",
+      thickness ? `T${thickness}` : "",
+      length ? `L${length}` : "",
+    ].filter(Boolean);
+    const computedSize = dimParts.join(" x ");
+    const size = pickString(
+      specRecord?.size,
+      computedSize,
+      (n as Record<string, unknown>).size,
+    );
+    const cycleTime = pickNumber(
+      specRecord?.cycle_time_sec,
+      specRecord?.cycle_time,
+      specRecord?.cycleTime,
+      (n as Record<string, unknown>).cycle_time,
+    );
+    const customerCycle = pickString(
+      specRecord?.customer_cycle,
+      specRecord?.customerCycle,
+      (n as Record<string, unknown>).customer_cycle,
+    );
+    const specWeight = pickNumber(
+      specRecord?.weight_kg,
+      specRecord?.weight,
+      weightKg,
+    );
+
     if (uniq) {
       uniqSet.add(uniq);
       if (partName && !partNameByUniq[uniq]) partNameByUniq[uniq] = partName;
@@ -182,6 +258,14 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
       if (model && !assemblyCodeByUniq[uniq]) assemblyCodeByUniq[uniq] = model;
       if (gradeSize && !gradeSizeByUniq[uniq])
         gradeSizeByUniq[uniq] = gradeSize;
+      else if (grade && !gradeSizeByUniq[uniq])
+        gradeSizeByUniq[uniq] = [grade, size].filter(Boolean).join(" / ");
+      if (materialCode && !materialCodeByUniq[uniq])
+        materialCodeByUniq[uniq] = materialCode;
+      if (grade && !gradeByUniq[uniq])
+        gradeByUniq[uniq] = grade;
+      if (size && !sizeByUniq[uniq])
+        sizeByUniq[uniq] = size;
       if (packingNumber && !packingNumberByUniq[uniq]) {
         packingNumberByUniq[uniq] = packingNumber;
       }
@@ -189,30 +273,21 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
       if (rmType && !rawMaterialTypeByUniq[uniq])
         rawMaterialTypeByUniq[uniq] = rmType;
       if (rmSource && !rmSourceByUniq[uniq]) rmSourceByUniq[uniq] = rmSource;
-      if (typeof weightKg === "number" && !(uniq in weightKgByUniq))
+      if (typeof specWeight === "number" && !(uniq in weightKgByUniq))
+        weightKgByUniq[uniq] = specWeight;
+      else if (typeof weightKg === "number" && !(uniq in weightKgByUniq))
         weightKgByUniq[uniq] = weightKg;
       if (typeof qtyPerUniq === "number" && !(uniq in qtyPerUniqByUniq))
         qtyPerUniqByUniq[uniq] = qtyPerUniq;
+      if (typeof cycleTime === "number" && !(uniq in cycleTimeByUniq))
+        cycleTimeByUniq[uniq] = cycleTime;
+      if (customerCycle && !customerCycleByUniq[uniq])
+        customerCycleByUniq[uniq] = customerCycle;
+      if (specRecord && !materialSpecByUniq[uniq]) {
+        materialSpecByUniq[uniq] = specRecord;
+      }
     }
 
-    // "Child Uniq" = uniq-uniq yang material code-nya (di material specification)
-    // sama dengan material code baris ini. Ambil langsung dari BOM: cek
-    // material_code / material_grade di material spec tiap node, lalu
-    // kelompokkan uniq_code-nya per material code.
-    const specRecord = isRecord(n.material_specifications)
-      ? (n.material_specifications as Record<string, unknown>)
-      : isRecord(n.material_spec)
-        ? (n.material_spec as Record<string, unknown>)
-        : undefined;
-    const materialCode = pickString(
-      n.material_code,
-      specRecord?.material_code,
-      specRecord?.material_grade,
-      specRecord?.grade,
-    );
-    if (uniq && specRecord && !materialSpecByUniq[uniq]) {
-      materialSpecByUniq[uniq] = specRecord;
-    }
     if (uniq && materialCode) {
       const key = materialCode.toLowerCase();
       if (!uniqsByMaterialCode[key]) uniqsByMaterialCode[key] = [];
@@ -284,6 +359,11 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
     qtyPerUniqByUniq,
     childUniqsByUniq,
     materialSpecByUniq,
+    materialCodeByUniq,
+    gradeByUniq,
+    sizeByUniq,
+    cycleTimeByUniq,
+    customerCycleByUniq,
     uniqsByMaterialCode,
   };
 };
