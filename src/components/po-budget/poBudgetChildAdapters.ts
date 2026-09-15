@@ -10,6 +10,7 @@ import type {
 export type PoBudgetChildRowSupplier = {
   id: string;
   supplier: string;
+  supplierName?: string;
   qty: number;
   percentage?: number;
 };
@@ -32,6 +33,7 @@ export type PoBudgetChildRow = {
   suppliers: PoBudgetChildRowSupplier[];
   materialSpec?: PoBudgetPrlChild["material_spec"];
   qtyPerUniq?: number;
+  level?: number;
   /** If true, this row is a non-editable group header (parent UNIQ) */
   isHeader?: boolean;
   /** Number of children under this header */
@@ -58,44 +60,122 @@ const toChildRow = (
   child: PoBudgetPrlChild,
   index: number,
   effectiveQty: number,
+  level = 1,
 ): PoBudgetChildRow => ({
-    key: `${text(detail?.id, "prl")}-${text(parentItem?.id, "item")}-${text(child.uniq_code, `child-${index}`)}-${index}`,
-    prlId: text(detail?.id),
-    prlItemId: parentItem?.id ?? null,
-    uniq: text(
-      child.uniq ?? child.material_spec?.material_grade ?? child.uniq_code,
-    ),
-    childUniqCode: text(child.uniq_code),
-    parentUniqCode: text(parentItem?.uniq_code),
-    productModel: text(child.model ?? parentItem?.product_model, "-"),
-    partName: text(child.part_name, "-"),
-    partNumber: text(child.part_number, "-"),
-    weightKg: num(child.weight_kg ?? child.material_spec?.weight_kg),
-    uom: text(child.uom),
-    quantity: effectiveQty ?? 0,
-    existingRawMaterial: text(child.existing_raw_material, "-"),
-    suppliers: Array.isArray(child.suppliers)
-      ? child.suppliers.map((supplier, supplierIndex) => ({
-          id: `seed-${supplierIndex + 1}`,
-          supplier: text(supplier.supplier_name),
-          qty: num(supplier.quantity),
-        }))
-      : [],
-    materialSpec: child.material_spec,
-    qtyPerUniq: num(child.qty_per_uniq),
+  key: `${text(detail?.id, "prl")}-${text(parentItem?.id, "item")}-${text(child.uniq_code, `child-${index}`)}-${index}`,
+  prlId: text(detail?.id),
+  prlItemId: parentItem?.id ?? null,
+  uniq: text(
+    child.uniq ?? child.material_spec?.material_grade ?? child.uniq_code,
+  ),
+  childUniqCode: text(child.uniq_code),
+  parentUniqCode: text(parentItem?.uniq_code),
+  productModel: text(child.model ?? parentItem?.product_model, "-"),
+  partName: text(child.part_name, "-"),
+  partNumber: text(child.part_number, "-"),
+  weightKg: num(child.weight_kg ?? child.material_spec?.weight_kg),
+  uom: text(child.uom),
+  quantity: effectiveQty ?? 0,
+  existingRawMaterial: text(child.existing_raw_material, "-"),
+  suppliers: Array.isArray(child.suppliers)
+    ? child.suppliers.map((supplier, supplierIndex) => ({
+        id: `seed-${supplierIndex + 1}`,
+        supplier: text(supplier.supplier_name),
+        supplierName: text(supplier.supplier_name),
+        qty: num(supplier.quantity),
+      }))
+    : [],
+  materialSpec: child.material_spec,
+  qtyPerUniq: num(child.qty_per_uniq),
+  level,
 });
+
+type BomChildLookup = Record<string, PoBudgetPrlChild[]>;
+
+const getLookupChildren = (
+  lookup: BomChildLookup | undefined,
+  parentUniqCode: string,
+) => {
+  const key = text(parentUniqCode).toLowerCase();
+  if (!lookup || !key) return [];
+  return lookup[key] ?? [];
+};
+
+const getNestedChildren = (
+  child: PoBudgetPrlChild,
+  lookup: BomChildLookup | undefined,
+) =>
+  Array.isArray(child.children) && child.children.length > 0
+    ? child.children
+    : getLookupChildren(lookup, child.uniq_code);
+
+function flattenPrlChildren(
+  detail: PoBudgetPrlDetail | undefined,
+  parentItem: PoBudgetPrlDetail["items"][number],
+  children: PoBudgetPrlChild[],
+  effectiveQty: number,
+  lookup: BomChildLookup | undefined,
+  level: number,
+  path: Set<string>,
+): PoBudgetChildRow[] {
+  const rows: PoBudgetChildRow[] = [];
+
+  children.forEach((child, index) => {
+    const row = toChildRow(
+      detail,
+      parentItem,
+      child,
+      index,
+      effectiveQty,
+      level,
+    );
+    rows.push(row);
+
+    const childCode = text(child.uniq_code).toLowerCase();
+    if (!childCode || path.has(childCode)) return;
+
+    const nested = getNestedChildren(child, lookup);
+    if (nested.length === 0) return;
+
+    const nextQty = num(child.quantity ?? child.qty_per_uniq, effectiveQty);
+    const nestedQty = nextQty / nested.length;
+    rows.push(
+      ...flattenPrlChildren(
+        detail,
+        parentItem,
+        nested,
+        nestedQty,
+        lookup,
+        level + 1,
+        new Set([...path, childCode]),
+      ),
+    );
+  });
+
+  return rows;
+}
 
 export function buildSingleChildRowsFromPrlDetail(
   detail: PoBudgetPrlDetail | undefined,
+  bomChildrenByParentUniq?: BomChildLookup,
 ): PoBudgetChildRow[] {
   const items = detail?.items ?? [];
   return items.flatMap((parent) => {
-    const children = Array.isArray(parent.children) ? parent.children : [];
+    const children =
+      Array.isArray(parent.children) && parent.children.length > 0
+        ? parent.children
+        : getLookupChildren(bomChildrenByParentUniq, parent.uniq_code);
     const childCount = children.length > 0 ? children.length : 1;
     const parentQty = num(parent?.remaining_qty ?? parent?.quantity);
     const perChildQty = Math.round(parentQty / childCount);
-    return children.map((child, index) =>
-      toChildRow(detail, parent, child, index, perChildQty),
+    return flattenPrlChildren(
+      detail,
+      parent,
+      children,
+      perChildQty,
+      bomChildrenByParentUniq,
+      1,
+      new Set([text(parent.uniq_code).toLowerCase()]),
     );
   });
 }
@@ -106,13 +186,17 @@ export function buildSingleChildRowsFromPrlDetail(
  */
 export function buildBulkChildRowsFromPrlDetail(
   detail: PoBudgetPrlDetail | undefined,
+  bomChildrenByParentUniq?: BomChildLookup,
 ): PoBudgetChildRow[] {
   const items = detail?.items ?? [];
   const rows: PoBudgetChildRow[] = [];
 
   for (let pIdx = 0; pIdx < items.length; pIdx++) {
     const item = items[pIdx];
-    const children = Array.isArray(item.children) ? item.children : [];
+    const children =
+      Array.isArray(item.children) && item.children.length > 0
+        ? item.children
+        : getLookupChildren(bomChildrenByParentUniq, item.uniq_code);
     const parentQty = num(item?.remaining_qty ?? item?.quantity);
     const childCount = children.length > 0 ? children.length : 1;
     const perChildQty = Math.round(parentQty / childCount);
@@ -137,12 +221,21 @@ export function buildBulkChildRowsFromPrlDetail(
       qtyPerUniq: 0,
       isHeader: true,
       childCount: children.length,
+      level: 0,
     });
 
     // Child rows
-    for (let cIdx = 0; cIdx < children.length; cIdx++) {
-      rows.push(toChildRow(detail, item, children[cIdx], cIdx, perChildQty));
-    }
+    rows.push(
+      ...flattenPrlChildren(
+        detail,
+        item,
+        children,
+        perChildQty,
+        bomChildrenByParentUniq,
+        1,
+        new Set([text(item.uniq_code).toLowerCase()]),
+      ),
+    );
   }
 
   return rows;

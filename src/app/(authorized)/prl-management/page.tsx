@@ -61,7 +61,8 @@ import { useGetGlobalWorkingDaysQuery } from "@/lib/api/system-settings/api";
 
 type PrlTabId = "forecast-table" | "demand-gap" | "bulk-ops";
 
-type AnalyticsTabId = "overview" | "trends" | "customers" | "performance" | "risk";
+type AnalyticsTabId =
+  "overview" | "trends" | "customers" | "performance" | "risk";
 
 type CustomerPerformanceRow = {
   key: string;
@@ -103,19 +104,46 @@ const normalizePrlStatus = (value: unknown): PrlStatus => {
 };
 
 const getPrlStatusColor = (value: PrlStatus) => {
-  const normalized = String(value ?? "").trim().toLowerCase();
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
 
   if (!normalized || normalized === "-") return "default";
-  if (["active", "approved", "complete", "completed", "done"].includes(normalized)) return "blue";
-  if (["inactive", "cancelled", "canceled", "rejected", "closed"].includes(normalized)) return "default";
-  if (["pending", "draft", "waiting", "in progress", "processing", "monitoring"].includes(normalized)) return "gold";
-  if (["urgent", "overdue", "failed", "error", "action needed"].includes(normalized)) return "red";
+  if (
+    ["active", "approved", "complete", "completed", "done"].includes(normalized)
+  )
+    return "blue";
+  if (
+    ["inactive", "cancelled", "canceled", "rejected", "closed"].includes(
+      normalized,
+    )
+  )
+    return "default";
+  if (
+    [
+      "pending",
+      "draft",
+      "waiting",
+      "in progress",
+      "processing",
+      "monitoring",
+    ].includes(normalized)
+  )
+    return "gold";
+  if (
+    ["urgent", "overdue", "failed", "error", "action needed"].includes(
+      normalized,
+    )
+  )
+    return "red";
 
   return "default";
 };
 
 const canDeletePrlStatus = (value: PrlStatus) => {
-  const normalized = String(value ?? "").trim().toLowerCase();
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
   return normalized === "pending" || normalized === "rejected";
 };
 
@@ -283,7 +311,9 @@ export default function PrlManagementPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<PrlTabId>("forecast-table");
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  // The table displays one row per PRL ID (UNIQ rows are grouped below), so
+  // pagination is intentionally fixed at ten PRL IDs per page.
+  const pageSize = 10;
   const [search, setSearch] = useState<string>("");
   const [periodFilter, setPeriodFilter] = useState<string>("current");
   const [customerFilter, setCustomerFilter] = useState<string>("");
@@ -302,12 +332,22 @@ export default function PrlManagementPage() {
   const [editForm] = Form.useForm();
 
   const apiEnabled = Boolean(apiBaseUrl);
-  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
-  const { data: globalParameters = [] } = useGetGlobalWorkingDaysQuery(undefined, {
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
     skip: !apiEnabled,
   });
+  const { data: globalParameters = [] } = useGetGlobalWorkingDaysQuery(
+    undefined,
+    {
+      skip: !apiEnabled,
+    },
+  );
 
-  const prlListQuery = useListPrlsQuery({ page: currentPage, limit: pageSize }, { skip: !apiEnabled });
+  // Fetch the complete working set once. The API returns one row per UNIQ;
+  // the table groups those rows by PRL ID before applying the 10-ID page.
+  const prlListQuery = useListPrlsQuery(
+    { page: 1, limit: 1000 },
+    { skip: !apiEnabled },
+  );
   const prlDetailQuery = useGetPrlByIdQuery(forecastDetail.record?.key ?? "", {
     skip: !apiEnabled || !forecastDetail.open || !forecastDetail.record?.key,
   });
@@ -316,7 +356,7 @@ export default function PrlManagementPage() {
   // Sumber data: GET /prls/history-vs-delivery (grouped per forecast_period + uniq_code).
   const gapQuery = useGetPrlGapAnalysisQuery(
     { page: 1, limit: 500 },
-    { skip: !apiEnabled || (activeTab !== "demand-gap" && !analyticsOpen) }
+    { skip: !apiEnabled || (activeTab !== "demand-gap" && !analyticsOpen) },
   );
 
   const [importPrls, importPrlsState] = useImportPrlsMutation();
@@ -325,10 +365,13 @@ export default function PrlManagementPage() {
 
   const bomIndex = useMemo(
     () => buildBomUniqIndex(bomTreeRes?.data ?? []),
-    [bomTreeRes?.data]
+    [bomTreeRes?.data],
   );
 
-  const anyBulkLoading = importPrlsState.isLoading || updatePrlState.isLoading || deletePrlState.isLoading;
+  const anyBulkLoading =
+    importPrlsState.isLoading ||
+    updatePrlState.isLoading ||
+    deletePrlState.isLoading;
 
   const refetchDemandGapIfActive = () => {
     if (activeTab !== "demand-gap") return;
@@ -351,7 +394,10 @@ export default function PrlManagementPage() {
     }
 
     try {
-      const headers = await generateHeaders({ useAuthorization: true, contentType: "application/json" });
+      const headers = await generateHeaders({
+        useAuthorization: true,
+        contentType: "application/json",
+      });
       const response = await fetch(`${apiBaseUrl}/prls/export`, {
         method: "GET",
         headers,
@@ -388,7 +434,9 @@ export default function PrlManagementPage() {
       });
 
       if (!response.ok) {
-        throw new Error(`Template download failed with status ${response.status}`);
+        throw new Error(
+          `Template download failed with status ${response.status}`,
+        );
       }
 
       const blob = await response.blob();
@@ -412,19 +460,43 @@ export default function PrlManagementPage() {
     if (!list) return initialRows;
 
     return list.map((r) => {
-      const customerName = r.customer?.customer_name ?? r.customer_name ?? (r.customer_uuid ? `Customer #${r.customer_uuid}` : "-");
+      const customerName =
+        r.customer?.customer_name ??
+        r.customer_name ??
+        (r.customer_uuid ? `Customer #${r.customer_uuid}` : "-");
       const uniq = r.uniq_code ?? r.item_uniq_code ?? "-";
-      const normalizedStatus = normalizePrlStatus(r.status ?? r.approval_status);
+      const normalizedStatus = normalizePrlStatus(
+        r.status ?? r.approval_status,
+      );
 
       return {
         key: r.id,
         prlId: r.prl_id ?? r.id,
         customer: customerName,
-        customerId: r.customer_uuid != null ? String(r.customer_uuid) : r.customer_id != null ? String(r.customer_id) : undefined,
+        customerId:
+          r.customer_uuid != null
+            ? String(r.customer_uuid)
+            : r.customer_id != null
+              ? String(r.customer_id)
+              : undefined,
         uniq,
-        productModel: r.product_model ?? r.product_details?.model ?? r.product_details?.description ?? bomIndex.modelByUniq[uniq] ?? bomIndex.assemblyCodeByUniq[uniq] ?? "-",
-        partName: r.part_name ?? r.product_details?.part_name ?? bomIndex.partNameByUniq[uniq] ?? "-",
-        partNumber: r.part_number ?? r.product_details?.part_number ?? bomIndex.partNumberByUniq[uniq] ?? "-",
+        productModel:
+          r.product_model ??
+          r.product_details?.model ??
+          r.product_details?.description ??
+          bomIndex.modelByUniq[uniq] ??
+          bomIndex.assemblyCodeByUniq[uniq] ??
+          "-",
+        partName:
+          r.part_name ??
+          r.product_details?.part_name ??
+          bomIndex.partNameByUniq[uniq] ??
+          "-",
+        partNumber:
+          r.part_number ??
+          r.product_details?.part_number ??
+          bomIndex.partNumberByUniq[uniq] ??
+          "-",
         quantity: Number(r.quantity ?? 0),
         period: r.forecast_period ?? r.period ?? "-",
         status: normalizedStatus as PrlStatus,
@@ -434,15 +506,33 @@ export default function PrlManagementPage() {
         deliveryQuantity: Number(r.delivery_quantity ?? 0),
       };
     });
-  }, [apiEnabled, bomIndex.assemblyCodeByUniq, bomIndex.modelByUniq, bomIndex.partNameByUniq, bomIndex.partNumberByUniq, prlListQuery.data]);
+  }, [
+    apiEnabled,
+    bomIndex.assemblyCodeByUniq,
+    bomIndex.modelByUniq,
+    bomIndex.partNameByUniq,
+    bomIndex.partNumberByUniq,
+    prlListQuery.data,
+  ]);
 
   const filteredForecastRows = useMemo(() => {
     let rows = resolvedForecastRows;
-    if (prlIdFilter) rows = rows.filter((r) => String(r.prlId) === String(prlIdFilter));
-    if (uniqFilter) rows = rows.filter((r) => String(r.uniq) === String(uniqFilter));
+    if (prlIdFilter)
+      rows = rows.filter((r) => String(r.prlId) === String(prlIdFilter));
+    if (uniqFilter)
+      rows = rows.filter((r) => String(r.uniq) === String(uniqFilter));
     if (search) {
       const s = search.trim().toLowerCase();
-      rows = rows.filter((r) => (r.uniq ?? "").toLowerCase().includes(s) || (r.partName ?? "").toLowerCase().includes(s));
+      rows = rows.filter((r) => {
+        const searchableValues = [
+          r.uniq,
+          r.prlId,
+          r.customer,
+          r.customerId,
+          r.partName,
+        ].map((value) => String(value ?? "").toLowerCase());
+        return searchableValues.some((value) => value.includes(s));
+      });
     }
     return rows;
   }, [resolvedForecastRows, prlIdFilter, uniqFilter, search]);
@@ -462,7 +552,10 @@ export default function PrlManagementPage() {
     return map;
   }, [prlListQuery.data]);
 
-  const prlIdOptions = useMemo(() => Array.from(prlGroups.keys()).map((id) => ({ label: id, value: id })), [prlGroups]);
+  const prlIdOptions = useMemo(
+    () => Array.from(prlGroups.keys()).map((id) => ({ label: id, value: id })),
+    [prlGroups],
+  );
 
   const uniqOptionsForSelectedPrl = useMemo(() => {
     if (prlIdFilter) {
@@ -477,16 +570,21 @@ export default function PrlManagementPage() {
 
   const selectedUniqRows = useMemo(() => {
     if (!forecastDetail.record) return [] as ForecastRow[];
-    return resolvedForecastRows.filter((row) => row.uniq === forecastDetail.record?.uniq);
+    return resolvedForecastRows.filter(
+      (row) => row.uniq === forecastDetail.record?.uniq,
+    );
   }, [forecastDetail.record, resolvedForecastRows]);
 
   const selectedUniqSummary = useMemo(() => {
     if (!forecastDetail.record) return null;
     const rowsForUniq = selectedUniqRows;
-    const quantity = rowsForUniq.reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+    const quantity = rowsForUniq.reduce(
+      (sum, row) => sum + Number(row.quantity || 0),
+      0,
+    );
     const deliveryQuantity = rowsForUniq.reduce(
       (sum, row) => sum + Number(row.deliveryQuantity || 0),
-      0
+      0,
     );
 
     return {
@@ -539,7 +637,12 @@ export default function PrlManagementPage() {
 
   React.useEffect(() => {
     if (!apiEnabled) return;
-    const err = activeTab === "forecast-table" ? prlListQuery.error : activeTab === "demand-gap" ? gapQuery.error : undefined;
+    const err =
+      activeTab === "forecast-table"
+        ? prlListQuery.error
+        : activeTab === "demand-gap"
+          ? gapQuery.error
+          : undefined;
     if (!err) return;
     message.error(getApiErrorMessage(err, "Failed to load PRL data"));
   }, [apiEnabled, activeTab, prlListQuery.error, gapQuery.error]);
@@ -553,7 +656,7 @@ export default function PrlManagementPage() {
       { id: "performance", label: "Performance" },
       { id: "risk", label: "Risk Analysis" },
     ],
-    []
+    [],
   );
 
   // ============================================================
@@ -567,19 +670,29 @@ export default function PrlManagementPage() {
   const quarterBuckets = useMemo(() => {
     const map = new Map<
       string,
-      { forecast: number; actual: number; entries: number; customers: Set<string> }
+      {
+        forecast: number;
+        actual: number;
+        entries: number;
+        customers: Set<string>;
+      }
     >();
 
     for (const row of resolvedForecastRows) {
       const key = toQuarterKey(row.period);
       if (!key) continue;
 
-      const bucket =
-        map.get(key) ?? { forecast: 0, actual: 0, entries: 0, customers: new Set<string>() };
+      const bucket = map.get(key) ?? {
+        forecast: 0,
+        actual: 0,
+        entries: 0,
+        customers: new Set<string>(),
+      };
       bucket.forecast += Number(row.quantity || 0);
       bucket.actual += Number(row.deliveryQuantity || 0);
       bucket.entries += 1;
-      if (row.customer && row.customer !== "-") bucket.customers.add(row.customer);
+      if (row.customer && row.customer !== "-")
+        bucket.customers.add(row.customer);
       map.set(key, bucket);
     }
 
@@ -590,11 +703,19 @@ export default function PrlManagementPage() {
 
   // Agregasi per customer.
   const customerAggregates = useMemo(() => {
-    const map = new Map<string, { forecast: number; actual: number; uniqs: Set<string> }>();
+    const map = new Map<
+      string,
+      { forecast: number; actual: number; uniqs: Set<string> }
+    >();
 
     for (const row of resolvedForecastRows) {
-      const name = row.customer && row.customer !== "-" ? row.customer : "Unknown";
-      const bucket = map.get(name) ?? { forecast: 0, actual: 0, uniqs: new Set<string>() };
+      const name =
+        row.customer && row.customer !== "-" ? row.customer : "Unknown";
+      const bucket = map.get(name) ?? {
+        forecast: 0,
+        actual: 0,
+        uniqs: new Set<string>(),
+      };
       bucket.forecast += Number(row.quantity || 0);
       bucket.actual += Number(row.deliveryQuantity || 0);
       if (row.uniq && row.uniq !== "-") bucket.uniqs.add(row.uniq);
@@ -608,16 +729,23 @@ export default function PrlManagementPage() {
 
   // KPI kartu Overview.
   const analyticsKpi = useMemo(() => {
-    const totalForecasts = prlListQuery.data?.pagination?.total ?? resolvedForecastRows.length;
-    const totalForecastQty = resolvedForecastRows.reduce((s, r) => s + Number(r.quantity || 0), 0);
+    const totalForecasts =
+      prlListQuery.data?.pagination?.total ?? resolvedForecastRows.length;
+    const totalForecastQty = resolvedForecastRows.reduce(
+      (s, r) => s + Number(r.quantity || 0),
+      0,
+    );
     const totalActualQty = resolvedForecastRows.reduce(
       (s, r) => s + Number(r.deliveryQuantity || 0),
-      0
+      0,
     );
-    const accuracyPct = totalForecastQty > 0 ? (totalActualQty / totalForecastQty) * 100 : 0;
+    const accuracyPct =
+      totalForecastQty > 0 ? (totalActualQty / totalForecastQty) * 100 : 0;
 
     const activeCustomers = new Set(
-      resolvedForecastRows.filter((r) => r.customer && r.customer !== "-").map((r) => r.customer)
+      resolvedForecastRows
+        .filter((r) => r.customer && r.customer !== "-")
+        .map((r) => r.customer),
     ).size;
 
     const last = quarterBuckets[quarterBuckets.length - 1];
@@ -628,12 +756,17 @@ export default function PrlManagementPage() {
         ? ((last.entries - prev.entries) / prev.entries) * 100
         : null;
 
-    const lastAccuracy = last && last.forecast > 0 ? (last.actual / last.forecast) * 100 : null;
-    const prevAccuracy = prev && prev.forecast > 0 ? (prev.actual / prev.forecast) * 100 : null;
+    const lastAccuracy =
+      last && last.forecast > 0 ? (last.actual / last.forecast) * 100 : null;
+    const prevAccuracy =
+      prev && prev.forecast > 0 ? (prev.actual / prev.forecast) * 100 : null;
     const accuracyDelta =
-      lastAccuracy !== null && prevAccuracy !== null ? lastAccuracy - prevAccuracy : null;
+      lastAccuracy !== null && prevAccuracy !== null
+        ? lastAccuracy - prevAccuracy
+        : null;
 
-    const customerDelta = last && prev ? last.customers.size - prev.customers.size : null;
+    const customerDelta =
+      last && prev ? last.customers.size - prev.customers.size : null;
 
     return {
       totalForecasts,
@@ -653,7 +786,7 @@ export default function PrlManagementPage() {
         forecast: b.forecast,
         actual: b.actual,
       })),
-    [quarterBuckets]
+    [quarterBuckets],
   );
 
   const accuracyTrendSeries = useMemo(
@@ -663,14 +796,15 @@ export default function PrlManagementPage() {
         planned: b.forecast,
         actual: b.actual,
       })),
-    [quarterBuckets]
+    [quarterBuckets],
   );
 
   const customerDistribution = useMemo(() => {
     const palette = ["#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#8B5CF6"];
     const top = customerAggregates.slice(0, 5);
     const total = top.reduce((s, c) => s + c.forecast, 0);
-    if (total <= 0) return [] as Array<{ name: string; value: number; color: string }>;
+    if (total <= 0)
+      return [] as Array<{ name: string; value: number; color: string }>;
 
     return top.map((c, index) => ({
       name: c.customer,
@@ -686,7 +820,9 @@ export default function PrlManagementPage() {
 
     for (const row of resolvedForecastRows) {
       const name =
-        row.productModel && row.productModel !== "-" ? row.productModel : "Uncategorized";
+        row.productModel && row.productModel !== "-"
+          ? row.productModel
+          : "Uncategorized";
       const bucket = map.get(name) ?? { parts: new Set<string>(), units: 0 };
       if (row.uniq && row.uniq !== "-") bucket.parts.add(row.uniq);
       bucket.units += Number(row.quantity || 0);
@@ -694,7 +830,11 @@ export default function PrlManagementPage() {
     }
 
     const list = Array.from(map.entries())
-      .map(([name, value]) => ({ name, parts: value.parts.size, units: value.units }))
+      .map(([name, value]) => ({
+        name,
+        parts: value.parts.size,
+        units: value.units,
+      }))
       .sort((a, b) => b.units - a.units)
       .slice(0, 5);
 
@@ -722,7 +862,7 @@ export default function PrlManagementPage() {
           reliability: reliabilityFromAccuracy(accuracyPct),
         };
       }),
-    [customerAggregates]
+    [customerAggregates],
   );
 
   const quarterlyPerformanceRows = useMemo<QuarterlyPerformanceRow[]>(
@@ -735,9 +875,12 @@ export default function PrlManagementPage() {
         // Tidak ada sumber harga pada data PRL.
         plannedRevenue: "-",
         actualRevenue: "-",
-        accuracyPct: b.forecast > 0 ? Number(((b.actual / b.forecast) * 100).toFixed(1)) : 0,
+        accuracyPct:
+          b.forecast > 0
+            ? Number(((b.actual / b.forecast) * 100).toFixed(1))
+            : 0,
       })),
-    [quarterBuckets]
+    [quarterBuckets],
   );
 
   // Pola musiman dihitung dari rata-rata forecast tiap nomor kuartal
@@ -746,7 +889,8 @@ export default function PrlManagementPage() {
     const byQuarterNo = new Map<number, number[]>();
     for (const b of quarterBuckets) {
       const quarterNo = Number(b.period.split("-Q")[1]);
-      if (!Number.isFinite(quarterNo) || quarterNo < 1 || quarterNo > 4) continue;
+      if (!Number.isFinite(quarterNo) || quarterNo < 1 || quarterNo > 4)
+        continue;
       const list = byQuarterNo.get(quarterNo) ?? [];
       list.push(b.forecast);
       byQuarterNo.set(quarterNo, list);
@@ -759,7 +903,8 @@ export default function PrlManagementPage() {
 
     const overall =
       averages.size > 0
-        ? Array.from(averages.values()).reduce((s, v) => s + v, 0) / averages.size
+        ? Array.from(averages.values()).reduce((s, v) => s + v, 0) /
+          averages.size
         : 0;
 
     return [1, 2, 3, 4].map((quarterNo) => {
@@ -806,19 +951,28 @@ export default function PrlManagementPage() {
     if (last) {
       const [yearStr, quarterStr] = last.period.split("-Q");
       const target = `${Number(yearStr) - 1}-Q${quarterStr}`;
-      const sameQuarterLastYear = quarterBuckets.find((b) => b.period === target);
+      const sameQuarterLastYear = quarterBuckets.find(
+        (b) => b.period === target,
+      );
       if (sameQuarterLastYear && sameQuarterLastYear.forecast > 0) {
         yoy =
-          ((last.forecast - sameQuarterLastYear.forecast) / sameQuarterLastYear.forecast) * 100;
+          ((last.forecast - sameQuarterLastYear.forecast) /
+            sameQuarterLastYear.forecast) *
+          100;
       }
     }
 
     let retention: number | null = null;
     let newCustomers: number | null = null;
     if (last && prev) {
-      const retained = Array.from(last.customers).filter((c) => prev.customers.has(c)).length;
-      retention = prev.customers.size > 0 ? (retained / prev.customers.size) * 100 : null;
-      newCustomers = Array.from(last.customers).filter((c) => !prev.customers.has(c)).length;
+      const retained = Array.from(last.customers).filter((c) =>
+        prev.customers.has(c),
+      ).length;
+      retention =
+        prev.customers.size > 0 ? (retained / prev.customers.size) * 100 : null;
+      newCustomers = Array.from(last.customers).filter(
+        (c) => !prev.customers.has(c),
+      ).length;
     }
 
     return { qoq, yoy, retention, newCustomers };
@@ -832,9 +986,15 @@ export default function PrlManagementPage() {
     const totalGap = gapList.length;
 
     const countByStatus = (target: string) =>
-      gapList.filter((g) => String(g.status ?? "").trim().toLowerCase() === target).length;
+      gapList.filter(
+        (g) =>
+          String(g.status ?? "")
+            .trim()
+            .toLowerCase() === target,
+      ).length;
 
-    const underPct = totalGap > 0 ? (countByStatus("under") / totalGap) * 100 : 0;
+    const underPct =
+      totalGap > 0 ? (countByStatus("under") / totalGap) * 100 : 0;
     const overPct = totalGap > 0 ? (countByStatus("over") / totalGap) * 100 : 0;
 
     rows.push({
@@ -878,10 +1038,13 @@ export default function PrlManagementPage() {
 
     // Kelengkapan master data part.
     const incomplete = resolvedForecastRows.filter(
-      (r) => r.partName === "-" || r.partNumber === "-" || r.productModel === "-"
+      (r) =>
+        r.partName === "-" || r.partNumber === "-" || r.productModel === "-",
     ).length;
     const incompletePct =
-      resolvedForecastRows.length > 0 ? (incomplete / resolvedForecastRows.length) * 100 : 0;
+      resolvedForecastRows.length > 0
+        ? (incomplete / resolvedForecastRows.length) * 100
+        : 0;
 
     rows.push({
       key: "incomplete-master-data",
@@ -924,8 +1087,10 @@ export default function PrlManagementPage() {
         r.partNumber.toLowerCase().includes(q) ||
         r.productModel.toLowerCase().includes(q);
 
-      const matchesCustomer = !customerQ || r.customer.toLowerCase().includes(customerQ);
-      const matchesPeriod = periodFilter === "current" ? true : r.period === periodFilter;
+      const matchesCustomer =
+        !customerQ || r.customer.toLowerCase().includes(customerQ);
+      const matchesPeriod =
+        periodFilter === "current" ? true : r.period === periodFilter;
       const matchesType = typeFilter === "all" ? true : true; // placeholder for future type mapping
 
       return matchesQuery && matchesCustomer && matchesPeriod && matchesType;
@@ -934,18 +1099,21 @@ export default function PrlManagementPage() {
 
   // Group rows by PRL ID so table shows one row per PRL with uniq list
   const groupedRows = useMemo(() => {
-    const map = new Map<string, {
-      key: string;
-      prlId: string;
-      customer: string;
-      uniqs: string[];
-      productModel: string;
-      partName: string;
-      partNumber: string;
-      quantity: number;
-      period: string;
-      status: PrlStatus;
-    }>();
+    const map = new Map<
+      string,
+      {
+        key: string;
+        prlId: string;
+        customer: string;
+        uniqs: string[];
+        productModel: string;
+        partName: string;
+        partNumber: string;
+        quantity: number;
+        period: string;
+        status: PrlStatus;
+      }
+    >();
 
     for (const r of rows) {
       const id = String(r.prlId ?? r.key ?? "");
@@ -980,51 +1148,61 @@ export default function PrlManagementPage() {
     }));
   }, [rows]);
 
-  const forecastPaginationTotal = useMemo(() => {
-    if (!apiEnabled) return rows.length;
-
-    const hasClientFilters = Boolean(search.trim() || customerFilter.trim() || periodFilter !== "current" || typeFilter !== "all");
-    if (hasClientFilters) return rows.length;
-
-    return prlListQuery.data?.pagination.total ?? rows.length;
-  }, [apiEnabled, customerFilter, periodFilter, prlListQuery.data?.pagination.total, rows.length, search, typeFilter]);
+  const forecastPaginationTotal = groupedRows.length;
 
   React.useEffect(() => {
     setCurrentPage(1);
   }, [search, customerFilter, periodFilter, typeFilter]);
 
-  const periodOptions = useMemo(
-    () => {
-      const activePlanningPeriods = globalParameters
-        .filter((item) => String(item.status ?? "active").trim().toLowerCase() === "active")
-        .filter((item) => {
-          const group = String(item.parameter_group ?? "").trim().toLowerCase();
-          return group === "planning";
-        })
-        .map((item) => String(item.period ?? "").trim())
-        .filter(Boolean);
+  const periodOptions = useMemo(() => {
+    const activePlanningPeriods = globalParameters
+      .filter(
+        (item) =>
+          String(item.status ?? "active")
+            .trim()
+            .toLowerCase() === "active",
+      )
+      .filter((item) => {
+        const group = String(item.parameter_group ?? "")
+          .trim()
+          .toLowerCase();
+        return group === "planning";
+      })
+      .map((item) => String(item.period ?? "").trim())
+      .filter(Boolean);
 
-      const fallbackPeriodsFromRows = resolvedForecastRows
-        .map((item) => String(item.period ?? "").trim())
-        .filter(Boolean);
+    const fallbackPeriodsFromRows = resolvedForecastRows
+      .map((item) => String(item.period ?? "").trim())
+      .filter(Boolean);
 
-      const periods = (activePlanningPeriods.length ? activePlanningPeriods : globalParameters
-        .filter((item) => String(item.status ?? "active").trim().toLowerCase() === "active")
-        .map((item) => String(item.period ?? "").trim())
-        .filter(Boolean).length
+    const periods = (
+      activePlanningPeriods.length
+        ? activePlanningPeriods
+        : globalParameters
+              .filter(
+                (item) =>
+                  String(item.status ?? "active")
+                    .trim()
+                    .toLowerCase() === "active",
+              )
+              .map((item) => String(item.period ?? "").trim())
+              .filter(Boolean).length
           ? globalParameters
-              .filter((item) => String(item.status ?? "active").trim().toLowerCase() === "active")
+              .filter(
+                (item) =>
+                  String(item.status ?? "active")
+                    .trim()
+                    .toLowerCase() === "active",
+              )
               .map((item) => String(item.period ?? "").trim())
               .filter(Boolean)
-          : fallbackPeriodsFromRows)
-        .filter((value, index, array) => array.indexOf(value) === index);
+          : fallbackPeriodsFromRows
+    ).filter((value, index, array) => array.indexOf(value) === index);
 
-      return [{ label: "Current Period", value: "current" }].concat(
-        periods.map((value) => ({ label: value, value }))
-      );
-    },
-    [globalParameters, resolvedForecastRows]
-  );
+    return [{ label: "Current Period", value: "current" }].concat(
+      periods.map((value) => ({ label: value, value })),
+    );
+  }, [globalParameters, resolvedForecastRows]);
 
   const typeOptions = useMemo(
     () => [
@@ -1032,13 +1210,21 @@ export default function PrlManagementPage() {
       { label: "Forecast", value: "forecast" },
       { label: "Master Data", value: "master" },
     ],
-    []
+    [],
   );
 
   const editablePeriodOptions = useMemo(() => {
-    const options = periodOptions.filter((option) => option.value !== "current");
-    if (editingPrl?.period && !options.some((option) => option.value === editingPrl.period)) {
-      return [{ label: editingPrl.period, value: editingPrl.period }, ...options];
+    const options = periodOptions.filter(
+      (option) => option.value !== "current",
+    );
+    if (
+      editingPrl?.period &&
+      !options.some((option) => option.value === editingPrl.period)
+    ) {
+      return [
+        { label: editingPrl.period, value: editingPrl.period },
+        ...options,
+      ];
     }
     return options;
   }, [editingPrl?.period, periodOptions]);
@@ -1064,8 +1250,13 @@ export default function PrlManagementPage() {
       key: "uniq",
       width: 120,
       render: (v: string | string[], record) => {
-        const vals = Array.isArray(v) ? v : String(v ?? "").split(/,\s*/).filter(Boolean);
-        if (vals.length === 0) return <span className="text-sm text-gray-500">-</span>;
+        const vals = Array.isArray(v)
+          ? v
+          : String(v ?? "")
+              .split(/,\s*/)
+              .filter(Boolean);
+        if (vals.length === 0)
+          return <span className="text-sm text-gray-500">-</span>;
         if (vals.length === 1) {
           return (
             <span className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
@@ -1083,7 +1274,10 @@ export default function PrlManagementPage() {
           <div className="flex items-center gap-2">
             <div className="flex flex-wrap gap-1">
               {visible.map((u, i) => (
-                <span key={u + i} className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
+                <span
+                  key={u + i}
+                  className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700"
+                >
                   {u}
                 </span>
               ))}
@@ -1092,21 +1286,31 @@ export default function PrlManagementPage() {
               <Tooltip
                 placement="top"
                 title={
-                  <div className="flex flex-row flex-wrap gap-2 max-w-xs" style={{ maxWidth: 320 }}>
+                  <div
+                    className="flex flex-row flex-wrap gap-2 max-w-xs"
+                    style={{ maxWidth: 320 }}
+                  >
                     {vals.slice(0, 10).map((u) => (
                       <Tag
                         key={u}
                         className="cursor-pointer inline-flex"
                         onClick={() => {
-                          const match = resolvedForecastRows.find((rr) => String(rr.prlId) === String(record.prlId) && rr.uniq === u);
-                          if (match) setForecastDetail({ open: true, record: match });
+                          const match = resolvedForecastRows.find(
+                            (rr) =>
+                              String(rr.prlId) === String(record.prlId) &&
+                              rr.uniq === u,
+                          );
+                          if (match)
+                            setForecastDetail({ open: true, record: match });
                         }}
                       >
                         {u}
                       </Tag>
                     ))}
                     {vals.length > 10 && (
-                      <div className="text-xs text-gray-500 mt-1">and {vals.length - 10} more</div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        and {vals.length - 10} more
+                      </div>
                     )}
                   </div>
                 }
@@ -1146,7 +1350,9 @@ export default function PrlManagementPage() {
       key: "quantity",
       width: 110,
       align: "right",
-      render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
+      render: (v: number) => (
+        <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+      ),
     },
     {
       title: "Period",
@@ -1165,7 +1371,10 @@ export default function PrlManagementPage() {
       key: "status",
       width: 100,
       render: (v: PrlStatus) => (
-        <Tag color={getPrlStatusColor(v)} className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+        <Tag
+          color={getPrlStatusColor(v)}
+          className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+        >
           {v}
         </Tag>
       ),
@@ -1191,9 +1400,17 @@ export default function PrlManagementPage() {
             size="small"
             type="text"
             icon={<EditOutlined />}
-            disabled={String(record.status || "").trim().toLowerCase() === "approved"}
+            disabled={
+              String(record.status || "")
+                .trim()
+                .toLowerCase() === "approved"
+            }
             onClick={() => {
-              if (String(record.status || "").trim().toLowerCase() === "approved") {
+              if (
+                String(record.status || "")
+                  .trim()
+                  .toLowerCase() === "approved"
+              ) {
                 message.info("Cannot edit an approved PRL entry");
                 return;
               }
@@ -1230,7 +1447,9 @@ export default function PrlManagementPage() {
                     prlListQuery.refetch();
                     refetchDemandGapIfActive();
                   } catch (error) {
-                    message.error(getApiErrorMessage(error, "Failed to delete PRL entry"));
+                    message.error(
+                      getApiErrorMessage(error, "Failed to delete PRL entry"),
+                    );
                   } finally {
                     confirmModal?.destroy();
                   }
@@ -1284,7 +1503,9 @@ export default function PrlManagementPage() {
       key: "quantity",
       align: "right",
       render: (v: number) => (
-        <span className="text-sm font-semibold text-gray-900">{formatNumber(v)}</span>
+        <span className="text-sm font-semibold text-gray-900">
+          {formatNumber(v)}
+        </span>
       ),
     },
   ];
@@ -1307,7 +1528,9 @@ export default function PrlManagementPage() {
       key: "customerForecast",
       width: 170,
       align: "right",
-      render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
+      render: (v: number) => (
+        <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+      ),
     },
     {
       title: "Actual Delivery",
@@ -1315,7 +1538,9 @@ export default function PrlManagementPage() {
       key: "actualDelivery",
       width: 160,
       align: "right",
-      render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
+      render: (v: number) => (
+        <span className="text-sm text-gray-700">{formatNumber(v)}</span>
+      ),
     },
     {
       title: "Gap (Units)",
@@ -1324,7 +1549,13 @@ export default function PrlManagementPage() {
       width: 120,
       align: "right",
       render: (v: number) => (
-        <span className={v < 0 ? "text-red-600 font-semibold" : "text-green-700 font-semibold"}>
+        <span
+          className={
+            v < 0
+              ? "text-red-600 font-semibold"
+              : "text-green-700 font-semibold"
+          }
+        >
           {v > 0 ? `+${formatNumber(v)}` : formatNumber(v)}
         </span>
       ),
@@ -1336,7 +1567,13 @@ export default function PrlManagementPage() {
       width: 100,
       align: "right",
       render: (v: number) => (
-        <span className={v < 0 ? "text-red-600 font-semibold" : "text-green-700 font-semibold"}>
+        <span
+          className={
+            v < 0
+              ? "text-red-600 font-semibold"
+              : "text-green-700 font-semibold"
+          }
+        >
           {v > 0 ? `+${v}%` : `${v}%`}
         </span>
       ),
@@ -1349,20 +1586,29 @@ export default function PrlManagementPage() {
       render: (v: DemandGapStatus) => {
         if (v === "Under") {
           return (
-            <Tag color="red" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+            <Tag
+              color="red"
+              className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+            >
               Under
             </Tag>
           );
         }
         if (v === "Over") {
           return (
-            <Tag color="default" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+            <Tag
+              color="default"
+              className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+            >
               Over
             </Tag>
           );
         }
         return (
-          <Tag color="blue" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+          <Tag
+            color="blue"
+            className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+          >
             On Track
           </Tag>
         );
@@ -1396,8 +1642,13 @@ export default function PrlManagementPage() {
       <div className="mb-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-1">PRL Management & Master Data</h1>
-            <p className="text-sm text-gray-500">Store forecasts by Uniq, Quantity, Model for Production Planning and Demand Analysis</p>
+            <h1 className="text-2xl font-bold text-gray-900 mb-1">
+              PRL Management & Master Data
+            </h1>
+            <p className="text-sm text-gray-500">
+              Store forecasts by Uniq, Quantity, Model for Production Planning
+              and Demand Analysis
+            </p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -1408,13 +1659,25 @@ export default function PrlManagementPage() {
             >
               View History Logs
             </Button>
-            <Button className="!rounded-lg" icon={<UploadOutlined />} onClick={() => setExcelModalOpen(true)}>
+            <Button
+              className="!rounded-lg"
+              icon={<UploadOutlined />}
+              onClick={() => setExcelModalOpen(true)}
+            >
               Excel Upload
             </Button>
-            <Button className="!rounded-lg" icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>
+            <Button
+              className="!rounded-lg"
+              icon={<DownloadOutlined />}
+              onClick={handleDownloadTemplate}
+            >
               Download Template
             </Button>
-            <Button className="!rounded-lg" icon={<FileExcelOutlined />} onClick={handleExport}> 
+            <Button
+              className="!rounded-lg"
+              icon={<FileExcelOutlined />}
+              onClick={handleExport}
+            >
               Export Data
             </Button>
             <Button
@@ -1442,7 +1705,9 @@ export default function PrlManagementPage() {
                   onClick={() => setActiveTab(t.id)}
                   className={
                     "px-4 py-2 text-sm font-medium rounded-md transition-colors " +
-                    (isActive ? "bg-white shadow-sm text-gray-900" : "text-gray-600 hover:text-gray-900")
+                    (isActive
+                      ? "bg-white shadow-sm text-gray-900"
+                      : "text-gray-600 hover:text-gray-900")
                   }
                 >
                   {t.label}
@@ -1457,7 +1722,7 @@ export default function PrlManagementPage() {
           <div className="flex-1 max-w-xl">
             <Input
               prefix={<span className="text-gray-400">⌕</span>}
-              placeholder="Search by Uniq or Machine Name..."
+              placeholder="Search by UNIQ, PRL ID, or Customer..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="!rounded-lg"
@@ -1465,7 +1730,12 @@ export default function PrlManagementPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Select value={periodFilter} onChange={setPeriodFilter} options={periodOptions} className="min-w-[160px]" />
+            <Select
+              value={periodFilter}
+              onChange={setPeriodFilter}
+              options={periodOptions}
+              className="min-w-[160px]"
+            />
             <Input
               allowClear
               value={customerFilter}
@@ -1473,7 +1743,12 @@ export default function PrlManagementPage() {
               placeholder="Customer Name"
               className="!rounded-lg min-w-[170px]"
             />
-            <Select value={typeFilter} onChange={setTypeFilter} options={typeOptions} className="min-w-[130px]" />
+            <Select
+              value={typeFilter}
+              onChange={setTypeFilter}
+              options={typeOptions}
+              className="min-w-[130px]"
+            />
           </div>
         </div>
 
@@ -1482,7 +1757,9 @@ export default function PrlManagementPage() {
           <>
             <div className="flex items-center justify-between mb-3">
               <div>
-                <div className="text-base font-semibold text-gray-900">Production Forecast by Uniq</div>
+                <div className="text-base font-semibold text-gray-900">
+                  Production Forecast by Uniq
+                </div>
                 <div className="min-w-[160px]">
                   <div className="text-xs text-gray-500 mb-1">PRL ID</div>
                   <Select
@@ -1490,7 +1767,10 @@ export default function PrlManagementPage() {
                     showSearch
                     options={prlIdOptions}
                     value={prlIdFilter}
-                    onChange={(v) => { setPrlIdFilter(v); setUniqFilter(undefined); }}
+                    onChange={(v) => {
+                      setPrlIdFilter(v);
+                      setUniqFilter(undefined);
+                    }}
                     placeholder="Filter by PRL ID"
                     className="min-w-[160px]"
                   />
@@ -1509,8 +1789,15 @@ export default function PrlManagementPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Badge count={`${forecastPaginationTotal} forecasts`} style={{ backgroundColor: "#EEF2FF", color: "#3730A3" }} />
-                <Button className="!rounded-lg" icon={<BarChartOutlined />} onClick={() => openAnalytics("overview")}> 
+                <Badge
+                  count={`${forecastPaginationTotal} forecasts`}
+                  style={{ backgroundColor: "#EEF2FF", color: "#3730A3" }}
+                />
+                <Button
+                  className="!rounded-lg"
+                  icon={<BarChartOutlined />}
+                  onClick={() => openAnalytics("overview")}
+                >
                   Analytics View
                 </Button>
               </div>
@@ -1530,16 +1817,12 @@ export default function PrlManagementPage() {
                 current: currentPage,
                 total: forecastPaginationTotal,
                 pageSize,
-                showSizeChanger: true,
-                pageSizeOptions: ["10", "20", "50"],
-                onChange: (page, nextPageSize) => {
+                showSizeChanger: false,
+                onChange: (page) => {
                   setCurrentPage(page);
-                  if (nextPageSize && nextPageSize !== pageSize) {
-                    setPageSize(nextPageSize);
-                    setCurrentPage(1);
-                  }
                 },
-                showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} Results`,
+                showTotal: (total, range) =>
+                  `${range[0]}-${range[1]} of ${total} Results`,
               }}
             />
           </>
@@ -1549,7 +1832,9 @@ export default function PrlManagementPage() {
           <>
             <div className="flex items-center justify-between mb-3">
               <div>
-                <div className="text-base font-semibold text-gray-900">Demand Forecasting Gap Analysis</div>
+                <div className="text-base font-semibold text-gray-900">
+                  Demand Forecasting Gap Analysis
+                </div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -1569,7 +1854,8 @@ export default function PrlManagementPage() {
                 pageSize: 10,
                 showSizeChanger: true,
                 pageSizeOptions: ["10", "20", "50"],
-                showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} Results`,
+                showTotal: (total, range) =>
+                  `${range[0]}-${range[1]} of ${total} Results`,
               }}
             />
           </>
@@ -1578,12 +1864,16 @@ export default function PrlManagementPage() {
         {activeTab === "bulk-ops" && (
           <div>
             <div className="mb-4">
-              <div className="text-base font-semibold text-gray-900">Bulk Operations & Data Management</div>
+              <div className="text-base font-semibold text-gray-900">
+                Bulk Operations & Data Management
+              </div>
             </div>
 
             {/* Excel Upload */}
             <div className="bg-white rounded-xl border border-gray-100 p-4 mb-4">
-              <div className="text-sm font-semibold text-gray-900">PRL Import</div>
+              <div className="text-sm font-semibold text-gray-900">
+                PRL Import
+              </div>
               <div className="text-xs text-gray-500 mt-1">
                 Upload PRL data directly from Excel using `POST /import/prls`.
               </div>
@@ -1594,7 +1884,9 @@ export default function PrlManagementPage() {
                   multiple={false}
                   showUploadList={false}
                   beforeUpload={(file) => {
-                    const isExcel = file.name.toLowerCase().endsWith(".xlsx") || file.name.toLowerCase().endsWith(".xls");
+                    const isExcel =
+                      file.name.toLowerCase().endsWith(".xlsx") ||
+                      file.name.toLowerCase().endsWith(".xls");
                     if (!isExcel) {
                       message.error("Please upload an Excel file (.xlsx/.xls)");
                       return Upload.LIST_IGNORE;
@@ -1612,15 +1904,21 @@ export default function PrlManagementPage() {
                         refetchDemandGapIfActive();
                       })
                       .catch((err) => {
-                        message.error(getApiErrorMessage(err, "PRL import failed"));
+                        message.error(
+                          getApiErrorMessage(err, "PRL import failed"),
+                        );
                       });
                     return false;
                   }}
                 >
                   <div className="py-6">
                     <div className="text-3xl text-gray-400 mb-2">⬆</div>
-                    <div className="text-sm font-semibold text-gray-900">Upload PRL Excel File</div>
-                    <div className="text-xs text-gray-500 mt-1">Drag and drop your Excel file here, or click to browse</div>
+                    <div className="text-sm font-semibold text-gray-900">
+                      Upload PRL Excel File
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      Drag and drop your Excel file here, or click to browse
+                    </div>
                     <Button className="!rounded-lg mt-3" type="primary">
                       Choose File
                     </Button>
@@ -1630,13 +1928,19 @@ export default function PrlManagementPage() {
             </div>
 
             <div className="bg-white rounded-xl border border-gray-100 p-4 mb-4">
-              <div className="text-sm font-semibold text-gray-900">PRL Export</div>
+              <div className="text-sm font-semibold text-gray-900">
+                PRL Export
+              </div>
               <div className="text-xs text-gray-500 mt-1">
                 Download current PRL data using `GET /prls/export`.
               </div>
 
               <div className="mt-4">
-                <Button className="!rounded-lg" icon={<FileExcelOutlined />} onClick={handleExport}>
+                <Button
+                  className="!rounded-lg"
+                  icon={<FileExcelOutlined />}
+                  onClick={handleExport}
+                >
                   Export PRL Data
                 </Button>
               </div>
@@ -1645,7 +1949,9 @@ export default function PrlManagementPage() {
             <div className="bg-white rounded-xl border border-gray-100 p-4">
               <div className="text-sm font-semibold text-gray-900">Notes</div>
               <div className="text-xs text-gray-500 mt-1">
-                Create uses `POST /prls`, detail uses `GET /prls/:id`, update uses `PUT /prls/:id`, and delete uses `DELETE /prls/:id` from the table actions.
+                Create uses `POST /prls`, detail uses `GET /prls/:id`, update
+                uses `PUT /prls/:id`, and delete uses `DELETE /prls/:id` from
+                the table actions.
               </div>
             </div>
           </div>
@@ -1659,7 +1965,9 @@ export default function PrlManagementPage() {
         width={720}
         title={
           <div>
-            <div className="text-sm font-semibold text-gray-900">PRL Detail</div>
+            <div className="text-sm font-semibold text-gray-900">
+              PRL Detail
+            </div>
             <div className="text-xs text-gray-500 font-normal">
               View detail for the selected PRL entry.
             </div>
@@ -1671,19 +1979,33 @@ export default function PrlManagementPage() {
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               <div className="rounded-xl border border-gray-100 bg-white p-4">
                 <div className="text-xs text-gray-500">PRL ID</div>
-                <div className="mt-1 text-sm font-semibold text-gray-900">{forecastDetail.record.prlId}</div>
+                <div className="mt-1 text-sm font-semibold text-gray-900">
+                  {forecastDetail.record.prlId}
+                </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-white p-4">
                 <div className="text-xs text-gray-500">Customer</div>
-                <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.customer?.customer_name ?? prlDetailQuery.data?.customer_name ?? forecastDetail.record.customer}</div>
+                <div className="mt-1 text-sm font-semibold text-gray-900">
+                  {prlDetailQuery.data?.customer?.customer_name ??
+                    prlDetailQuery.data?.customer_name ??
+                    forecastDetail.record.customer}
+                </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-white p-4">
                 <div className="text-xs text-gray-500">UNIQ</div>
-                <div className="mt-1 text-sm font-semibold text-gray-900">{detailUniqRows.length > 1 ? forecastDetail.record.uniq : (prlDetailQuery.data?.uniq_code ?? forecastDetail.record.uniq)}</div>
+                <div className="mt-1 text-sm font-semibold text-gray-900">
+                  {detailUniqRows.length > 1
+                    ? forecastDetail.record.uniq
+                    : (prlDetailQuery.data?.uniq_code ??
+                      forecastDetail.record.uniq)}
+                </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-white p-4">
                 <div className="text-xs text-gray-500">Forecast Period</div>
-                <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.forecast_period ?? forecastDetail.record.period}</div>
+                <div className="mt-1 text-sm font-semibold text-gray-900">
+                  {prlDetailQuery.data?.forecast_period ??
+                    forecastDetail.record.period}
+                </div>
               </div>
             </div>
 
@@ -1691,40 +2013,80 @@ export default function PrlManagementPage() {
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <div className="text-xs text-gray-500">Product Model</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.product_model ?? prlDetailQuery.data?.product_details?.model ?? prlDetailQuery.data?.product_details?.description ?? forecastDetail.record.productModel}</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">
+                    {prlDetailQuery.data?.product_model ??
+                      prlDetailQuery.data?.product_details?.model ??
+                      prlDetailQuery.data?.product_details?.description ??
+                      forecastDetail.record.productModel}
+                  </div>
                 </div>
                 <div>
                   <div className="text-xs text-gray-500">Part Name</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.part_name ?? prlDetailQuery.data?.product_details?.part_name ?? forecastDetail.record.partName}</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">
+                    {prlDetailQuery.data?.part_name ??
+                      prlDetailQuery.data?.product_details?.part_name ??
+                      forecastDetail.record.partName}
+                  </div>
                 </div>
                 <div>
                   <div className="text-xs text-gray-500">Part Number</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.part_number ?? prlDetailQuery.data?.product_details?.part_number ?? forecastDetail.record.partNumber}</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">
+                    {prlDetailQuery.data?.part_number ??
+                      prlDetailQuery.data?.product_details?.part_number ??
+                      forecastDetail.record.partNumber}
+                  </div>
                 </div>
                 <div>
-                  <div className="text-xs text-gray-500">{detailUniqRows.length > 1 ? "Quantity (Total)" : "Quantity"}</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900">{formatNumber(detailUniqRows.length > 1 ? Number(forecastDetail.record.quantity ?? 0) : Number(prlDetailQuery.data?.quantity ?? forecastDetail.record.quantity ?? 0))}</div>
+                  <div className="text-xs text-gray-500">
+                    {detailUniqRows.length > 1
+                      ? "Quantity (Total)"
+                      : "Quantity"}
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">
+                    {formatNumber(
+                      detailUniqRows.length > 1
+                        ? Number(forecastDetail.record.quantity ?? 0)
+                        : Number(
+                            prlDetailQuery.data?.quantity ??
+                              forecastDetail.record.quantity ??
+                              0,
+                          ),
+                    )}
+                  </div>
                 </div>
                 <div>
                   <div className="text-xs text-gray-500">Status</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900">{forecastDetail.record.status}</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">
+                    {forecastDetail.record.status}
+                  </div>
                 </div>
                 <div>
                   <div className="text-xs text-gray-500">Created At</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.created_at ?? forecastDetail.record.createdAt ?? "-"}</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">
+                    {prlDetailQuery.data?.created_at ??
+                      forecastDetail.record.createdAt ??
+                      "-"}
+                  </div>
                 </div>
                 <div>
                   <div className="text-xs text-gray-500">Updated At</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900">{prlDetailQuery.data?.updated_at ?? forecastDetail.record.updatedAt ?? "-"}</div>
+                  <div className="mt-1 text-sm font-semibold text-gray-900">
+                    {prlDetailQuery.data?.updated_at ??
+                      forecastDetail.record.updatedAt ??
+                      "-"}
+                  </div>
                 </div>
               </div>
             </div>
 
             {detailUniqRows.length > 1 ? (
               <div className="rounded-xl border border-gray-100 bg-white p-4">
-                <div className="text-sm font-semibold text-gray-900 mb-1">Detail per UNIQ</div>
+                <div className="text-sm font-semibold text-gray-900 mb-1">
+                  Detail per UNIQ
+                </div>
                 <div className="text-xs text-gray-500 mb-3">
-                  This PRL groups {detailUniqRows.length} UNIQ codes under one PRL ID. Each UNIQ keeps its own quantity.
+                  This PRL groups {detailUniqRows.length} UNIQ codes under one
+                  PRL ID. Each UNIQ keeps its own quantity.
                 </div>
                 <Table<ForecastRow>
                   columns={detailUniqColumns}
@@ -1748,7 +2110,10 @@ export default function PrlManagementPage() {
         }}
         title="Edit PRL"
         okText="Save"
-        okButtonProps={{ className: "!rounded-lg", loading: updatePrlState.isLoading }}
+        okButtonProps={{
+          className: "!rounded-lg",
+          loading: updatePrlState.isLoading,
+        }}
         cancelButtonProps={{ className: "!rounded-lg" }}
         onOk={async () => {
           if (!editingPrl) return;
@@ -1780,7 +2145,11 @@ export default function PrlManagementPage() {
         }}
       >
         <Form form={editForm} layout="vertical">
-          <Form.Item label="Forecast Period" name="forecastPeriod" rules={[{ required: true }]}> 
+          <Form.Item
+            label="Forecast Period"
+            name="forecastPeriod"
+            rules={[{ required: true }]}
+          >
             <Select
               className="!rounded-lg"
               options={editablePeriodOptions}
@@ -1789,8 +2158,16 @@ export default function PrlManagementPage() {
               optionFilterProp="label"
             />
           </Form.Item>
-          <Form.Item label="Quantity" name="quantity" rules={[{ required: true }]}> 
-            <InputNumber className="!rounded-lg w-full" min={1} placeholder="e.g. 4200" />
+          <Form.Item
+            label="Quantity"
+            name="quantity"
+            rules={[{ required: true }]}
+          >
+            <InputNumber
+              className="!rounded-lg w-full"
+              min={1}
+              placeholder="e.g. 4200"
+            />
           </Form.Item>
         </Form>
       </Modal>
@@ -1804,7 +2181,9 @@ export default function PrlManagementPage() {
       >
         <Upload
           beforeUpload={(file) => {
-            const isExcel = file.name.toLowerCase().endsWith(".xlsx") || file.name.toLowerCase().endsWith(".xls");
+            const isExcel =
+              file.name.toLowerCase().endsWith(".xlsx") ||
+              file.name.toLowerCase().endsWith(".xls");
             if (!isExcel) {
               message.error("Please upload an Excel file (.xlsx/.xls)");
               return Upload.LIST_IGNORE;
@@ -1830,7 +2209,9 @@ export default function PrlManagementPage() {
           <Button icon={<UploadOutlined />}>Select Excel File</Button>
         </Upload>
         <div className="text-xs text-gray-500 mt-3">
-          {apiEnabled ? "Uses POST /import/prls." : "API disabled: UI-only mock."}
+          {apiEnabled
+            ? "Uses POST /import/prls."
+            : "API disabled: UI-only mock."}
         </div>
       </Modal>
 
@@ -1841,9 +2222,12 @@ export default function PrlManagementPage() {
         width={980}
         title={
           <div>
-            <div className="text-sm font-semibold text-gray-900">PRL Analytics & Intelligence Dashboard</div>
+            <div className="text-sm font-semibold text-gray-900">
+              PRL Analytics & Intelligence Dashboard
+            </div>
             <div className="text-xs text-gray-500 font-normal">
-              Comprehensive analytics and insights for Production Resource Lifecycle Management
+              Comprehensive analytics and insights for Production Resource
+              Lifecycle Management
             </div>
           </div>
         }
@@ -1859,7 +2243,9 @@ export default function PrlManagementPage() {
                   onClick={() => setAnalyticsTab(t.id)}
                   className={
                     "rounded-md px-3 py-2 text-xs font-semibold transition-colors " +
-                    (isActive ? "bg-white shadow-sm text-gray-900" : "text-gray-600 hover:text-gray-900")
+                    (isActive
+                      ? "bg-white shadow-sm text-gray-900"
+                      : "text-gray-600 hover:text-gray-900")
                   }
                 >
                   {t.label}
@@ -1919,7 +2305,8 @@ export default function PrlManagementPage() {
                   {formatNumber(analyticsKpi.activeCustomers)}
                 </div>
                 <div className="text-xs text-blue-700 mt-1">
-                  {analyticsKpi.customerDelta === null || analyticsKpi.customerDelta === 0
+                  {analyticsKpi.customerDelta === null ||
+                  analyticsKpi.customerDelta === 0
                     ? "Stable base"
                     : analyticsKpi.customerDelta > 0
                       ? `+${analyticsKpi.customerDelta} vs last quarter`
@@ -1933,7 +2320,8 @@ export default function PrlManagementPage() {
                     sebagai gantinya, bukan angka rupiah karangan. */}
                 <div className="text-xl font-bold text-gray-900 mt-1">-</div>
                 <div className="text-xs text-gray-500 mt-1">
-                  No price source ({formatNumber(analyticsKpi.totalForecastQty)} units planned)
+                  No price source ({formatNumber(analyticsKpi.totalForecastQty)}{" "}
+                  units planned)
                 </div>
               </div>
             </div>
@@ -1941,19 +2329,54 @@ export default function PrlManagementPage() {
             {/* Charts */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="rounded-xl border border-gray-100 bg-white p-4">
-                <div className="text-sm font-semibold text-gray-900">Forecast vs Actual Delivery Trend</div>
-                <div className="text-xs text-gray-500 mt-1">Quarterly comparison showing forecast accuracy over time</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Forecast vs Actual Delivery Trend
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Quarterly comparison showing forecast accuracy over time
+                </div>
                 <div className="h-56 mt-3">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={trendSeries} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                    <AreaChart
+                      data={trendSeries}
+                      margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+                    >
                       <defs>
-                        <linearGradient id="forecastFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.25} />
-                          <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.02} />
+                        <linearGradient
+                          id="forecastFill"
+                          x1="0"
+                          y1="0"
+                          x2="0"
+                          y2="1"
+                        >
+                          <stop
+                            offset="5%"
+                            stopColor="#3B82F6"
+                            stopOpacity={0.25}
+                          />
+                          <stop
+                            offset="95%"
+                            stopColor="#3B82F6"
+                            stopOpacity={0.02}
+                          />
                         </linearGradient>
-                        <linearGradient id="actualFill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#22C55E" stopOpacity={0.25} />
-                          <stop offset="95%" stopColor="#22C55E" stopOpacity={0.02} />
+                        <linearGradient
+                          id="actualFill"
+                          x1="0"
+                          y1="0"
+                          x2="0"
+                          y2="1"
+                        >
+                          <stop
+                            offset="5%"
+                            stopColor="#22C55E"
+                            stopOpacity={0.25}
+                          />
+                          <stop
+                            offset="95%"
+                            stopColor="#22C55E"
+                            stopOpacity={0.02}
+                          />
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" />
@@ -1961,22 +2384,44 @@ export default function PrlManagementPage() {
                       <YAxis tick={{ fontSize: 11 }} />
                       <Tooltip />
                       <Legend />
-                      <Area type="monotone" dataKey="forecast" stroke="#3B82F6" fill="url(#forecastFill)" name="Forecast" />
-                      <Area type="monotone" dataKey="actual" stroke="#22C55E" fill="url(#actualFill)" name="Actual" />
+                      <Area
+                        type="monotone"
+                        dataKey="forecast"
+                        stroke="#3B82F6"
+                        fill="url(#forecastFill)"
+                        name="Forecast"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="actual"
+                        stroke="#22C55E"
+                        fill="url(#actualFill)"
+                        name="Actual"
+                      />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
               </div>
 
               <div className="rounded-xl border border-gray-100 bg-white p-4">
-                <div className="text-sm font-semibold text-gray-900">Customer Distribution</div>
-                <div className="text-xs text-gray-500 mt-1">Forecast volume by customer percentage</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Customer Distribution
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Forecast volume by customer percentage
+                </div>
                 <div className="h-56 mt-3">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Tooltip />
                       <Legend />
-                      <Pie data={customerDistribution} dataKey="value" nameKey="name" outerRadius={70} label>
+                      <Pie
+                        data={customerDistribution}
+                        dataKey="value"
+                        nameKey="name"
+                        outerRadius={70}
+                        label
+                      >
                         {customerDistribution.map((entry) => (
                           <Cell key={entry.name} fill={entry.color} />
                         ))}
@@ -1989,24 +2434,39 @@ export default function PrlManagementPage() {
 
             {/* Part category analysis */}
             <div className="rounded-xl border border-gray-100 bg-white p-4">
-              <div className="text-sm font-semibold text-gray-900">Part Category Analysis</div>
-              <div className="text-xs text-gray-500 mt-1">Breakdown of forecasts by part categories</div>
+              <div className="text-sm font-semibold text-gray-900">
+                Part Category Analysis
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                Breakdown of forecasts by part categories
+              </div>
 
               <div className="mt-4 space-y-4">
                 {partCategories.map((c) => (
-                  <div key={c.name} className="rounded-lg border border-gray-100 p-3">
+                  <div
+                    key={c.name}
+                    className="rounded-lg border border-gray-100 p-3"
+                  >
                     <div className="flex items-center justify-between">
-                      <div className="text-sm font-semibold text-gray-900">{c.name}</div>
+                      <div className="text-sm font-semibold text-gray-900">
+                        {c.name}
+                      </div>
                       <div className="text-xs text-gray-500">
-                        {c.parts} parts <span className="mx-2">•</span> {formatNumber(c.units)} units
+                        {c.parts} parts <span className="mx-2">•</span>{" "}
+                        {formatNumber(c.units)} units
                       </div>
                     </div>
 
                     <div className="mt-2 flex items-center justify-between gap-4">
                       <div className="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-600" style={{ width: `${c.percent}%` }} />
+                        <div
+                          className="h-full bg-blue-600"
+                          style={{ width: `${c.percent}%` }}
+                        />
                       </div>
-                      <div className="text-xs font-semibold text-gray-700 w-10 text-right">{c.percent}%</div>
+                      <div className="text-xs font-semibold text-gray-700 w-10 text-right">
+                        {c.percent}%
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -2018,19 +2478,36 @@ export default function PrlManagementPage() {
         {analyticsTab === "trends" && (
           <div className="space-y-4">
             <div className="rounded-xl border border-gray-100 bg-white p-4">
-              <div className="text-sm font-semibold text-gray-900">Forecast Accuracy Trends</div>
-              <div className="text-xs text-gray-500 mt-1">Historical accuracy and variance analysis</div>
+              <div className="text-sm font-semibold text-gray-900">
+                Forecast Accuracy Trends
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                Historical accuracy and variance analysis
+              </div>
 
               <div className="h-64 mt-3">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={accuracyTrendSeries} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                  <BarChart
+                    data={accuracyTrendSeries}
+                    margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+                  >
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="period" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} />
                     <Tooltip />
                     <Legend />
-                    <Bar dataKey="planned" name="Planned" fill="#3B82F6" radius={[6, 6, 0, 0]} />
-                    <Bar dataKey="actual" name="Actual" fill="#22C55E" radius={[6, 6, 0, 0]} />
+                    <Bar
+                      dataKey="planned"
+                      name="Planned"
+                      fill="#3B82F6"
+                      radius={[6, 6, 0, 0]}
+                    />
+                    <Bar
+                      dataKey="actual"
+                      name="Actual"
+                      fill="#22C55E"
+                      radius={[6, 6, 0, 0]}
+                    />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -2038,8 +2515,12 @@ export default function PrlManagementPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="rounded-xl border border-gray-100 bg-white p-4">
-                <div className="text-sm font-semibold text-gray-900">Seasonal Patterns</div>
-                <div className="text-xs text-gray-500 mt-1">Typical demand changes by quarter</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Seasonal Patterns
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Typical demand changes by quarter
+                </div>
 
                 <div className="mt-4 space-y-2">
                   {seasonalPatterns.map((s) => (
@@ -2050,7 +2531,9 @@ export default function PrlManagementPage() {
                         (s.highlight ? "bg-blue-50/40" : "bg-gray-50")
                       }
                     >
-                      <div className="text-xs font-semibold text-gray-800">{s.title}</div>
+                      <div className="text-xs font-semibold text-gray-800">
+                        {s.title}
+                      </div>
                       <Tag
                         color={s.highlight ? "blue" : "default"}
                         className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
@@ -2063,8 +2546,12 @@ export default function PrlManagementPage() {
               </div>
 
               <div className="rounded-xl border border-gray-100 bg-white p-4">
-                <div className="text-sm font-semibold text-gray-900">Growth Indicators</div>
-                <div className="text-xs text-gray-500 mt-1">Key business movement metrics</div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Growth Indicators
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Key business movement metrics
+                </div>
 
                 <div className="mt-4 space-y-3">
                   <div className="flex items-center justify-between">
@@ -2079,7 +2566,9 @@ export default function PrlManagementPage() {
                             : "text-red-600")
                       }
                     >
-                      {growthIndicators.yoy === null ? "-" : signedPercent(growthIndicators.yoy)}
+                      {growthIndicators.yoy === null
+                        ? "-"
+                        : signedPercent(growthIndicators.yoy)}
                     </div>
                   </div>
                   <div className="flex items-center justify-between">
@@ -2094,11 +2583,15 @@ export default function PrlManagementPage() {
                             : "text-red-600")
                       }
                     >
-                      {growthIndicators.qoq === null ? "-" : signedPercent(growthIndicators.qoq)}
+                      {growthIndicators.qoq === null
+                        ? "-"
+                        : signedPercent(growthIndicators.qoq)}
                     </div>
                   </div>
                   <div className="flex items-center justify-between">
-                    <div className="text-xs text-gray-600">Customer Retention</div>
+                    <div className="text-xs text-gray-600">
+                      Customer Retention
+                    </div>
                     <div className="text-xs font-semibold text-purple-700">
                       {growthIndicators.retention === null
                         ? "-"
@@ -2106,7 +2599,9 @@ export default function PrlManagementPage() {
                     </div>
                   </div>
                   <div className="flex items-center justify-between">
-                    <div className="text-xs text-gray-600">New Customer Acquisition</div>
+                    <div className="text-xs text-gray-600">
+                      New Customer Acquisition
+                    </div>
                     <div className="text-xs font-semibold text-red-600">
                       {growthIndicators.newCustomers === null
                         ? "-"
@@ -2122,8 +2617,12 @@ export default function PrlManagementPage() {
         {analyticsTab === "customers" && (
           <div className="space-y-4">
             <div className="rounded-xl border border-gray-100 bg-white p-4">
-              <div className="text-sm font-semibold text-gray-900">Customer Performance Matrix</div>
-              <div className="text-xs text-gray-500 mt-1">Volume vs accuracy analysis by customer</div>
+              <div className="text-sm font-semibold text-gray-900">
+                Customer Performance Matrix
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                Volume vs accuracy analysis by customer
+              </div>
 
               <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
                 <Table<CustomerPerformanceRow>
@@ -2131,56 +2630,78 @@ export default function PrlManagementPage() {
                   rowKey="key"
                   size="middle"
                   pagination={false}
-                  columns={([
-                    {
-                      title: "Customer",
-                      dataIndex: "customer",
-                      key: "customer",
-                      render: (v: string) => <span className="text-sm text-gray-800">{v}</span>,
-                    },
-                    {
-                      title: "Forecast Volume",
-                      dataIndex: "forecastVolume",
-                      key: "forecastVolume",
-                      align: "right",
-                      render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
-                    },
-                    {
-                      title: "Actual Volume",
-                      dataIndex: "actualVolume",
-                      key: "actualVolume",
-                      align: "right",
-                      render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
-                    },
-                    {
-                      title: "Accuracy %",
-                      dataIndex: "accuracyPct",
-                      key: "accuracyPct",
-                      align: "center",
-                      render: (v: number) => (
-                        <Tag color="blue" className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
-                          {v}%
-                        </Tag>
-                      ),
-                    },
-                    {
-                      title: "Revenue Impact",
-                      dataIndex: "revenueImpact",
-                      key: "revenueImpact",
-                      render: (v: string) => <span className="text-sm font-semibold text-green-700">{v}</span>,
-                    },
-                    {
-                      title: "Reliability Score",
-                      dataIndex: "reliability",
-                      key: "reliability",
-                      align: "center",
-                      render: (v: CustomerPerformanceRow["reliability"]) => (
-                        <Tag color="blue" className="!rounded-md !px-2 !py-0.5 !text-xs !font-semibold">
-                          {v}
-                        </Tag>
-                      ),
-                    },
-                  ]) as ColumnsType<CustomerPerformanceRow>}
+                  columns={
+                    [
+                      {
+                        title: "Customer",
+                        dataIndex: "customer",
+                        key: "customer",
+                        render: (v: string) => (
+                          <span className="text-sm text-gray-800">{v}</span>
+                        ),
+                      },
+                      {
+                        title: "Forecast Volume",
+                        dataIndex: "forecastVolume",
+                        key: "forecastVolume",
+                        align: "right",
+                        render: (v: number) => (
+                          <span className="text-sm text-gray-700">
+                            {formatNumber(v)}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: "Actual Volume",
+                        dataIndex: "actualVolume",
+                        key: "actualVolume",
+                        align: "right",
+                        render: (v: number) => (
+                          <span className="text-sm text-gray-700">
+                            {formatNumber(v)}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: "Accuracy %",
+                        dataIndex: "accuracyPct",
+                        key: "accuracyPct",
+                        align: "center",
+                        render: (v: number) => (
+                          <Tag
+                            color="blue"
+                            className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+                          >
+                            {v}%
+                          </Tag>
+                        ),
+                      },
+                      {
+                        title: "Revenue Impact",
+                        dataIndex: "revenueImpact",
+                        key: "revenueImpact",
+                        render: (v: string) => (
+                          <span className="text-sm font-semibold text-green-700">
+                            {v}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: "Reliability Score",
+                        dataIndex: "reliability",
+                        key: "reliability",
+                        align: "center",
+                        render: (v: CustomerPerformanceRow["reliability"]) => (
+                          <Tag
+                            color="blue"
+                            className="!rounded-md !px-2 !py-0.5 !text-xs !font-semibold"
+                          >
+                            {v}
+                          </Tag>
+                        ),
+                      },
+                    ] as ColumnsType<CustomerPerformanceRow>
+                  }
                 />
               </div>
             </div>
@@ -2190,8 +2711,12 @@ export default function PrlManagementPage() {
         {analyticsTab === "performance" && (
           <div className="space-y-4">
             <div className="rounded-xl border border-gray-100 bg-white p-4">
-              <div className="text-sm font-semibold text-gray-900">Quarterly Performance Summary</div>
-              <div className="text-xs text-gray-500 mt-1">Comprehensive performance metrics by quarter</div>
+              <div className="text-sm font-semibold text-gray-900">
+                Quarterly Performance Summary
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                Comprehensive performance metrics by quarter
+              </div>
 
               <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
                 <Table<QuarterlyPerformanceRow>
@@ -2199,61 +2724,77 @@ export default function PrlManagementPage() {
                   rowKey="key"
                   size="middle"
                   pagination={false}
-                  columns={([
-                    {
-                      title: "Quarter",
-                      dataIndex: "quarter",
-                      key: "quarter",
-                      render: (v: string) => <span className="text-sm text-gray-800">{v}</span>,
-                    },
-                    {
-                      title: "Planned Quantity",
-                      dataIndex: "plannedQty",
-                      key: "plannedQty",
-                      align: "right",
-                      render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
-                    },
-                    {
-                      title: "Actual Quantity",
-                      dataIndex: "actualQty",
-                      key: "actualQty",
-                      align: "right",
-                      render: (v: number) => <span className="text-sm text-gray-700">{formatNumber(v)}</span>,
-                    },
-                    {
-                      title: "Planned Revenue",
-                      dataIndex: "plannedRevenue",
-                      key: "plannedRevenue",
-                      render: (v: string) => <span className="text-sm text-gray-700">{v}</span>,
-                    },
-                    {
-                      title: "Actual Revenue",
-                      dataIndex: "actualRevenue",
-                      key: "actualRevenue",
-                      render: (v: string) => <span className="text-sm text-gray-700">{v}</span>,
-                    },
-                    {
-                      title: "Accuracy %",
-                      dataIndex: "accuracyPct",
-                      key: "accuracyPct",
-                      align: "center",
-                      render: (v: number) => {
-                        const isGood = v >= 100;
-                        return (
-                          <Tag
-                            color={isGood ? "blue" : "default"}
-                            className={
-                              isGood
-                                ? "!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
-                                : "!rounded-md !px-2 !py-0.5 !text-xs !font-semibold !text-gray-700"
-                            }
-                          >
-                            {v}%
-                          </Tag>
-                        );
+                  columns={
+                    [
+                      {
+                        title: "Quarter",
+                        dataIndex: "quarter",
+                        key: "quarter",
+                        render: (v: string) => (
+                          <span className="text-sm text-gray-800">{v}</span>
+                        ),
                       },
-                    },
-                  ]) as ColumnsType<QuarterlyPerformanceRow>}
+                      {
+                        title: "Planned Quantity",
+                        dataIndex: "plannedQty",
+                        key: "plannedQty",
+                        align: "right",
+                        render: (v: number) => (
+                          <span className="text-sm text-gray-700">
+                            {formatNumber(v)}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: "Actual Quantity",
+                        dataIndex: "actualQty",
+                        key: "actualQty",
+                        align: "right",
+                        render: (v: number) => (
+                          <span className="text-sm text-gray-700">
+                            {formatNumber(v)}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: "Planned Revenue",
+                        dataIndex: "plannedRevenue",
+                        key: "plannedRevenue",
+                        render: (v: string) => (
+                          <span className="text-sm text-gray-700">{v}</span>
+                        ),
+                      },
+                      {
+                        title: "Actual Revenue",
+                        dataIndex: "actualRevenue",
+                        key: "actualRevenue",
+                        render: (v: string) => (
+                          <span className="text-sm text-gray-700">{v}</span>
+                        ),
+                      },
+                      {
+                        title: "Accuracy %",
+                        dataIndex: "accuracyPct",
+                        key: "accuracyPct",
+                        align: "center",
+                        render: (v: number) => {
+                          const isGood = v >= 100;
+                          return (
+                            <Tag
+                              color={isGood ? "blue" : "default"}
+                              className={
+                                isGood
+                                  ? "!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
+                                  : "!rounded-md !px-2 !py-0.5 !text-xs !font-semibold !text-gray-700"
+                              }
+                            >
+                              {v}%
+                            </Tag>
+                          );
+                        },
+                      },
+                    ] as ColumnsType<QuarterlyPerformanceRow>
+                  }
                 />
               </div>
             </div>
@@ -2263,8 +2804,12 @@ export default function PrlManagementPage() {
         {analyticsTab === "risk" && (
           <div className="space-y-4">
             <div className="rounded-xl border border-gray-100 bg-white p-4">
-              <div className="text-sm font-semibold text-gray-900">Risk Assessment Matrix</div>
-              <div className="text-xs text-gray-500 mt-1">Identified risks and mitigation strategies</div>
+              <div className="text-sm font-semibold text-gray-900">
+                Risk Assessment Matrix
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                Identified risks and mitigation strategies
+              </div>
 
               <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
                 <Table<RiskAssessmentRow>
@@ -2272,67 +2817,73 @@ export default function PrlManagementPage() {
                   rowKey="key"
                   size="middle"
                   pagination={false}
-                  columns={([
-                    {
-                      title: "Risk Factor",
-                      dataIndex: "riskFactor",
-                      key: "riskFactor",
-                      render: (v: string) => <span className="text-sm text-gray-800">{v}</span>,
-                    },
-                    {
-                      title: "Probability",
-                      dataIndex: "probability",
-                      key: "probability",
-                      align: "center",
-                      render: (v: RiskAssessmentRow["probability"]) => (
-                        <Tag
-                          color={v === "High" ? "red" : "default"}
-                          className={
-                            v === "High"
-                              ? "!rounded-md !px-2 !py-0.5 !text-xs !font-semibold"
-                              : "!rounded-md !px-2 !py-0.5 !text-xs !font-semibold !text-gray-700"
-                          }
-                        >
-                          {v}
-                        </Tag>
-                      ),
-                    },
-                    {
-                      title: "Impact",
-                      dataIndex: "impact",
-                      key: "impact",
-                      align: "center",
-                      render: (v: RiskAssessmentRow["impact"]) => (
-                        <Tag
-                          color={v === "High" ? "red" : "default"}
-                          className={
-                            v === "High"
-                              ? "!rounded-md !px-2 !py-0.5 !text-xs !font-semibold"
-                              : "!rounded-md !px-2 !py-0.5 !text-xs !font-semibold !text-gray-700"
-                          }
-                        >
-                          {v}
-                        </Tag>
-                      ),
-                    },
-                    {
-                      title: "Mitigation Strategy",
-                      dataIndex: "mitigationStrategy",
-                      key: "mitigationStrategy",
-                      render: (v: string) => <span className="text-sm text-gray-700">{v}</span>,
-                    },
-                    {
-                      title: "Status",
-                      dataIndex: "status",
-                      key: "status",
-                      align: "center",
-                      render: (v: RiskAssessmentRow["status"]) => (
-                        <Tag className="!rounded-md !px-2 !py-0.5 !text-xs !font-semibold !text-gray-700">
-                          {v}
-                        </Tag>
-                      ),
-                    },
-                  ]) as ColumnsType<RiskAssessmentRow>}
+                  columns={
+                    [
+                      {
+                        title: "Risk Factor",
+                        dataIndex: "riskFactor",
+                        key: "riskFactor",
+                        render: (v: string) => (
+                          <span className="text-sm text-gray-800">{v}</span>
+                        ),
+                      },
+                      {
+                        title: "Probability",
+                        dataIndex: "probability",
+                        key: "probability",
+                        align: "center",
+                        render: (v: RiskAssessmentRow["probability"]) => (
+                          <Tag
+                            color={v === "High" ? "red" : "default"}
+                            className={
+                              v === "High"
+                                ? "!rounded-md !px-2 !py-0.5 !text-xs !font-semibold"
+                                : "!rounded-md !px-2 !py-0.5 !text-xs !font-semibold !text-gray-700"
+                            }
+                          >
+                            {v}
+                          </Tag>
+                        ),
+                      },
+                      {
+                        title: "Impact",
+                        dataIndex: "impact",
+                        key: "impact",
+                        align: "center",
+                        render: (v: RiskAssessmentRow["impact"]) => (
+                          <Tag
+                            color={v === "High" ? "red" : "default"}
+                            className={
+                              v === "High"
+                                ? "!rounded-md !px-2 !py-0.5 !text-xs !font-semibold"
+                                : "!rounded-md !px-2 !py-0.5 !text-xs !font-semibold !text-gray-700"
+                            }
+                          >
+                            {v}
+                          </Tag>
+                        ),
+                      },
+                      {
+                        title: "Mitigation Strategy",
+                        dataIndex: "mitigationStrategy",
+                        key: "mitigationStrategy",
+                        render: (v: string) => (
+                          <span className="text-sm text-gray-700">{v}</span>
+                        ),
+                      },
+                      {
+                        title: "Status",
+                        dataIndex: "status",
+                        key: "status",
+                        align: "center",
+                        render: (v: RiskAssessmentRow["status"]) => (
+                          <Tag className="!rounded-md !px-2 !py-0.5 !text-xs !font-semibold !text-gray-700">
+                            {v}
+                          </Tag>
+                        ),
+                      },
+                    ] as ColumnsType<RiskAssessmentRow>
+                  }
                 />
               </div>
             </div>
@@ -2344,10 +2895,11 @@ export default function PrlManagementPage() {
           analyticsTab !== "customers" &&
           analyticsTab !== "performance" &&
           analyticsTab !== "risk" && (
-          <div className="rounded-xl border border-gray-100 bg-gray-50 p-6 text-sm text-gray-600">
-            {analyticsTabs.find((t) => t.id === analyticsTab)?.label} (coming soon).
-          </div>
-        )}
+            <div className="rounded-xl border border-gray-100 bg-gray-50 p-6 text-sm text-gray-600">
+              {analyticsTabs.find((t) => t.id === analyticsTab)?.label} (coming
+              soon).
+            </div>
+          )}
       </Modal>
     </div>
   );
