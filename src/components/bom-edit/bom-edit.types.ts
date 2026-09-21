@@ -14,6 +14,7 @@ export type ProcessRouteForm = {
 };
 
 export type MaterialSpecForm = {
+  raw_material_master_id?: number;
   material_code?: string;
   material_grade?: string;
   form?: string;

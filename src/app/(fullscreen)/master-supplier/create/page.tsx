@@ -39,6 +39,10 @@ import {
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 import { useGetUomsQuery } from "@/lib/api/system-settings/api";
 import { useListWarehousesQuery } from "@/lib/api/warehouse/api";
+import {
+  type RawMaterialMaster,
+  useGetRawMaterialMastersQuery,
+} from "@/lib/api/raw-material-master/api";
 import { setFlashMessage } from "@/lib/utils/flashMessage";
 import {
   focusFirstInvalidField,
@@ -347,8 +351,7 @@ const getSupplierItemPayloadJson = (
 ): SupplierItemPayloadJSON | undefined => {
   if (!isRecord(record)) return undefined;
   return (asRecord(record.payload_json) ?? asRecord(record.payloadJson)) as
-    | SupplierItemPayloadJSON
-    | undefined;
+    SupplierItemPayloadJSON | undefined;
 };
 
 const getSupplierItemPayloadDetail = (
@@ -357,8 +360,7 @@ const getSupplierItemPayloadDetail = (
   const payloadJson = getSupplierItemPayloadJson(record);
   return (asRecord(payloadJson?.payload_detail) ??
     (isRecord(record) ? asRecord(record.payload_detail) : undefined)) as
-    | SupplierItemPayloadDetail
-    | undefined;
+    SupplierItemPayloadDetail | undefined;
 };
 
 const getSupplierItemPayloadMaterialSpec = (
@@ -367,11 +369,9 @@ const getSupplierItemPayloadMaterialSpec = (
   const payloadDetail = getSupplierItemPayloadDetail(record);
   return (
     (asRecord(payloadDetail?.material_spec) as
-      | SupplierItemPayloadMaterialSpecDetail
-      | undefined) ??
+      SupplierItemPayloadMaterialSpecDetail | undefined) ??
     (asRecord(payloadDetail?.material_spec_detail) as
-      | SupplierItemPayloadMaterialSpecDetail
-      | undefined) ??
+      SupplierItemPayloadMaterialSpecDetail | undefined) ??
     payloadDetail?.material_spec ??
     payloadDetail?.material_spec_detail ??
     undefined
@@ -644,6 +644,10 @@ function MasterSupplierCreatePageContent() {
   const [uniqSearch, setUniqSearch] = useState("");
   const [debouncedUniqSearch, setDebouncedUniqSearch] = useState("");
   const [uniqPage, setUniqPage] = useState(1);
+  const [rawMasterPage, setRawMasterPage] = useState(1);
+  const [accumulatedRawMasters, setAccumulatedRawMasters] = useState<
+    RawMaterialMaster[]
+  >([]);
   const [accumulatedBomItems, setAccumulatedBomItems] = useState<
     BackendBomNode[]
   >([]);
@@ -656,10 +660,14 @@ function MasterSupplierCreatePageContent() {
   // Reset pagination whenever search term or supplier changes
   useEffect(() => {
     setUniqPage(1);
+    setRawMasterPage(1);
+    setAccumulatedRawMasters([]);
   }, [debouncedUniqSearch]);
 
   useEffect(() => {
     setUniqPage(1);
+    setRawMasterPage(1);
+    setAccumulatedRawMasters([]);
     setAccumulatedBomItems([]);
   }, [selectedSupplierId, section]);
 
@@ -684,6 +692,47 @@ function MasterSupplierCreatePageContent() {
       skip: !apiEnabled,
     },
   );
+  const rawMaterialMastersQuery = useGetRawMaterialMastersQuery(
+    { page: rawMasterPage, limit: 50, search: debouncedUniqSearch },
+    { skip: !apiEnabled || section !== "raw-material" || !selectedSupplierId },
+  );
+  useEffect(() => {
+    const incoming = rawMaterialMastersQuery.data?.items ?? [];
+    if (rawMasterPage === 1) {
+      setAccumulatedRawMasters(incoming);
+      return;
+    }
+    setAccumulatedRawMasters((current) => {
+      const byId = new Map(current.map((item) => [item.id, item]));
+      incoming.forEach((item) => byId.set(item.id, item));
+      return Array.from(byId.values());
+    });
+  }, [rawMasterPage, rawMaterialMastersQuery.data?.items]);
+
+  const rawMaterialMasterOptions = useMemo<BomOption[]>(() => {
+    const seen = new Set<string>();
+    return accumulatedRawMasters
+      .filter((item) => item.status === "Active")
+      .filter((item) => {
+        const key = item.material_name
+          .trim()
+          .replace(/\s+/g, " ")
+          .toUpperCase();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((item) => ({
+        value: item.material_name.trim(),
+        label: item.material_name.trim(),
+        materialCode: item.material_code,
+        partName: item.material_name,
+        grade: item.material_grade ?? undefined,
+        type: item.type_material,
+        uom: item.uom ?? undefined,
+        weight: item.weight_kg ?? undefined,
+      }));
+  }, [accumulatedRawMasters]);
 
   const BOM_PAGE_SIZE = 1000;
 
@@ -779,8 +828,7 @@ function MasterSupplierCreatePageContent() {
           // atas, sisanya tetap bisa dipilih dan dicari.
           const wanted = sectionToMaterialCategory(section).toLowerCase();
           const leftRank = left.category.toLowerCase() === wanted ? 0 : 1;
-          const rightRank =
-            right.category.toLowerCase() === wanted ? 0 : 1;
+          const rightRank = right.category.toLowerCase() === wanted ? 0 : 1;
           if (leftRank !== rightRank) return leftRank - rightRank;
           return left.label.localeCompare(right.label);
         }),
@@ -879,6 +927,17 @@ function MasterSupplierCreatePageContent() {
   };
 
   const selectedWarehouseId = Form.useWatch("warehouse_uuid", form);
+  const handleRawMasterPopupScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLDivElement;
+    const nearBottom =
+      target.scrollTop + target.offsetHeight >= target.scrollHeight - 40;
+    const loaded = accumulatedRawMasters.length;
+    const total = rawMaterialMastersQuery.data?.total ?? 0;
+    if (nearBottom && !rawMaterialMastersQuery.isFetching && loaded < total) {
+      setRawMasterPage((page) => page + 1);
+    }
+  };
+
   const formUniqCode = Form.useWatch("uniq_code", form);
 
   const selectedWarehouse = useMemo(
@@ -1283,7 +1342,8 @@ function MasterSupplierCreatePageContent() {
             <Button
               type="text"
               icon={<ArrowLeftOutlined />}
-              onClick={() => router.push("/master-supplier")}>
+              onClick={() => router.push("/master-supplier")}
+            >
               Back to Master Supplier
             </Button>
             <Typography.Title level={3} className="!mb-1 !mt-2">
@@ -1298,7 +1358,8 @@ function MasterSupplierCreatePageContent() {
                     : section === "indirect-raw-material"
                       ? "purple"
                       : "blue"
-                }>
+                }
+              >
                 {sectionLabel(section)}
               </Tag>
               {readOnly ? <Tag>Read only</Tag> : null}
@@ -1314,7 +1375,8 @@ function MasterSupplierCreatePageContent() {
                 type="primary"
                 icon={<SaveOutlined />}
                 loading={createState.isLoading || updateState.isLoading}
-                onClick={handleSave}>
+                onClick={handleSave}
+              >
                 {isEditing ? "Update" : "Save"}
               </Button>
             ) : null}
@@ -1385,7 +1447,8 @@ function MasterSupplierCreatePageContent() {
                               required: true,
                               message: "Please select a supplier",
                             },
-                          ]}>
+                          ]}
+                        >
                           <Select
                             size="large"
                             showSearch
@@ -1397,8 +1460,7 @@ function MasterSupplierCreatePageContent() {
                               const needle = input.trim().toLowerCase();
                               if (!needle) return true;
                               const opt = option as
-                                | Partial<SupplierOption>
-                                | undefined;
+                                Partial<SupplierOption> | undefined;
                               if (!opt) return false;
                               if (
                                 (opt.matchValues ?? []).some((entry) =>
@@ -1436,7 +1498,8 @@ function MasterSupplierCreatePageContent() {
                               required: true,
                               message: "Please select a warehouse",
                             },
-                          ]}>
+                          ]}
+                        >
                           <Select
                             size="large"
                             showSearch
@@ -1447,8 +1510,7 @@ function MasterSupplierCreatePageContent() {
                               const needle = input.trim().toLowerCase();
                               if (!needle) return true;
                               const opt = option as
-                                | { label?: string; type?: string }
-                                | undefined;
+                                { label?: string; type?: string } | undefined;
                               return `${opt?.label ?? ""} ${opt?.type ?? ""}`
                                 .toLowerCase()
                                 .includes(needle);
@@ -1487,7 +1549,8 @@ function MasterSupplierCreatePageContent() {
                                   required: true,
                                   message: "Please select a UNIQ Code",
                                 },
-                              ]}>
+                              ]}
+                            >
                               <Select
                                 size="large"
                                 showSearch
@@ -1499,10 +1562,18 @@ function MasterSupplierCreatePageContent() {
                                   const opt = option as unknown as BomOption & {
                                     materialCode?: string;
                                   } & { label?: string; value?: string };
-                                  const label = String(opt.label ?? "").toLowerCase();
-                                  const material = String(opt.materialCode ?? "").toLowerCase();
-                                  const grade = String((opt as BomOption).grade ?? "").toLowerCase();
-                                  const value = String(opt.value ?? "").toLowerCase();
+                                  const label = String(
+                                    opt.label ?? "",
+                                  ).toLowerCase();
+                                  const material = String(
+                                    opt.materialCode ?? "",
+                                  ).toLowerCase();
+                                  const grade = String(
+                                    (opt as BomOption).grade ?? "",
+                                  ).toLowerCase();
+                                  const value = String(
+                                    opt.value ?? "",
+                                  ).toLowerCase();
                                   // [bom-label-matcode] part number / part name / model ikut dicocokkan
                                   // walau tidak selalu tampil di label.
                                   const partNumber = String(
@@ -1525,47 +1596,103 @@ function MasterSupplierCreatePageContent() {
                                   );
                                 }}
                                 placeholder="Search or scroll to browse..."
-                                options={(() => {
-                                  const toSelectOpt = (
-                                    option: BomOption & { _isParent?: boolean },
-                                  ) => ({
-                                    ...option,
-                                    label: buildBomOptionLabel(option),
-                                  });
+                                options={
+                                  section === "raw-material"
+                                    ? rawMaterialMasterOptions
+                                    : (() => {
+                                        const toSelectOpt = (
+                                          option: BomOption & {
+                                            _isParent?: boolean;
+                                          },
+                                        ) => ({
+                                          ...option,
+                                          label: buildBomOptionLabel(option),
+                                        });
 
-                                  const list = bomOptions.map(toSelectOpt);
+                                        const list =
+                                          bomOptions.map(toSelectOpt);
 
-                                  if (
-                                    selectedBomOption &&
-                                    !list.some(
-                                      (o) =>
-                                        o.value === selectedBomOption.value,
-                                    )
-                                  ) {
-                                    list.unshift(
-                                      toSelectOpt(
-                                        selectedBomOption as BomOption & {
-                                          _isParent?: boolean;
-                                        },
-                                      ),
-                                    );
-                                  }
-                                  return list;
-                                })()}
+                                        if (
+                                          selectedBomOption &&
+                                          !list.some(
+                                            (o) =>
+                                              o.value ===
+                                              selectedBomOption.value,
+                                          )
+                                        ) {
+                                          list.unshift(
+                                            toSelectOpt(
+                                              selectedBomOption as BomOption & {
+                                                _isParent?: boolean;
+                                              },
+                                            ),
+                                          );
+                                        }
+                                        return list;
+                                      })()
+                                }
                                 onSearch={setUniqSearch}
-                                onChange={(val, opt) =>
+                                onChange={(val, opt) => {
+                                  if (section === "raw-material") {
+                                    const materialCode = String(
+                                      val ?? "",
+                                    ).trim();
+                                    setSelectedUniqCode(materialCode);
+                                    setSelectedBomLookupId("");
+                                    setSelectedBomOption(
+                                      materialCode
+                                        ? {
+                                            value: materialCode,
+                                            label: materialCode,
+                                          }
+                                        : null,
+                                    );
+                                    const master = accumulatedRawMasters.find(
+                                      (item) =>
+                                        item.material_name.trim() ===
+                                        materialCode,
+                                    );
+                                    form.setFieldsValue({
+                                      uniq_code: materialCode,
+                                      part_name: master?.material_name,
+                                      grade:
+                                        master?.material_grade ?? undefined,
+                                      material_form: master?.form ?? undefined,
+                                      width_mm: master?.width_mm ?? undefined,
+                                      diameter_mm:
+                                        master?.diameter_mm ?? undefined,
+                                      thickness_mm:
+                                        master?.thickness_mm ?? undefined,
+                                      length_mm: master?.length_mm ?? undefined,
+                                      weight: master?.weight_kg ?? undefined,
+                                      uom: master?.uom ?? undefined,
+                                    });
+                                    return;
+                                  }
                                   handleUniqChange(
                                     val as string,
                                     opt as BomOption | BomOption[],
-                                  )
+                                  );
+                                }}
+                                onPopupScroll={
+                                  section === "raw-material"
+                                    ? handleRawMasterPopupScroll
+                                    : handleUniqPopupScroll
                                 }
-                                onPopupScroll={handleUniqPopupScroll}
-                                loading={bomSearchFetching}
+                                loading={
+                                  section === "raw-material"
+                                    ? rawMaterialMastersQuery.isFetching
+                                    : bomSearchFetching
+                                }
                                 disabled={readOnly || !selectedSupplierId}
                                 notFoundContent={
-                                  bomSearchFetching
+                                  (
+                                    section === "raw-material"
+                                      ? rawMaterialMastersQuery.isFetching
+                                      : bomSearchFetching
+                                  )
                                     ? "Loading..."
-                                    : "No items found"
+                                    : "No material codes found"
                                 }
                               />
                             </Form.Item>
@@ -1573,7 +1700,8 @@ function MasterSupplierCreatePageContent() {
                             <Form.Item
                               className="md:col-span-1 xl:col-span-2"
                               label="Grade"
-                              name="grade">
+                              name="grade"
+                            >
                               <Input
                                 size="large"
                                 placeholder="Auto-filled from material spec"
@@ -1583,7 +1711,8 @@ function MasterSupplierCreatePageContent() {
                             <Form.Item
                               className="md:col-span-1 xl:col-span-2"
                               label="Form"
-                              name="material_form">
+                              name="material_form"
+                            >
                               <Input
                                 size="large"
                                 placeholder="Auto-filled from material spec"
@@ -1593,7 +1722,8 @@ function MasterSupplierCreatePageContent() {
                             <Form.Item
                               className="md:col-span-2 xl:col-span-2"
                               label="Supplier Cycle"
-                              name="customer_cycle">
+                              name="customer_cycle"
+                            >
                               <Input
                                 size="large"
                                 placeholder="Auto-filled from material spec"
@@ -1603,7 +1733,8 @@ function MasterSupplierCreatePageContent() {
                             <Form.Item
                               className="md:col-span-1 xl:col-span-3"
                               label="Width (mm)"
-                              name="width_mm">
+                              name="width_mm"
+                            >
                               <InputNumber
                                 style={{ width: "100%" }}
                                 size="large"
@@ -1615,7 +1746,8 @@ function MasterSupplierCreatePageContent() {
                             <Form.Item
                               className="md:col-span-1 xl:col-span-3"
                               label="Diameter (mm)"
-                              name="diameter_mm">
+                              name="diameter_mm"
+                            >
                               <InputNumber
                                 style={{ width: "100%" }}
                                 size="large"
@@ -1627,7 +1759,8 @@ function MasterSupplierCreatePageContent() {
                             <Form.Item
                               className="md:col-span-1 xl:col-span-3"
                               label="Thickness (mm)"
-                              name="thickness_mm">
+                              name="thickness_mm"
+                            >
                               <InputNumber
                                 style={{ width: "100%" }}
                                 size="large"
@@ -1639,7 +1772,8 @@ function MasterSupplierCreatePageContent() {
                             <Form.Item
                               className="md:col-span-1 xl:col-span-3"
                               label="Length (mm)"
-                              name="length_mm">
+                              name="length_mm"
+                            >
                               <InputNumber
                                 style={{ width: "100%" }}
                                 size="large"
@@ -1651,7 +1785,8 @@ function MasterSupplierCreatePageContent() {
                             <Form.Item
                               className="md:col-span-1 xl:col-span-3"
                               label="Weight (kg)"
-                              name="weight">
+                              name="weight"
+                            >
                               <InputNumber
                                 style={{ width: "100%" }}
                                 size="large"
@@ -1669,7 +1804,8 @@ function MasterSupplierCreatePageContent() {
                                   required: true,
                                   message: "Please input Quantity per kanban",
                                 },
-                              ]}>
+                              ]}
+                            >
                               <InputNumber
                                 style={{ width: "100%" }}
                                 min={0}
@@ -1691,7 +1827,8 @@ function MasterSupplierCreatePageContent() {
                                   message:
                                     "Percentage must be between 0 and 100",
                                 },
-                              ]}>
+                              ]}
+                            >
                               <InputNumber
                                 style={{ width: "100%" }}
                                 min={0}
@@ -1714,7 +1851,8 @@ function MasterSupplierCreatePageContent() {
                             <Form.Item
                               className="md:col-span-1 xl:col-span-3"
                               label="Lead Time (days)"
-                              name="cycle_time">
+                              name="cycle_time"
+                            >
                               <InputNumber
                                 style={{ width: "100%" }}
                                 min={0}
@@ -1731,7 +1869,8 @@ function MasterSupplierCreatePageContent() {
                               className="md:col-span-1 xl:col-span-3"
                               label="Status"
                               name="status"
-                              initialValue="active">
+                              initialValue="active"
+                            >
                               <Select
                                 size="large"
                                 showSearch
@@ -1747,7 +1886,8 @@ function MasterSupplierCreatePageContent() {
                             <Form.Item
                               className="md:col-span-2 xl:col-span-12"
                               label="Description"
-                              name="description">
+                              name="description"
+                            >
                               <Input
                                 size="large"
                                 placeholder="Optional description"
@@ -1773,7 +1913,8 @@ function MasterSupplierCreatePageContent() {
                                       ? "Please select a Sebango Code"
                                       : "Please select a UNIQ Code",
                                 },
-                              ]}>
+                              ]}
+                            >
                               <Select
                                 size="large"
                                 showSearch
@@ -1787,10 +1928,18 @@ function MasterSupplierCreatePageContent() {
                                   const opt = option as unknown as BomOption & {
                                     materialCode?: string;
                                   } & { label?: string; value?: string };
-                                  const label = String(opt.label ?? "").toLowerCase();
-                                  const material = String(opt.materialCode ?? "").toLowerCase();
-                                  const grade = String((opt as BomOption).grade ?? "").toLowerCase();
-                                  const value = String(opt.value ?? "").toLowerCase();
+                                  const label = String(
+                                    opt.label ?? "",
+                                  ).toLowerCase();
+                                  const material = String(
+                                    opt.materialCode ?? "",
+                                  ).toLowerCase();
+                                  const grade = String(
+                                    (opt as BomOption).grade ?? "",
+                                  ).toLowerCase();
+                                  const value = String(
+                                    opt.value ?? "",
+                                  ).toLowerCase();
                                   // [bom-label-matcode] part number / part name / model ikut dicocokkan
                                   // walau tidak selalu tampil di label.
                                   const partNumber = String(
@@ -1869,7 +2018,8 @@ function MasterSupplierCreatePageContent() {
 
                             <Form.Item
                               label="Product Model"
-                              name="product_model">
+                              name="product_model"
+                            >
                               <Input
                                 size="large"
                                 placeholder="Auto-filled from BOM"
@@ -1952,7 +2102,8 @@ function MasterSupplierCreatePageContent() {
                                   required: true,
                                   message: "Please input Quantity per kanban",
                                 },
-                              ]}>
+                              ]}
+                            >
                               <InputNumber
                                 style={{ width: "100%" }}
                                 min={0}
@@ -1988,7 +2139,8 @@ function MasterSupplierCreatePageContent() {
                                 max: 100,
                                 message: "Percentage must be between 0 and 100",
                               },
-                            ]}>
+                            ]}
+                          >
                             <InputNumber
                               style={{ width: "100%" }}
                               min={0}
@@ -2016,7 +2168,8 @@ function MasterSupplierCreatePageContent() {
                                 // required: true,
                                 message: "Please input Supplier cycle",
                               },
-                            ]}>
+                            ]}
+                          >
                             <Input
                               size="large"
                               placeholder="e.g. Daily / Weekly / Monthly"
@@ -2046,7 +2199,8 @@ function MasterSupplierCreatePageContent() {
                           <Form.Item
                             label="Status"
                             name="status"
-                            initialValue="active">
+                            initialValue="active"
+                          >
                             <Select
                               size="large"
                               showSearch
@@ -2099,9 +2253,7 @@ function MasterSupplierCreatePageContent() {
                           Selected Uniq
                         </div>
                         <div className="mt-1 text-sm font-semibold text-[#1f2d3d]">
-                          {selectedUniqCode ||
-                            formUniqCode ||
-                            "-"}
+                          {selectedUniqCode || formUniqCode || "-"}
                         </div>
                       </div>
                     </div>

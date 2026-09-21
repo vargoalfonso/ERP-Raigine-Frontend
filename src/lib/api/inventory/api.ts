@@ -96,6 +96,7 @@ export type InventoryType =
 
 export type InventoryRecord = {
   id: string;
+  raw_material_master_id?: number;
   uniq_code?: string;
   raw_material_type?: string;
   rm_source?: string;
@@ -168,6 +169,7 @@ export type InventoryKanbanSummary = {
 
 export type InventoryMutationRequest = {
   uniq_code: string;
+  raw_material_master_id?: number;
   raw_material_type?: string;
   rm_source?: string;
   warehouse_location?: string;
@@ -268,6 +270,9 @@ const toInventoryRecord = (raw: unknown): InventoryRecord => {
       toText(
         record.id ?? record.inventory_id ?? record.ID ?? record.InventoryID,
       ) ?? "",
+    raw_material_master_id: toNumber(
+      record.raw_material_master_id ?? record.RawMaterialMasterID,
+    ),
     uniq_code: toText(
       record.uniq_code ?? record.uniq ?? record.UniqCode ?? record.Uniq,
     ),

@@ -151,7 +151,6 @@ const menuItems: MenuItem[] = [
       //   icon: MdGroup,
       //   href: "/master-supplier-only",
       // },
-      
     ],
   },
   {
@@ -220,6 +219,12 @@ const menuItems: MenuItem[] = [
         label: "Raw Materials",
         icon: MdScience,
         href: "/raw-materials",
+      },
+      {
+        id: "raw-material-master",
+        label: "Raw Material Master",
+        icon: MdArchive,
+        href: "/raw-material-master",
       },
       {
         id: "indirect-material-raw",
@@ -347,9 +352,11 @@ export default function Sidebar() {
 
 function SidebarContent() {
   const [isExpanded, setIsExpanded] = useState(true);
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
-    "master-supplier-group": true,
-  });
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(
+    {
+      "master-supplier-group": true,
+    },
+  );
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
@@ -413,7 +420,9 @@ function SidebarContent() {
           >
             <Icon className="w-5 h-5 flex-shrink-0 text-gray-700" />
             {isExpanded && (
-              <span className="text-sm font-medium text-gray-800 flex-1">{item.label}</span>
+              <span className="text-sm font-medium text-gray-800 flex-1">
+                {item.label}
+              </span>
             )}
             {isExpanded && (
               <MdChevronRight
@@ -423,7 +432,9 @@ function SidebarContent() {
               />
             )}
           </button>
-          <div className={`${isExpanded ? "ml-6" : "ml-0"} ${isOpen ? "block" : "hidden"}`}>
+          <div
+            className={`${isExpanded ? "ml-6" : "ml-0"} ${isOpen ? "block" : "hidden"}`}
+          >
             {item.children?.map((child) => renderMenuItem(child, level + 1))}
           </div>
         </div>
@@ -437,7 +448,7 @@ function SidebarContent() {
       if (hrefPath === pathname && hrefQuery) {
         const hrefParams = new URLSearchParams(hrefQuery);
         isActive = Array.from(hrefParams.entries()).every(
-          ([key, value]) => searchParams.get(key) === value
+          ([key, value]) => searchParams.get(key) === value,
         );
       }
     }

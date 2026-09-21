@@ -382,6 +382,10 @@ export default function BomEditPage() {
             ? spec.raw_material_type
             : undefined;
       return {
+        raw_material_master_id:
+          typeof spec.raw_material_master_id === "number"
+            ? spec.raw_material_master_id
+            : undefined,
         material_grade:
           typeof spec.material_grade === "string"
             ? spec.material_grade
@@ -638,6 +642,7 @@ export default function BomEditPage() {
           cleanText(spec?.material_grade) ?? cleanText(spec?.grade) ?? null;
         const resolvedGrade = cleanText(spec?.grade) ?? null;
         const payload: Record<string, unknown> = {
+          raw_material_master_id: spec?.raw_material_master_id ?? null,
           grade: resolvedGrade,
           material_grade: resolvedMaterialGrade,
           type_material: spec?.is_subcon

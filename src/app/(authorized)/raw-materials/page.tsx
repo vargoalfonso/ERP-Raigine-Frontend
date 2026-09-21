@@ -15,6 +15,8 @@ import {
   Space,
   Divider,
   Descriptions,
+  Table,
+  Typography,
 } from "antd";
 import {
   ScanOutlined,
@@ -27,7 +29,7 @@ import {
 } from "@ant-design/icons";
 import StatsCard from "@/components/StatsCard";
 import TableTemplate from "@/components/TableTemplate";
-import type { ColumnType } from "antd/es/table";
+import type { ColumnType, ColumnsType } from "antd/es/table";
 import Image from "next/image";
 import type { FormInstance } from "antd";
 import { BsBoxSeam } from "react-icons/bs";
@@ -56,6 +58,21 @@ import {
 import { useLazyGenerateQRRawmaterialQuery } from "@/lib/api/raw-materials/api";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import {
+  type RawMaterialPlanningItem,
+  useGetRawMaterialPlanningQuery,
+} from "@/lib/api/raw-material-master/api";
+
+const planningNumber = (value: number | null | undefined) =>
+  new Intl.NumberFormat("id-ID", { maximumFractionDigits: 4 }).format(
+    value ?? 0,
+  );
+
+const planningDecisionTag = (value: RawMaterialPlanningItem["decision"]) => {
+  if (value === "BUY") return <Tag color="error">BUY</Tag>;
+  if (value === "NOT_BUY") return <Tag color="success">NOT BUY</Tag>;
+  return <Tag color="warning">DATA INCOMPLETE</Tag>;
+};
 
 // Mock data untuk demo
 const MOCK_RAW_MATERIALS: RawMaterialRecord[] = [
@@ -460,6 +477,9 @@ export default function RawMaterialsPage() {
     { type: "raw-materials", page: currentPage, limit: pageSize },
     { skip: !apiEnabled },
   );
+  const planningQuery = useGetRawMaterialPlanningQuery(undefined, {
+    skip: !apiEnabled,
+  });
   const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
     skip: !apiEnabled,
   });
@@ -972,6 +992,79 @@ export default function RawMaterialsPage() {
     },
   ];
 
+  const planningColumns: ColumnsType<RawMaterialPlanningItem> = [
+    {
+      title: "Material",
+      fixed: "left",
+      width: 240,
+      render: (_, row) => (
+        <>
+          <Typography.Text strong>{row.material_code}</Typography.Text>
+          <br />
+          <Typography.Text type="secondary">
+            {row.material_name}
+          </Typography.Text>
+        </>
+      ),
+    },
+    {
+      title: "Demand / day",
+      dataIndex: "daily_demand",
+      align: "right",
+      width: 130,
+      render: planningNumber,
+    },
+    {
+      title: "Beginning stock",
+      dataIndex: "beginning_stock",
+      align: "right",
+      width: 135,
+      render: planningNumber,
+    },
+    {
+      title: "Ending stock",
+      dataIndex: "ending_stock",
+      align: "right",
+      width: 125,
+      render: planningNumber,
+    },
+    {
+      title: "Minimum",
+      dataIndex: "minimum_stock_level",
+      align: "right",
+      width: 110,
+      render: planningNumber,
+    },
+    {
+      title: "Stock days",
+      dataIndex: "actual_stock_days",
+      align: "right",
+      width: 105,
+      render: planningNumber,
+    },
+    {
+      title: "Sources",
+      dataIndex: "demand_source_count",
+      align: "right",
+      width: 90,
+    },
+    {
+      title: "Decision",
+      dataIndex: "decision",
+      width: 150,
+      render: planningDecisionTag,
+    },
+    {
+      title: "Recommended qty",
+      dataIndex: "recommended_buy_qty",
+      align: "right",
+      width: 150,
+      render: (value) => (
+        <Typography.Text strong>{planningNumber(value)}</Typography.Text>
+      ),
+    },
+  ];
+
   return (
     <div className="p-6 space-y-6">
       <Modal
@@ -1109,6 +1202,28 @@ export default function RawMaterialsPage() {
             onPageChange={setCurrentPage}
             onPageSizeChange={setPageSize}
             loading={apiEnabled ? listQuery.isFetching : false}
+          />
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow-sm">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900">
+            BUY / NOT BUY Planning
+          </h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Rekomendasi pembelian berdasarkan Machine Pattern, BOM, stok
+            bersama, safety stock, dan target stock days.
+          </p>
+        </div>
+        <div className="p-6">
+          <Table
+            rowKey="master_id"
+            columns={planningColumns}
+            dataSource={planningQuery.data ?? []}
+            loading={planningQuery.isFetching}
+            scroll={{ x: 1250 }}
+            pagination={{ pageSize: 20 }}
           />
         </div>
       </div>

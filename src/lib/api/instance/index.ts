@@ -1,40 +1,47 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react";
 import { notifySessionExpired } from "@/lib/sessionExpiry";
 
-let cachedLocationPromise: Promise<{ latitude: number | null; longitude: number | null }> | null = null;
+let cachedLocationPromise: Promise<{
+  latitude: number | null;
+  longitude: number | null;
+}> | null = null;
 
 export const getUserLocation = async () => {
   if (cachedLocationPromise) {
     return cachedLocationPromise;
   }
 
-  cachedLocationPromise = new Promise<{ latitude: number | null; longitude: number | null }>(
-    (resolve, reject) => {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            resolve({
-              latitude: position.coords.latitude,
-              longitude: position.coords.longitude,
-            });
-          },
-          (error) => {
-            reject(error);
-          },
-          {
-            enableHighAccuracy: false,
-            timeout: 2000,
-            maximumAge: 5 * 60 * 1000,
-          }
-        );
-      } else {
-        reject(new Error("Geolocation is not supported"));
-      }
+  cachedLocationPromise = new Promise<{
+    latitude: number | null;
+    longitude: number | null;
+  }>((resolve, reject) => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          });
+        },
+        (error) => {
+          reject(error);
+        },
+        {
+          enableHighAccuracy: false,
+          timeout: 2000,
+          maximumAge: 5 * 60 * 1000,
+        },
+      );
+    } else {
+      reject(new Error("Geolocation is not supported"));
     }
-  );
+  });
 
   return cachedLocationPromise.catch((error) => {
-    cachedLocationPromise = Promise.resolve({ latitude: null, longitude: null });
+    cachedLocationPromise = Promise.resolve({
+      latitude: null,
+      longitude: null,
+    });
     throw error;
   });
 };
@@ -42,7 +49,7 @@ export const getUserLocation = async () => {
 export const getCookiesFromBrowser = (cookieName: string): string | null => {
   const cookies = document.cookie.split("; ");
   const targetCookie = cookies.find((cookie) =>
-    cookie.startsWith(`${cookieName}=`)
+    cookie.startsWith(`${cookieName}=`),
   );
 
   return targetCookie ? targetCookie.split("=")[1] : null;
@@ -115,6 +122,7 @@ export const apiSlice = createApi({
     "SystemSettingsProcess",
     "SystemSettingsGlobalParameters",
     "SystemSettingsSupplierInfo",
+    "RawMaterialMaster",
   ],
   refetchOnFocus: false,
   baseQuery: async (args, api, extraOptions) => {
@@ -127,11 +135,14 @@ export const apiSlice = createApi({
       };
     }
 
-    const argsMeta = (typeof args === "object" && args && "meta" in args ? args.meta : undefined) as
-      | { useAuthorization?: boolean; contentType?: string }
-      | undefined;
+    const argsMeta = (
+      typeof args === "object" && args && "meta" in args ? args.meta : undefined
+    ) as { useAuthorization?: boolean; contentType?: string } | undefined;
 
-    const requestBody = typeof args === "object" && args && "body" in args ? args.body : undefined;
+    const requestBody =
+      typeof args === "object" && args && "body" in args
+        ? args.body
+        : undefined;
     const inferredContentType =
       typeof FormData !== "undefined" && requestBody instanceof FormData
         ? "multipart/form-data"

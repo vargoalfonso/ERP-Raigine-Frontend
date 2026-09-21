@@ -2,6 +2,7 @@
 
 import { Checkbox, Form, Input, InputNumber, Select, Typography } from "antd";
 import type { FormPath } from "./bom-edit.types";
+import { useGetRawMaterialMastersQuery } from "@/lib/api/raw-material-master/api";
 
 const { Text } = Typography;
 
@@ -14,11 +15,32 @@ export default function MaterialSpecEditor({
   fieldPath,
   disabled,
 }: MaterialSpecEditorProps) {
+  const { data, isFetching } = useGetRawMaterialMastersQuery({ limit: 100 });
   return (
     <div className="space-y-4">
       <Text strong>Material specification</Text>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <Form.Item
+          name={[...fieldPath, "material_spec", "raw_material_master_id"]}
+          label="Raw Material Master"
+          tooltip="BOM dengan spesifikasi yang sama harus memilih master yang sama."
+        >
+          <Select
+            showSearch
+            allowClear
+            disabled={disabled}
+            loading={isFetching}
+            placeholder="Select canonical material"
+            optionFilterProp="label"
+            options={(data?.items ?? [])
+              .filter((item) => item.status === "Active")
+              .map((item) => ({
+                value: item.id,
+                label: `${item.material_code} — ${item.material_name}`,
+              }))}
+          />
+        </Form.Item>
         <Form.Item
           name={[...fieldPath, "material_spec", "material_grade"]}
           label="Material Grade"

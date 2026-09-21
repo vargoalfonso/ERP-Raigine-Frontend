@@ -262,10 +262,8 @@ export const buildBomUniqIndex = (tree: unknown): BomUniqIndex => {
         gradeSizeByUniq[uniq] = [grade, size].filter(Boolean).join(" / ");
       if (materialCode && !materialCodeByUniq[uniq])
         materialCodeByUniq[uniq] = materialCode;
-      if (grade && !gradeByUniq[uniq])
-        gradeByUniq[uniq] = grade;
-      if (size && !sizeByUniq[uniq])
-        sizeByUniq[uniq] = size;
+      if (grade && !gradeByUniq[uniq]) gradeByUniq[uniq] = grade;
+      if (size && !sizeByUniq[uniq]) sizeByUniq[uniq] = size;
       if (packingNumber && !packingNumberByUniq[uniq]) {
         packingNumberByUniq[uniq] = packingNumber;
       }

@@ -191,7 +191,7 @@ const toSupplierRow = (
   const bomPartNumber = uniq !== "-" ? bomIndex?.partNumberByUniq[uniq] : "";
   const bomModel =
     uniq !== "-"
-      ? (bomIndex?.modelByUniq[uniq] || bomIndex?.assemblyCodeByUniq[uniq])
+      ? bomIndex?.modelByUniq[uniq] || bomIndex?.assemblyCodeByUniq[uniq]
       : "";
   const bomMaterialCode =
     uniq !== "-" ? bomIndex?.materialCodeByUniq[uniq] : "";
@@ -216,7 +216,7 @@ const toSupplierRow = (
   const materialCode =
     pickText(
       bomMaterialCode,
-      record.payload_detail?.material_spec?.material_code,
+      // record.payload_detail?.material_spec?.material_code,
       record.payload_detail?.material_spec?.material_grade,
       record.sebango_code && record.sebango_code !== uniq
         ? record.sebango_code
@@ -565,7 +565,7 @@ export default function MasterSupplierPage() {
           );
         }
 
-        return <span className="text-gray-400">—</span>;
+        return null;
       },
     },
     {
@@ -574,9 +574,7 @@ export default function MasterSupplierPage() {
       key: "uniqCode",
       width: 130,
       render: (value: string, row) =>
-        row.isGroup ? (
-          <span className="text-gray-400">—</span>
-        ) : (
+        row.isGroup ? null : (
           <span className="inline-flex items-center rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white">
             {value}
           </span>
@@ -587,8 +585,7 @@ export default function MasterSupplierPage() {
       dataIndex: "sebangoCode",
       key: "sebangoCode",
       width: 150,
-      render: (value: string, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) => (row.isGroup ? null : value),
     },
     {
       title: "Type",
@@ -596,19 +593,14 @@ export default function MasterSupplierPage() {
       key: "type",
       width: 170,
       render: (value: string, row) =>
-        row.isGroup ? (
-          <span className="text-gray-400">—</span>
-        ) : (
-          <Tag color="purple">{value}</Tag>
-        ),
+        row.isGroup ? null : <Tag color="purple">{value}</Tag>,
     },
     {
       title: "Product Model",
       dataIndex: "productModel",
       key: "productModel",
       width: 160,
-      render: (value: string, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) => (row.isGroup ? null : value),
     },
     {
       title: "Part Name",
@@ -616,9 +608,7 @@ export default function MasterSupplierPage() {
       key: "partName",
       width: 220,
       render: (value: string, row) =>
-        row.isGroup ? (
-          <span className="text-gray-400">—</span>
-        ) : (
+        row.isGroup ? null : (
           <span className="font-semibold text-gray-900">{value}</span>
         ),
     },
@@ -627,40 +617,35 @@ export default function MasterSupplierPage() {
       dataIndex: "partNumber",
       key: "partNumber",
       width: 160,
-      render: (value: string, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) => (row.isGroup ? null : value),
     },
     {
       title: "Grade / Size",
       dataIndex: "gradeSize",
       key: "gradeSize",
       width: 160,
-      render: (value: string, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) => (row.isGroup ? null : value),
     },
     {
       title: "Qty",
       dataIndex: "quantity",
       key: "quantity",
       width: 100,
-      render: (value: number, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: number, row) => (row.isGroup ? null : value),
     },
     {
       title: "Pcs / Kanban",
       dataIndex: "pcsPerKanban",
       key: "pcsPerKanban",
       width: 120,
-      render: (value: number, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: number, row) => (row.isGroup ? null : value),
     },
     {
       title: "Cycle",
       dataIndex: "customerCycle",
       key: "customerCycle",
       width: 100,
-      render: (value: string, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) => (row.isGroup ? null : value),
     },
     {
       title: "Lead Time",
@@ -668,37 +653,32 @@ export default function MasterSupplierPage() {
       key: "cycleTime",
       width: 120,
       render: (value: number, row) =>
-        row.isGroup ? (
-          <span className="text-gray-400">—</span>
-        ) : value ? (
-          `${value} day${value > 1 ? "s" : ""}`
-        ) : (
-          "-"
-        ),
+        row.isGroup
+          ? null
+          : value
+            ? `${value} day${value > 1 ? "s" : ""}`
+            : null,
     },
     {
       title: "UOM",
       dataIndex: "uom",
       key: "uom",
       width: 100,
-      render: (value: string, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) => (row.isGroup ? null : value),
     },
     {
       title: "Weight",
       dataIndex: "weight",
       key: "weight",
       width: 100,
-      render: (value: number, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: number, row) => (row.isGroup ? null : value),
     },
     {
       title: "Warehouse",
       dataIndex: "warehouse",
       key: "warehouse",
       width: 180,
-      render: (value: string, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) => (row.isGroup ? null : value),
     },
     {
       title: "Status",
@@ -706,7 +686,7 @@ export default function MasterSupplierPage() {
       key: "status",
       width: 110,
       render: (value: string, row) => {
-        if (row.isGroup) return <span className="text-gray-400">—</span>;
+        if (row.isGroup) return null;
         const lowered = value.toLowerCase();
         return (
           <Tag color={lowered === "active" ? "green" : "default"}>{value}</Tag>
@@ -755,6 +735,11 @@ export default function MasterSupplierPage() {
         ),
     },
   ];
+
+  const visibleSupplierColumns =
+    activeSection === "raw-material"
+      ? supplierColumns.filter((column) => column.key !== "uniqCode")
+      : supplierColumns;
 
   const supplierOnlyColumns: ColumnsType<SupplierOnlyRow> = [
     {
@@ -1037,7 +1022,7 @@ export default function MasterSupplierPage() {
           />
         ) : (
           <Table<SupplierTableRow>
-            columns={supplierColumns}
+            columns={visibleSupplierColumns}
             dataSource={apiEnabled ? groupedSupplierRows : []}
             rowKey="key"
             loading={apiEnabled && supplierItemsQuery.isLoading}

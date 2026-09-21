@@ -37,6 +37,7 @@ import {
 import { apiBaseUrl, getCookiesFromBrowser } from "@/lib/api/instance";
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 import { useGetMachinesQuery } from "@/lib/api/machines/api";
+import { useGetRawMaterialMastersQuery } from "@/lib/api/raw-material-master/api";
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -53,6 +54,7 @@ type ProcessRoute = {
 };
 
 type MaterialSpec = {
+  raw_material_master_id?: number;
   material_code?: string;
   form?: string;
   grade?: string;
@@ -161,6 +163,8 @@ export default function Page() {
   const router = useRouter();
   const [messageApi, contextHolder] = message.useMessage();
   const [form] = Form.useForm<Step1Values>();
+  const { data: rawMaterialMasters, isFetching: loadingRawMaterialMasters } =
+    useGetRawMaterialMastersQuery({ limit: 100 });
   const rootAddChildRef = useRef<(() => void) | null>(null);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [childFileLists, setChildFileLists] = useState<
@@ -648,6 +652,26 @@ export default function Page() {
     <div className="space-y-3">
       <Text strong>Material Specifications</Text>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Form.Item
+          name={[...fieldPath, "material_spec", "raw_material_master_id"]}
+          label="Raw Material Master"
+          tooltip="Pilih master yang sama untuk spesifikasi material yang sama."
+        >
+          <Select
+            showSearch
+            allowClear
+            disabled={disabled}
+            loading={loadingRawMaterialMasters}
+            optionFilterProp="label"
+            placeholder="Select master"
+            options={(rawMaterialMasters?.items ?? [])
+              .filter((item) => item.status === "Active")
+              .map((item) => ({
+                value: item.id,
+                label: `${item.material_code} — ${item.material_name}`,
+              }))}
+          />
+        </Form.Item>
         <Form.Item
           name={[...fieldPath, "material_spec", "material_code"]}
           label="Material Code"
@@ -1195,6 +1219,7 @@ export default function Page() {
         const s = spec ?? {};
         const form = normalizeMaterialForm(s.form);
         const raw: Record<string, unknown> = {
+          raw_material_master_id: s.raw_material_master_id,
           grade: cleanText(s.grade),
           material_grade: cleanText(s.material_code),
           type_material: s.is_subcon ? "subcon" : cleanText(s.type_material),
