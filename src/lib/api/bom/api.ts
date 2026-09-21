@@ -952,6 +952,7 @@ export const bomSlice = apiSlice.injectEndpoints({
 
 export const {
   useGetBomTreeQuery,
+  useLazyGetBomTreeQuery,
   useGetBomListQuery,
   useGetBomsBySupplierQuery,
   useGetBomByIdQuery,

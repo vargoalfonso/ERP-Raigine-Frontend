@@ -38,6 +38,8 @@ import {
   useGetSupplierByIdQuery,
   useListSuppliersQuery,
 } from "@/lib/api/suppliers/api";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex, type BomUniqIndex } from "@/lib/utils/bomUniq";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { consumeFlashMessage } from "@/lib/utils/flashMessage";
@@ -180,10 +182,73 @@ const sectionToItemType = (section: SupplierSection): string | undefined => {
 const toSupplierRow = (
   record: SupplierItemRecord,
   index: number,
+  bomIndex?: BomUniqIndex,
 ): SupplierRow => {
   const section = normalizeSection(record.material_type ?? record.type);
-  const grade = pickText(record.grade);
-  const size = pickText(record.size);
+  const uniq = pickText(record.uniq_code) || "-";
+
+  const bomPartName = uniq !== "-" ? bomIndex?.partNameByUniq[uniq] : "";
+  const bomPartNumber = uniq !== "-" ? bomIndex?.partNumberByUniq[uniq] : "";
+  const bomModel =
+    uniq !== "-"
+      ? bomIndex?.modelByUniq[uniq] || bomIndex?.assemblyCodeByUniq[uniq]
+      : "";
+  const bomMaterialCode =
+    uniq !== "-" ? bomIndex?.materialCodeByUniq[uniq] : "";
+  const bomGrade = uniq !== "-" ? bomIndex?.gradeByUniq[uniq] : "";
+  const bomSize = uniq !== "-" ? bomIndex?.sizeByUniq[uniq] : "";
+  const bomGradeSize = uniq !== "-" ? bomIndex?.gradeSizeByUniq[uniq] : "";
+  const bomWeight = uniq !== "-" ? bomIndex?.weightKgByUniq[uniq] : undefined;
+  const bomUom = uniq !== "-" ? bomIndex?.uomByUniq[uniq] : "";
+  const bomCycleTime =
+    uniq !== "-" ? bomIndex?.cycleTimeByUniq[uniq] : undefined;
+  const bomCustomerCycle =
+    uniq !== "-" ? bomIndex?.customerCycleByUniq[uniq] : "";
+
+  const rawGrade = pickText(record.grade, bomGrade);
+  const rawSize = pickText(record.size, bomSize);
+  const combinedGradeSize = pickText(
+    [rawGrade, rawSize].filter(Boolean).join(" / "),
+    bomGradeSize,
+    rawGrade,
+  );
+
+  const materialCode =
+    pickText(
+      bomMaterialCode,
+      // record.payload_detail?.material_spec?.material_code,
+      record.payload_detail?.material_spec?.material_grade,
+      record.sebango_code && record.sebango_code !== uniq
+        ? record.sebango_code
+        : "",
+      record.sebango_code,
+    ) || "-";
+
+  const productModel =
+    pickText(
+      record.product_model && record.product_model !== "-"
+        ? record.product_model
+        : "",
+      bomModel,
+      record.product_model,
+    ) || "-";
+
+  const partName =
+    pickText(
+      record.part_name && record.part_name !== uniq ? record.part_name : "",
+      bomPartName,
+      record.part_name,
+      record.description,
+    ) || "-";
+
+  const partNumber =
+    pickText(
+      record.part_number && record.part_number !== "-"
+        ? record.part_number
+        : "",
+      bomPartNumber,
+      record.part_number,
+    ) || "-";
 
   return {
     key: String(
@@ -194,20 +259,19 @@ const toSupplierRow = (
     supplierUuid: pickText(record.supplier_uuid),
     supplierCode: pickText(record.supplier_code),
     supplierName: pickText(record.supplier_name, record.supplier_code) || "-",
-    uniqCode: pickText(record.uniq_code) || "-",
-    sebangoCode: pickText(record.sebango_code) || "-",
+    uniqCode: uniq,
+    sebangoCode: materialCode,
     type: pickText(record.type, record.material_type) || "-",
-    productModel: pickText(record.product_model) || "-",
-    partName:
-      pickText(record.part_name, record.description, record.uniq_code) || "-",
-    partNumber: pickText(record.part_number) || "-",
-    gradeSize: [grade, size].filter(Boolean).join(" / ") || "-",
+    productModel,
+    partName,
+    partNumber,
+    gradeSize: combinedGradeSize || "-",
     quantity: pickNumber(record.quantity),
     pcsPerKanban: pickNumber(record.pcs_per_kanban),
-    customerCycle: pickText(record.customer_cycle) || "-",
-    cycleTime: pickNumber(record.cycle_time),
-    uom: pickText(record.uom) || "-",
-    weight: pickNumber(record.weight),
+    customerCycle: pickText(record.customer_cycle, bomCustomerCycle) || "-",
+    cycleTime: pickNumber(record.cycle_time, bomCycleTime),
+    uom: pickText(record.uom, bomUom) || "-",
+    weight: pickNumber(record.weight, bomWeight),
     warehouse: pickText(record.warehouse_name, record.warehouse_id) || "-",
     status: pickText(record.status) || "Active",
   };
@@ -264,6 +328,19 @@ export default function MasterSupplierPage() {
     { page: 1, limit: 1000 },
     { skip: !apiEnabled },
   );
+  const bomTreeQuery = useGetBomTreeQuery(undefined, {
+    skip: !apiEnabled || activeSection === "supplier-only",
+  });
+  const bomIndex = useMemo(
+    () =>
+      buildBomUniqIndex(
+        bomTreeQuery.data?.data ??
+          (bomTreeQuery.data as any)?.items ??
+          bomTreeQuery.data ??
+          [],
+      ),
+    [bomTreeQuery.data],
+  );
   const [deleteSupplierItem, deleteSupplierItemState] =
     useDeleteSupplierItemMutation();
   const [deleteSupplier, deleteSupplierState] = useDeleteSupplierMutation();
@@ -287,9 +364,9 @@ export default function MasterSupplierPage() {
   const supplierRows = useMemo(
     () =>
       (supplierItemsQuery.data ?? []).map((record, index) =>
-        toSupplierRow(record, index),
+        toSupplierRow(record, index, bomIndex),
       ),
-    [supplierItemsQuery.data],
+    [supplierItemsQuery.data, bomIndex],
   );
   const supplierOnlyRows = useMemo(
     () =>
@@ -488,7 +565,7 @@ export default function MasterSupplierPage() {
           );
         }
 
-        return <span className="text-gray-400">—</span>;
+        return null;
       },
     },
     {
@@ -497,9 +574,7 @@ export default function MasterSupplierPage() {
       key: "uniqCode",
       width: 130,
       render: (value: string, row) =>
-        row.isGroup ? (
-          <span className="text-gray-400">—</span>
-        ) : (
+        row.isGroup ? null : (
           <span className="inline-flex items-center rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white">
             {value}
           </span>
@@ -510,8 +585,7 @@ export default function MasterSupplierPage() {
       dataIndex: "sebangoCode",
       key: "sebangoCode",
       width: 150,
-      render: (value: string, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) => (row.isGroup ? null : value),
     },
     {
       title: "Type",
@@ -519,19 +593,14 @@ export default function MasterSupplierPage() {
       key: "type",
       width: 170,
       render: (value: string, row) =>
-        row.isGroup ? (
-          <span className="text-gray-400">—</span>
-        ) : (
-          <Tag color="purple">{value}</Tag>
-        ),
+        row.isGroup ? null : <Tag color="purple">{value}</Tag>,
     },
     {
       title: "Product Model",
       dataIndex: "productModel",
       key: "productModel",
       width: 160,
-      render: (value: string, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) => (row.isGroup ? null : value),
     },
     {
       title: "Part Name",
@@ -539,9 +608,7 @@ export default function MasterSupplierPage() {
       key: "partName",
       width: 220,
       render: (value: string, row) =>
-        row.isGroup ? (
-          <span className="text-gray-400">—</span>
-        ) : (
+        row.isGroup ? null : (
           <span className="font-semibold text-gray-900">{value}</span>
         ),
     },
@@ -550,40 +617,35 @@ export default function MasterSupplierPage() {
       dataIndex: "partNumber",
       key: "partNumber",
       width: 160,
-      render: (value: string, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) => (row.isGroup ? null : value),
     },
     {
       title: "Grade / Size",
       dataIndex: "gradeSize",
       key: "gradeSize",
       width: 160,
-      render: (value: string, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) => (row.isGroup ? null : value),
     },
     {
       title: "Qty",
       dataIndex: "quantity",
       key: "quantity",
       width: 100,
-      render: (value: number, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: number, row) => (row.isGroup ? null : value),
     },
     {
       title: "Pcs / Kanban",
       dataIndex: "pcsPerKanban",
       key: "pcsPerKanban",
       width: 120,
-      render: (value: number, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: number, row) => (row.isGroup ? null : value),
     },
     {
       title: "Cycle",
       dataIndex: "customerCycle",
       key: "customerCycle",
       width: 100,
-      render: (value: string, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) => (row.isGroup ? null : value),
     },
     {
       title: "Lead Time",
@@ -591,37 +653,32 @@ export default function MasterSupplierPage() {
       key: "cycleTime",
       width: 120,
       render: (value: number, row) =>
-        row.isGroup ? (
-          <span className="text-gray-400">—</span>
-        ) : value ? (
-          `${value} day${value > 1 ? "s" : ""}`
-        ) : (
-          "-"
-        ),
+        row.isGroup
+          ? null
+          : value
+            ? `${value} day${value > 1 ? "s" : ""}`
+            : null,
     },
     {
       title: "UOM",
       dataIndex: "uom",
       key: "uom",
       width: 100,
-      render: (value: string, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) => (row.isGroup ? null : value),
     },
     {
       title: "Weight",
       dataIndex: "weight",
       key: "weight",
       width: 100,
-      render: (value: number, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: number, row) => (row.isGroup ? null : value),
     },
     {
       title: "Warehouse",
       dataIndex: "warehouse",
       key: "warehouse",
       width: 180,
-      render: (value: string, row) =>
-        row.isGroup ? <span className="text-gray-400">—</span> : value,
+      render: (value: string, row) => (row.isGroup ? null : value),
     },
     {
       title: "Status",
@@ -629,7 +686,7 @@ export default function MasterSupplierPage() {
       key: "status",
       width: 110,
       render: (value: string, row) => {
-        if (row.isGroup) return <span className="text-gray-400">—</span>;
+        if (row.isGroup) return null;
         const lowered = value.toLowerCase();
         return (
           <Tag color={lowered === "active" ? "green" : "default"}>{value}</Tag>
@@ -678,6 +735,11 @@ export default function MasterSupplierPage() {
         ),
     },
   ];
+
+  const visibleSupplierColumns =
+    activeSection === "raw-material"
+      ? supplierColumns.filter((column) => column.key !== "uniqCode")
+      : supplierColumns;
 
   const supplierOnlyColumns: ColumnsType<SupplierOnlyRow> = [
     {
@@ -960,7 +1022,7 @@ export default function MasterSupplierPage() {
           />
         ) : (
           <Table<SupplierTableRow>
-            columns={supplierColumns}
+            columns={visibleSupplierColumns}
             dataSource={apiEnabled ? groupedSupplierRows : []}
             rowKey="key"
             loading={apiEnabled && supplierItemsQuery.isLoading}
