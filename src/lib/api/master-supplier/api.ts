@@ -103,6 +103,7 @@ export type SupplierItemPayloadFormSnapshot = {
 };
 
 export type SupplierItemPayloadMaterialSpecDetail = {
+  material_code?: string | null;
   material_grade?: string | null;
   grade?: string | null;
   form?: string | null;
@@ -241,7 +242,14 @@ const normalizeSupplierItem = (record: unknown): SupplierItemRecord => {
       toText(row.location) ??
       toText(warehouse?.warehouse_name) ??
       toText(warehouse?.name),
-    sebango_code: toText(row.sebango_code) ?? toText(row.sebanggo) ?? toText(row.sebango),
+    material_code:
+      toText(row.material_code) ??
+      toText(materialSpecDetail?.material_code) ??
+      toText(materialSpecDetail?.material_grade),
+    sebango_code:
+      toText(row.sebango_code) ??
+      toText(row.sebanggo) ??
+      toText(row.sebango),
     uniq_code: toText(row.uniq_code) ?? toText(row.uniq),
     type: toText(row.type),
     material_type: toText(row.material_type) ?? toText(row.item_type) ?? toText(row.raw_material_type),
