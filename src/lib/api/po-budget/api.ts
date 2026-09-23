@@ -199,6 +199,8 @@ export type PoBudgetRow = {
   description?: string;
   materialSpec?: Record<string, unknown>;
   detailJson?: PoBudgetStoredDetail;
+  /** Timestamp the entry was created/submitted. Used to filter a "per day" PDF export. */
+  createdAt?: string;
   status: "approved" | "pending";
   approval: "Approved" | "Pending";
 };
@@ -501,6 +503,12 @@ const toPoBudgetRow = (item: unknown, index: number): PoBudgetRow => {
     detailJson: toPoBudgetStoredDetail(
       record.detail_jsonb ?? record.detailJson ?? record.detail_json,
     ),
+    createdAt: getString(record, [
+      "created_at",
+      "createdAt",
+      "submitted_at",
+      "submittedAt",
+    ]),
     status,
     approval: status === "approved" ? "Approved" : "Pending",
   };
@@ -645,6 +653,7 @@ export const poBudgetSlice = apiSlice
 export const {
   useGetPoBudgetSummaryQuery,
   useGetPoBudgetListQuery,
+  useLazyGetPoBudgetListQuery,
   useAddPoBudgetEntryMutation,
   useAddPoBudgetBulkMutation,
   useGetPoBudgetDetailQuery,

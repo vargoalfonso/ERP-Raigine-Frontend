@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import {
   useGetPoBudgetListQuery,
+  useLazyGetPoBudgetListQuery,
   useGetPoBudgetSummaryQuery,
   useAddPoBudgetEntryMutation,
   useAddPoBudgetBulkMutation,
@@ -19,6 +20,7 @@ import {
   type PoBudgetPrlDetail,
   type PoBudgetUpdateRequest,
 } from "@/lib/api/po-budget/api";
+import { getCurrentUserDisplayName } from "@/lib/utils/currentUser";
 import type { ApiResponse } from "@/types";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import {
@@ -72,6 +74,7 @@ import {
   CloseOutlined,
   DownOutlined,
   FileExcelOutlined,
+  FilePdfOutlined,
   PlusOutlined,
   EyeOutlined,
 } from "@ant-design/icons";
@@ -628,6 +631,14 @@ export default function PoBudgetPage() {
   const [addBulk] = useAddPoBudgetBulkMutation();
   const [loadPoBudgetPrlDetail] = useLazyGetPoBudgetPrlDetailQuery();
   const [updateEntry] = useUpdatePoBudgetEntryMutation();
+  // [po-budget-pdf-per-day] Lazy fetch dipakai khusus untuk export PDF harian,
+  // supaya tidak terbatas oleh pagination tabel yang sedang tampil.
+  const [loadAllPoBudgetForExport] = useLazyGetPoBudgetListQuery();
+
+  // [po-budget-pdf-per-day] State untuk modal download PDF "Permintaan Barang" per hari.
+  const [prBudgetPdfOpen, setPrBudgetPdfOpen] = useState(false);
+  const [prBudgetPdfDate, setPrBudgetPdfDate] = useState<Dayjs>(() => dayjs());
+  const [prBudgetPdfBusy, setPrBudgetPdfBusy] = useState(false);
 
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -3057,6 +3068,331 @@ export default function PoBudgetPage() {
     }
   };
 
+  // [po-budget-pdf-per-day] Utilities untuk export "PERMINTAAN BARANG" PDF per hari.
+  //
+  // Alur:
+  // 1. User klik "Download PDF" -> muncul modal DatePicker (default hari ini).
+  // 2. User pilih tanggal -> ambil SEMUA entri PO Budget pada tab aktif
+  //    (tidak dibatasi pagination tabel) yang `created_at`-nya sama dengan
+  //    tanggal terpilih.
+  // 3. Setiap entri di-flatten menjadi baris-baris "barang": untuk tipe
+  //    budget yang punya struktur child (raw-material & indirect), kolom
+  //    "Kode Barang" WAJIB memakai CHILD uniq_code, bukan uniq/PRL milik
+  //    parent. Subcon tidak punya struktur child sehingga memakai uniq itu
+  //    sendiri.
+  // 4. Render satu halaman print dengan layout dokumen PERMINTAAN BARANG
+  //    (mengikuti contoh PT. MATRA RODA PIRANTI) lalu window.print() supaya
+  //    user bisa Save-as-PDF via dialog browser.
+  const escapeHtml = (value: unknown): string =>
+    String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;");
+
+  const formatIdLongDate = (value: Dayjs | null | undefined) => {
+    if (!value || !value.isValid()) return "-";
+    const months = [
+      "Januari",
+      "Februari",
+      "Maret",
+      "April",
+      "Mei",
+      "Juni",
+      "Juli",
+      "Agustus",
+      "September",
+      "Oktober",
+      "November",
+      "Desember",
+    ];
+    return `${value.date()} ${months[value.month()]} ${value.year()}`;
+  };
+
+  const getKelompokBarangLabel = (tab: BudgetTabId) =>
+    `PERSEDIAN ${getBudgetTypeLabel(tab).toUpperCase()} MATERIAL`;
+
+  type PrBudgetPrintRow = {
+    kodeBarang: string;
+    jumlah: number;
+    satuan: string;
+    noPart: string;
+    deskripsi: string;
+    keterangan: string;
+  };
+
+  // Flatten satu entri PO Budget menjadi baris-baris siap cetak. Untuk tipe
+  // child budget (raw-material / indirect), "Kode Barang" diambil dari
+  // child.uniq_code (childUniqCode) sesuai permintaan — BUKAN dari
+  // row.uniq / row.prlRef yang merupakan kode parent/PRL.
+  const buildPrBudgetPrintRowsForEntry = (
+    row: ApiPoBudgetRow,
+    tab: BudgetTabId,
+  ): PrBudgetPrintRow[] => {
+    const keterangan = getKelompokBarangLabel(tab);
+    const apiType = getApiType(tab);
+
+    if (isChildBudgetType(apiType)) {
+      const parents = getStoredParents(row.detailJson);
+      const childRows: PrBudgetPrintRow[] = parents.flatMap((parent) =>
+        (Array.isArray(parent.children) ? parent.children : []).map(
+          (child) => ({
+            kodeBarang:
+              String(child.uniq_code ?? child.uniq ?? row.uniq ?? "-").trim() ||
+              "-",
+            jumlah: Number(child.quantity ?? child.qty_per_uniq ?? row.pr ?? 0),
+            satuan: String(child.uom ?? row.uom ?? "Pcs").trim() || "Pcs",
+            noPart: String(child.part_number ?? "-").trim() || "-",
+            deskripsi: String(child.part_name ?? "-").trim() || "-",
+            keterangan,
+          }),
+        ),
+      );
+
+      if (childRows.length > 0) return childRows;
+
+      // Fallback bila entri belum punya detail child tersimpan.
+      return [
+        {
+          kodeBarang: row.uniq || "-",
+          jumlah: Number(row.pr || 0),
+          satuan: row.uom || "Pcs",
+          noPart: row.partNumber || "-",
+          deskripsi: row.partName || "-",
+          keterangan,
+        },
+      ];
+    }
+
+    // Subcon budget tidak mempunyai struktur parent/child.
+    return [
+      {
+        kodeBarang: row.uniq || "-",
+        jumlah: Number(row.pr || 0),
+        satuan: row.uom || "Pcs",
+        noPart: row.partNumber || "-",
+        deskripsi: row.partName || "-",
+        keterangan,
+      },
+    ];
+  };
+
+  const buildPrBudgetPrintHtml = (
+    rows: PrBudgetPrintRow[],
+    meta: {
+      mrNumber: string;
+      ptName: string;
+      tanggal: string;
+      tglDiperlukan: string;
+      unit: string;
+      pembelian: string;
+      note: string;
+      mengetahuiAtas: string;
+      pemesan: string;
+      mengetahuiBawah: string;
+    },
+  ): string => {
+    const rowsHtml = rows
+      .map(
+        (r, index) => `
+          <tr>
+            <td class="c">${index + 1}</td>
+            <td class="c b">${escapeHtml(r.kodeBarang)}</td>
+            <td class="r">${formatNumber(Math.ceil(r.jumlah))}</td>
+            <td class="c">${escapeHtml(r.satuan)}</td>
+            <td class="c">${escapeHtml(r.noPart)}</td>
+            <td>${escapeHtml(r.deskripsi)}</td>
+            <td>${escapeHtml(r.keterangan)}</td>
+          </tr>`,
+      )
+      .join("");
+
+    return `<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Permintaan Barang - ${escapeHtml(meta.tglDiperlukan)}</title>
+          <style>
+            * { box-sizing: border-box; }
+            html, body { margin: 0; padding: 0; background: #eef2f7; color: #111827; font-family: Arial, Helvetica, sans-serif; }
+            .page { padding: 18px; }
+            .frame { background: #fff; padding: 14px 16px; }
+            .brand { text-align: center; font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+            .title { text-align: center; font-size: 15px; font-weight: 800; letter-spacing: 0.03em; margin-bottom: 10px; }
+            .meta { display: grid; grid-template-columns: 90px 8px 1fr 100px 8px 1fr; gap: 4px 0; font-size: 11px; margin: 10px 0; }
+            .meta .lbl { font-weight: 600; color: #374151; }
+            .meta .sep { color: #6b7280; }
+            .meta .val { font-weight: 700; }
+            .items { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10.5px; }
+            .items th, .items td { border: 1px solid #111827; padding: 4px 6px; vertical-align: middle; }
+            .items thead { display: table-header-group; }
+            .items thead th { background: #f3f4f6; text-align: center; font-weight: 700; }
+            .items tr { page-break-inside: avoid; }
+            .items td.c { text-align: center; }
+            .items td.r { text-align: right; }
+            .items td.b { font-weight: 700; }
+            .note { font-size: 10.5px; margin-top: 8px; }
+            .sig-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 30px; font-size: 11px; text-align: center; }
+            .sig-box .sig-title { font-weight: 700; margin-bottom: 44px; }
+            .sig-box .sig-name { border-top: 1px solid #111827; padding-top: 4px; display: inline-block; min-width: 140px; }
+            @page { size: A4; margin: 10mm; }
+            @media print {
+              body { background: #fff; }
+              .page { padding: 0; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <section class="page">
+            <div class="frame">
+              <div class="brand">PT. MATRA RODA PIRANTI</div>
+              <div class="title">PERMINTAAN BARANG</div>
+
+              <div class="meta">
+                <div class="lbl">No. MR</div><div class="sep">:</div><div class="val">${escapeHtml(meta.mrNumber)}</div>
+                <div class="lbl">PT</div><div class="sep">:</div><div class="val">${escapeHtml(meta.ptName)}</div>
+
+                <div class="lbl">Tanggal</div><div class="sep">:</div><div class="val">${escapeHtml(meta.tanggal)}</div>
+                <div class="lbl">Tgl diperlukan</div><div class="sep">:</div><div class="val">${escapeHtml(meta.tglDiperlukan)}</div>
+
+                <div class="lbl">Unit</div><div class="sep">:</div><div class="val">${escapeHtml(meta.unit)}</div>
+                <div class="lbl">Pembelian</div><div class="sep">:</div><div class="val">${escapeHtml(meta.pembelian)}</div>
+              </div>
+
+              <table class="items">
+                <thead>
+                  <tr>
+                    <th style="width:32px">NO.</th>
+                    <th style="width:110px">Kode Barang</th>
+                    <th style="width:70px">Jumlah</th>
+                    <th style="width:60px">Satuan</th>
+                    <th style="width:120px">No Part</th>
+                    <th>Descripsi Barang</th>
+                    <th style="width:170px">Keterangan</th>
+                  </tr>
+                </thead>
+                <tbody>${rowsHtml || `<tr><td colspan="7" class="c">Tidak ada item pada tanggal ini.</td></tr>`}</tbody>
+              </table>
+
+              <div class="note">Note : ${escapeHtml(meta.note)}</div>
+
+              <div class="sig-grid">
+                <div class="sig-box">
+                  <div class="sig-title">Mengetahui</div>
+                  <div class="sig-name">${escapeHtml(meta.mengetahuiAtas)}</div>
+                </div>
+                <div class="sig-box">
+                  <div class="sig-title">Pemesan</div>
+                  <div class="sig-name">${escapeHtml(meta.pemesan)}</div>
+                </div>
+                <div class="sig-box">
+                  <div class="sig-title">Mengetahui</div>
+                  <div class="sig-name">${escapeHtml(meta.mengetahuiBawah)}</div>
+                </div>
+              </div>
+            </div>
+          </section>
+          <div class="no-print" style="position:fixed; bottom:12px; right:12px;">
+            <button onclick="window.print()" style="padding:8px 14px; border-radius:6px; border:1px solid #111827; background:#111827; color:#fff; cursor:pointer;">Print / Save as PDF</button>
+          </div>
+        </body>
+      </html>`;
+  };
+
+  const handleDownloadPrBudgetPdf = async () => {
+    if (!prBudgetPdfDate || !prBudgetPdfDate.isValid()) {
+      message.warning("Pilih tanggal terlebih dahulu.");
+      return;
+    }
+
+    setPrBudgetPdfBusy(true);
+    try {
+      const selectedIso = prBudgetPdfDate.format("YYYY-MM-DD");
+      const apiType = getApiType(activeTab);
+
+      let sourceRows: ApiPoBudgetRow[] = [];
+      if (useApi) {
+        // Ambil seluruh data tab aktif (bukan hanya halaman yang sedang
+        // tampil) supaya filter per-hari mencakup semua entri.
+        const result = await loadAllPoBudgetForExport(
+          { type: apiType, page: 1, limit: 1000 },
+          true,
+        ).unwrap();
+        sourceRows = result.data ?? [];
+      } else {
+        sourceRows = (activeTab === "raw"
+          ? initialRawRows
+          : activeTab === "subcon"
+            ? initialSubconRows
+            : initialIndirectRows) as unknown as ApiPoBudgetRow[];
+      }
+
+      const matchedRows = sourceRows.filter((row) => {
+        const created = row.createdAt ? dayjs(row.createdAt) : null;
+        if (!created || !created.isValid()) return false;
+        return created.format("YYYY-MM-DD") === selectedIso;
+      });
+
+      if (matchedRows.length === 0) {
+        message.info(
+          `Tidak ada PR Budget ${getBudgetTypeLabel(activeTab)} yang dibuat pada ${prBudgetPdfDate.format(
+            "DD MMM YYYY",
+          )}.`,
+        );
+        return;
+      }
+
+      const printRows = matchedRows.flatMap((row) =>
+        buildPrBudgetPrintRowsForEntry(row, activeTab),
+      );
+
+      const dateLabel = formatIdLongDate(prBudgetPdfDate);
+      const supplierNames = Array.from(
+        new Set(
+          matchedRows
+            .map((row) => String(row.supplier ?? "-").trim())
+            .filter((name) => Boolean(name) && name !== "-"),
+        ),
+      );
+      const ptName = supplierNames[0] || "-";
+      const currentUserName = getCurrentUserDisplayName() ?? "-";
+
+      const html = buildPrBudgetPrintHtml(printRows, {
+        mrNumber: `PR-${prBudgetPdfDate.format("YYYYMMDD")}-${activeTab.toUpperCase()}`,
+        ptName,
+        tanggal: dateLabel,
+        tglDiperlukan: dateLabel,
+        unit: `Produksi ${getBudgetTypeLabel(activeTab)}`,
+        pembelian: currentUserName,
+        note: `${getBudgetTypeLabel(activeTab)} — ${prBudgetPdfDate.format("MMMM YYYY")}`,
+        mengetahuiAtas: "-",
+        pemesan: currentUserName,
+        mengetahuiBawah: "-",
+      });
+
+      const win = window.open("", "_blank", "width=900,height=1100");
+      if (!win) {
+        message.error(
+          "Popup diblokir browser. Izinkan popup untuk mengunduh PDF.",
+        );
+        return;
+      }
+      win.document.write(html);
+      win.document.close();
+      win.focus();
+      setTimeout(() => win.print(), 400);
+      setPrBudgetPdfOpen(false);
+    } catch (error) {
+      console.error("[po-budget-pdf-per-day] failed", error);
+      message.error(
+        getApiErrorMessage(error, "Gagal menyiapkan PDF PR Budget."),
+      );
+    } finally {
+      setPrBudgetPdfBusy(false);
+    }
+  };
+
   const addSubtitle = `Enter the PO budget details for ${getBudgetTypeLabel(activeTab).toLowerCase()}`;
   const groupedDetail = detailQuery.data?.data as
     PoBudgetGroupedDetail | undefined;
@@ -3735,6 +4071,16 @@ export default function PoBudgetPage() {
               onClick={openAddBudget}
             >
               Add Budget Entry
+            </Button>
+            <Button
+              className="!rounded-lg"
+              icon={<FilePdfOutlined />}
+              onClick={() => {
+                setPrBudgetPdfDate(dayjs());
+                setPrBudgetPdfOpen(true);
+              }}
+            >
+              Download PDF (Per Hari)
             </Button>
             <Button
               type="primary"
@@ -5331,6 +5677,57 @@ export default function PoBudgetPage() {
               {formatNumber(addSupplierAllocated)} | Remaining:{" "}
               {formatNumber(addSupplierRemaining)}
             </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* [po-budget-pdf-per-day] Modal pilih tanggal untuk download PDF Permintaan Barang */}
+      <Modal
+        title="Download PDF Permintaan Barang per Hari"
+        open={prBudgetPdfOpen}
+        onCancel={() => (prBudgetPdfBusy ? null : setPrBudgetPdfOpen(false))}
+        maskClosable={!prBudgetPdfBusy}
+        footer={[
+          <Button
+            key="cancel"
+            onClick={() => setPrBudgetPdfOpen(false)}
+            disabled={prBudgetPdfBusy}
+          >
+            Batal
+          </Button>,
+          <Button
+            key="download"
+            type="primary"
+            loading={prBudgetPdfBusy}
+            onClick={handleDownloadPrBudgetPdf}
+          >
+            Download PDF
+          </Button>,
+        ]}
+      >
+        <div className="space-y-3">
+          <div className="text-sm text-gray-600">
+            Pilih tanggal PR Budget dibuat (created at). Semua entri{" "}
+            <span className="font-semibold">
+              {getBudgetTypeLabel(activeTab)}
+            </span>{" "}
+            yang dibuat pada tanggal tersebut akan dicetak dengan format
+            Permintaan Barang. Kolom <span className="font-semibold">
+              Kode Barang
+            </span>{" "}
+            memakai kode CHILD, bukan kode parent/PRL.
+          </div>
+          <div>
+            <div className="text-xs font-medium text-gray-700 mb-1">
+              Tanggal Dibuat
+            </div>
+            <DatePicker
+              className="w-full"
+              format="DD MMM YYYY"
+              value={prBudgetPdfDate}
+              onChange={(v) => v && setPrBudgetPdfDate(v)}
+              allowClear={false}
+            />
           </div>
         </div>
       </Modal>
