@@ -2,7 +2,7 @@
 
 import { Checkbox, Form, Input, InputNumber, Select, Typography } from "antd";
 import type { FormPath } from "./bom-edit.types";
-import { useGetRawMaterialMastersQuery } from "@/lib/api/raw-material-master/api";
+import { useAllRawMaterialMasters } from "@/lib/hooks/useAllRawMaterialMasters";
 
 const { Text } = Typography;
 
@@ -15,7 +15,43 @@ export default function MaterialSpecEditor({
   fieldPath,
   disabled,
 }: MaterialSpecEditorProps) {
-  const { data, isFetching } = useGetRawMaterialMastersQuery({ limit: 100 });
+  const form = Form.useFormInstance();
+  // Loads incrementally (100 at a time) instead of one big request.
+  const { items, isFetching } = useAllRawMaterialMasters();
+
+  const handleMasterSelect = (masterId: number | undefined) => {
+    if (masterId == null) return;
+    const item = items.find((m) => m.id === masterId);
+    if (!item) return;
+    const base = [...fieldPath, "material_spec"] as const;
+    form.setFieldValue(
+      [...base, "material_grade"],
+      item.material_grade ?? undefined,
+    );
+    form.setFieldValue([...base, "grade"], item.material_grade ?? undefined);
+    form.setFieldValue([...base, "form"], item.form ?? undefined);
+    form.setFieldValue(
+      [...base, "weight_kg"],
+      item.weight_kg ?? undefined,
+    );
+    form.setFieldValue([...base, "width_mm"], item.width_mm ?? undefined);
+    form.setFieldValue(
+      [...base, "diameter_mm"],
+      item.diameter_mm ?? undefined,
+    );
+    form.setFieldValue(
+      [...base, "thickness_mm"],
+      item.thickness_mm ?? undefined,
+    );
+    form.setFieldValue([...base, "length_mm"], item.length_mm ?? undefined);
+    if (item.type_material === "raw" || item.type_material === "indirect") {
+      form.setFieldValue([...base, "type_material"], item.type_material);
+      form.setFieldValue([...base, "is_subcon"], false);
+    } else if (item.type_material === "subcon") {
+      form.setFieldValue([...base, "is_subcon"], true);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Text strong>Material specification</Text>
@@ -24,7 +60,7 @@ export default function MaterialSpecEditor({
         <Form.Item
           name={[...fieldPath, "material_spec", "raw_material_master_id"]}
           label="Raw Material Master"
-          tooltip="BOM dengan spesifikasi yang sama harus memilih master yang sama."
+          tooltip="BOM dengan spesifikasi yang sama harus memilih master yang sama. Pilih master untuk mengisi otomatis spesifikasi di bawah."
         >
           <Select
             showSearch
@@ -33,7 +69,8 @@ export default function MaterialSpecEditor({
             loading={isFetching}
             placeholder="Select canonical material"
             optionFilterProp="label"
-            options={(data?.items ?? [])
+            onChange={handleMasterSelect}
+            options={items
               .filter((item) => item.status === "Active")
               .map((item) => ({
                 value: item.id,

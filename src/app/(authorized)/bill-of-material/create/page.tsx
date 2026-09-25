@@ -37,7 +37,7 @@ import {
 import { apiBaseUrl, getCookiesFromBrowser } from "@/lib/api/instance";
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 import { useGetMachinesQuery } from "@/lib/api/machines/api";
-import { useGetRawMaterialMastersQuery } from "@/lib/api/raw-material-master/api";
+import { useAllRawMaterialMasters } from "@/lib/hooks/useAllRawMaterialMasters";
 
 const { Title, Text } = Typography;
 const { TextArea } = Input;
@@ -163,8 +163,11 @@ export default function Page() {
   const router = useRouter();
   const [messageApi, contextHolder] = message.useMessage();
   const [form] = Form.useForm<Step1Values>();
-  const { data: rawMaterialMasters, isFetching: loadingRawMaterialMasters } =
-    useGetRawMaterialMastersQuery({ limit: 100 });
+  // Loads incrementally (100 at a time) instead of one big request.
+  const {
+    items: rawMaterialMasterItems,
+    isFetching: loadingRawMaterialMasters,
+  } = useAllRawMaterialMasters();
   const rootAddChildRef = useRef<(() => void) | null>(null);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [childFileLists, setChildFileLists] = useState<
@@ -645,6 +648,33 @@ export default function Page() {
     );
   };
 
+  // Autofills the rest of a material_spec block from the chosen Raw Material
+  // Master (fieldPath is [] for the root/parent spec, or a child's fieldPath).
+  const applyRawMaterialAutofill = (
+    fieldPath: Array<string | number>,
+    masterId: number | undefined,
+  ) => {
+    if (masterId == null) return;
+    const item = rawMaterialMasterItems.find((m) => m.id === masterId);
+    if (!item) return;
+    const dynamicForm = form as any;
+    const base = [...fieldPath, "material_spec"];
+    dynamicForm.setFieldValue([...base, "material_code"], item.material_grade ?? undefined);
+    dynamicForm.setFieldValue([...base, "grade"], item.grade ?? undefined);
+    dynamicForm.setFieldValue([...base, "form"], item.form ?? undefined);
+    dynamicForm.setFieldValue([...base, "weight_kg"], item.weight_kg ?? undefined);
+    dynamicForm.setFieldValue([...base, "width_mm"], item.width_mm ?? undefined);
+    dynamicForm.setFieldValue([...base, "diameter_mm"], item.diameter_mm ?? undefined);
+    dynamicForm.setFieldValue([...base, "thickness_mm"], item.thickness_mm ?? undefined);
+    dynamicForm.setFieldValue([...base, "length_mm"], item.length_mm ?? undefined);
+    if (item.type_material === "raw" || item.type_material === "indirect") {
+      dynamicForm.setFieldValue([...base, "type_material"], item.type_material);
+      dynamicForm.setFieldValue([...base, "is_subcon"], false);
+    } else if (item.type_material === "subcon") {
+      dynamicForm.setFieldValue([...base, "is_subcon"], true);
+    }
+  };
+
   const renderMaterialSpecEditor = (
     fieldPath: Array<string | number>,
     disabled = false,
@@ -655,7 +685,7 @@ export default function Page() {
         <Form.Item
           name={[...fieldPath, "material_spec", "raw_material_master_id"]}
           label="Raw Material Master"
-          tooltip="Pilih master yang sama untuk spesifikasi material yang sama."
+          tooltip="Pilih master yang sama untuk spesifikasi material yang sama. Memilih master akan mengisi otomatis spesifikasi di bawah."
         >
           <Select
             showSearch
@@ -664,7 +694,8 @@ export default function Page() {
             loading={loadingRawMaterialMasters}
             optionFilterProp="label"
             placeholder="Select master"
-            options={(rawMaterialMasters?.items ?? [])
+            onChange={(value) => applyRawMaterialAutofill(fieldPath, value)}
+            options={rawMaterialMasterItems
               .filter((item) => item.status === "Active")
               .map((item) => ({
                 value: item.id,
@@ -1991,6 +2022,28 @@ export default function Page() {
                   styles={{ body: { paddingTop: 16 } }}
                 >
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <Form.Item
+                      name={["material_spec", "raw_material_master_id"]}
+                      label="Raw Material Master"
+                      tooltip="Pilih master untuk mengisi otomatis Material Code, Form, Grade, dan ukuran di bawah."
+                    >
+                      <Select
+                        showSearch
+                        allowClear
+                        size="large"
+                        disabled={isParentAssembly}
+                        loading={loadingRawMaterialMasters}
+                        optionFilterProp="label"
+                        placeholder="Select master"
+                        onChange={(value) => applyRawMaterialAutofill([], value)}
+                        options={rawMaterialMasterItems
+                          .filter((item) => item.status === "Active")
+                          .map((item) => ({
+                            value: item.id,
+                            label: `${item.material_code} — ${item.material_name}`,
+                          }))}
+                      />
+                    </Form.Item>
                     <Form.Item
                       name={["material_spec", "material_code"]}
                       label="Material Code"
