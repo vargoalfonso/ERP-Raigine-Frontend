@@ -5,6 +5,7 @@ export type RawMaterialMaster = {
   id: number;
   material_code: string;
   material_name: string;
+  grade?: string | null;
   material_grade?: string | null;
   form?: string | null;
   type_material: "raw" | "indirect" | "subcon";
@@ -105,6 +106,7 @@ export const rawMaterialMasterApi = apiSlice.injectEndpoints({
 
 export const {
   useGetRawMaterialMastersQuery,
+  useLazyGetRawMaterialMastersQuery,
   useGetRawMaterialPlanningQuery,
   useCreateRawMaterialMasterMutation,
   useUpdateRawMaterialMasterMutation,
