@@ -669,7 +669,6 @@ export default function Page() {
     dynamicForm.setFieldValue([...base, "length_mm"], item.length_mm ?? undefined);
     if (item.type_material === "raw" || item.type_material === "indirect") {
       dynamicForm.setFieldValue([...base, "type_material"], item.type_material);
-      dynamicForm.setFieldValue([...base, "is_subcon"], false);
     } else if (item.type_material === "subcon") {
       dynamicForm.setFieldValue([...base, "is_subcon"], true);
     }
@@ -1253,7 +1252,9 @@ export default function Page() {
           raw_material_master_id: s.raw_material_master_id,
           grade: cleanText(s.grade),
           material_grade: cleanText(s.material_code),
-          type_material: s.is_subcon ? "subcon" : cleanText(s.type_material),
+          // Kategori (raw/indirect) dan Subcon (boolean proses) dikirim terpisah.
+          type_material: cleanText(s.type_material),
+          is_subcon: s.is_subcon === true,
           form,
           width_mm: s.width_mm,
           diameter_mm: s.diameter_mm,
@@ -1310,9 +1311,7 @@ export default function Page() {
               qty_per_uniq:
                 typeof c.qpu === "number" && Number.isFinite(c.qpu) ? c.qpu : 1,
             };
-            const rawMatType = c.material_spec?.is_subcon
-              ? "subcon"
-              : (c.material_spec?.type_material ?? c.category);
+            const rawMatType = c.material_spec?.type_material ?? c.category;
             if (rawMatType) childBody.raw_material_type = rawMatType;
             if (childRoutes.length > 0) childBody.process_routes = childRoutes;
             if (childSpec !== undefined) childBody.material_spec = childSpec;
