@@ -198,6 +198,16 @@ export type GetWorkOrdersParams = {
   limit: number;
 };
 
+export type WorkOrderProcessStepStatus = "done" | "in_progress" | "pending";
+
+export type WorkOrderProcessStep = {
+  op_seq: number;
+  process_name: string;
+  status: WorkOrderProcessStepStatus;
+  scanned_in_at?: string;
+  scanned_out_at?: string;
+};
+
 export type WorkOrderItemRecord = {
   id: string;
   wo_item_id?: string;
@@ -212,6 +222,8 @@ export type WorkOrderItemRecord = {
   model?: string;
   qr_data_url?: string;
   process_flow_json?: unknown;
+  /** Routing steps with per-process scan status (from GET /work-orders/:id). */
+  process_steps?: WorkOrderProcessStep[];
 };
 
 export type WorkOrderItemQRResponse = {
@@ -284,6 +296,29 @@ export type RmProcessingWorkOrderRecord = {
   kanban_qr_data_url?: string;
 };
 
+const toProcessSteps = (raw: unknown): WorkOrderProcessStep[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry, index) => {
+    if (!isRecord(entry)) return [];
+    const name = getString(entry, ["process_name", "process", "name"]);
+    if (!name) return [];
+    const rawStatus = (getString(entry, ["status"]) ?? "").toLowerCase();
+    const status: WorkOrderProcessStepStatus =
+      rawStatus === "done" || rawStatus === "in_progress"
+        ? rawStatus
+        : "pending";
+    return [
+      {
+        op_seq: getNumber(entry, ["op_seq", "seq"]) ?? index + 1,
+        process_name: name,
+        status,
+        scanned_in_at: getString(entry, ["scanned_in_at"]),
+        scanned_out_at: getString(entry, ["scanned_out_at"]),
+      },
+    ];
+  });
+};
+
 const toWorkOrderItem = (raw: unknown): WorkOrderItemRecord => {
   const record = isRecord(raw) ? raw : {};
   return {
@@ -310,6 +345,7 @@ const toWorkOrderItem = (raw: unknown): WorkOrderItemRecord => {
     model: getString(record, ["model", "product_model", "assembly_code"]),
     qr_data_url: getString(record, ["qr_data_url", "qrDataUrl"]),
     process_flow_json: (record as UnknownRecord)["process_flow_json"],
+    process_steps: toProcessSteps((record as UnknownRecord)["process_steps"]),
   };
 };
 

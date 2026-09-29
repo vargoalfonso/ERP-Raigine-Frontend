@@ -12,10 +12,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeftOutlined,
+  CheckCircleFilled,
+  ClockCircleOutlined,
   CloseOutlined,
   PrinterOutlined,
   QrcodeOutlined,
   ReloadOutlined,
+  SyncOutlined,
 } from "@ant-design/icons";
 import { Button, Empty, Progress, Spin, Tag, Tooltip, message } from "antd";
 import { apiBaseUrl } from "@/lib/api/instance";
@@ -25,6 +28,7 @@ import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
 import {
   useGetWorkOrderByIdQuery,
   useGetWorkOrderItemQRQuery,
+  type WorkOrderProcessStep,
 } from "@/lib/api/work-orders/api";
 import {
   buildKanbanCardsHtml,
@@ -50,6 +54,8 @@ type DetailRow = {
   /** Estimasi waktu per-uniq (menit) = qty x cycle_time_min x machine_capacity. */
   estimatedMinutes: number;
   processName: string;
+  /** Routing steps (in order) with per-process scan status. */
+  processSteps: WorkOrderProcessStep[];
   status: string;
   kanbanNumber: string;
   qrDataUrl?: string;
@@ -90,6 +96,98 @@ const normalizeStatusColor = (value?: string) => {
   if (lower.includes("pending")) return "gold";
   if (lower.includes("reject") || lower.includes("error")) return "red";
   return "default";
+};
+
+const formatScanTime = (value?: string) => {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+/**
+ * Vertical list of an item's processes with scan progress:
+ *  - done        -> checked  (SCAN_OUT recorded)
+ *  - in_progress -> scanned in, not yet scanned out; also the next step after
+ *                   the last done one (the item's current step)
+ *  - pending     -> not reached yet
+ * Falls back to the plain process name when the item has no routing steps.
+ */
+const ProcessProgressList = ({
+  steps,
+  fallbackName,
+}: {
+  steps: WorkOrderProcessStep[];
+  fallbackName: string;
+}) => {
+  if (steps.length === 0) {
+    return <span>{fallbackName}</span>;
+  }
+
+  const doneCount = steps.filter((step) => step.status === "done").length;
+  // The step right after the last finished one is the item's current step, so
+  // it reads "on progress" even before its own SCAN_IN. Later steps stay
+  // pending. Nothing is "current" until the item has started (>=1 step done).
+  const currentIdx = steps.findIndex((step) => step.status !== "done");
+
+  return (
+    <div>
+      <div className="mb-2 text-xs font-medium text-slate-500">
+        {doneCount}/{steps.length} process scanned
+      </div>
+      <ol className="m-0 flex list-none flex-col gap-1.5 p-0">
+        {steps.map((step, idx) => {
+          const done = step.status === "done";
+          const running =
+            step.status === "in_progress" ||
+            (!done && idx === currentIdx && doneCount > 0);
+          const time = formatScanTime(
+            done ? step.scanned_out_at : step.scanned_in_at,
+          );
+          return (
+            <li
+              key={`${step.op_seq}-${step.process_name}`}
+              className="flex min-w-0 items-center gap-2 text-sm"
+            >
+              <span className="flex w-4 shrink-0 justify-center">
+                {done ? (
+                  <CheckCircleFilled className="!text-green-600" />
+                ) : running ? (
+                  <SyncOutlined spin className="!text-blue-600" />
+                ) : (
+                  <ClockCircleOutlined className="!text-amber-500" />
+                )}
+              </span>
+              <span className="min-w-0 break-words font-semibold text-slate-950">
+                {step.process_name}
+              </span>
+              <span
+                className={`shrink-0 text-xs font-medium ${
+                  done
+                    ? "text-green-700"
+                    : running
+                      ? "text-blue-700"
+                      : "text-amber-600"
+                }`}
+              >
+                {done ? "" : running ? "(on progress)" : "(pending)"}
+              </span>
+              {time ? (
+                <span className="ml-auto shrink-0 text-[11px] font-normal text-slate-400">
+                  {time}
+                </span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
 };
 
 const DetailField = ({ label, value, mono }: DetailFieldProps) => (
@@ -173,6 +271,7 @@ export default function WorkOrderDetailPage() {
         quantityNumber: qtyNumber,
         estimatedMinutes: perUniq,
         processName: item.process_name || "-",
+        processSteps: item.process_steps ?? [],
         status: item.status || "Pending",
         kanbanNumber: item.kanban_number ?? "-",
         qrDataUrl: item.qr_data_url,
@@ -948,9 +1047,17 @@ export default function WorkOrderDetailPage() {
                         value={selectedItem.quantity}
                         mono
                       />
+                    </div>
+
+                    <div className="mt-5 border-t border-slate-100 pt-5">
                       <DetailField
                         label="Process"
-                        value={selectedItem.processName}
+                        value={
+                          <ProcessProgressList
+                            steps={selectedItem.processSteps}
+                            fallbackName={selectedItem.processName}
+                          />
+                        }
                       />
                     </div>
 
