@@ -16,6 +16,7 @@ import {
   AppstoreOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
+  DownloadOutlined,
   EyeOutlined,
   PlusOutlined,
   PrinterOutlined,
@@ -31,6 +32,7 @@ import WorkOrderLineExportModal, {
   buildBomDetailIndex,
   type ReportItem as WorkOrderReportItem,
 } from "@/components/work-orders/WorkOrderLineReport";
+import WorkOrderProcessExportModal from "@/components/work-orders/WorkOrderProcessExportModal";
 import WorkOrderImportModal from "@/components/WorkOrderImportModal";
 import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
 
@@ -548,6 +550,8 @@ export default function WorkOrdersPage() {
   const [bulkNote, setBulkNote] = useState("");
   /* Modal export "Work Order per Line" (format PDF acuan). */
   const [lineExportOpen, setLineExportOpen] = useState(false);
+  /* Modal download Excel per proses (semua WO, filter proses). */
+  const [processExportOpen, setProcessExportOpen] = useState(false);
   const [importBulkOpen, setImportBulkOpen] = useState(false);
 
   const [bulkApproveWorkOrders, bulkApproveState] =
@@ -2069,7 +2073,7 @@ export default function WorkOrdersPage() {
           <div className="mt-6 rounded-xl border border-gray-100 bg-white p-5">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <div className="text-lg font-semibold text-gray-900">
+                <div className="whitespace-nowrap text-lg font-semibold text-gray-900">
                   All Work Orders
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
@@ -2129,6 +2133,18 @@ export default function WorkOrdersPage() {
                 </Button>
               </div>
             </div>
+
+            {isWorkOrderTab ? (
+              <div className="mt-3 flex justify-end">
+                <Button
+                  className="!rounded-lg"
+                  icon={<DownloadOutlined />}
+                  onClick={() => setProcessExportOpen(true)}
+                >
+                  Download Excel per Proses
+                </Button>
+              </div>
+            ) : null}
 
             <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
               <Table<WorkOrderRow>
@@ -2453,6 +2469,13 @@ export default function WorkOrdersPage() {
         open={lineExportOpen}
         items={lineExportItems}
         onClose={() => setLineExportOpen(false)}
+      />
+
+      <WorkOrderProcessExportModal
+        open={processExportOpen}
+        onClose={() => setProcessExportOpen(false)}
+        bomIndex={bomIndex}
+        bomDetail={bomDetail}
       />
 
       <WorkOrderImportModal

@@ -193,6 +193,11 @@ export type WorkOrderSummary = {
   total_uniqs: number;
 };
 
+export type WorkOrderProcessOption = {
+  process_code: string;
+  process_name: string;
+};
+
 export type GetWorkOrdersParams = {
   page: number;
   limit: number;
@@ -666,6 +671,28 @@ export const workOrdersApiSlice = apiSlice
           ),
         invalidatesTags: [{ type: TAG, id: "LIST" }],
       }),
+      // Daftar proses aktif (dipakai filter export Excel per proses).
+      getWorkOrderProcessOptions: builder.query<WorkOrderProcessOption[], void>({
+        query: () => ({
+          url: "/working-order/work-orders/form-options/processes",
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => {
+          const rows = normalizeArrayResponse<unknown>(response);
+          return rows.flatMap((row) => {
+            if (!isRecord(row)) return [];
+            const name = getString(row, ["process_name", "name"]);
+            if (!name) return [];
+            return [
+              {
+                process_code: getString(row, ["process_code", "code"]) ?? "",
+                process_name: name,
+              },
+            ];
+          });
+        },
+      }),
       getWorkOrdersSummary: builder.query<WorkOrderSummary, void>({
         query: () => ({
           url: "/working-order/work-orders/summary",
@@ -796,6 +823,8 @@ export const workOrdersApiSlice = apiSlice
 
 export const {
   useGetWorkOrdersQuery,
+  useLazyGetWorkOrdersQuery,
+  useGetWorkOrderProcessOptionsQuery,
   useGetRobotWorkOrderTasksQuery,
   useGetWorkOrderByIdQuery,
   useGetWorkOrderItemQRQuery,
