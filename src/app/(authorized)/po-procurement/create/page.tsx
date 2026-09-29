@@ -22,9 +22,9 @@ import {
 } from "@/lib/api/procurement-po/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
-  useGetPoBudgetListQuery,
   type PoBudgetType,
 } from "@/lib/api/po-budget/api";
+import { useAllPoBudgetEntries } from "@/lib/hooks/useAllPoBudgetEntries";
 import { getStoredParents } from "@/components/po-budget/poBudgetChildAdapters";
 
 type PoItemRow = {
@@ -121,9 +121,12 @@ function CreatePoProcurementPageContent() {
   >({});
   const [generateMode, setGenerateMode] = useState<string>("both_stages");
 
-  const poBudgetQuery = useGetPoBudgetListQuery(
-    { type: poBudgetType, page: 1, limit: 100, budgetSubtype },
-    { skip: !apiEnabled },
+  // Loads incrementally (100 at a time) instead of stopping at the first
+  // page (limit=100), so the PR Budget dropdown eventually shows everything.
+  const poBudgetEntries = useAllPoBudgetEntries(
+    poBudgetType,
+    budgetSubtype,
+    apiEnabled,
   );
 
   // Only budget entries whose period matches the Period selected in Step 1 are
@@ -135,7 +138,7 @@ function CreatePoProcurementPageContent() {
   );
 
   const budgetRowsForPeriod = useMemo(() => {
-    const rows = poBudgetQuery.data?.data ?? [];
+    const rows = poBudgetEntries.items;
     if (!periodKey) return rows;
     return rows.filter((row) => {
       if (!isBudgetSubtype(row.budgetSubtype || row.type, budgetSubtype))
@@ -154,7 +157,7 @@ function CreatePoProcurementPageContent() {
         ? parsed.format("MMMM YYYY") === periodKey
         : rowPeriod === periodKey;
     });
-  }, [budgetSubtype, poBudgetQuery.data?.data, periodKey]);
+  }, [budgetSubtype, poBudgetEntries.items, periodKey]);
 
   const poBudgetOptions = useMemo<{ label: string; value: number }[]>(() => {
     if (!apiEnabled) {
@@ -541,6 +544,7 @@ function CreatePoProcurementPageContent() {
               <Select
                 mode="multiple"
                 showSearch
+                loading={poBudgetEntries.isFetching}
                 optionFilterProp="label"
                 value={selectedBudgetIds}
                 onChange={(values) =>
