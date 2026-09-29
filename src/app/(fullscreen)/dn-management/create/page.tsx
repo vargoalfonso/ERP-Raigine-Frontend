@@ -804,7 +804,7 @@ function DnRawMaterialCreatePageContent() {
                 <div>
                   <div className="mb-2 text-sm font-medium text-gray-700">Order Qty</div>
                   <InputNumber
-                    value={draft.orderQty}
+                    value={draft.pcsPerKanban}
                     onChange={(v) => setDraft((p) => ({ ...p, orderQty: v ?? undefined }))}
                     className="w-full"
                     min={0}
