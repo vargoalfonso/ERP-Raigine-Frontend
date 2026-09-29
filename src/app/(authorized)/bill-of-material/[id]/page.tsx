@@ -55,6 +55,7 @@ type MaterialSpec = {
   grade?: string | null;
   material_grade?: string | null;
   type_material?: string | null;
+  is_subcon?: boolean;
   form?: string | null;
   width_mm?: number | null;
   diameter_mm?: number | null;
@@ -191,6 +192,7 @@ const parseMaterialSpec = (raw: unknown): MaterialSpec | null => {
     material_code: asStr(s.material_code) ?? asStr(s.material_grade) ?? null,
     material_grade: asStr(s.material_grade) ?? null,
     type_material: asStr(s.type_material) ?? asStr(s.material_type) ?? null,
+    is_subcon: s.is_subcon === true,
     grade: asStr(s.grade) ?? asStr(s.material_grade) ?? null,
     form: asStr(s.form) ?? null,
     width_mm: asNum(s.width_mm),
@@ -263,6 +265,7 @@ const MaterialSpecDesc = ({ spec }: { spec: MaterialSpec | null | undefined }) =
       <Descriptions.Item label="Material Code">{spec.material_grade ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Grade">{spec.grade ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Type Material">{spec.type_material ?? "—"}</Descriptions.Item>
+      <Descriptions.Item label="Subcon">{spec.is_subcon ? "Yes" : "No"}</Descriptions.Item>
       <Descriptions.Item label="Form">{spec.form ?? "—"}</Descriptions.Item>
       <Descriptions.Item label="Weight">{fmt(spec.weight_kg, "kg")}</Descriptions.Item>
       {/* <Descriptions.Item label="Customer Cycle">{spec.customer_cycle ?? "—"}</Descriptions.Item> */}

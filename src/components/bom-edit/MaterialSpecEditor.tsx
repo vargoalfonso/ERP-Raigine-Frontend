@@ -46,7 +46,6 @@ export default function MaterialSpecEditor({
     form.setFieldValue([...base, "length_mm"], item.length_mm ?? undefined);
     if (item.type_material === "raw" || item.type_material === "indirect") {
       form.setFieldValue([...base, "type_material"], item.type_material);
-      form.setFieldValue([...base, "is_subcon"], false);
     } else if (item.type_material === "subcon") {
       form.setFieldValue([...base, "is_subcon"], true);
     }

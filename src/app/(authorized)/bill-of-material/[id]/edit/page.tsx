@@ -395,8 +395,14 @@ export default function BomEditPage() {
                 ? spec.grade
                 : undefined,
         form: typeof spec.form === "string" ? spec.form : undefined,
-        type_material: typeMaterial,
-        is_subcon: typeMaterial?.trim().toLowerCase() === "subcon",
+        type_material:
+          typeMaterial?.trim().toLowerCase() === "subcon"
+            ? undefined
+            : typeMaterial,
+        // Data lama bisa masih menyimpan "subcon" di type_material; anggap sebagai flag subcon.
+        is_subcon:
+          spec.is_subcon === true ||
+          typeMaterial?.trim().toLowerCase() === "subcon",
         grade:
           typeof spec.grade === "string"
             ? spec.grade
@@ -645,9 +651,8 @@ export default function BomEditPage() {
           raw_material_master_id: spec?.raw_material_master_id ?? null,
           grade: resolvedGrade,
           material_grade: resolvedMaterialGrade,
-          type_material: spec?.is_subcon
-            ? "subcon"
-            : (cleanText(spec?.type_material) ?? null),
+          type_material: cleanText(spec?.type_material) ?? null,
+          is_subcon: spec?.is_subcon === true,
           form: normalizedForm ?? null,
           width_mm:
             typeof spec?.width_mm === "number" && Number.isFinite(spec.width_mm)
@@ -810,11 +815,10 @@ export default function BomEditPage() {
               ...currentPath,
               "children",
             ]),
-            raw_material_type: child.material_spec?.is_subcon
-              ? "subcon"
-              : (cleanText(child.material_spec?.type_material) ??
-                cleanText(child.category) ??
-                undefined),
+            raw_material_type:
+              cleanText(child.material_spec?.type_material) ??
+              cleanText(child.category) ??
+              undefined,
           };
         });
       };
