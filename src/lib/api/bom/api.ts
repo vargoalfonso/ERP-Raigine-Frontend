@@ -636,8 +636,8 @@ export const bomSlice = apiSlice.injectEndpoints({
     >({
       query: (params) => {
         const page = params?.page ?? 1;
-        // Backend clamps any limit > 200 down to 20; request the max allowed.
-        const limit = Math.min(1000, params?.limit ?? 1000);
+        // Backend clamps limit at 10000 (pkg/pagination clampLimit); request the max.
+        const limit = Math.min(10000, params?.limit ?? 10000);
         const searchParams = new URLSearchParams({
           page: String(page),
           limit: String(limit),

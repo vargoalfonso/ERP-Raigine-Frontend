@@ -1,140 +1,174 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Card,
-  Typography,
-  Upload,
+  Alert,
   Button,
+  Card,
+  Checkbox,
+  Divider,
+  InputNumber,
+  Modal,
+  Radio,
   Space,
   Table,
-  InputNumber,
+  Tag,
+  Typography,
+  Upload,
   message,
-  Divider,
-  Radio,
 } from "antd";
 import {
-  UploadOutlined,
-  DownloadOutlined,
   ArrowLeftOutlined,
+  DownloadOutlined,
   SaveOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
+import type { ColumnsType } from "antd/es/table";
 import type {
   RcFile,
   UploadChangeParam,
   UploadFile,
 } from "antd/es/upload/interface";
 
+import { useBulkCreateInventoryMutation } from "@/lib/api/inventory/api";
+import { useListWarehousesQuery } from "@/lib/api/warehouse/api";
+import {
+  buildRows,
+  decodeCsvBuffer,
+  findDuplicateGroups,
+  mergeDuplicates,
+  parseDelimited,
+  validateRow,
+  type Cell,
+  type DuplicateMode,
+  type UploadRow,
+} from "@/lib/api/raw-materials/bulkUpload";
+
 const { Title, Text } = Typography;
 const { Dragger } = Upload;
 
-type RowData = {
-  key: string;
-  uniq: string;
-  part_number: string;
-  part_name: string;
-  model: string;
-  stock: number;
-  wo_number: string;
-  warehouse: string;
-};
+const ACCEPTED = /\.(csv|xlsx|xls)$/i;
 
-export default function BulkFinishedGoodsPage() {
+export default function BulkRawMaterialsPage() {
   const router = useRouter();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
-  const [rows, setRows] = useState<RowData[]>([]);
-  const [loadingSave, setLoadingSave] = useState(false);
+  const [rows, setRows] = useState<UploadRow[]>([]);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [dupMode, setDupMode] = useState<DuplicateMode | undefined>(undefined);
+  const [onlyProblems, setOnlyProblems] = useState(false);
   const [mode, setMode] = useState<"manual" | "bulk">("bulk");
-  const sampleRows: RowData[] = [
-  {
-    key: "1",
-    model: "Vaso",
-    stock: 24,
-    wo_number: "Jakarta",
-    uniq: "123",
-    part_number: "1233",
-    part_name: "1234",
-    warehouse: "12345"
-  },
-  {
-   key: "1",
-    model: "Vaso",
-    stock: 24,
-    wo_number: "Jakarta",
-    uniq: "123",
-    part_number: "1233",
-    part_name: "1234",
-    warehouse: "12345"
-  },
-  {
- key: "1",
-    model: "Vaso",
-    stock: 24,
-    wo_number: "Jakarta",
-    uniq: "123",
-    part_number: "1233",
-    part_name: "1234",
-    warehouse: "12345"
-  },
-  {
-  key: "1",
-    model: "Vaso",
-    stock: 24,
-    wo_number: "Jakarta",
-    uniq: "123",
-    part_number: "1233",
-    part_name: "1234",
-    warehouse: "12345"
-  },
-  {
-   key: "1",
-    model: "Vaso",
-    stock: 24,
-    wo_number: "Jakarta",
-    uniq: "123",
-    part_number: "1233",
-    part_name: "1234",
-    warehouse: "12345"
-  }
-  
-];
 
-  useEffect(() => {
-    /* otomatis isi saat pertama buka biar gampang testing */
-    setRows(sampleRows);
-  }, []);
-  // Columns for preview table
-  const columns = [
-    {
-      title: "Uniq",
-      dataIndex: "uniq",
-      key: "uniq",
+  const [bulkCreate, { isLoading: saving }] = useBulkCreateInventoryMutation();
+  const { data: warehouseData, isSuccess: warehousesLoaded } =
+    useListWarehousesQuery(undefined);
+
+  // Raw-material warehouses only (same rule as the manual create form).
+  // null = list not available, so the warehouse check is skipped.
+  const warehouseNames = useMemo(() => {
+    if (!warehousesLoaded) return null;
+    const map = new Map<string, string>();
+    for (const w of warehouseData ?? []) {
+      const rec = w as unknown as Record<string, unknown>;
+      const type = String(rec.type_warehouse ?? "").trim().toLowerCase();
+      if (type && type !== "raw_material" && type !== "raw-material") continue;
+      const name = String(rec.warehouse_name ?? "").trim();
+      if (name) map.set(name.toLowerCase(), name);
+    }
+    return map;
+  }, [warehouseData, warehousesLoaded]);
+
+  const issuesOf = useCallback(
+    (r: UploadRow): string[] => {
+      const list = [...r.errors];
+      if (
+        warehouseNames &&
+        r.warehouse &&
+        !warehouseNames.has(r.warehouse.toLowerCase())
+      ) {
+        list.push(`Warehouse "${r.warehouse}" is not a raw material warehouse`);
+      }
+      return list;
     },
+    [warehouseNames],
+  );
+
+  // ---- derived state ------------------------------------------------------
+  const dupGroups = useMemo(() => findDuplicateGroups(rows), [rows]);
+  const dupKeys = useMemo(
+    () => new Set(Array.from(dupGroups.values()).flat().map((r) => r.key)),
+    [dupGroups],
+  );
+  const problemRows = useMemo(
+    () => rows.filter((r) => issuesOf(r).length > 0),
+    [rows, issuesOf],
+  );
+  const needsDupChoice = dupGroups.size > 0 && dupMode === undefined;
+  const finalRows = useMemo(
+    () => (needsDupChoice ? [] : mergeDuplicates(rows, dupMode ?? "sum")),
+    [rows, dupMode, needsDupChoice],
+  );
+  const totalStock = useMemo(
+    () => finalRows.reduce((sum, r) => sum + (r.stock ?? 0), 0),
+    [finalRows],
+  );
+  const extraDupRows = useMemo(
+    () =>
+      Array.from(dupGroups.values()).reduce((s, list) => s + list.length - 1, 0),
+    [dupGroups],
+  );
+  const canSave =
+    rows.length > 0 && problemRows.length === 0 && !needsDupChoice && !saving;
+
+  const tableData = useMemo(
+    () =>
+      onlyProblems
+        ? rows.filter((r) => dupKeys.has(r.key) || issuesOf(r).length > 0)
+        : rows,
+    [onlyProblems, rows, dupKeys, issuesOf],
+  );
+
+  // ---- table --------------------------------------------------------------
+  const handleStockChange = (key: string, value: number | null) => {
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.key !== key) return r;
+        const next = {
+          ...r,
+          stock: value,
+          stock_raw: value === null ? "" : String(value),
+        };
+        return { ...next, errors: validateRow(next) };
+      }),
+    );
+  };
+
+  const columns: ColumnsType<UploadRow> = [
+    { title: "Row", dataIndex: "line", key: "line", width: 64 },
+    { title: "Uniq", dataIndex: "uniq", key: "uniq" },
     {
       title: "Part Number",
       dataIndex: "part_number",
       key: "part_number",
+      render: (v: string) => v || "-",
     },
-    {
-      title: "Part Name",
-      dataIndex: "part_name",
-      key: "part_name",
-    },
+    { title: "Part Name", dataIndex: "part_name", key: "part_name" },
     {
       title: "Model",
       dataIndex: "model",
       key: "model",
+      render: (v: string) => v || "-",
     },
     {
       title: "Stock",
       dataIndex: "stock",
       key: "stock",
-      render: (value: number, record: RowData) => (
+      render: (value: number | null, record) => (
         <InputNumber
           min={0}
           value={value}
-          onChange={(v) => handleStockChange(record.key, v ?? 0)}
+          status={value === null ? "error" : undefined}
+          onChange={(v) => handleStockChange(record.key, v)}
         />
       ),
     },
@@ -142,38 +176,31 @@ export default function BulkFinishedGoodsPage() {
       title: "WO Number",
       dataIndex: "wo_number",
       key: "wo_number",
+      render: (v: string) => v || "-",
     },
+    { title: "Warehouse", dataIndex: "warehouse", key: "warehouse" },
     {
-      title: "Warehouse",
-      dataIndex: "warehouse",
-      key: "warehouse",
+      title: "Status",
+      key: "status",
+      render: (_: unknown, record) => {
+        const issues = issuesOf(record);
+        const isDup = dupKeys.has(record.key);
+        if (!issues.length && !isDup) return <Tag color="success">OK</Tag>;
+        return (
+          <Space size={[0, 4]} wrap>
+            {issues.map((text) => (
+              <Tag key={text} color="error">
+                {text}
+              </Tag>
+            ))}
+            {isDup && <Tag color="warning">Duplicate uniq</Tag>}
+          </Space>
+        );
+      },
     },
   ];
 
-  const handleStockChange = (key: string, value: number) => {
-    setRows((prev) =>
-      prev.map((r) => (r.key === key ? { ...r, stock: value } : r))
-    );
-  };
-  
-
-  // Compute summary counts
-  const entriesCount = rows.length;
-  const completeCount = useMemo(
-    () =>
-      rows.filter(
-        (r) =>
-          r.uniq &&
-          r.part_number &&
-          r.part_name &&
-          typeof r.stock === "number" &&
-          r.wo_number &&
-          r.warehouse
-      ).length,
-    [rows]
-  );
-
-  // Create CSV template and download
+  // ---- template -----------------------------------------------------------
   const handleDownloadTemplate = () => {
     const header = [
       "uniq",
@@ -185,153 +212,142 @@ export default function BulkFinishedGoodsPage() {
       "warehouse",
     ];
     const sample = [
-      "LV-001",
-      "SP-001-A",
-      "Steel Plate",
-      "Camry 2024",
-      "250",
-      "WO-2024-001",
-      "WH-FG-202",
+      "M01",
+      "11A19-21975",
+      "STKM-11AC Ø19.1 X 1.20 X 2197.5",
+      "HINO",
+      "120",
+      "",
+      "RAW-WH-MRP1",
     ];
-    const csv = [header.join(","), sample.join(",")].join("\n");
+    // BOM so Excel opens the file as UTF-8 (keeps "Ø").
+    const csv = "\uFEFF" + [header.join(";"), sample.join(";")].join("\r\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "finished_goods_template.csv";
+    a.download = "raw_material_inventory_template.csv";
     a.click();
     URL.revokeObjectURL(url);
     message.success("Template downloaded");
   };
 
-  // Parse CSV simple parser
-  const parseCSV = async (file: RcFile) =>
-    new Promise<RowData[]>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const text = String(reader.result || "");
-        try {
-          const lines = text.split(/\r\n|\n/).filter(Boolean);
-          if (!lines.length) return resolve([]);
-          const headers = lines[0]
-            .split(",")
-            .map((h) => h.trim().toLowerCase());
-          const dataLines = lines.slice(1);
-          const parsed: RowData[] = dataLines.map((line, idx) => {
-            const cols = line.split(",").map((c) => c.trim());
-            const obj: any = {};
-            headers.forEach((h, i) => {
-              obj[h] = cols[i] ?? "";
-            });
-            return {
-              key: `${Date.now()}-${idx}`,
-              uniq: obj["uniq"] ?? "",
-              part_number: obj["part_number"] ?? "",
-              part_name: obj["part_name"] ?? "",
-              model: obj["model"] ?? "",
-              stock: Number(obj["stock"] ?? 0),
-              wo_number: obj["wo_number"] ?? "",
-              warehouse: obj["warehouse"] ?? "",
-            };
-          });
-          resolve(parsed);
-        } catch (e) {
-          reject(e);
-        }
-      };
-      reader.onerror = () => reject(new Error("Failed to read file"));
-      reader.readAsText(file);
-    });
-
-  // Handler for Upload component change
-  const onUploadChange = async (info: UploadChangeParam<UploadFile>) => {
-    const newFileList = info.fileList.slice(-1); // only keep latest
-    setFileList(newFileList);
-
-    const latest = info.file;
-    const file = latest.originFileObj as RcFile | undefined;
-    if (!file) {
-      setRows([]);
-      return;
+  // ---- file handling ------------------------------------------------------
+  const readMatrix = async (file: File): Promise<Cell[][]> => {
+    const buffer = await file.arrayBuffer();
+    if (/\.csv$/i.test(file.name)) {
+      return parseDelimited(decodeCsvBuffer(buffer));
     }
+    const XLSX = await import("xlsx");
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    return XLSX.utils.sheet_to_json<Cell[]>(sheet, {
+      header: 1,
+      raw: true,
+      defval: "",
+    });
+  };
 
-    // If CSV, parse. If xlsx/xls, show mock data and notify user to install `xlsx` for real preview.
-    if (file.name.toLowerCase().endsWith(".csv")) {
-      try {
-        const parsed = await parseCSV(file);
-        setRows(parsed);
-        message.success(`Parsed ${parsed.length} rows from CSV`);
-      } catch (err) {
-        message.error("Failed to parse CSV file");
-        setRows([]);
+  const resetData = () => {
+    setRows([]);
+    setParseError(null);
+    setDupMode(undefined);
+    setOnlyProblems(false);
+  };
+
+  const onUploadChange = async (info: UploadChangeParam<UploadFile>) => {
+    setFileList(info.fileList.slice(-1));
+    const file = (info.file.originFileObj ?? info.file) as unknown as File;
+    if (!(file instanceof Blob) || info.file.status === "removed") return;
+
+    resetData();
+    try {
+      const { rows: parsed, missingColumns } = buildRows(await readMatrix(file));
+      if (missingColumns.length) {
+        setParseError(
+          `Required column(s) not found: ${missingColumns.join(", ")}. ` +
+            `Expected header: uniq, part_number, part_name, model, stock, wo_number, warehouse.`,
+        );
+        return;
       }
-    } else if (file.name.toLowerCase().match(/\.xlsx?$|\.xls$/)) {
-      message.info(
-        "Excel upload detected. Preview limited in this demo. Install `xlsx` library for full preview."
-      );
-      // Provide mock sample rows (replace with real parser when adding sheetjs)
-      const sample = Array.from({ length: 4 }).map((_, idx) => ({
-        key: `sample-${idx}`,
-        uniq: `LV-00${idx + 1}`,
-        part_number: "SP-001-A",
-        part_name: "Steel Plate",
-        model: "Camry 2024",
-        stock: 250,
-        wo_number: "WO-2024-001",
-        warehouse: "WH-FG-202",
-      }));
-      setRows(sample);
-    } else {
-      message.warning("Unsupported file type. Please upload CSV or Excel.");
-      setRows([]);
+      if (!parsed.length) {
+        setParseError("The file has no data rows.");
+        return;
+      }
+      setRows(parsed);
+      message.success(`Read ${parsed.length} rows`);
+    } catch {
+      setParseError("Failed to read the file. Please check the format.");
     }
   };
 
   const beforeUpload = (file: RcFile) => {
-    // accept csv or xlsx/xls
-    const allowed = /\.(csv|xlsx?|xls)$/i.test(file.name);
-    if (!allowed) {
+    if (!ACCEPTED.test(file.name)) {
       message.error("Only CSV or Excel files are accepted");
+      return Upload.LIST_IGNORE;
     }
-    // prevent auto upload by returning false (we handle manually)
-    return false;
+    return false; // we read the file ourselves, no auto upload
   };
 
-  // Save action (simulate)
-  const handleSave = async () => {
-    if (!rows.length) {
-      message.warning("No data to save");
-      return;
-    }
-    setLoadingSave(true);
+  // ---- save ---------------------------------------------------------------
+  const doImport = async () => {
+    const items = finalRows.map((r) => ({
+      uniq_code: r.uniq,
+      part_number: r.part_number || undefined,
+      part_name: r.part_name || undefined,
+      warehouse_location:
+        warehouseNames?.get(r.warehouse.toLowerCase()) ?? r.warehouse,
+      stock_qty: r.stock ?? 0,
+      // Not in the file: use the database defaults so the rows are still
+      // counted in the RM type / source stats. Editable later per item.
+      raw_material_type: "others",
+      rm_source: "supplier",
+    }));
     try {
-      // TODO: call API to save rows
-      await new Promise((res) => setTimeout(res, 800)); // simulate
-      message.success(`Saved ${rows.length} Raw Materials entries`);
+      const res = await bulkCreate({ type: "raw-materials", items }).unwrap();
+      message.success(
+        `Imported ${res.data?.created || items.length} raw materials`,
+      );
       router.push("/raw-materials");
-    } catch {
-      message.error("Failed to save data");
-    } finally {
-      setLoadingSave(false);
+    } catch (error: unknown) {
+      message.error(
+        (error as { data?: { message?: string } })?.data?.message ||
+          "Failed to import raw materials",
+      );
     }
   };
 
-  const handleBack = () => {
-    router.push("/raw-materials/create");
+  const handleSave = () => {
+    if (!canSave) return;
+    Modal.confirm({
+      title: "Import to Raw Material Inventory?",
+      width: 520,
+      okText: "Import",
+      content: (
+        <div className="space-y-2">
+          <div>
+            <b>{finalRows.length}</b> items, total stock{" "}
+            <b>{totalStock.toLocaleString("id-ID")}</b>.
+          </div>
+          <Alert
+            type="warning"
+            showIcon
+            message="If a uniq already exists in the inventory, this stock is ADDED to the current stock (not replaced). Importing the same file twice doubles the stock."
+          />
+        </div>
+      ),
+      onOk: doImport,
+    });
   };
 
-  const handleModeChange = (e: any) => {
-    const value = e.target.value as "manual" | "bulk";
+  const handleBack = () => router.push("/raw-materials/create");
+
+  const handleModeChange = (value: "manual" | "bulk") => {
     setMode(value);
-    if (value === "bulk") {
-      // navigate to bulk page (adjust path if you have a different route)
-      router.push("/raw-materials/bulk");
-    } else {
-      // manual: stay on this page (no navigation)
-      router.push("/raw-materials/create");
-      message.info("Switched to Manual mode");
-    }
+    if (value === "manual") router.push("/raw-materials/create");
   };
+
+  const dupPreview = Array.from(dupGroups.entries()).slice(0, 6);
 
   return (
     <div className="min-h-screen bg-white pb-32">
@@ -363,19 +379,18 @@ export default function BulkFinishedGoodsPage() {
               <Text className="text-gray-600">Bulk Upload</Text>
             </div>
           </div>
-          <div>
-            <Space>
-              <Button onClick={handleBack}>Cancel</Button>
-              <Button
-                type="primary"
-                icon={<SaveOutlined />}
-                onClick={handleSave}
-                loading={loadingSave}
-              >
-                Save Raw Materials
-              </Button>
-            </Space>
-          </div>
+          <Space>
+            <Button onClick={handleBack}>Cancel</Button>
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              onClick={handleSave}
+              loading={saving}
+              disabled={!canSave}
+            >
+              Save Raw Materials
+            </Button>
+          </Space>
         </div>
       </div>
 
@@ -388,40 +403,37 @@ export default function BulkFinishedGoodsPage() {
               Choose whether to enter data manually or upload in bulk.
             </Text>
             <div className="mt-4">
-              <div>
-                <Radio.Group
-                  onChange={handleModeChange}
-                  value={mode}
-                  size="large"
-                >
-                  <div className=" flex-col pt-7">
-                    <Radio value="manual">Manual</Radio>
-                    <Radio value="bulk">Bulk Action</Radio>
-                  </div>
-                </Radio.Group>
-              </div>
+              <Radio.Group
+                onChange={(e) => handleModeChange(e.target.value)}
+                value={mode}
+                size="large"
+              >
+                <div className="flex-col pt-7">
+                  <Radio value="manual">Manual</Radio>
+                  <Radio value="bulk">Bulk Action</Radio>
+                </div>
+              </Radio.Group>
             </div>
           </Card>
 
-          {/* Step 2 - Upload */}
-          <Card className="w-full rounded-xl mt-10 ">
-            <div className="flex items-start justify-between ">
+          {/* Step 2 */}
+          <Card className="w-full rounded-xl mt-10">
+            <div className="flex items-start justify-between">
               <Title level={4}>Step 2: Input Data</Title>
-              <div className="flex flex-col items-end">
-                <Button
-                  type="primary"
-                  icon={<DownloadOutlined />}
-                  onClick={handleDownloadTemplate}
-                  size="large"
-                >
-                  Download Template
-                </Button>
-              </div>
+              <Button
+                type="primary"
+                icon={<DownloadOutlined />}
+                onClick={handleDownloadTemplate}
+                size="large"
+              >
+                Download Template
+              </Button>
             </div>
             <div className="w-full flex flex-col">
               <Text>
-                Bulk Upload. You&apos;ve chosen to upload data directly from
-                CSV/Excel.
+                Upload a CSV (comma, semicolon or tab separated) or Excel file
+                with the columns: uniq, part_number, part_name, model, stock,
+                wo_number, warehouse.
               </Text>
               <div className="mt-4 bg-white w-full">
                 <Dragger
@@ -434,16 +446,12 @@ export default function BulkFinishedGoodsPage() {
                   onChange={onUploadChange}
                   showUploadList={{ showRemoveIcon: true }}
                   onRemove={() => {
-                    setRows([]);
+                    resetData();
                     setFileList([]);
                   }}
-                  style={{
-                    width: "100%",
-                    maxWidth: "100%",
-                    display: "block",
-                  }}
+                  style={{ width: "100%", maxWidth: "100%", display: "block" }}
                 >
-                  <p className="ant-upload-drag-icon ">
+                  <p className="ant-upload-drag-icon">
                     <UploadOutlined className="!text-gray-400 text-3xl" />
                   </p>
                   <Title level={5}>Upload Excel/CSV File</Title>
@@ -458,34 +466,92 @@ export default function BulkFinishedGoodsPage() {
             </div>
           </Card>
 
-          {/* Step 3 - Preview */}
+          {/* Step 3 */}
           <Card>
             <Title level={4}>Step 3: Review Uploaded Data</Title>
             <Text>
-              Please validate the data from your upload before proceeding.
-              Ensure all entries are correct and complete.
+              Please validate the data before saving. A Part Number / Model of
+              &quot;0&quot; is treated as empty. Model and WO Number are shown
+              for review only and are not stored in Raw Material Inventory.
             </Text>
+
+            <div className="mt-4 space-y-3">
+              {parseError && <Alert type="error" showIcon message={parseError} />}
+
+              {problemRows.length > 0 && (
+                <Alert
+                  type="error"
+                  showIcon
+                  message={`${problemRows.length} row(s) have problems and must be fixed before saving.`}
+                  description="Fix them in your file and upload again (Stock can also be edited directly in the table)."
+                />
+              )}
+
+              {dupGroups.size > 0 && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={`${dupGroups.size} uniq code(s) appear more than once (${extraDupRows} extra rows).`}
+                  description={
+                    <div className="space-y-2">
+                      <div>
+                        Inventory keeps one row per uniq, so the repeated rows
+                        must be combined. Choose how to combine their stock:
+                      </div>
+                      <Radio.Group
+                        value={dupMode}
+                        onChange={(e) => setDupMode(e.target.value)}
+                      >
+                        <Space direction="vertical">
+                          <Radio value="sum">Add up the stock of all rows</Radio>
+                          <Radio value="max">
+                            Keep the largest stock only (use if the rows are
+                            repeated copies)
+                          </Radio>
+                        </Space>
+                      </Radio.Group>
+                      <div className="text-gray-600">
+                        {dupPreview.map(([uniq, list]) => (
+                          <div key={uniq}>
+                            {uniq}: {list.map((r) => r.stock ?? "?").join(", ")}
+                          </div>
+                        ))}
+                        {dupGroups.size > dupPreview.length && (
+                          <div>…and {dupGroups.size - dupPreview.length} more</div>
+                        )}
+                      </div>
+                    </div>
+                  }
+                />
+              )}
+            </div>
 
             <Divider />
 
-            <div style={{ overflowX: "auto" }}className="w-full">
-              <Table<RowData>
+            <div className="mb-3">
+              <Checkbox
+                checked={onlyProblems}
+                onChange={(e) => setOnlyProblems(e.target.checked)}
+              >
+                Show only rows with problems or duplicates
+              </Checkbox>
+            </div>
+
+            <div style={{ overflowX: "auto" }} className="w-full">
+              <Table<UploadRow>
                 columns={columns}
-                dataSource={rows}
-                pagination={false}
+                dataSource={tableData}
                 rowKey="key"
+                pagination={{ pageSize: 50, showSizeChanger: true }}
                 locale={{ emptyText: "No uploaded data yet" }}
-
-                
-
               />
             </div>
           </Card>
         </div>
       </div>
 
-      {/* Footer Summary - Fixed */}
-      <div className="p-6 flex flex-1 justify-center items-start ">
+      {/* Summary */}
+      <div className="p-6 flex flex-1 justify-center items-start">
         <div className="w-full max-w-6xl space-y-6">
           <Card
             className="mt-6"
@@ -501,24 +567,41 @@ export default function BulkFinishedGoodsPage() {
               <div>
                 <Text strong>Summary</Text>
                 <div>
-                  <Text>{entriesCount} Raw Materials ready to be saved</Text>
+                  <Text>
+                    {needsDupChoice
+                      ? "Choose how to combine duplicate uniq codes to continue"
+                      : `${finalRows.length} Raw Materials ready to be saved`}
+                  </Text>
                 </div>
               </div>
               <div className="flex items-center gap-8">
                 <div className="text-center">
                   <div className="text-2xl font-bold text-blue-600">
-                    {entriesCount}
+                    {rows.length}
                   </div>
-                  <div className="text-sm text-gray-500">Entries</div>
+                  <div className="text-sm text-gray-500">Rows in file</div>
                 </div>
                 <div className="text-center">
                   <div className="text-2xl font-bold text-green-600">
-                    {completeCount}
+                    {needsDupChoice ? "-" : finalRows.length}
                   </div>
-                  <div className="text-sm text-gray-500">Complete</div>
+                  <div className="text-sm text-gray-500">Unique items</div>
                 </div>
-                <div>
-                 
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-gray-700">
+                    {needsDupChoice ? "-" : totalStock.toLocaleString("id-ID")}
+                  </div>
+                  <div className="text-sm text-gray-500">Total stock</div>
+                </div>
+                <div className="text-center">
+                  <div
+                    className={`text-2xl font-bold ${
+                      problemRows.length ? "text-red-600" : "text-gray-400"
+                    }`}
+                  >
+                    {problemRows.length}
+                  </div>
+                  <div className="text-sm text-gray-500">Problems</div>
                 </div>
               </div>
             </div>
