@@ -31,6 +31,31 @@ const getNumber = (
   return undefined;
 };
 
+export type BulkCreateFinishedGoodsItem = {
+  uniq_code: string;
+  warehouse_location: string;
+  wo_number?: string;
+  stock_qty?: number;
+  part_number?: string;
+  part_name?: string;
+  model?: string;
+};
+
+export type BulkCreateFinishedGoodsResult = {
+  index: number;
+  uniq_code: string;
+  status: "created" | "failed";
+  id?: number;
+  uuid?: string;
+  error?: string;
+};
+
+export type BulkCreateFinishedGoodsResponse = {
+  created: number;
+  failed: number;
+  results: BulkCreateFinishedGoodsResult[];
+};
+
 export type Pagination = {
   total: number;
   page: number;
@@ -466,6 +491,25 @@ export const finishedGoodsSlice = apiSlice.injectEndpoints({
         ),
     }),
 
+    bulkCreateFinishedGoods: builder.mutation<
+      BulkCreateFinishedGoodsResponse,
+      { items: BulkCreateFinishedGoodsItem[] }
+    >({
+      query: (body) => ({
+        url: "/finished-goods/bulk",
+        method: "POST",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      invalidatesTags: [{ type: "FinishedGoods", id: "LIST" }],
+      transformResponse: (response: unknown) =>
+        normalizeObjectResponse<BulkCreateFinishedGoodsResponse>(response) ?? {
+          created: 0,
+          failed: 0,
+          results: [],
+        },
+    }),
+
     updateFinishedGood: builder.mutation<
       FinishedGoodListItem,
       { id: number; body: UpdateFinishedGoodRequest }
@@ -556,6 +600,7 @@ export const {
   useGetFinishedGoodHistoryQuery,
   useGetFinishedGoodUniqOptionsQuery,
   useCreateFinishedGoodMutation,
+  useBulkCreateFinishedGoodsMutation,
   useUpdateFinishedGoodMutation,
   useDeleteFinishedGoodMutation,
   useLazyGenerateFinishedGoodQRQuery,

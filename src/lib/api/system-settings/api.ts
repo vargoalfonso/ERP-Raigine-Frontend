@@ -1460,7 +1460,7 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
       CreateSafetyStockBulkRequest
     >({
       query: (body) => ({
-        url: `${ROUTES.safetyStock}`,
+        url: `${ROUTES.safetyStock}/bulk`,
         method: "POST",
         body,
         meta: { useAuthorization: true, contentType: "application/json" },

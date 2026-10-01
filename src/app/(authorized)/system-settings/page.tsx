@@ -124,6 +124,22 @@ import {
   hasPermission,
 } from "@/lib/utils/permissions";
 import { UploadOutlined } from "@ant-design/icons";
+import * as XLSX from "xlsx";
+import {
+  decodeCsvBuffer,
+  downloadTextFile,
+  parseCsvText,
+} from "@/lib/utils/excel/csv";
+import {
+  PARAMETER_IMPORT_CONFIG,
+  buildFailedRowsCsv,
+  buildParameterTemplateCsv,
+  parameterKey,
+  parseParameterImport,
+  runWithConcurrency,
+  withRateLimitRetry,
+  type ParameterImportKind,
+} from "@/lib/utils/excel/parameterImport";
 
 type StatusType = "Active" | "Inactive";
 
@@ -1163,6 +1179,7 @@ export default function SystemSettingsPage() {
 
   const [rows, setRows] = useState<ParameterRow[]>(initialRows);
   const [roleRows, setRoleRows] = useState<RoleRow[]>(initialRoleRows);
+  const [parameterImporting, setParameterImporting] = useState(false);
   const [safetyRows, setSafetyRows] = useState<SafetyStockRow[]>(
     initialSafetyStockRows,
   );
@@ -2679,6 +2696,198 @@ export default function SystemSettingsPage() {
       );
       return false;
     }
+  };
+
+  // ---------------------------------------------------------------------
+  // Safety Stock / Stockdays import (CSV or Excel, parsed in the browser).
+  // The Download Template / Import buttons are shared by every module, so
+  // they pick the right behaviour from the selected module.
+  // ---------------------------------------------------------------------
+  const readImportMatrix = async (file: File): Promise<string[][]> => {
+    const buffer = await file.arrayBuffer();
+    if (/\.csv$/i.test(file.name)) return parseCsvText(decodeCsvBuffer(buffer));
+
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    if (!sheet) return [];
+    return XLSX.utils
+      .sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: "" })
+      .map((r) => r.map((c) => String(c ?? "")))
+      .filter((r) => r.some((c) => c.trim() !== ""));
+  };
+
+  const handleImportParameters = async (
+    kind: ParameterImportKind,
+    file: File,
+  ): Promise<boolean> => {
+    if (!apiEnabled) {
+      message.info("API is not configured");
+      return false;
+    }
+    if (parameterImporting) return false;
+
+    const existingList = (
+      kind === "safety-stock" ? safetyStockApiData : stockdaysApiData
+    ) as unknown as Array<Record<string, unknown>> | undefined;
+    if (!existingList) {
+      message.warning("Data is still loading, please try again in a moment");
+      return false;
+    }
+
+    const progressKey = "parameter-import";
+    setParameterImporting(true);
+    try {
+      const parsed = parseParameterImport(kind, await readImportMatrix(file));
+      if (parsed.missingColumns.length) {
+        message.error(
+          `Missing column(s): ${parsed.missingColumns.join(", ")}. Use Download Template for the correct format.`,
+        );
+        return false;
+      }
+      if (!parsed.rows.length && !parsed.invalid.length) {
+        message.warning("No data rows found in the file");
+        return false;
+      }
+
+      // Existing records, so a re-import updates instead of creating duplicates.
+      const existing = new Map<string, { id: string; status: string }>();
+      for (const rec of existingList) {
+        if (!rec?.id) continue;
+        const code = rec.item_uniq_code ?? rec.item_code ?? "";
+        existing.set(
+          parameterKey(String(rec.inventory_type ?? ""), String(code)),
+          { id: String(rec.id), status: String(rec.status ?? "") },
+        );
+      }
+
+      const failed = parsed.invalid.map((i) => ({
+        cells: i.cells,
+        error: `Line ${i.line}: ${i.reason}`,
+      }));
+      let created = 0;
+      let updated = 0;
+      let done = 0;
+      const total = parsed.rows.length;
+
+      await runWithConcurrency(parsed.rows, 3, async (row) => {
+        const current = existing.get(
+          parameterKey(row.inventory_type, row.item_code),
+        );
+        try {
+          await withRateLimitRetry(async () => {
+            if (kind === "safety-stock") {
+              // Backend resets status to Active on update when it is not sent,
+              // so keep the current status when the file leaves it blank.
+              const status = row.status
+                ? row.status === "active"
+                  ? "Active"
+                  : "Inactive"
+                : current?.status || undefined;
+              if (current) {
+                await updateSafetyStock({
+                  id: current.id,
+                  body: {
+                    calculation_type: row.calculation_type,
+                    constanta: row.constanta,
+                    ...(status ? { status } : {}),
+                  },
+                }).unwrap();
+              } else {
+                await createSafetyStock({
+                  inventory_type: row.inventory_type,
+                  item_uniq_code: row.item_code,
+                  calculation_type: row.calculation_type,
+                  constanta: row.constanta,
+                  ...(status ? { status } : {}),
+                }).unwrap();
+              }
+            } else if (current) {
+              await updateStockdays({
+                id: current.id,
+                body: {
+                  inventory_type: row.inventory_type,
+                  item_code: row.item_code,
+                  calculation_type: row.calculation_type,
+                  constanta: row.constanta,
+                  ...(row.status ? { status: row.status } : {}),
+                },
+              }).unwrap();
+            } else {
+              await createStockdays({
+                inventory_type: row.inventory_type,
+                item_code: row.item_code,
+                calculation_type: row.calculation_type,
+                constanta: row.constanta,
+                status: row.status ?? "active",
+              }).unwrap();
+            }
+          });
+          if (current) updated += 1;
+          else created += 1;
+        } catch (err) {
+          failed.push({
+            cells: row.cells,
+            error: `Line ${row.line}: ${getApiErrorMessage(err, "Request failed")}`,
+          });
+        } finally {
+          done += 1;
+          message.loading({
+            content: `Importing ${done}/${total}...`,
+            key: progressKey,
+            duration: 0,
+          });
+        }
+      });
+
+      message.destroy(progressKey);
+      const summary = `Import selesai. Created ${created}, Updated ${updated}, Failed ${failed.length}`;
+      if (failed.length) {
+        message.warning(
+          parsed.duplicates
+            ? `${summary} (${parsed.duplicates} duplicate row(s) in file, last one used)`
+            : summary,
+          6,
+        );
+        downloadTextFile(
+          `${kind === "safety-stock" ? "safety_stock" : "stockdays"}_import_failed.csv`,
+          buildFailedRowsCsv(kind, failed),
+        );
+      } else {
+        message.success(
+          parsed.duplicates
+            ? `${summary} (${parsed.duplicates} duplicate row(s) in file, last one used)`
+            : summary,
+        );
+      }
+      return failed.length === 0;
+    } catch (err: unknown) {
+      message.destroy(progressKey);
+      message.error(
+        err instanceof Error ? err.message : "Failed to import file",
+      );
+      return false;
+    } finally {
+      setParameterImporting(false);
+    }
+  };
+
+  const handleDownloadTemplate = () => {
+    if (selectedModuleId === "safety-stock" || selectedModuleId === "stockdays") {
+      downloadTextFile(
+        PARAMETER_IMPORT_CONFIG[selectedModuleId].filename,
+        buildParameterTemplateCsv(selectedModuleId),
+      );
+      message.success("Template downloaded");
+      return;
+    }
+    handleDownloadTemplateKanban();
+  };
+
+  const handleImportFile = async (file: File): Promise<boolean> => {
+    if (selectedModuleId === "safety-stock" || selectedModuleId === "stockdays") {
+      return handleImportParameters(selectedModuleId, file);
+    }
+    return handleImportKanban(file);
   };
 
   const resetPurchaseOrderEdit = () => {
@@ -7255,7 +7464,7 @@ export default function SystemSettingsPage() {
 
                   <Button
                     icon={<DownloadOutlined />}
-                    onClick={handleDownloadTemplateKanban}
+                    onClick={handleDownloadTemplate}
                   >
                     Download Template
                   </Button>
@@ -7271,7 +7480,7 @@ export default function SystemSettingsPage() {
                         message.error("Only Excel/CSV files are supported");
                         return Upload.LIST_IGNORE;
                       }
-                      await handleImportKanban(file as File);
+                      await handleImportFile(file as File);
                       return false;
                     }}
                   >
