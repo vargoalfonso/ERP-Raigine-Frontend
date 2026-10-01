@@ -112,6 +112,9 @@ export type InventoryRecord = {
   qr?: string;
   model?: string;
   material_grade?: string;
+  material_code?: string;
+  /** Terisi kalau uniq ada di master item/BOM (dicocokkan backend). */
+  item_uniq_code?: string;
 };
 
 export type InventoryHistoryRecord = {
@@ -312,6 +315,8 @@ const toInventoryRecord = (raw: unknown): InventoryRecord => {
     updated_at: toText(record.updated_at ?? record.UpdatedAt),
     model: toText(record.model ?? record.model),
     material_grade: toText(record.material_grade ?? record.material_grade),
+    material_code: toText(record.material_code ?? record.MaterialCode),
+    item_uniq_code: toText(record.item_uniq_code ?? record.ItemUniqCode),
   };
 };
 
@@ -488,7 +493,9 @@ const toInventoryKanbanSummary = (raw: unknown): InventoryKanbanSummary => {
 
 export type InventoryQRResult = { qr?: string };
 
-export const inventoryApiSlice = apiSlice.injectEndpoints({
+export const inventoryApiSlice = apiSlice
+  .enhanceEndpoints({ addTagTypes: ["Inventory"] })
+  .injectEndpoints({
   endpoints: (builder) => ({
     // Generate (or fetch) the QR for an indirect raw material. The QR carries
     // the packing list / kanban list from DN management. 1 uniq = 1 QR.
@@ -519,6 +526,9 @@ export const inventoryApiSlice = apiSlice.injectEndpoints({
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
+      providesTags: (_result, _error, arg) => [
+        { type: "Inventory" as const, id: arg.type },
+      ],
       transformResponse: (response: unknown) => {
         console.log("RAW API RESPONSE", response);
 
@@ -626,6 +636,32 @@ export const inventoryApiSlice = apiSlice.injectEndpoints({
         ),
     }),
 
+    /** POST /inventory/{raw-materials|indirect-materials}/bulk  ->  { created: n } */
+    bulkCreateInventory: builder.mutation<
+      ApiResponse<{ created: number }>,
+      {
+        type: Extract<InventoryType, "raw-materials" | "indirect-materials">;
+        items: InventoryMutationRequest[];
+      }
+    >({
+      query: ({ type, items }) => ({
+        url: `/inventory/${encodeURIComponent(type)}/bulk`,
+        method: "POST",
+        body: { items },
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => {
+        const data = parseObjectResponse<{ created?: unknown }>(response);
+        return ok(
+          { created: toNumber(data?.created) ?? 0 },
+          "Inventory bulk created",
+        );
+      },
+      invalidatesTags: (_result, _error, arg) => [
+        { type: "Inventory" as const, id: arg.type },
+      ],
+    }),
+
     updateInventory: builder.mutation<
       ApiResponse<InventoryRecord>,
       {
@@ -685,6 +721,7 @@ export const {
   useGetInventoryKanbanSummaryQuery,
   useLazyGetInventoryKanbanSummaryQuery,
   useCreateInventoryMutation,
+  useBulkCreateInventoryMutation,
   useUpdateInventoryMutation,
   useLazyGenerateQRIndirectQuery,
   useLazyGenerateQRSubconQuery,

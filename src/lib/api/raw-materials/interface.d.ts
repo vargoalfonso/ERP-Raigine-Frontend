@@ -8,6 +8,10 @@ export interface RawMaterialRecord {
   warehouse_id?: string;
   master_list_supplier_id?: string;
   uniq: string;
+  /** Material code hasil resolve dari uniq (API), bukan uniq itu sendiri. */
+  material_code?: string;
+  /** Uniq item di master item/BOM yang cocok dengan baris ini (dari API). */
+  item_uniq?: string;
   code: string;
   name: string;
   category?: string;

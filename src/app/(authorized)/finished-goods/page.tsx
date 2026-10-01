@@ -13,6 +13,7 @@ import {
   PlusOutlined,
   ScanOutlined,
   QrcodeOutlined,
+  UploadOutlined,
 } from "@ant-design/icons";
 import {
   Button,
@@ -957,6 +958,13 @@ export default function FinishedGoodsPage() {
         <div className="flex items-center gap-3">
           <Button icon={<ScanOutlined />} className="flex items-center gap-2">
             Scan FG
+          </Button>
+          <Button
+            icon={<UploadOutlined />}
+            className="flex items-center gap-2"
+            onClick={() => router.push("/finished-goods/bulk")}
+          >
+            Bulk Upload
           </Button>
           <Button
             type="primary"

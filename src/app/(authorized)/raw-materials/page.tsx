@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Button,
@@ -21,6 +21,7 @@ import {
 import {
   ScanOutlined,
   PlusOutlined,
+  UploadOutlined,
   EyeOutlined,
   ExclamationCircleOutlined,
   CloseOutlined,
@@ -195,6 +196,8 @@ const mapInventoryToRawMaterial = (
     master_list: undefined,
     id: record.id,
     uniq: record.uniq_code ?? "-",
+    material_code: record.material_code,
+    item_uniq: record.item_uniq_code,
     code: record.rm_source ?? "-",
     name: record.part_name ?? record.item_name ?? record.uniq_code ?? "-",
     category: record.raw_material_type,
@@ -487,6 +490,20 @@ export default function RawMaterialsPage() {
     () => buildBomUniqIndex(bomTreeRes?.data ?? []),
     [bomTreeRes?.data],
   );
+  const bomUniqSet = useMemo(() => new Set(bomIndex.uniqs), [bomIndex.uniqs]);
+
+  // Baris dari bulk upload menyimpan uniq BOM sebagai uniq_code, jadi Material
+  // Code diambil dari material specification uniq tersebut. Baris lama (uniq_code
+  // = material code) tetap memakai perilaku sebelumnya.
+  const resolveMaterialCode = useCallback(
+    (uniqRaw: unknown): string => {
+      const uniq = String(uniqRaw ?? "").trim();
+      if (!uniq) return "";
+      if (bomUniqSet.has(uniq)) return bomIndex.materialCodeByUniq[uniq] ?? "";
+      return uniq;
+    },
+    [bomIndex, bomUniqSet],
+  );
 
   const [triggerKanbanSummary] = useLazyGetInventoryKanbanSummaryQuery();
   const [kanbanSummaryByUniq, setKanbanSummaryByUniq] = useState<
@@ -525,6 +542,8 @@ export default function RawMaterialsPage() {
     return inventoryRows.filter((item) => {
       return [
         item.uniq,
+        item.material_code,
+        resolveMaterialCode(item.uniq),
         item.name,
         item.code,
         item.category,
@@ -533,7 +552,7 @@ export default function RawMaterialsPage() {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q));
     });
-  }, [inventoryRows, searchValue]);
+  }, [inventoryRows, searchValue, resolveMaterialCode]);
 
   useEffect(() => {
     if (!apiEnabled) return;
@@ -739,7 +758,9 @@ export default function RawMaterialsPage() {
       key: "uniq",
       width: 120,
       render: (record: RawMaterialRecord) => (
-        <span className="font-mono text-sm">{record.uniq || "-"}</span>
+        <span className="font-mono text-sm">
+          {record.material_code || resolveMaterialCode(record.uniq) || "-"}
+        </span>
       ),
     },
     {
@@ -747,33 +768,58 @@ export default function RawMaterialsPage() {
       key: "child_uniq",
       width: 200,
       render: (record: RawMaterialRecord) => {
-        const key = String(record.uniq ?? "")
-          .trim()
-          .toLowerCase();
+        const ownUniq = String(record.uniq ?? "").trim();
+        // Backend sudah mencocokkan uniq ini dengan master item/BOM.
+        const itemUniq = String(record.item_uniq ?? "").trim();
+        if (itemUniq) {
+          return <span className="font-mono text-sm">{itemUniq}</span>;
+        }
+        // Uniq baris ini adalah uniq item (bukan material code) kalau ada di BOM,
+        // atau kalau material code hasil resolve API berbeda dari uniq-nya.
+        const codeFromApi = String(record.material_code ?? "").trim();
+        const isItemUniq =
+          bomUniqSet.has(ownUniq) ||
+          (codeFromApi !== "" &&
+            codeFromApi.toLowerCase() !== ownUniq.toLowerCase());
+        if (ownUniq && isItemUniq) {
+          return <span className="font-mono text-sm">{ownUniq}</span>;
+        }
+        const key = ownUniq.toLowerCase();
         const children = bomIndex.uniqsByMaterialCode[key] ?? [];
         if (!children.length) {
           return <span className="text-sm text-gray-400">-</span>;
         }
-        // Cocokkan berdasarkan part name: uniq yang part name-nya SAMA dengan
-        // part name baris ini adalah uniq spesifik yang diambil.
-        const rowPartName = String(record.name ?? "")
-          .trim()
-          .toLowerCase();
-        const matched = rowPartName
-          ? children.find(
-              (u) =>
-                String(bomIndex.partNameByUniq[u] ?? "")
-                  .trim()
-                  .toLowerCase() === rowPartName,
-            )
-          : undefined;
-        // Fallback: kalau hanya ada 1 uniq untuk material code ini, pakai itu.
-        const finalUniq =
-          matched ?? (children.length === 1 ? children[0] : undefined);
-        if (!finalUniq) {
-          return <span className="text-sm text-gray-400">-</span>;
+        // Cocokkan uniq spesifik: part number dulu, lalu part name (abaikan huruf
+        // besar/kecil & spasi ganda). Kalau tidak ada yang cocok tapi kandidatnya
+        // ada, tampilkan semua kandidat — jangan "-" padahal uniq-nya ada.
+        const norm = (v: unknown) =>
+          String(v ?? "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
+        const rowPartNo = norm(record.part_no);
+        const rowPartName = norm(record.name);
+        const matched =
+          (rowPartNo
+            ? children.find((u) => norm(bomIndex.partNumberByUniq[u]) === rowPartNo)
+            : undefined) ??
+          (rowPartName
+            ? children.find((u) => norm(bomIndex.partNameByUniq[u]) === rowPartName)
+            : undefined);
+        if (matched) {
+          return <span className="font-mono text-sm">{matched}</span>;
         }
-        return <span className="font-mono text-sm">{finalUniq}</span>;
+        if (children.length === 1) {
+          return <span className="font-mono text-sm">{children[0]}</span>;
+        }
+        return (
+          <span
+            className="font-mono text-sm"
+            title={`${children.length} uniq memakai material code ini`}
+          >
+            {children.join(", ")}
+          </span>
+        );
       },
     },
     {
@@ -1142,6 +1188,13 @@ export default function RawMaterialsPage() {
             Scan Incoming
           </Button>
           <Button
+            icon={<UploadOutlined />}
+            className="flex items-center gap-2"
+            onClick={() => router.push("/raw-materials/bulk")}
+          >
+            Bulk Upload
+          </Button>
+          <Button
             type="primary"
             icon={<PlusOutlined />}
             onClick={() => router.push("/raw-materials/create")}
@@ -1206,7 +1259,7 @@ export default function RawMaterialsPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm">
+      {/* <div className="bg-white rounded-lg shadow-sm">
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900">
             BUY / NOT BUY Planning
@@ -1226,7 +1279,7 @@ export default function RawMaterialsPage() {
             pagination={{ pageSize: 20 }}
           />
         </div>
-      </div>
+      </div> */}
     </div>
   );
 }
