@@ -519,10 +519,12 @@ export const inventoryApiSlice = apiSlice
 
     getInventoryList: builder.query<
       ApiResponse<InventoryRecord[]>,
-      { type: InventoryType; page?: number; limit?: number }
+      { type: InventoryType; page?: number; limit?: number; search?: string }
     >({
-      query: ({ type, page = 1, limit = 20 }) => ({
-        url: `/inventory/${encodeURIComponent(type)}?page=${page}&limit=${limit}`,
+      query: ({ type, page = 1, limit = 20, search }) => ({
+        url: `/inventory/${encodeURIComponent(type)}?page=${page}&limit=${limit}${
+          search?.trim() ? `&search=${encodeURIComponent(search.trim())}` : ""
+        }`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),

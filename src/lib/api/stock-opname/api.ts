@@ -367,7 +367,7 @@ const toAuditLogRecord = (raw: unknown): StockOpnameAuditLogRecord => {
 };
 
 export const stockOpnameApiSlice = apiSlice
-  .enhanceEndpoints({ addTagTypes: [TAG] })
+  .enhanceEndpoints({ addTagTypes: [TAG, "Inventory", "FinishedGoods"] })
   .injectEndpoints({
     endpoints: (builder) => ({
       getStockOpnameUniqOptions: builder.query<
@@ -401,7 +401,11 @@ export const stockOpnameApiSlice = apiSlice
           body,
           meta: { useAuthorization: true, contentType: "application/json" },
         }),
-        invalidatesTags: [{ type: TAG, id: "LIST" }],
+        invalidatesTags: [
+          { type: TAG, id: "LIST" },
+          { type: "Inventory" as const },
+          { type: "FinishedGoods" as const },
+        ],
       }),
 
       bulkAddStockOpnameEntries: builder.mutation<
@@ -511,6 +515,8 @@ export const stockOpnameApiSlice = apiSlice
         invalidatesTags: (_r, _e, arg) => [
           { type: TAG, id: "LIST" },
           { type: TAG, id: String(arg.id) },
+          { type: "Inventory" as const },
+          { type: "FinishedGoods" as const },
         ],
       }),
 
