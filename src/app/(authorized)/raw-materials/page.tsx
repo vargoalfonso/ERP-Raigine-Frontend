@@ -477,7 +477,12 @@ export default function RawMaterialsPage() {
     useState<RawMaterialRecord[]>(MOCK_RAW_MATERIALS);
   const apiEnabled = Boolean(apiBaseUrl);
   const listQuery = useGetInventoryListQuery(
-    { type: "raw-materials", page: currentPage, limit: pageSize },
+    {
+      type: "raw-materials",
+      page: currentPage,
+      limit: pageSize,
+      search: searchValue,
+    },
     { skip: !apiEnabled },
   );
   const planningQuery = useGetRawMaterialPlanningQuery(undefined, {
@@ -539,6 +544,10 @@ export default function RawMaterialsPage() {
   const filteredRows = useMemo(() => {
     const q = searchValue.trim().toLowerCase();
     if (!q) return inventoryRows;
+    // Mode API: pencarian sudah dilakukan server di seluruh data (lintas halaman),
+    // jadi jangan difilter ulang di sisi klien.
+    if (apiEnabled && !isMissingRouteError(listQuery.error))
+      return inventoryRows;
     return inventoryRows.filter((item) => {
       return [
         item.uniq,
@@ -552,7 +561,13 @@ export default function RawMaterialsPage() {
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q));
     });
-  }, [inventoryRows, searchValue, resolveMaterialCode]);
+  }, [
+    inventoryRows,
+    searchValue,
+    resolveMaterialCode,
+    apiEnabled,
+    listQuery.error,
+  ]);
 
   useEffect(() => {
     if (!apiEnabled) return;
@@ -592,9 +607,10 @@ export default function RawMaterialsPage() {
     triggerKanbanSummary,
   ]);
 
-  const paginationTotal = searchValue.trim()
-    ? filteredRows.length
-    : (listQuery.data?.pagination?.total ?? inventoryRows.length);
+  const paginationTotal =
+    apiEnabled && !isMissingRouteError(listQuery.error)
+      ? (listQuery.data?.pagination?.total ?? inventoryRows.length)
+      : filteredRows.length;
 
   const stats = {
     totalItems: paginationTotal || 0,
@@ -1247,7 +1263,10 @@ export default function RawMaterialsPage() {
             data={filteredRows}
             rowKey="id"
             searchValue={searchValue}
-            onSearchChange={setSearchValue}
+            onSearchChange={(value) => {
+              setSearchValue(value);
+              setCurrentPage(1);
+            }}
             searchPlaceholder="Search raw materials..."
             pageSize={pageSize}
             currentPage={currentPage}

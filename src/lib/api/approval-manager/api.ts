@@ -337,7 +337,9 @@ const toSummary = (raw: unknown): ApprovalManagerSummary => {
 };
 
 export const approvalManagerApiSlice = apiSlice
-  .enhanceEndpoints({ addTagTypes: [TAG] })
+  .enhanceEndpoints({
+    addTagTypes: [TAG, "Inventory", "FinishedGoods", "StockOpnameSessions"],
+  })
   .injectEndpoints({
     endpoints: (builder) => ({
       getApprovalManagerItems: builder.query<
@@ -516,7 +518,18 @@ export const approvalManagerApiSlice = apiSlice
           if (fallback.error) return { error: fallback.error };
           return { data: unwrapText(fallback.data) };
         },
-        invalidatesTags: [{ type: TAG, id: "LIST" }],
+        // Approving a stock opname posts the counted qty to inventory (RM, IDR,
+        // Subcon, FG, WIP), so inventory lists must refetch instead of showing
+        // cached pre-opname numbers.
+        invalidatesTags: (_result, _error, arg) =>
+          (arg.module_kind ?? "").trim().toLowerCase() === "stock_opname"
+            ? [
+                { type: TAG, id: "LIST" },
+                { type: "StockOpnameSessions" as const, id: "LIST" },
+                { type: "Inventory" as const },
+                { type: "FinishedGoods" as const },
+              ]
+            : [{ type: TAG, id: "LIST" }],
       }),
     }),
   });
