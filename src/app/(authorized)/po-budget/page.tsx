@@ -1504,6 +1504,40 @@ export default function PoBudgetPage() {
 
   const addPrlOptions = bulkPrlOptions;
 
+  // PRL untuk Step 1 modal Bulk: hanya yang forecast period-nya jatuh di bulan
+  // yang dipilih di "Period" (Step 3). Format periode bebas: "October 2026",
+  // "Oct-2026", "2026-10", ...
+  const bulkPrlMonthOptions = useMemo(() => {
+    const bulkPrlMonth = parsePeriodMonth(bulkPeriod);
+    if (!bulkPrlMonth) return [];
+    const prlGroups = new Map<
+      string,
+      { customerName: string; uniqs: string[] }
+    >();
+    for (const item of approvedPrls) {
+      const itemMonth = parsePeriodMonth(getPrlPeriodValue(item));
+      if (!itemMonth || !itemMonth.isSame(bulkPrlMonth, "month")) continue;
+      const prlId = String(item.prl_id ?? item.id ?? "");
+      if (!prlId) continue;
+      const customerName = String(
+        item.customer?.customer_name ?? item.customer_name ?? "-",
+      );
+      const uniqCode = String(
+        item.uniq_code ?? item.item_uniq_code ?? "",
+      ).trim();
+      if (!prlGroups.has(prlId)) {
+        prlGroups.set(prlId, { customerName, uniqs: [] });
+      }
+      const group = prlGroups.get(prlId)!;
+      if (uniqCode && !group.uniqs.includes(uniqCode))
+        group.uniqs.push(uniqCode);
+    }
+    return Array.from(prlGroups.entries()).map(([prlId, group]) => ({
+      label: `${prlId} — ${group.uniqs.length > 0 ? group.uniqs.join(", ") : "-"} (${group.customerName})`,
+      value: `prl::${encodeURIComponent(prlId)}`,
+    }));
+  }, [approvedPrls, bulkPeriod]);
+
   const prlOptions = useMemo(() => {
     const fromPo = (customerPos as any[])
       .map((po: any) => {
@@ -2251,10 +2285,7 @@ export default function PoBudgetPage() {
     if (!addForm.period && periodOptions[0]?.value) {
       setAddForm((prev) => ({ ...prev, period: periodOptions[0].value }));
     }
-    if (!bulkPeriod && periodOptions[0]?.value) {
-      setBulkPeriod(periodOptions[0].value);
-    }
-  }, [addForm.period, bulkPeriod, periodOptions]);
+  }, [addForm.period, periodOptions]);
 
   useEffect(() => {
     const matchedPeriod = getPrlPeriodValue(matchedAddPrl);
@@ -2323,12 +2354,7 @@ export default function PoBudgetPage() {
       return;
     }
 
-    if (periodOptions[0]?.value) {
-      setBulkPeriod((prev) =>
-        prev === periodOptions[0].value ? prev : periodOptions[0].value,
-      );
-    }
-  }, [selectedBulkPrl, periodOptions]);
+  }, [selectedBulkPrl]);
 
   const activeAddSupplierItem = useMemo(
     () => bulkItems.find((it) => it.key === addSupplierItemKey),
@@ -2388,7 +2414,8 @@ export default function PoBudgetPage() {
     setBulkItems([]);
     setExpandedBulkRowKeys([]);
     setCollapsedBulkGroupKeys([]);
-    setBulkPeriod(periodOptions[0]?.value);
+    // Period dikosongkan: bulan harus dipilih dulu agar daftar PRL muncul.
+    setBulkPeriod(undefined);
     setBulkPrlIds([]);
     setBulkPoIds([]);
     setBulkBudgetType("adhoc");
@@ -4800,20 +4827,36 @@ export default function PoBudgetPage() {
 
                 {bulkSource === "prl" ? (
                   <>
-                    <div className="text-xs text-gray-600 mb-1">Select PRL</div>
+                    <div className="text-xs text-gray-600 mb-1">
+                      Select PRL
+                      <span className="text-gray-400">
+                        {" "}
+                        (filtered by Period in Step 3)
+                      </span>
+                    </div>
                     <Select
                       mode="multiple"
                       allowClear
                       showSearch
+                      disabled={!bulkPeriod}
                       value={bulkPrlIds}
                       onChange={(values) => {
                         setBulkPrlIds(values);
                         syncBulkItemsFromPrl(values);
                       }}
                       onSearch={handleBulkPrlSearch}
-                      options={bulkPrlOptions}
+                      options={bulkPrlMonthOptions}
+                      notFoundContent={
+                        bulkPeriod
+                          ? "No approved PRL for this period"
+                          : "Select Period in Step 3 first"
+                      }
                       className="w-full"
-                      placeholder="Search and select one or more PRL UNIQ"
+                      placeholder={
+                        bulkPeriod
+                          ? "Search and select one or more PRL UNIQ"
+                          : "Select Period (Step 3) first"
+                      }
                       optionFilterProp="label"
                       filterOption={false}
                       loading={prlsFetching}
@@ -5040,7 +5083,13 @@ export default function PoBudgetPage() {
                 <DatePicker
                   picker="month"
                   value={parsePeriodMonth(bulkPeriod)}
-                  onChange={(date) => setBulkPeriod(formatPeriodMonth(date))}
+                  onChange={(date) => {
+                    setBulkPeriod(formatPeriodMonth(date));
+                    // Ganti period = PRL yang sudah dipilih dari bulan lain
+                    // tidak berlaku lagi.
+                    setBulkPrlIds([]);
+                    syncBulkItemsFromPrl([]);
+                  }}
                   className="w-full"
                   format={(value) => (value ? value.format("MMMM YYYY") : "")}
                   placeholder="Select period..."
