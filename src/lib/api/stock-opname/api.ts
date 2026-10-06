@@ -140,6 +140,22 @@ export type StockOpnameUniqOption = {
   raw_material_type: string;
 };
 
+// Server-side comparison of a counted qty with the CURRENT system stock.
+// The system quantity is never returned (anti-fraud); only a status.
+export type StockOpnameCountStatus = "less" | "over" | "match" | "unknown";
+
+export type StockOpnameCheckCountItem = {
+  key: string;
+  uniq_code: string;
+  counted_qty: number;
+};
+
+export type StockOpnameCheckCountResult = {
+  key: string;
+  uniq_code: string;
+  status: StockOpnameCountStatus;
+};
+
 export type StockOpnameCreateItemRequest = {
   uniq_code: string;
   counted_qty: number;
@@ -391,6 +407,34 @@ export const stockOpnameApiSlice = apiSlice
             .filter((x) => Boolean(x.uniq_code)),
       }),
 
+      checkStockOpnameCounts: builder.mutation<
+        StockOpnameCheckCountResult[],
+        {
+          type: StockInventoryType;
+          method?: StockOpnameMethod;
+          items: StockOpnameCheckCountItem[];
+        }
+      >({
+        query: (body) => ({
+          url: "/stock-opname-sessions/form-options/check-count",
+          method: "POST",
+          body,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) =>
+          normalizeArrayResponse<unknown>(response).map((raw) => {
+            const r = isRecord(raw) ? raw : {};
+            const status = getString(r, ["status"]) ?? "unknown";
+            return {
+              key: getString(r, ["key"]) ?? "",
+              uniq_code: getString(r, ["uniq_code"]) ?? "",
+              status: (["less", "over", "match"].includes(status)
+                ? status
+                : "unknown") as StockOpnameCountStatus,
+            };
+          }),
+      }),
+
       createStockOpnameSession: builder.mutation<
         unknown,
         StockOpnameCreateRequest
@@ -580,6 +624,7 @@ export const stockOpnameApiSlice = apiSlice
 export const {
   useGetStockOpnameUniqOptionsQuery,
   useLazyGetStockOpnameUniqOptionsQuery,
+  useCheckStockOpnameCountsMutation,
   useCreateStockOpnameSessionMutation,
   useBulkAddStockOpnameEntriesMutation,
   useGetStockOpnameSessionsQuery,
