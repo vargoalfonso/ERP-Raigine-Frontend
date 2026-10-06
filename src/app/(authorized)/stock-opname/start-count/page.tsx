@@ -34,7 +34,9 @@ import { apiBaseUrl } from "@/lib/api/instance";
 import {
   type StockInventoryType,
   type StockOpnameBulkCreateError,
+  type StockOpnameCountStatus,
   type StockOpnameUniqOption,
+  useCheckStockOpnameCountsMutation,
   useCreateStockOpnameSessionMutation,
   useLazyGetStockOpnameUniqOptionsQuery,
 } from "@/lib/api/stock-opname/api";
@@ -88,6 +90,15 @@ type BulkRow = {
 function difference(systemStock: number, countedQty?: number) {
   const counted = typeof countedQty === "number" ? countedQty : 0;
   return counted - systemStock;
+}
+
+// Hint shown under Counted Qty. The comparison is done by the server against
+// the CURRENT system stock; the UI only receives a status, never the system
+// quantity (anti-fraud). It never blocks submission.
+function countedQtyHint(status?: StockOpnameCountStatus): string | null {
+  if (status === "less") return "Quantity kurang dari sistem";
+  if (status === "over") return "Quantity berlebih";
+  return null;
 }
 
 function toId(prefix: string) {
@@ -235,6 +246,11 @@ function StockOpnameStartCountPageContent() {
 
   const [bulkFileName, setBulkFileName] = useState<string | null>(null);
   const [bulkRows, setBulkRows] = useState<BulkRow[]>([]);
+  const [countStatus, setCountStatus] = useState<
+    Record<string, StockOpnameCountStatus>
+  >({});
+  const [checkCounts] = useCheckStockOpnameCountsMutation();
+  const countCheckSeqRef = useRef(0);
 
   const [
     getUniqOptions,
@@ -350,6 +366,61 @@ function StockOpnameStartCountPageContent() {
     if (!apiEnabled) return;
     void getUniqOptions({ type: inventoryType, method, q: "", limit: 10000 });
   }, [apiEnabled, getUniqOptions, inventoryType, method]);
+
+  // Ask the server (debounced) whether each counted qty is below / above the
+  // current system stock. Re-runs whenever a uniq or counted qty changes.
+  const countCheckItems = useMemo(() => {
+    if (method === "manual") {
+      return entries
+        .filter((e) => e.uniq && typeof e.countedQty === "number")
+        .map((e) => ({
+          key: e.id,
+          uniq_code: e.uniq as string,
+          counted_qty: e.countedQty as number,
+        }));
+    }
+    // Bulk WIP has no stock baseline; the server would answer "unknown".
+    if (inventoryType === "WIP") return [];
+    return bulkRows
+      .filter((r) => r.uniq)
+      .map((r) => ({
+        key: r.key,
+        uniq_code: r.uniq,
+        counted_qty: r.countedQty,
+      }));
+  }, [method, entries, bulkRows, inventoryType]);
+
+  const countCheckSignature = countCheckItems
+    .map((i) => `${i.key}|${i.uniq_code}|${i.counted_qty}`)
+    .join(";");
+
+  useEffect(() => {
+    if (!apiEnabled || countCheckItems.length === 0) {
+      setCountStatus((prev) => (Object.keys(prev).length ? {} : prev));
+      return;
+    }
+    const seq = ++countCheckSeqRef.current;
+    const timer = setTimeout(() => {
+      checkCounts({ type: inventoryType, method, items: countCheckItems })
+        .unwrap()
+        .then((results) => {
+          // Ignore out-of-date responses.
+          if (seq !== countCheckSeqRef.current) return;
+          const next: Record<string, StockOpnameCountStatus> = {};
+          results.forEach((r) => {
+            next[r.key] = r.status;
+          });
+          setCountStatus(next);
+        })
+        .catch(() => {
+          // The hint is advisory only; never block the form on failure.
+          if (seq === countCheckSeqRef.current) setCountStatus({});
+        });
+    }, 400);
+    return () => clearTimeout(timer);
+    // countCheckSignature captures every field the check depends on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiEnabled, inventoryType, method, countCheckSignature]);
 
   useEffect(() => {
     return () => {
@@ -895,6 +966,9 @@ function StockOpnameStartCountPageContent() {
               {entries.map((e, idx) => {
                 const diff = difference(e.systemStock, e.countedQty);
                 const diffText = `${diff > 0 ? "+" : ""}${diff}`;
+                const countedHint = e.uniq
+                  ? countedQtyHint(countStatus[e.id])
+                  : null;
                 return (
                   <div
                     key={e.id}
@@ -990,12 +1064,18 @@ function StockOpnameStartCountPageContent() {
                           className="!w-full"
                           value={e.countedQty}
                           min={0}
+                          status={countedHint ? "error" : undefined}
                           onChange={(v) =>
                             setEntry(e.id, {
                               countedQty: typeof v === "number" ? v : undefined,
                             })
                           }
                         />
+                        {countedHint && (
+                          <div className="mt-1 text-xs text-red-600">
+                            {countedHint}
+                          </div>
+                        )}
                       </div>
 
                       {/* User */}
@@ -1196,24 +1276,35 @@ function StockOpnameStartCountPageContent() {
                       title: "Counted Qty",
                       dataIndex: "countedQty",
                       key: "countedQty",
-                      width: 140,
-                      render: (_: number, r: BulkRow) => (
-                        <InputNumber
-                          className="w-full"
-                          value={r.countedQty}
-                          min={0}
-                          onChange={(v) => {
-                            const next = typeof v === "number" ? v : 0;
-                            setBulkRows((prev) =>
-                              prev.map((x) =>
-                                x.key === r.key
-                                  ? { ...x, countedQty: next }
-                                  : x,
-                              ),
-                            );
-                          }}
-                        />
-                      ),
+                      width: 200,
+                      render: (_: number, r: BulkRow) => {
+                        const hint = countedQtyHint(countStatus[r.key]);
+                        return (
+                          <div>
+                            <InputNumber
+                              className="w-full"
+                              value={r.countedQty}
+                              min={0}
+                              status={hint ? "error" : undefined}
+                              onChange={(v) => {
+                                const next = typeof v === "number" ? v : 0;
+                                setBulkRows((prev) =>
+                                  prev.map((x) =>
+                                    x.key === r.key
+                                      ? { ...x, countedQty: next }
+                                      : x,
+                                  ),
+                                );
+                              }}
+                            />
+                            {hint && (
+                              <div className="mt-1 text-xs text-red-600">
+                                {hint}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      },
                     },
                     {
                       title: "User Counted",
