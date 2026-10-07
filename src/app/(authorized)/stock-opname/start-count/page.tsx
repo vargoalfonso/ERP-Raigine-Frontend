@@ -36,16 +36,39 @@ import {
   type StockOpnameBulkCreateError,
   type StockOpnameCountStatus,
   type StockOpnameUniqOption,
+  type StockOpnameWarehouseItem,
   useCheckStockOpnameCountsMutation,
   useCreateStockOpnameSessionMutation,
   useLazyGetStockOpnameUniqOptionsQuery,
+  useLazyGetStockOpnameWarehouseItemsQuery,
 } from "@/lib/api/stock-opname/api";
 import { getCurrentUserDisplayName } from "@/lib/utils/currentUser";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetEmployeesQuery } from "@/lib/api/system-settings/api";
 import { useListWarehousesQuery } from "@/lib/api/warehouse/api";
 
-type Method = "manual" | "bulk";
+type Method = "manual" | "bulk" | "warehouse";
+
+// "warehouse" is a UI-only method: the session is stored as a normal manual
+// stock opname (pending approval), so the API only ever sees manual / bulk.
+const toApiMethod = (m: Method): "manual" | "bulk" =>
+  m === "bulk" ? "bulk" : "manual";
+
+// Warehouse master type (warehouse.type_warehouse) that belongs to each tab.
+const TAB_TO_WAREHOUSE_TYPE: Record<string, string> = {
+  finished: "finished_goods",
+  raw: "raw_material",
+  indirect: "indirect_raw_material",
+  subcon: "subcon",
+};
+
+// One row of the "count by warehouse" table.
+type WarehouseRow = {
+  key: string;
+  item: StockOpnameWarehouseItem;
+  totalFisik?: number;
+  note: string;
+};
 
 type Entry = {
   id: string;
@@ -258,6 +281,10 @@ function StockOpnameStartCountPageContent() {
   ] = useLazyGetStockOpnameUniqOptionsQuery();
   const [createStockOpnameSession, { isLoading: saving }] =
     useCreateStockOpnameSessionMutation();
+  const [getWarehouseItems, { isFetching: warehouseItemsLoading }] =
+    useLazyGetStockOpnameWarehouseItemsQuery();
+  const [warehouseRows, setWarehouseRows] = useState<WarehouseRow[]>([]);
+  const [warehouseSearch, setWarehouseSearch] = useState("");
   const [warehouseLocation, setWarehouseLocation] = useState<string>();
   const { data: warehouseList = [] } = useListWarehousesQuery(undefined, {
     skip: !apiEnabled,
@@ -274,6 +301,25 @@ function StockOpnameStartCountPageContent() {
         .filter((o) => Boolean(o.value)),
     [warehouseList],
   );
+  // By Warehouse: only warehouses that belong to the current tab.
+  const tabWarehouseOptions = useMemo(() => {
+    const wantedType = TAB_TO_WAREHOUSE_TYPE[tab];
+    const matches = warehouseList.filter((w) => {
+      const type = (w.type_warehouse ?? "").toLowerCase();
+      const name = (w.warehouse_name ?? "").toLowerCase();
+      if (tab === "wip") return name.includes("wip");
+      return wantedType ? type === wantedType : true;
+    });
+    return matches
+      .map((w) => ({
+        value: w.warehouse_name ?? w.id ?? "",
+        label:
+          (w.plant_name ?? w.plant_id)
+            ? `${w.warehouse_name ?? w.id ?? "-"} — ${w.plant_name ?? w.plant_id}`
+            : (w.warehouse_name ?? w.id ?? "-"),
+      }))
+      .filter((o) => Boolean(o.value));
+  }, [warehouseList, tab]);
   const plantOptions = useMemo(
     () =>
       Array.from(
@@ -363,13 +409,66 @@ function StockOpnameStartCountPageContent() {
   );
 
   useEffect(() => {
-    if (!apiEnabled) return;
-    void getUniqOptions({ type: inventoryType, method, q: "", limit: 10000 });
+    if (!apiEnabled || method === "warehouse") return;
+    void getUniqOptions({
+      type: inventoryType,
+      method: toApiMethod(method),
+      q: "",
+      limit: 10000,
+    });
   }, [apiEnabled, getUniqOptions, inventoryType, method]);
+
+  // By Warehouse: (re)load the item list whenever the warehouse changes.
+  useEffect(() => {
+    if (!apiEnabled || method !== "warehouse") return;
+    if (!warehouseLocation) {
+      setWarehouseRows([]);
+      return;
+    }
+    let cancelled = false;
+    getWarehouseItems({ type: inventoryType, warehouse: warehouseLocation })
+      .unwrap()
+      .then((items) => {
+        if (cancelled) return;
+        setWarehouseRows(
+          items.map((item, i) => ({
+            key: `wh-${i}-${item.uniq_code}`,
+            item,
+            totalFisik: undefined,
+            note: "",
+          })),
+        );
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setWarehouseRows([]);
+        message.error(getApiErrorMessage(err, "Gagal memuat item warehouse"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiEnabled, method, warehouseLocation, inventoryType, getWarehouseItems]);
+
+  // Switching tab / method must not leak a warehouse from another tab.
+  const isWarehouseMethod = method === "warehouse";
+  useEffect(() => {
+    setWarehouseLocation(undefined);
+    setWarehouseRows([]);
+    setWarehouseSearch("");
+  }, [tab, isWarehouseMethod]);
 
   // Ask the server (debounced) whether each counted qty is below / above the
   // current system stock. Re-runs whenever a uniq or counted qty changes.
   const countCheckItems = useMemo(() => {
+    if (method === "warehouse") {
+      return warehouseRows
+        .filter((r) => typeof r.totalFisik === "number")
+        .map((r) => ({
+          key: r.key,
+          uniq_code: r.item.uniq_code,
+          counted_qty: r.totalFisik as number,
+        }));
+    }
     if (method === "manual") {
       return entries
         .filter((e) => e.uniq && typeof e.countedQty === "number")
@@ -388,7 +487,7 @@ function StockOpnameStartCountPageContent() {
         uniq_code: r.uniq,
         counted_qty: r.countedQty,
       }));
-  }, [method, entries, bulkRows, inventoryType]);
+  }, [method, entries, bulkRows, warehouseRows, inventoryType]);
 
   const countCheckSignature = countCheckItems
     .map((i) => `${i.key}|${i.uniq_code}|${i.counted_qty}`)
@@ -401,9 +500,22 @@ function StockOpnameStartCountPageContent() {
     }
     const seq = ++countCheckSeqRef.current;
     const timer = setTimeout(() => {
-      checkCounts({ type: inventoryType, method, items: countCheckItems })
-        .unwrap()
-        .then((results) => {
+      // The server caps one check at 1000 items, so big warehouses are split.
+      const chunks: (typeof countCheckItems)[] = [];
+      for (let i = 0; i < countCheckItems.length; i += 1000) {
+        chunks.push(countCheckItems.slice(i, i + 1000));
+      }
+      Promise.all(
+        chunks.map((items) =>
+          checkCounts({
+            type: inventoryType,
+            method: toApiMethod(method),
+            items,
+          }).unwrap(),
+        ),
+      )
+        .then((chunkResults) => {
+          const results = chunkResults.flat();
           // Ignore out-of-date responses.
           if (seq !== countCheckSeqRef.current) return;
           const next: Record<string, StockOpnameCountStatus> = {};
@@ -432,8 +544,14 @@ function StockOpnameStartCountPageContent() {
 
   const entryCountLabel = useMemo(() => {
     if (method === "bulk") return `${bulkRows.length || 0} entry`;
+    if (method === "warehouse") {
+      const filled = warehouseRows.filter(
+        (r) => typeof r.totalFisik === "number",
+      ).length;
+      return `${filled}/${warehouseRows.length} item terisi`;
+    }
     return `${entries.length} entry`;
-  }, [bulkRows.length, entries.length, method]);
+  }, [bulkRows.length, entries.length, warehouseRows, method]);
 
   // Generates a complete template. Each row remains a separate item row, and
   // Plant/Warehouse Location are kept on the row so the save flow can create
@@ -444,7 +562,7 @@ function StockOpnameStartCountPageContent() {
       try {
         templateUniqs = await getUniqOptions({
           type: inventoryType,
-          method,
+          method: toApiMethod(method),
           q: "",
           limit: 10000,
         }).unwrap();
@@ -526,7 +644,7 @@ function StockOpnameStartCountPageContent() {
           try {
             const results = await getUniqOptions({
               type: inventoryType,
-              method,
+              method: toApiMethod(method),
               q: code,
               limit: 5,
             }).unwrap();
@@ -688,6 +806,17 @@ function StockOpnameStartCountPageContent() {
       }
     }
 
+    if (method === "warehouse") {
+      if (!warehouseLocation) {
+        message.warning("Pilih warehouse terlebih dahulu");
+        return;
+      }
+      if (!warehouseRows.some((r) => typeof r.totalFisik === "number")) {
+        message.warning("Isi Total Fisik minimal satu item");
+        return;
+      }
+    }
+
     if (method === "bulk") {
       if (!bulkFileName) {
         message.warning("Upload Excel file first");
@@ -706,6 +835,35 @@ function StockOpnameStartCountPageContent() {
     }
 
     try {
+      if (method === "warehouse") {
+        // One session for the whole warehouse. Only rows whose Total Fisik was
+        // filled are submitted; the rest were simply not counted.
+        const wireFallback = (r: WarehouseRow) =>
+          isWireType(r.item.raw_material_type) ? r.item.weight_kg : null;
+        await createStockOpnameSession({
+          inventory_type: inventoryType,
+          method: "manual",
+          period_month: period.month() + 1,
+          period_year: period.year(),
+          schedule_date: scheduleDate.format("YYYY-MM-DD"),
+          counted_date: countedDate.format("YYYY-MM-DD"),
+          remarks: "",
+          warehouse_location: warehouseLocation ?? null,
+          items: warehouseRows
+            .filter((r) => typeof r.totalFisik === "number")
+            .map((r) => ({
+              uniq_code: r.item.uniq_code,
+              counted_qty: r.totalFisik as number,
+              user_counter: currentUserName,
+              weight_kg: wireFallback(r),
+              remarks: r.note.trim(),
+            })),
+        }).unwrap();
+        message.success("Stock Opname saved successfully");
+        router.push(`/stock-opname?tab=${tab}`);
+        return;
+      }
+
       const items =
         method === "manual"
           ? entries.map((entry) => ({
@@ -726,7 +884,7 @@ function StockOpnameStartCountPageContent() {
 
       const sessionPayload = {
         inventory_type: inventoryType,
-        method,
+        method: toApiMethod(method),
         period_month: period.month() + 1,
         period_year: period.year(),
         schedule_date: scheduleDate.format("YYYY-MM-DD"),
@@ -866,9 +1024,11 @@ function StockOpnameStartCountPageContent() {
             <Radio.Group
               value={method}
               onChange={(e) => setMethod(e.target.value)}
+              style={{ display: "flex", flexDirection: "column", gap: 8 }}
             >
               <Radio value="manual">Manual Input</Radio>
               <Radio value="bulk">Bulk Upload</Radio>
+              <Radio value="warehouse">By Warehouse</Radio>
             </Radio.Group>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -929,10 +1089,12 @@ function StockOpnameStartCountPageContent() {
                 <div className="text-xs text-gray-500">
                   {method === "manual"
                     ? "Manual Input selected. You've chosen to enter data manually."
-                    : "Bulk Upload selected."}
+                    : method === "warehouse"
+                      ? "By Warehouse selected. Pilih warehouse, lalu isi Total Fisik tiap item."
+                      : "Bulk Upload selected."}
                 </div>
               </div>
-              {method === "manual" ? (
+              {method === "warehouse" ? null : method === "manual" ? (
                 <Tag className="!rounded-full !text-xs !px-3 !py-0.5">
                   Entry 1
                 </Tag>
@@ -1023,7 +1185,7 @@ function StockOpnameStartCountPageContent() {
                             uniqSearchTimeoutRef.current = setTimeout(() => {
                               void getUniqOptions({
                                 type: inventoryType,
-                                method,
+                                method: toApiMethod(method),
                                 q: normalizedValue,
                                 limit: 10,
                               });
@@ -1166,6 +1328,173 @@ function StockOpnameStartCountPageContent() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {method === "warehouse" && (
+            <div>
+              <div className="flex flex-col md:flex-row md:items-end gap-4 mb-4">
+                <div className="md:w-96">
+                  <label className="text-xs font-semibold text-gray-600 mb-2 block">
+                    Warehouse
+                  </label>
+                  <Select
+                    size="large"
+                    className="w-full"
+                    placeholder="Pilih Warehouse"
+                    value={warehouseLocation}
+                    options={tabWarehouseOptions}
+                    showSearch
+                    optionFilterProp="label"
+                    onChange={setWarehouseLocation}
+                    notFoundContent="Tidak ada warehouse untuk tab ini"
+                  />
+                </div>
+                <div className="md:w-72">
+                  <label className="text-xs font-semibold text-gray-600 mb-2 block">
+                    Cari Item
+                  </label>
+                  <Input
+                    size="large"
+                    allowClear
+                    placeholder="Kode item"
+                    value={warehouseSearch}
+                    onChange={(e) => setWarehouseSearch(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-xl border border-gray-100">
+                <Table<WarehouseRow>
+                  dataSource={warehouseRows.filter((r) =>
+                    r.item.uniq_code
+                      .toLowerCase()
+                      .includes(warehouseSearch.trim().toLowerCase()),
+                  )}
+                  rowKey="key"
+                  loading={warehouseItemsLoading}
+                  pagination={{ pageSize: 50, showSizeChanger: false }}
+                  size="middle"
+                  scroll={{ x: 1100 }}
+                  locale={{
+                    emptyText: warehouseLocation
+                      ? "Tidak ada item di warehouse ini"
+                      : "Pilih warehouse untuk menampilkan daftar item",
+                  }}
+                  columns={[
+                    {
+                      title: "No",
+                      key: "no",
+                      width: 64,
+                      render: (_: unknown, r: WarehouseRow) =>
+                        warehouseRows.findIndex((x) => x.key === r.key) + 1,
+                    },
+                    {
+                      title: "Kode Item",
+                      key: "uniq",
+                      width: 240,
+                      render: (_: unknown, r: WarehouseRow) => (
+                        <div>
+                          <div className="font-medium text-gray-900">
+                            {r.item.uniq_code}
+                          </div>
+                          {(r.item.part_name || r.item.part_number) && (
+                            <div className="text-xs text-gray-500">
+                              {[r.item.part_number, r.item.part_name]
+                                .filter(Boolean)
+                                .join(" - ")}
+                            </div>
+                          )}
+                        </div>
+                      ),
+                    },
+                    {
+                      title: "Lokasi Virtual",
+                      key: "location",
+                      width: 200,
+                      render: (_: unknown, r: WarehouseRow) =>
+                        r.item.warehouse_location || "-",
+                    },
+                    {
+                      title: "KBN/Box",
+                      key: "kbn",
+                      width: 110,
+                      align: "right" as const,
+                      render: (_: unknown, r: WarehouseRow) =>
+                        r.item.kanban_qty ?? "-",
+                    },
+                    {
+                      title: "Total Fisik",
+                      key: "total",
+                      width: 190,
+                      render: (_: unknown, r: WarehouseRow) => {
+                        const hint = countedQtyHint(countStatus[r.key]);
+                        return (
+                          <div>
+                            <InputNumber
+                              className="!w-full"
+                              min={0}
+                              value={r.totalFisik}
+                              status={hint ? "error" : undefined}
+                              onChange={(v) =>
+                                setWarehouseRows((prev) =>
+                                  prev.map((x) =>
+                                    x.key === r.key
+                                      ? {
+                                          ...x,
+                                          totalFisik:
+                                            typeof v === "number"
+                                              ? v
+                                              : undefined,
+                                        }
+                                      : x,
+                                  ),
+                                )
+                              }
+                            />
+                            {hint && (
+                              <div className="mt-1 text-xs text-red-600">
+                                {hint}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      },
+                    },
+                    {
+                      title: "Status",
+                      key: "status",
+                      width: 140,
+                      render: (_: unknown, r: WarehouseRow) =>
+                        typeof r.totalFisik === "number" ? (
+                          <Tag color="orange">Belum Approved</Tag>
+                        ) : (
+                          <Tag>Belum Dihitung</Tag>
+                        ),
+                    },
+                    {
+                      title: "Catatan",
+                      key: "note",
+                      width: 240,
+                      render: (_: unknown, r: WarehouseRow) => (
+                        <Input
+                          placeholder="Catatan"
+                          value={r.note}
+                          onChange={(e) =>
+                            setWarehouseRows((prev) =>
+                              prev.map((x) =>
+                                x.key === r.key
+                                  ? { ...x, note: e.target.value }
+                                  : x,
+                              ),
+                            )
+                          }
+                        />
+                      ),
+                    },
+                  ]}
+                />
+              </div>
             </div>
           )}
 

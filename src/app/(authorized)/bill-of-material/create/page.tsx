@@ -268,7 +268,7 @@ export default function Page() {
         const name = String(p?.process_name ?? p?.ProcessName ?? "").trim();
         return {
           value,
-          label: code && name ? `${code} — ${name}` : name || code || idStr,
+          label: code && name ? `${name} — ${code}` : name || code || idStr,
           isAssembly: Boolean(p?.is_assembly ?? p?.IsAssembly),
           subCon: Boolean(p?.sub_con ?? p?.subcon ?? p?.SubCon),
         };
