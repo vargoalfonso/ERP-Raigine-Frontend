@@ -144,6 +144,19 @@ export type StockOpnameUniqOption = {
 // The system quantity is never returned (anti-fraud); only a status.
 export type StockOpnameCountStatus = "less" | "over" | "match" | "unknown";
 
+// One row of the "count by warehouse" table. The remaining system stock is
+// never returned (anti-fraud); kanban_qty is the read-only KBN/Box value.
+export type StockOpnameWarehouseItem = {
+  uniq_code: string;
+  part_number: string;
+  part_name: string;
+  uom: string;
+  warehouse_location: string;
+  kanban_qty: number | null;
+  weight_kg: number | null;
+  raw_material_type: string;
+};
+
 export type StockOpnameCheckCountItem = {
   key: string;
   uniq_code: string;
@@ -161,6 +174,7 @@ export type StockOpnameCreateItemRequest = {
   counted_qty: number;
   user_counter?: string;
   weight_kg?: number | null;
+  remarks?: string;
 };
 
 export type StockOpnameCreateRequest = {
@@ -297,6 +311,25 @@ const toUniqOption = (raw: unknown): StockOpnameUniqOption => {
   };
 };
 
+const toWarehouseItem = (raw: unknown): StockOpnameWarehouseItem => {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    uniq_code: getString(r, ["uniq_code", "uniq", "uniqCode"]) ?? "",
+    part_number: getString(r, ["part_number", "partNumber"]) ?? "",
+    part_name: getString(r, ["part_name", "partName"]) ?? "",
+    uom: getString(r, ["uom", "unit"]) ?? "",
+    warehouse_location:
+      getString(r, ["warehouse_location", "warehouseLocation"]) ?? "",
+    kanban_qty: getNullableNumber(r, ["kanban_qty", "kanbanQty"]) ?? null,
+    weight_kg: getNullableNumber(r, ["weight_kg"]) ?? null,
+    raw_material_type: (
+      getString(r, ["raw_material_type", "rawMaterialType"]) ?? ""
+    )
+      .trim()
+      .toLowerCase(),
+  };
+};
+
 const toSessionListRecord = (raw: unknown): StockOpnameSessionListRecord => {
   const r = isRecord(raw) ? raw : {};
   return {
@@ -404,6 +437,22 @@ export const stockOpnameApiSlice = apiSlice
         transformResponse: (response: unknown) =>
           normalizeArrayResponse<unknown>(response)
             .map(toUniqOption)
+            .filter((x) => Boolean(x.uniq_code)),
+      }),
+
+      getStockOpnameWarehouseItems: builder.query<
+        StockOpnameWarehouseItem[],
+        { type: StockInventoryType; warehouse: string; q?: string }
+      >({
+        query: ({ type, warehouse, q }) => ({
+          url: "/stock-opname-sessions/form-options/warehouse-items",
+          method: "GET",
+          params: { type, warehouse, q: q ?? "", limit: 5000 },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) =>
+          normalizeArrayResponse<unknown>(response)
+            .map(toWarehouseItem)
             .filter((x) => Boolean(x.uniq_code)),
       }),
 
@@ -624,6 +673,7 @@ export const stockOpnameApiSlice = apiSlice
 export const {
   useGetStockOpnameUniqOptionsQuery,
   useLazyGetStockOpnameUniqOptionsQuery,
+  useLazyGetStockOpnameWarehouseItemsQuery,
   useCheckStockOpnameCountsMutation,
   useCreateStockOpnameSessionMutation,
   useBulkAddStockOpnameEntriesMutation,
