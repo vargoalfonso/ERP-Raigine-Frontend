@@ -130,9 +130,9 @@ const parseDocSource = (ref: string): { type: string; id: string } => {
   return { type: known[prefix] ?? "PO", id };
 };
 
-// Only surface schedules whose delivery date falls within H-3..H+3 from today.
-const DELIVERY_WINDOW_BACK_DAYS = 3;
-const DELIVERY_WINDOW_AHEAD_DAYS = 3;
+// Only surface schedules whose delivery date falls within H-7..H+7 from today.
+const DELIVERY_WINDOW_BACK_DAYS = 7;
+const DELIVERY_WINDOW_AHEAD_DAYS = 7;
 
 const isWithinDeliveryWindow = (
   iso: string,
@@ -149,6 +149,14 @@ const isWithinDeliveryWindow = (
   const end = new Date(today);
   end.setDate(today.getDate() + aheadDays);
   return date >= start && date <= end;
+};
+
+// A schedule's po_dn_name may be a plain document number ("PO-2026-0011") or a
+// dropdown label ("[PO] PO-2026-0029 · Customer"). Always compare by document number.
+const extractDocNumber = (ref: string): string => {
+  const raw = String(ref ?? "").trim();
+  const match = raw.match(/\b(?:PO|DN|SO)-\d{4}-\d+\b/i);
+  return match ? match[0].toUpperCase() : raw;
 };
 
 // Normalize a date/datetime string to a YYYY-MM-DD key.
@@ -355,10 +363,11 @@ function DeliverySchedulingPageInner() {
     const approvedRefSet = new Set<string>();
     (schedulesQuery.data?.data ?? []).forEach((schedule) => {
       if (
-        String(schedule.status).toLowerCase() === "approved" &&
+        String(schedule.approvalStatus ?? schedule.status).toLowerCase() ===
+          "approved" &&
         schedule.poDnName
       ) {
-        approvedRefSet.add(schedule.poDnName);
+        approvedRefSet.add(extractDocNumber(schedule.poDnName));
       }
     });
     // A Customer Delivery Note already exists for these documents, so keep them
@@ -371,12 +380,33 @@ function DeliverySchedulingPageInner() {
 
     const grouped = new Map<string, DayGroup>();
 
+    // Schedules created from "Add Delivery Schedule" are authoritative: they use
+    // the schedule's own delivery date, so the matching order item is rendered
+    // from the schedule (below) instead of from the order's item date.
+    const scheduleRecords = (schedulesQuery.data?.data ?? []).filter((sc) => {
+      const approval = String(sc.approvalStatus ?? "").toLowerCase();
+      return approval !== "rejected" && approval !== "cancelled";
+    });
+    const scheduledKeys = new Set<string>();
+    scheduleRecords.forEach((sc) => {
+      scheduledKeys.add(
+        `${extractDocNumber(sc.poDnName)}|${sc.items[0]?.uniq ?? "-"}`,
+      );
+    });
+
     orders.forEach((order) => {
       order.items.forEach((item, index) => {
+        if (
+          scheduledKeys.has(
+            `${order.document_number}|${item.item_uniq_code || "-"}`,
+          )
+        ) {
+          return;
+        }
         // Target delivery is taken from each order item's delivery date.
         // Use the item delivery date, falling back to the order-level
         // delivery date, then the document date, so every PO/DN/SO row can be
-        // placed on the H-3..H+3 timeline even when item dates are missing.
+        // placed on the H-7..H+7 timeline even when item dates are missing.
         const dateKey = toDateKey(
           item.delivery_date ?? order.delivery_date ?? order.document_date ?? "",
         );
@@ -421,6 +451,58 @@ function DeliverySchedulingPageInner() {
         baseGroup.itemsLabel = `${baseGroup.rows.length} items`;
         grouped.set(dateKey, baseGroup);
       });
+    });
+
+    scheduleRecords.forEach((sc, index) => {
+      const dateKey = toDateKey(sc.deliveryDate);
+      if (!dateKey || !isWithinDeliveryWindow(dateKey)) return;
+
+      const scItem = sc.items[0];
+      const docNumber = extractDocNumber(sc.poDnName);
+      const order = orders.find((o) => o.document_number === docNumber);
+      const orderItem = order?.items.find(
+        (i) => i.item_uniq_code === scItem?.uniq,
+      );
+      const docType = (
+        order?.document_type ??
+        docNumber.split("-")[0] ??
+        "PO"
+      ).toUpperCase();
+
+      const rowKey = `sch-${sc.id}-${scItem?.uniq ?? index}`;
+      const approved =
+        approvedKeys.has(rowKey) ||
+        String(sc.approvalStatus ?? "").toLowerCase() === "approved";
+
+      const row: ScheduleRow = {
+        key: rowKey,
+        scheduleId: sc.id,
+        orderId: order?.id ?? "",
+        itemId: orderItem?.id ?? "",
+        customerId: sc.customerId ?? order?.customer_id ?? 0,
+        docType,
+        customer: sc.customerName || order?.customer_name || "-",
+        poDnName: docNumber || "-",
+        uniq: scItem?.uniq || "-",
+        model: scItem?.model || "-",
+        partNo: scItem?.partNo || "-",
+        partName: scItem?.partName || "-",
+        quantity: scItem?.totalDelivery ?? 0,
+        cycle: sc.cycle || "Daily",
+        deliveryDate: dateKey,
+        dnNumber: approved && docType === "DN" ? docNumber || "-" : "-",
+        status: approved ? "Approved" : "Scheduled",
+      };
+
+      const baseGroup = grouped.get(dateKey) ?? {
+        key: dateKey,
+        dayLabel: formatDateLabel(dateKey),
+        itemsLabel: "0 items",
+        rows: [],
+      };
+      baseGroup.rows.push(row);
+      baseGroup.itemsLabel = `${baseGroup.rows.length} items`;
+      grouped.set(dateKey, baseGroup);
     });
 
     return Array.from(grouped.values()).sort((a, b) =>
@@ -531,7 +613,7 @@ function DeliverySchedulingPageInner() {
         });
         return { ...g, rows };
       })
-      // Keep only deliveries scheduled within H-3..H+3 from today.
+      // Keep only deliveries scheduled within H-7..H+7 from today.
       .filter((g) => g.rows.length > 0 && isWithinDeliveryWindow(g.key));
   }, [activeTab, groups, query, customer]);
 

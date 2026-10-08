@@ -120,6 +120,7 @@ const normalizeScheduleGroups = (
         status:
           getString(row, ["status", "approval_status", "approvalStatus"]) ??
           "pending",
+        approvalStatus: getString(row, ["approval_status", "approvalStatus"]),
         approvedBy: getString(row, ["approved_by", "approvedBy"]) ?? "",
         approvedAt: getString(row, ["approved_at", "approvedAt"]) ?? "",
         createdAt: getString(row, ["created_at", "createdAt"]) ?? "",
@@ -248,6 +249,7 @@ export interface DeliveryScheduleRecord {
   cycle: string;
   priority?: string;
   status: string;
+  approvalStatus?: string;
   approvedBy: string;
   approvedAt: string;
   createdAt: string;
