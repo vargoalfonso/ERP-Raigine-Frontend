@@ -130,9 +130,9 @@ const parseDocSource = (ref: string): { type: string; id: string } => {
   return { type: known[prefix] ?? "PO", id };
 };
 
-// Only surface schedules whose delivery date falls within H-3..H+3 from today.
-const DELIVERY_WINDOW_BACK_DAYS = 3;
-const DELIVERY_WINDOW_AHEAD_DAYS = 3;
+// Only surface schedules whose delivery date falls within H-7..H+7 from today.
+const DELIVERY_WINDOW_BACK_DAYS = 7;
+const DELIVERY_WINDOW_AHEAD_DAYS = 7;
 
 const isWithinDeliveryWindow = (
   iso: string,
@@ -376,7 +376,7 @@ function DeliverySchedulingPageInner() {
         // Target delivery is taken from each order item's delivery date.
         // Use the item delivery date, falling back to the order-level
         // delivery date, then the document date, so every PO/DN/SO row can be
-        // placed on the H-3..H+3 timeline even when item dates are missing.
+        // placed on the H-7..H+7 timeline even when item dates are missing.
         const dateKey = toDateKey(
           item.delivery_date ?? order.delivery_date ?? order.document_date ?? "",
         );
@@ -531,7 +531,7 @@ function DeliverySchedulingPageInner() {
         });
         return { ...g, rows };
       })
-      // Keep only deliveries scheduled within H-3..H+3 from today.
+      // Keep only deliveries scheduled within H-7..H+7 from today.
       .filter((g) => g.rows.length > 0 && isWithinDeliveryWindow(g.key));
   }, [activeTab, groups, query, customer]);
 
