@@ -505,8 +505,9 @@ function DeliverySchedulingPageInner() {
       grouped.set(dateKey, baseGroup);
     });
 
+    // Newest (future, H+) dates first, then going back to past (H-) dates.
     return Array.from(grouped.values()).sort((a, b) =>
-      a.key.localeCompare(b.key),
+      b.key.localeCompare(a.key),
     );
   }, [
     poOrdersQuery.data,
@@ -576,7 +577,7 @@ function DeliverySchedulingPageInner() {
     const customerName = selectedDnDetail?.customerName || selectedDn.customer;
     const deliveryDate = selectedDnDetail?.deliveryDate || selectedDn.dnDate;
     const qr = normalizeQrSrc(item?.qr || selectedDn.qrCode);
-    const popup = window.open("", "_blank", "noopener,noreferrer,width=800,height=900");
+    const popup = window.open("", "_blank", "width=800,height=900");
     if (!popup) {
       message.error("Popup is blocked. Please allow popups to print the packing list.");
       return;
@@ -593,8 +594,11 @@ function DeliverySchedulingPageInner() {
       <div><div class="label">Quantity</div><div class="value">${escapeHtml(`${formatNumber(item?.quantity || selectedDn.quantity)} ${item?.uom || ""}`.trim())}</div></div>
     </div><div class="qr">${qr ? `<img src="${qr}" alt="QR code"/>` : ""}<div class="note">Scan for Shipment Confirmation</div></div></body></html>`);
     popup.document.close();
-    popup.focus();
-    popup.print();
+    // Give the QR image a moment to load before opening the print dialog.
+    setTimeout(() => {
+      popup.focus();
+      popup.print();
+    }, 300);
   };
 
   const filteredGroups = useMemo(() => {
