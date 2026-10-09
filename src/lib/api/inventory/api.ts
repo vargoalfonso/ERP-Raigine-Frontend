@@ -702,6 +702,43 @@ export const inventoryApiSlice = apiSlice
         toInventoryPackingList(response, arg.uniq_code),
     }),
 
+    /**
+     * [initial-packing] Buat Packing ID untuk Raw Material yang bertock tetapi
+     * belum punya packing (opening stock tanpa DN). Tidak mengubah stock_qty.
+     * POST /inventory/raw-materials/{id|uniq_code}/initial-packings
+     */
+    ensureInitialPackings: builder.mutation<
+      {
+        created: number;
+        totalQty: number;
+        packingNumbers: string[];
+        skipped: string;
+      },
+      { key: string }
+    >({
+      query: ({ key }) => ({
+        url: `/inventory/raw-materials/${encodeURIComponent(key)}/initial-packings`,
+        method: "POST",
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) => {
+        const data = parseObjectResponse<{
+          created?: unknown;
+          total_qty?: unknown;
+          packing_numbers?: unknown;
+          skipped?: unknown;
+        }>(response);
+        return {
+          created: toNumber(data?.created) ?? 0,
+          totalQty: toNumber(data?.total_qty) ?? 0,
+          packingNumbers: Array.isArray(data?.packing_numbers)
+            ? (data?.packing_numbers as unknown[]).map((v) => String(v))
+            : [],
+          skipped: typeof data?.skipped === "string" ? data.skipped : "",
+        };
+      },
+    }),
+
     getDeliveryNoteByUniq: builder.query<DeliveryNoteResponse, string>({
       query: (uniq) => ({
         url: `/delivery-notes/uniq/${encodeURIComponent(uniq)}`,
@@ -729,6 +766,7 @@ export const {
   useLazyGenerateQRSubconQuery,
   useGetInventoryPackingListQuery,
   useLazyGetInventoryPackingListQuery,
+  useEnsureInitialPackingsMutation,
   useGetDeliveryNoteByUniqQuery,
   useLazyGetDeliveryNoteByUniqQuery,
 } = inventoryApiSlice;
