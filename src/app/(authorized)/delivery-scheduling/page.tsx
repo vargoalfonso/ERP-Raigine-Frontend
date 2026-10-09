@@ -202,7 +202,8 @@ const escapeHtml = (value: string) =>
     "'": "&#039;",
   })[char] ?? char);
 
-const DN_PRINT_SUPPLIER = "PT. MATRA RODA PIRANTI";
+// Perusahaan penerbit DN (kop surat). Penerima barang = customer.
+const DN_PRINT_COMPANY = "PT. MATRA RODA PIRANTI";
 
 const formatDnLongDate = (value: string) => {
   const raw = String(value ?? "").trim();
@@ -372,6 +373,17 @@ function DeliverySchedulingPageInner() {
       next.add(row.key);
       return next;
     });
+  };
+
+  // Pindah ke tab DN Creation dan saring ke dokumen order baris ini, supaya DN
+  // yang baru dibuat dari approval langsung terlihat.
+  const goToDnCreation = (row: ScheduleRow) => {
+    setCustomer("");
+    setQuery(row.poDnName && row.poDnName !== "-" ? row.poDnName : "");
+    setActiveTab("dn");
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
   };
 
   const handleApproveRow = (row: ScheduleRow) => {
@@ -665,12 +677,12 @@ function DeliverySchedulingPageInner() {
       .remarks{margin-top:10px;font-weight:700;font-size:10px}
       .remarks span{font-weight:400;white-space:pre-wrap}
     </style></head><body>
-      <div class="company">${escapeHtml(customerName)}</div>
+      <div class="company">${escapeHtml(DN_PRINT_COMPANY)}</div>
       <h1>DELIVERY NOTE</h1>
       <div class="dn">${escapeHtml(dnNumber)}</div>
       <div class="head">
         <div class="kv">
-          <div class="k">SUPPLIER</div><div>:</div><div>${escapeHtml(DN_PRINT_SUPPLIER)}</div>
+          <div class="k">CUSTOMER</div><div>:</div><div>${escapeHtml(customerName)}</div>
           <div class="k">DATE</div><div>:</div><div>${escapeHtml(formatDnLongDate(selectedDn.dnDate))}</div>
           <div class="k">DEL. TO</div><div>:</div><div>${escapeHtml(deliveryAddress)}</div>
         </div>
@@ -1016,21 +1028,32 @@ function DeliverySchedulingPageInner() {
     {
       title: "Actions",
       key: "actions",
-      width: 170,
+      width: 290,
       fixed: "right",
       render: (_: unknown, record) => {
         const isApproved = record.status === "Approved";
         return (
           <div className="flex items-center justify-end gap-2">
             {isApproved ? (
-              <Button
-                size="small"
-                className="!rounded-lg"
-                icon={<PrinterOutlined />}
-                onClick={() => message.info(`Print packing list for ${record.poDnName} (mock)`)}
-              >
-                Print
-              </Button>
+              <>
+                <Button
+                  size="small"
+                  type="primary"
+                  className="!rounded-lg"
+                  icon={<FileTextOutlined />}
+                  onClick={() => goToDnCreation(record)}
+                >
+                  DN Creation
+                </Button>
+                <Button
+                  size="small"
+                  className="!rounded-lg"
+                  icon={<PrinterOutlined />}
+                  onClick={() => message.info(`Print packing list for ${record.poDnName} (mock)`)}
+                >
+                  Print
+                </Button>
+              </>
             ) : (
               <Button
                 size="small"
