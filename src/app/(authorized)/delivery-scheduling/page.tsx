@@ -200,6 +200,36 @@ const escapeHtml = (value: string) =>
     "'": "&#039;",
   })[char] ?? char);
 
+const DN_PRINT_SUPPLIER = "PT. MATRA RODA PIRANTI";
+
+const formatDnLongDate = (value: string) => {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "-") return "-";
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+    ? new Date(`${raw}T00:00:00`)
+    : new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "2-digit",
+    year: "numeric",
+  }).format(date);
+};
+
+const formatDnTime = (value?: string) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "-";
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return "-";
+  return `${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}`;
+};
+
+const formatDnQty = (n: number) =>
+  new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(n) || 0);
+
 function DeliverySchedulingPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -572,27 +602,94 @@ function DeliverySchedulingPageInner() {
   const printSelectedDn = () => {
     if (!selectedDn) return;
 
-    const item = selectedDnItems[0];
     const dnNumber = selectedDnDetail?.dnNumber || selectedDn.dnNumber;
     const customerName = selectedDnDetail?.customerName || selectedDn.customer;
     const deliveryDate = selectedDnDetail?.deliveryDate || selectedDn.dnDate;
-    const qr = normalizeQrSrc(item?.qr || selectedDn.qrCode);
-    const popup = window.open("", "_blank", "width=800,height=900");
+    const deliveryAddress = selectedDnDetail?.deliveryAddress || "-";
+    const remarks = selectedDnDetail?.deliveryInstructions || "";
+    const qr = normalizeQrSrc(
+      selectedDnItems[0]?.qr || selectedDn.qrCode,
+    );
+
+    const popup = window.open("", "_blank", "width=1100,height=800");
     if (!popup) {
       message.error("Popup is blocked. Please allow popups to print the packing list.");
       return;
     }
 
-    popup.document.write(`<!doctype html><html><head><title>${escapeHtml(dnNumber)} Packing List</title><style>
-      body{font-family:Arial,sans-serif;color:#111827;padding:36px;max-width:720px;margin:auto}h1{text-align:center;font-size:24px;margin:0} .dn{text-align:center;color:#64748b;margin:8px 0 32px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;border-top:1px solid #dbe2ea;padding-top:24px}.label{font-size:11px;color:#64748b;margin-bottom:5px}.value{font-size:15px;font-weight:600;line-height:1.45}.qr{text-align:center;border-top:1px solid #dbe2ea;margin-top:28px;padding-top:28px}.qr img{width:180px;height:180px;object-fit:contain}.note{font-size:13px;margin-top:12px;color:#334155}@media print{body{padding:0}}
-    </style></head><body><h1>DELIVERY NOTE</h1><div class="dn">${escapeHtml(dnNumber)}</div><div class="grid">
-      <div><div class="label">Customer</div><div class="value">${escapeHtml(customerName)}</div></div>
-      <div><div class="label">Delivery Date</div><div class="value">${escapeHtml(formatDateShort(deliveryDate))}</div></div>
-      <div><div class="label">Part Name</div><div class="value">${escapeHtml(item?.partName || selectedDn.partTitle)}</div></div>
-      <div><div class="label">Part Number</div><div class="value">${escapeHtml(item?.partNumber || selectedDn.partNo)}</div></div>
-      <div><div class="label">Uniq / Model</div><div class="value">${escapeHtml(`${item?.itemUniqCode || selectedDn.uniq}${item?.model ? ` / ${item.model}` : ""}`)}</div></div>
-      <div><div class="label">Quantity</div><div class="value">${escapeHtml(`${formatNumber(item?.quantity || selectedDn.quantity)} ${item?.uom || ""}`.trim())}</div></div>
-    </div><div class="qr">${qr ? `<img src="${qr}" alt="QR code"/>` : ""}<div class="note">Scan for Shipment Confirmation</div></div></body></html>`);
+    // QTY/KBN is 1 per pack, so ORDER KBN equals ORDER UNIT.
+    const totalQty = selectedDnItems.reduce(
+      (sum, it) => sum + (Number(it.quantity) || 0),
+      0,
+    );
+    const rowsHtml = selectedDnItems
+      .map((it, idx) => {
+        const qty = formatDnQty(it.quantity);
+        return `<tr>
+          <td class="c">${idx + 1}</td>
+          <td>${escapeHtml(it.itemUniqCode || "-")}</td>
+          <td><div>${escapeHtml(it.partNumber || "-")}</div><div>${escapeHtml(it.partName || "-")}</div></td>
+          <td>PACK</td>
+          <td class="r">1.00</td>
+          <td>${escapeHtml(it.uom || "PC")}</td>
+          <td class="r">${qty}</td>
+          <td class="r">${qty}</td>
+        </tr>`;
+      })
+      .join("");
+
+    popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(dnNumber)} Delivery Note</title><style>
+      @page{size:A4 landscape;margin:12mm}
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#000;font-size:11px;margin:0;padding:8px 14px}
+      .company{font-weight:700;font-size:13px;margin-bottom:14px}
+      h1{text-align:center;font-size:14px;margin:0;text-decoration:underline}
+      .dn{text-align:center;font-weight:700;font-size:11px;margin:3px 0 14px}
+      .head{display:grid;grid-template-columns:1fr 130px 1fr;gap:8px;align-items:start;margin-bottom:10px}
+      .kv{display:grid;grid-template-columns:78px 10px 1fr;row-gap:9px}
+      .kv .k{font-weight:700}
+      .qr{text-align:center}.qr img{width:86px;height:86px;object-fit:contain}
+      table{width:100%;border-collapse:collapse;margin-top:4px}
+      th,td{border:1px solid #000;padding:5px 6px;vertical-align:top}
+      th{text-align:left;font-weight:700;font-size:10.5px}
+      th.r,td.r{text-align:right}th.c,td.c{text-align:center}
+      tr.total td{font-weight:700;text-align:right;height:24px;vertical-align:middle}
+      .remarks{margin-top:10px;font-weight:700;font-size:10px}
+      .remarks span{font-weight:400;white-space:pre-wrap}
+    </style></head><body>
+      <div class="company">${escapeHtml(customerName)}</div>
+      <h1>DELIVERY NOTE</h1>
+      <div class="dn">${escapeHtml(dnNumber)}</div>
+      <div class="head">
+        <div class="kv">
+          <div class="k">SUPPLIER</div><div>:</div><div>${escapeHtml(DN_PRINT_SUPPLIER)}</div>
+          <div class="k">DATE</div><div>:</div><div>${escapeHtml(formatDnLongDate(selectedDn.dnDate))}</div>
+          <div class="k">DEL. TO</div><div>:</div><div>${escapeHtml(deliveryAddress)}</div>
+        </div>
+        <div class="qr">${qr ? `<img src="${qr}" alt="QR code"/>` : ""}</div>
+        <div class="kv" style="grid-template-columns:80px 10px 1fr">
+          <div class="k">CYCLE</div><div>:</div><div>-</div>
+          <div class="k">DELIVERY</div><div>:</div><div>${escapeHtml(formatDnLongDate(deliveryDate))}</div>
+          <div class="k">TIME</div><div>:</div><div>${escapeHtml(formatDnTime(selectedDnDetail?.departureAt))}</div>
+        </div>
+      </div>
+      <table>
+        <thead><tr>
+          <th class="c" style="width:38px">NO.</th>
+          <th style="width:60px">UNIQ.</th>
+          <th>PART NUMBER<br/>PART NAME</th>
+          <th style="width:90px">PACKING</th>
+          <th class="r" style="width:80px">QTY/KBN</th>
+          <th style="width:60px">UNIT</th>
+          <th class="r" style="width:100px">ORDER<br/>KBN</th>
+          <th class="r" style="width:100px">ORDER<br/>UNIT</th>
+        </tr></thead>
+        <tbody>${rowsHtml}
+          <tr class="total"><td colspan="6">Total</td><td>${formatDnQty(totalQty)}</td><td>${formatDnQty(totalQty)}</td></tr>
+        </tbody>
+      </table>
+      <div class="remarks">Remarks : <span>${escapeHtml(remarks)}</span></div>
+    </body></html>`);
     popup.document.close();
     // Give the QR image a moment to load before opening the print dialog.
     setTimeout(() => {
