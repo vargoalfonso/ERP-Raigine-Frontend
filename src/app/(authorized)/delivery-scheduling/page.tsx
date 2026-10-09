@@ -80,6 +80,8 @@ type DnStatus = "Printed" | "Scanned" | "Created";
 
 type DnRow = {
   key: string;
+  /** Unik per baris item (satu DN bisa punya banyak item). `key` = id DN. */
+  rowKey: string;
   dnNumber: string;
   dnDate: string;
   customer: string;
@@ -561,6 +563,12 @@ function DeliverySchedulingPageInner() {
           const src = parseDocSource(row.poDnName || row.customerPo || "");
           return {
         key: row.id || row.dnNumber || `dn-${index}`,
+        rowKey: [
+          row.id || row.dnNumber || "dn",
+          row.uniq || "-",
+          row.packingList || "-",
+          index,
+        ].join("|"),
         dnNumber: row.dnNumber || "-",
         dnDate: formatDateShort(row.dnDate),
         customer: row.customerName || "-",
@@ -1158,14 +1166,16 @@ function DeliverySchedulingPageInner() {
           <div className="mt-6">
             <div className="flex items-center justify-between">
               <div className="text-lg font-semibold text-gray-900">Delivery Note Creation & Management</div>
-              <div className="text-xs text-gray-500">{filteredDnRows.length} DNs created</div>
+              <div className="text-xs text-gray-500">
+                {new Set(filteredDnRows.map((r) => r.key)).size} DNs created &middot; {filteredDnRows.length} items
+              </div>
             </div>
 
             <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">
               <Table<DnRow>
                 columns={dnColumns}
                 dataSource={filteredDnRows}
-                rowKey="key"
+                rowKey="rowKey"
                 size="middle"
                 loading={dnCreationQuery.isFetching || scanState.isLoading}
                 pagination={false}
@@ -1175,7 +1185,14 @@ function DeliverySchedulingPageInner() {
           </div>
         ) : (
           <div className="mt-5 space-y-4">
-            {filteredGroups.map((group) => (
+            {filteredGroups.map((group) => {
+              // Pakai grup lengkap (sebelum filter pencarian) supaya tombol tidak
+              // hilang hanya karena baris yang belum approved tersaring.
+              const fullGroup = groups.find((g) => g.key === group.key) ?? group;
+              const allApproved =
+                fullGroup.rows.length > 0 &&
+                fullGroup.rows.every((r) => r.status === "Approved");
+              return (
               <div key={group.key} className="rounded-xl border border-gray-100 overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 bg-white">
                   <div className="flex items-center gap-3">
@@ -1185,6 +1202,7 @@ function DeliverySchedulingPageInner() {
                     </span>
                   </div>
 
+                  {!allApproved ? (
                   <div className="flex items-center gap-2">
                     <Button
                       size="small"
@@ -1205,6 +1223,7 @@ function DeliverySchedulingPageInner() {
                       Approve Partial
                     </Button>
                   </div>
+                  ) : null}
                 </div>
 
                 <Table<ScheduleRow>
@@ -1217,7 +1236,8 @@ function DeliverySchedulingPageInner() {
                   scroll={{ x: "max-content" }}
                 />
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
