@@ -1,8 +1,12 @@
 "use client";
 
-import React, { Suspense, useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeftOutlined, BarcodeOutlined } from "@ant-design/icons";
+import {
+  ArrowLeftOutlined,
+  BarcodeOutlined,
+  PrinterOutlined,
+} from "@ant-design/icons";
 import { Table, Tabs, Card, Tag, Button, message, Modal, QRCode } from "antd";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
@@ -12,6 +16,7 @@ import {
   useGetInventoryKanbanSummaryQuery,
   useGetDeliveryNoteByUniqQuery,
   useGetInventoryPackingListQuery,
+  useEnsureInitialPackingsMutation,
   type InventoryPackingItem,
   type DeliveryNoteItem as ApiDeliveryNoteItem,
 } from "@/lib/api/inventory/api";
@@ -46,6 +51,8 @@ function RawMaterialsDetailPageContent() {
     dn: string;
     packing: string;
   } | null>(null);
+  const [labelsOpen, setLabelsOpen] = useState(false);
+  const autoPackingTried = useRef<string>("");
   const id = searchParams.get("id") ?? "";
   const uniq = searchParams.get("uniq") ?? "LV7-001";
   const apiEnabled = Boolean(apiBaseUrl);
@@ -168,12 +175,50 @@ function RawMaterialsDetailPageContent() {
     data: packingRes,
     isFetching: packingLoading,
     isError: packingError,
+    refetch: refetchPacking,
   } = useGetInventoryPackingListQuery(
     { type: "raw-materials", uniq_code: uniqCode },
     { skip: !apiEnabled || !uniqCode },
   );
 
   const packingData: InventoryPackingItem[] = packingRes?.items ?? [];
+
+  // [initial-packing] Opening stock yang di-inject tanpa DN belum punya Packing
+  // ID. Buat otomatis (sekali per uniq) agar bisa langsung dicetak & di-scan.
+  // Backend idempotent dan tidak mengubah stock_qty.
+  const [ensurePackings, { isLoading: generatingPackings }] =
+    useEnsureInitialPackingsMutation();
+
+  const generatePackings = async (silent = false) => {
+    const key = id || uniqCode;
+    if (!key) return;
+    try {
+      const res = await ensurePackings({ key }).unwrap();
+      if (res.created > 0) {
+        message.success(`${res.created} Initial Packing ID dibuat`);
+        refetchPacking();
+      } else if (!silent) {
+        message.info(
+          res.skipped === "stok 0"
+            ? "Stok 0, tidak ada packing yang dibuat"
+            : "RM ini sudah punya packing",
+        );
+      }
+    } catch (error) {
+      if (!silent) {
+        message.error(getApiErrorMessage(error, "Gagal membuat Packing ID"));
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!apiEnabled || !uniqCode || !packingRes || packingLoading) return;
+    if (packingData.length > 0 || detailInfo.stock <= 0) return;
+    if (autoPackingTried.current === uniqCode) return;
+    autoPackingTried.current = uniqCode;
+    void generatePackings(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiEnabled, uniqCode, packingRes, packingLoading, packingData.length, detailInfo.stock]);
 
   const historyColumns = [
     { title: "Uniq", dataIndex: "uniq", key: "uniq" },
@@ -386,9 +431,28 @@ function RawMaterialsDetailPageContent() {
                   {uniqCode || uniq}
                 </p>
               </div>
-              <p className="m-0 text-sm text-gray-500">
-                {packingRes?.total_packing ?? packingData.length} packing
-              </p>
+              <div className="flex items-center gap-3">
+                <p className="m-0 text-sm text-gray-500">
+                  {packingRes?.total_packing ?? packingData.length} packing
+                </p>
+                {packingData.length === 0 && detailInfo.stock > 0 ? (
+                  <Button
+                    size="small"
+                    loading={generatingPackings}
+                    onClick={() => void generatePackings(false)}
+                  >
+                    Generate Packing ID
+                  </Button>
+                ) : null}
+                <Button
+                  size="small"
+                  icon={<PrinterOutlined />}
+                  disabled={packingData.length === 0}
+                  onClick={() => setLabelsOpen(true)}
+                >
+                  Print Label QR
+                </Button>
+              </div>
             </div>
 
             {packingError ? (
@@ -405,7 +469,7 @@ function RawMaterialsDetailPageContent() {
                 dataSource={packingData}
                 locale={{
                   emptyText:
-                    "Belum ada packing. Data muncul setelah barcode work order di-scan.",
+                    "Belum ada packing. Packing dibuat otomatis dari DN, scan work order, atau opening stock.",
                 }}
                 columns={[
                   {
@@ -501,6 +565,44 @@ function RawMaterialsDetailPageContent() {
           </div>
         </Card>
       </div>
+
+      <Modal
+        open={labelsOpen}
+        onCancel={() => setLabelsOpen(false)}
+        centered
+        width={820}
+        title={`Label QR Packing - ${uniqCode || uniq}`}
+        okText="Print"
+        cancelText="Tutup"
+        okButtonProps={{ icon: <PrinterOutlined /> }}
+        onOk={() => window.print()}
+      >
+        <style>{`@media print {
+          body * { visibility: hidden !important; }
+          #rm-packing-labels, #rm-packing-labels * { visibility: visible !important; }
+          #rm-packing-labels { position: absolute; left: 0; top: 0; width: 100%; }
+          .rm-label { break-inside: avoid; }
+        }`}</style>
+        <div
+          id="rm-packing-labels"
+          className="grid grid-cols-2 gap-3 sm:grid-cols-3"
+        >
+          {packingData.map((record, index) => (
+            <div
+              key={`${record.packing_number || "row"}-${index}`}
+              className="rm-label flex flex-col items-center gap-2 rounded-lg border border-gray-300 p-3"
+            >
+              <QRCode size={120} value={record.packing_number || "-"} />
+              <p className="m-0 text-center text-xs font-semibold">
+                {record.packing_number || "-"}
+              </p>
+              <p className="m-0 text-center text-[11px] text-gray-500">
+                {uniqCode || uniq} &middot; Qty {formatNumber(record.qty_current ?? record.quantity)}
+              </p>
+            </div>
+          ))}
+        </div>
+      </Modal>
 
       <Modal
         open={!!barcodeModal}
