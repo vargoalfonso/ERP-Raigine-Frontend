@@ -503,6 +503,10 @@ export default function BomEditPage() {
         typeof (bom as any)?.description === "string"
           ? (bom as any).description
           : undefined,
+      qty_per_uniq:
+        typeof (bom as any)?.qty_per_uniq === "number"
+          ? (bom as any).qty_per_uniq
+          : null,
       asset_id: (bom as any)?.asset?.id ?? null,
       asset_url:
         typeof (bom as any)?.asset?.url === "string"
@@ -873,6 +877,12 @@ export default function BomEditPage() {
           uom: parentUom,
           status: cleanText(values.status) ?? "Draft",
           description: cleanNullableText(values.description),
+          // QPU parent opsional: dikirim hanya bila terisi (kosong = pertahankan nilai lama).
+          ...(typeof values.qty_per_uniq === "number" &&
+          Number.isFinite(values.qty_per_uniq) &&
+          values.qty_per_uniq >= 1
+            ? { qty_per_uniq: Math.trunc(values.qty_per_uniq) }
+            : {}),
           asset_id: parentFile ? null : (values.asset_id ?? null),
           upload_key: parentFile ? "parent" : null,
           material_spec: parentMaterialSpec,
