@@ -174,19 +174,27 @@ function FinishedGoodDetailContent() {
         if (value < 0) {
           return <Tag className="bg-red-100 text-red-600">{value}</Tag>;
         }
-        return <Tag className="bg-green-100 text-green-600">+{value}</Tag>;
+        if (value > 0) {
+          return <Tag className="bg-green-100 text-green-600">+{value}</Tag>;
+        }
+        // [fg-history] catatan tanpa perubahan stok (mis. QC Final lolos).
+        return <Tag className="bg-gray-100 text-gray-500">0</Tag>;
       },
     },
     {
+      // [fg-history] kolom "Qty" (saldo setelah transaksi) dihapus karena
+      // membingungkan; keterangan transaksi ditampilkan di bawah Reason.
       title: "Reason",
       dataIndex: "reason",
       key: "reason",
-      render: (value: string) => value || "-",
-    },
-    {
-      title: "Qty",
-      dataIndex: "qty_after",
-      key: "qty_after",
+      render: (value: string, record: FinishedGoodHistoryItem) => (
+        <div>
+          <div>{value || "-"}</div>
+          {record.notes ? (
+            <div className="text-xs text-gray-500">{record.notes}</div>
+          ) : null}
+        </div>
+      ),
     },
     {
       title: "Last Update",
