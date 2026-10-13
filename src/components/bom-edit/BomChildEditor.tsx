@@ -61,14 +61,29 @@ export default function BomChildEditor({
           <Form.Item name={[...fieldPath, "uom"]} label="UOM" rules={[{ required: true, message: "UOM is required" }]}>
             <Select showSearch disabled={disabled} loading={isUomsLoading} options={uomOptions} optionFilterProp="label" />
           </Form.Item>
-          <Form.Item name={[...fieldPath, "qty_per_uniq"]} label="Qty per UNIQ" rules={[{ required: true, message: "Qty per UNIQ is required" }]}>
-            <InputNumber min={0} className="w-full" disabled={disabled} />
+          <Form.Item name={[...fieldPath, "parent_uniq_code"]} label="Parent UNIQ">
+            <Input disabled placeholder="-" />
+          </Form.Item>
+          <Form.Item
+            name={[...fieldPath, "qty_per_uniq"]}
+            label="QPU (Quantity Per Unit)"
+            extra="Jumlah child ini per 1 unit parent (bilangan bulat)."
+            rules={[
+              { required: true, message: "QPU is required" },
+              {
+                validator: (_, value) =>
+                  value === undefined ||
+                  value === null ||
+                  (Number.isInteger(value) && value >= 1)
+                    ? Promise.resolve()
+                    : Promise.reject(new Error("QPU harus bilangan bulat minimal 1")),
+              },
+            ]}
+          >
+            <InputNumber min={1} step={1} precision={0} className="w-full" disabled={disabled} />
           </Form.Item>
           <Form.Item name={[...fieldPath, "scrap_factor"]} label="Scrap Factor">
             <InputNumber min={0} className="w-full" disabled={disabled} />
-          </Form.Item>
-          <Form.Item name={[...fieldPath, "is_phantom"]} valuePropName="checked" label=" ">
-            <Checkbox disabled={disabled}>Is Phantom</Checkbox>
           </Form.Item>
           <Form.Item name={[...fieldPath, "is_phantom"]} valuePropName="checked" label=" ">
             <Checkbox disabled={disabled}>Is Phantom</Checkbox>

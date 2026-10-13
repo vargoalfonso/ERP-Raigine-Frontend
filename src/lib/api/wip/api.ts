@@ -71,6 +71,10 @@ export type WipListRow = {
   type?: string;
   stock_to_complete_kanban?: number;
   kanban?: number;
+  /** process = sedang diproses (sudah scan-in), queue = menunggu proses berikutnya. */
+  status?: string;
+  /** Proses yang akan/sedang mengerjakan baris ini. */
+  waiting_process?: string;
 };
 
 export type WipDetailProcess = {
@@ -146,6 +150,8 @@ const toWipListRow = (raw: unknown): WipListRow => {
       r.stock_to_complete_kanban ?? r.stockToCompleteKanban,
     ),
     kanban: toNumber(r.kanban ?? r.kanban_count ?? r.kanbanCount),
+    status: toText(r.status ?? r.Status),
+    waiting_process: toText(r.waiting_process ?? r.waitingProcess),
   };
 };
 
@@ -280,10 +286,10 @@ export const wipApiSlice = apiSlice.injectEndpoints({
   endpoints: (builder) => ({
     getWipList: builder.query<
       ApiResponse<WipListRow[]>,
-      { page?: number; limit?: number }
+      { page?: number; limit?: number; includeDone?: boolean }
     >({
-      query: ({ page = 1, limit = 10 }) => ({
-        url: `/wip?page=${page}&limit=${limit}`,
+      query: ({ page = 1, limit = 10, includeDone = false }) => ({
+        url: `/wip?page=${page}&limit=${limit}${includeDone ? "&include_done=true" : ""}`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),

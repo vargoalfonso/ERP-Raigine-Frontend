@@ -48,81 +48,10 @@ type WipRecord = {
   type: string;
   stockToCompleteKanban: number;
   kanban: number;
+  /** process = sedang diproses, queue = menunggu proses berikutnya. */
+  status?: string;
+  waitingProcess?: string;
 };
-
-type UnknownRecord = Record<string, unknown>;
-const isRecord = (value: unknown): value is UnknownRecord =>
-  typeof value === "object" && value !== null;
-const isMissingRouteError = (error: unknown): boolean =>
-  isRecord(error) && error.status === 404;
-
-const dummyWipData: WipRecord[] = [
-  {
-    id: "1",
-    process: "Assembly",
-    uniq: "LV7-001",
-    partNumber: "EMA7-001",
-    partName: "Engine Mount Assembly",
-    woNumber: "WO-001-2024",
-    stock: 200,
-    kanbanCode: "KBN-001-2024",
-    type: "draft",
-    stockToCompleteKanban: 250,
-    kanban: 5,
-  },
-  {
-    id: "2",
-    process: "Machining",
-    uniq: "LV7-001",
-    partNumber: "EMA7-001",
-    partName: "Engine Mount Assembly",
-    woNumber: "WO-001-2024",
-    stock: 200,
-    kanbanCode: "KBN-001-2024",
-    type: "draft",
-    stockToCompleteKanban: 250,
-    kanban: 5,
-  },
-  {
-    id: "3",
-    process: "Quality Check",
-    uniq: "LV8-002",
-    partNumber: "SA8-002",
-    partName: "Suspension Arm",
-    woNumber: "WO-002-2024",
-    stock: 200,
-    kanbanCode: "KBN-002-2024",
-    type: "draft",
-    stockToCompleteKanban: 25,
-    kanban: 2,
-  },
-  {
-    id: "4",
-    process: "Assembly",
-    uniq: "LW0-003",
-    partNumber: "BC0-003",
-    partName: "Brake Caliper",
-    woNumber: "WO-003-2024",
-    stock: 200,
-    kanbanCode: "KBN-003-2024",
-    type: "draft",
-    stockToCompleteKanban: 25,
-    kanban: 2,
-  },
-  {
-    id: "5",
-    process: "Quality Check",
-    uniq: "MB6-004",
-    partNumber: "CM6-004",
-    partName: "Control Module",
-    woNumber: "WO-004-2024",
-    stock: 200,
-    kanbanCode: "KBN-004-2024",
-    type: "draft",
-    stockToCompleteKanban: 29,
-    kanban: 2,
-  },
-];
 
 type WipEditFormValues = {
   status?: string;
@@ -133,16 +62,15 @@ export default function WorkInProgressPage() {
   const [messageApi, contextHolder] = message.useMessage();
   const [searchValue, setSearchValue] = useState("");
   const [tab, setTab] = useState("wip");
+  const [statusFilter, setStatusFilter] = useState<string>("active");
   const [processFilter, setProcessFilter] = useState<string>("all");
 
   const apiEnabled = Boolean(apiBaseUrl);
   const listQuery = useGetWipListQuery(
-    { page: 1, limit: 10 },
+    { page: 1, limit: 1000, includeDone: true },
     { skip: !apiEnabled },
   );
   const [updateWip] = useUpdateWipMutation();
-
-  const [wipData, setWipData] = useState<WipRecord[]>(dummyWipData);
 
   const [editOpen, setEditOpen] = useState(false);
   const [editingWip, setEditingWip] = useState<WipRecord | null>(null);
@@ -153,12 +81,6 @@ export default function WorkInProgressPage() {
 
   useEffect(() => {
     if (!apiEnabled || !listQuery.error) return;
-    if (isMissingRouteError(listQuery.error)) {
-      messageApi.warning(
-        "WIP API route is not available yet; showing mock data.",
-      );
-      return;
-    }
     messageApi.error(
       getApiErrorMessage(listQuery.error, "Failed to load WIP inventory"),
     );
@@ -179,15 +101,17 @@ export default function WorkInProgressPage() {
       type: row.type ?? "-",
       stockToCompleteKanban: Number(row.stock_to_complete_kanban ?? 0),
       kanban: Number(row.kanban ?? 0),
+      status: (row.status ?? "").toLowerCase(),
+      waitingProcess: row.waiting_process ?? "-",
     };
   };
 
+  // Sumber data HANYA dari API (/wip -> tabel wip_items), tanpa data dummy.
   const tableRows = useMemo(() => {
-    if (!apiEnabled || isMissingRouteError(listQuery.error)) return wipData;
     const items = listQuery.data?.data ?? [];
-    if (!items.length) return [];
     return items.map(mapApiRowToRecord);
-  }, [apiEnabled, listQuery.data, listQuery.error, wipData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listQuery.data]);
 
   const openWipDetail = (record: WipRecord) => {
     const params = new URLSearchParams();
@@ -219,24 +143,16 @@ export default function WorkInProgressPage() {
         return;
       }
 
-      const fromApi = apiEnabled && !isMissingRouteError(listQuery.error);
-      if (fromApi && editingWip.apiId) {
-        await updateWip({
-          id: editingWip.apiId,
-          body: { status: nextStatus },
-        }).unwrap();
-        messageApi.success("Status updated");
-        listQuery.refetch();
-        closeEditDrawer();
+      if (!editingWip.apiId) {
+        messageApi.error("WIP id not found");
         return;
       }
-
-      setWipData((prev) =>
-        prev.map((row) =>
-          row.id === editingWip.id ? { ...row, type: nextStatus } : row,
-        ),
-      );
-      messageApi.success("Saved");
+      await updateWip({
+        id: editingWip.apiId,
+        body: { status: nextStatus },
+      }).unwrap();
+      messageApi.success("Status updated");
+      listQuery.refetch();
       closeEditDrawer();
     } catch {
       // validation errors shown by antd
@@ -255,16 +171,7 @@ export default function WorkInProgressPage() {
 
   const handleConfirmDelete = () => {
     if (!deletingWip) return;
-    if (apiEnabled && !isMissingRouteError(listQuery.error)) {
-      messageApi.info("Delete WIP is not integrated for this page yet.");
-      closeDeleteModal();
-      return;
-    }
-    setWipData((prev) => prev.filter((row) => row.id !== deletingWip.id));
-    if (editingWip?.id === deletingWip.id) {
-      closeEditDrawer();
-    }
-    messageApi.success("Deleted");
+    messageApi.info("Delete WIP is not integrated for this page yet.");
     closeDeleteModal();
   };
 
@@ -278,38 +185,69 @@ export default function WorkInProgressPage() {
         row.partName,
         row.woNumber,
         row.kanbanCode,
-        row.type,
+        row.status,
+        row.waitingProcess,
       ]
         .join(" ")
         .toLowerCase()
         .includes(searchValue.toLowerCase());
 
     const matchesProcess =
-      processFilter === "all" || row.process === processFilter;
+      processFilter === "all" ||
+      row.process === processFilter ||
+      row.waitingProcess === processFilter;
+    const matchesStatus =
+      statusFilter === "all" ||
+      (statusFilter === "active"
+        ? (row.status ?? "") !== "done"
+        : (row.status ?? "") === statusFilter);
 
-    return matchesSearch && matchesProcess;
+    return matchesSearch && matchesProcess && matchesStatus;
   });
 
   const summaryStats = useMemo(() => {
-    const totalQuantity = tableRows.reduce(
+    // Statistik hanya menghitung WIP aktif; baris "done" hanya riwayat.
+    const activeRows = tableRows.filter((r) => r.status !== "done");
+    const totalQuantity = activeRows.reduce(
       (sum, row) => sum + Number(row.stock ?? 0),
       0,
     );
-    const activeStations = new Set(
-      tableRows.map((r) => r.process).filter(Boolean),
-    ).size;
+    const inProcess = activeRows.filter((r) => r.status === "process").length;
+    const inQueue = activeRows.filter((r) => r.status === "queue").length;
     return {
-      activeWip: tableRows.length,
+      activeWip: activeRows.length,
       totalQuantity,
-      activeStations,
+      inProcess,
+      inQueue,
     };
   }, [tableRows]);
 
   const columns: ColumnType<WipRecord>[] = [
     {
+      title: "Status",
+      key: "status",
+      width: 130,
+      render: (_: unknown, record: WipRecord) =>
+        record.status === "queue" ? (
+          <Tag color="orange" className="!m-0">
+            Queue
+          </Tag>
+        ) : record.status === "process" ? (
+          <Tag color="blue" className="!m-0">
+            In Process
+          </Tag>
+        ) : record.status === "done" ? (
+          <Tag color="green" className="!m-0">
+            Done
+          </Tag>
+        ) : (
+          <Tag className="!m-0">{record.status || "-"}</Tag>
+        ),
+    },
+    {
       title: "Process",
       key: "process",
-      width: 120,
+      width: 130,
       render: (_: unknown, record: WipRecord) => (
         <span className="inline-flex rounded-full bg-[#F1F5F9] px-3 py-1 text-xs text-gray-700">
           {record.process}
@@ -317,16 +255,23 @@ export default function WorkInProgressPage() {
       ),
     },
     {
+      title: "Next Process",
+      key: "waitingProcess",
+      width: 140,
+      render: (_: unknown, record: WipRecord) =>
+        record.status === "queue" ? (
+          <span className="inline-flex rounded-full bg-orange-50 px-3 py-1 text-xs text-orange-700">
+            {record.waitingProcess}
+          </span>
+        ) : (
+          <span className="text-gray-400">-</span>
+        ),
+    },
+    {
       title: "Uniq",
       dataIndex: "uniq",
       key: "uniq",
       width: 110,
-    },
-    {
-      title: "Part Number",
-      dataIndex: "partNumber",
-      key: "partNumber",
-      width: 130,
     },
     {
       title: "Part Info",
@@ -356,9 +301,9 @@ export default function WorkInProgressPage() {
       width: 100,
     },
     {
-      title: "Kanban",
+      title: "Kanban No.",
       key: "kanbanCode",
-      width: 140,
+      width: 150,
       render: (_: unknown, record: WipRecord) => (
         <span className="inline-flex rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700">
           {record.kanbanCode}
@@ -366,22 +311,10 @@ export default function WorkInProgressPage() {
       ),
     },
     {
-      title: "Type",
-      dataIndex: "type",
-      key: "type",
-      width: 140,
-    },
-    {
-      title: "Stock to Complete Kanban",
-      key: "stockToCompleteKanban",
-      dataIndex: "stockToCompleteKanban",
-      width: 120,
-    },
-    {
-      title: "Kanban",
+      title: "Qty / Kanban",
       dataIndex: "kanban",
       key: "kanban",
-      width: 140,
+      width: 120,
     },
     {
       title: "Actions",
@@ -423,7 +356,11 @@ export default function WorkInProgressPage() {
   ];
 
   const processOptions = useMemo(() => {
-    const values = new Set(tableRows.map((row) => row.process).filter(Boolean));
+    const values = new Set(
+      tableRows
+        .flatMap((row) => [row.process, row.waitingProcess ?? ""])
+        .filter((v) => Boolean(v) && v !== "-"),
+    );
     return [
       { label: "All Process", value: "all" },
       ...Array.from(values).map((p) => ({ label: p, value: p })),
@@ -511,8 +448,9 @@ export default function WorkInProgressPage() {
               Work In-Progress Database
             </div>
             <div className="text-sm text-gray-500">
-              Track WIP by Uniq, Packing Number, Type and Process with real-time
-              aging and station visibility
+              Barang yang belum selesai dan sedang dikerjakan (In Process) atau
+              menunggu proses berikutnya (Queue) otomatis masuk WIP; keluar dari
+              daftar saat sudah selesai.
             </div>
           </div>
 
@@ -549,15 +487,15 @@ export default function WorkInProgressPage() {
           textColor="text-green-600"
         />
         <StatsCard
-          title="Avg Aging"
-          value="-"
+          title="In Process"
+          value={summaryStats.inProcess}
           icon={<HiOutlineArchiveBox size={22} />}
           bgColor=""
           textColor="text-orange-600"
         />
         <StatsCard
-          title="Active Stations"
-          value={summaryStats.activeStations}
+          title="In Queue"
+          value={summaryStats.inQueue}
           icon={<LuChartColumn size={22} />}
           bgColor=""
           textColor="text-purple-600"
@@ -573,7 +511,7 @@ export default function WorkInProgressPage() {
               onClick={() => setTab("wip")}
               className={`${tab === "wip" ? "bg-white" : ""} rounded-xl text-sm px-4 py-2`}
             >
-              WIP Tracking
+              WIP Inventory
             </button>
             <button
               type="button"
@@ -588,7 +526,7 @@ export default function WorkInProgressPage() {
             <Input
               value={searchValue}
               onChange={(e) => setSearchValue(e.target.value)}
-              placeholder="Search by Uniq or Machine Name..."
+              placeholder="Search by Uniq, Part, WO, Process or Kanban..."
               prefix={<SearchOutlined className="text-gray-400" />}
               className="max-w-[420px]"
               allowClear
@@ -608,14 +546,28 @@ export default function WorkInProgressPage() {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div className="text-sm font-semibold text-gray-900">
-                  Real-time WIP Tracking
+                  WIP Inventory
                 </div>
-                <Select
-                  value={processFilter}
-                  onChange={setProcessFilter}
-                  style={{ width: 200 }}
-                  options={processOptions}
-                />
+                <div className="flex items-center gap-3">
+                  <Select
+                    value={statusFilter}
+                    onChange={setStatusFilter}
+                    style={{ width: 160 }}
+                    options={[
+                      { label: "Active (Belum Done)", value: "active" },
+                      { label: "All Status", value: "all" },
+                      { label: "In Process", value: "process" },
+                      { label: "Queue", value: "queue" },
+                      { label: "Done", value: "done" },
+                    ]}
+                  />
+                  <Select
+                    value={processFilter}
+                    onChange={setProcessFilter}
+                    style={{ width: 200 }}
+                    options={processOptions}
+                  />
+                </div>
               </div>
 
               <div className="overflow-x-auto">
@@ -624,9 +576,13 @@ export default function WorkInProgressPage() {
                   dataSource={filteredData}
                   rowKey="id"
                   loading={apiEnabled ? listQuery.isFetching : false}
-                  pagination={false}
+                  pagination={{ pageSize: 10, showSizeChanger: false }}
                   bordered
                   scroll={{ x: "max-content" }}
+                  locale={{
+                    emptyText:
+                      "Belum ada WIP. Barang masuk WIP setelah scan-in dan keluar saat selesai.",
+                  }}
                 />
               </div>
             </div>

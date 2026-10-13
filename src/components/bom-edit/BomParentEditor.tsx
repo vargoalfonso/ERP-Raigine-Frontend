@@ -1,13 +1,65 @@
 "use client";
 
-import { Alert, Card, Form, Input, InputNumber, Select } from "antd";
+import { useMemo } from "react";
+import { Alert, Card, Form, Input, InputNumber, Select, Table, Tag, Typography } from "antd";
+import type { ColumnsType } from "antd/es/table";
 import type { UploadFile } from "antd/es/upload/interface";
 import AssetUploadField from "./AssetUploadField";
 import MaterialSpecEditor from "./MaterialSpecEditor";
 import ProcessRoutesEditor from "./ProcessRoutesEditor";
-import type { EditValues } from "./bom-edit.types";
+import type { ChildPartForm, EditValues } from "./bom-edit.types";
 
 const { TextArea } = Input;
+const { Text } = Typography;
+
+type QpuDetailRow = {
+  key: string;
+  level: number;
+  uniq: string;
+  partName: string;
+  parentUniq: string;
+  qpu: number | null;
+  uom: string;
+};
+
+// Ratakan semua child (semua level) untuk tabel ringkasan QPU.
+const flattenQpuRows = (
+  nodes: ChildPartForm[] | undefined,
+  parentUniq: string,
+  level = 1,
+  out: QpuDetailRow[] = [],
+): QpuDetailRow[] => {
+  (Array.isArray(nodes) ? nodes : []).forEach((node, index) => {
+    const uniq = String(node?.uniq_code ?? "").trim();
+    out.push({
+      key: `${level}-${out.length}-${index}`,
+      level,
+      uniq: uniq || "-",
+      partName: String(node?.part_name ?? "").trim() || "-",
+      parentUniq: String(node?.parent_uniq_code ?? parentUniq).trim() || "-",
+      qpu: typeof node?.qty_per_uniq === "number" ? node.qty_per_uniq : null,
+      uom: typeof node?.uom === "string" ? node.uom : node?.uom != null ? String(node.uom) : "",
+    });
+    flattenQpuRows(node?.children, uniq || parentUniq, level + 1, out);
+  });
+  return out;
+};
+
+const qpuColumns: ColumnsType<QpuDetailRow> = [
+  { title: "Level", dataIndex: "level", key: "level", width: 70, render: (v: number) => <Tag>L{v}</Tag> },
+  { title: "UNIQ", dataIndex: "uniq", key: "uniq", width: 150 },
+  { title: "Part Name", dataIndex: "partName", key: "partName" },
+  { title: "Parent UNIQ", dataIndex: "parentUniq", key: "parentUniq", width: 150 },
+  {
+    title: "QPU",
+    dataIndex: "qpu",
+    key: "qpu",
+    width: 90,
+    align: "right",
+    render: (v: number | null) => (v != null ? v : "-"),
+  },
+  { title: "UOM", dataIndex: "uom", key: "uom", width: 90 },
+];
 
 type ParentEditorProps = {
   form: import("antd").FormInstance<EditValues>;
@@ -39,6 +91,11 @@ export default function BomParentEditor(props: ParentEditorProps) {
     isUomsLoading,
     uomOptions,
   } = props;
+
+  // Ringkasan QPU seluruh child di bawah parent ini (read-only).
+  const childParts = Form.useWatch("child_parts", form) as ChildPartForm[] | undefined;
+  const parentUniq = String(Form.useWatch("parent_uniq", form) ?? "").trim();
+  const qpuRows = useMemo(() => flattenQpuRows(childParts, parentUniq), [childParts, parentUniq]);
 
   return (
     <div className="space-y-6">
@@ -101,6 +158,33 @@ export default function BomParentEditor(props: ParentEditorProps) {
             <TextArea rows={4} disabled={disabled} />
           </Form.Item>
         </div>
+      </Card>
+
+      <Card
+        title={
+          <div className="flex items-center gap-2">
+            <span>QPU Detail</span>
+            <Tag>{qpuRows.length} child</Tag>
+          </div>
+        }
+        className="rounded-3xl border-slate-200 shadow-sm"
+      >
+        <Text type="secondary" className="block mb-3">
+          Jumlah tiap child per 1 unit parent{parentUniq ? ` ${parentUniq}` : ""}. Ubah nilainya di panel child yang
+          bersangkutan.
+        </Text>
+        {qpuRows.length === 0 ? (
+          <Text type="secondary">Belum ada child.</Text>
+        ) : (
+          <Table<QpuDetailRow>
+            size="small"
+            pagination={false}
+            rowKey="key"
+            dataSource={qpuRows}
+            columns={qpuColumns}
+            scroll={{ x: 640 }}
+          />
+        )}
       </Card>
 
       <Card title="Process routes" className="rounded-3xl border-slate-200 shadow-sm">

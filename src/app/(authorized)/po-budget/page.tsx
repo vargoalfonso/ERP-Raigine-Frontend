@@ -1,8 +1,12 @@
 "use client";
 import { apiBaseUrl, getCookiesFromBrowser } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useGetBomTreeQuery,
+  useLazyGetBomFullByIdQuery,
+  type BomFullNode,
+} from "@/lib/api/bom/api";
 import {
   useGetPoBudgetListQuery,
   useLazyGetPoBudgetListQuery,
@@ -58,6 +62,7 @@ import {
 const useApi = Boolean(apiBaseUrl);
 import {
   Button,
+  Descriptions,
   Input,
   InputNumber,
   Modal,
@@ -192,6 +197,123 @@ type AddFormState = {
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+// ── Spesifikasi material dari detail BOM (/bill-of-material/<id>) ──────────────
+type BomSpec = {
+  material_grade: string | null;
+  grade: string | null;
+  type_material: string | null;
+  is_subcon: boolean;
+  form: string | null;
+  width_mm: number | null;
+  diameter_mm: number | null;
+  thickness_mm: number | null;
+  length_mm: number | null;
+  weight_kg: number | null;
+  cycle_time_sec: number | null;
+  setup_time_min: number | null;
+};
+
+type BomDetailEntry = {
+  status: "loading" | "ok" | "error" | "missing";
+  bomId?: string;
+  node?: BomFullNode;
+};
+
+type BomSpecChildRow = {
+  key: string;
+  level: number;
+  uniq: string;
+  partName: string;
+  partNumber: string;
+  qpu?: number;
+  spec: BomSpec | null;
+};
+
+const specStr = (v: unknown): string | null => {
+  if (typeof v === "string") return v.trim() || null;
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  return null;
+};
+const specNum = (v: unknown): number | null => {
+  const n = typeof v === "number" ? v : Number(v);
+  return v != null && v !== "" && Number.isFinite(n) ? n : null;
+};
+
+// Sama dengan parseMaterialSpec di halaman detail BOM.
+function parseBomSpec(raw: unknown): BomSpec | null {
+  if (!raw || typeof raw !== "object") return null;
+  const s = raw as Record<string, unknown>;
+  return {
+    material_grade: specStr(s.material_grade),
+    grade: specStr(s.grade) ?? specStr(s.material_grade),
+    type_material: specStr(s.type_material) ?? specStr(s.material_type),
+    is_subcon: s.is_subcon === true,
+    form: specStr(s.form),
+    width_mm: specNum(s.width_mm),
+    diameter_mm: specNum(s.diameter_mm),
+    thickness_mm: specNum(s.thickness_mm),
+    length_mm: specNum(s.length_mm),
+    weight_kg: specNum(s.weight_kg),
+    cycle_time_sec: specNum(s.cycle_time_sec),
+    setup_time_min: specNum(s.setup_time_min),
+  };
+}
+
+function pickBomSpec(node: unknown): BomSpec | null {
+  if (!node || typeof node !== "object") return null;
+  const r = node as Record<string, unknown>;
+  return parseBomSpec(r.material_spec ?? r.material_specifications);
+}
+
+function formatSpecInline(spec: BomSpec | null): string {
+  if (!spec) return "-";
+  const dims = [
+    spec.width_mm != null ? `W ${spec.width_mm}` : "",
+    spec.thickness_mm != null ? `T ${spec.thickness_mm}` : "",
+    spec.length_mm != null ? `L ${spec.length_mm}` : "",
+    spec.diameter_mm != null ? `Ø ${spec.diameter_mm}` : "",
+  ]
+    .filter(Boolean)
+    .join(" × ");
+  const parts = [
+    spec.material_grade,
+    spec.type_material,
+    spec.form,
+    dims ? `${dims} mm` : "",
+    spec.weight_kg != null ? `${spec.weight_kg} kg` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(" · ") : "-";
+}
+
+function flattenBomChildren(
+  nodes: unknown,
+  level = 1,
+  out: BomSpecChildRow[] = [],
+): BomSpecChildRow[] {
+  if (!Array.isArray(nodes)) return out;
+  nodes.forEach((n: any, index: number) => {
+    const uniq = specStr(n?.uniq_code) ?? specStr(n?.uniq) ?? "-";
+    out.push({
+      key: `${level}-${n?.id ?? n?.line_id ?? uniq}-${index}-${out.length}`,
+      level,
+      uniq,
+      partName: specStr(n?.part_name) ?? "-",
+      partNumber: specStr(n?.part_number) ?? "-",
+      qpu: specNum(n?.qty_per_uniq) ?? undefined,
+      spec: pickBomSpec(n),
+    });
+    flattenBomChildren(n?.children, level + 1, out);
+  });
+  return out;
+}
+
+/** "RM1, RM2, RM3 +4" - ringkas supaya label dropdown tetap terbaca. */
+function formatMaterialSummary(uniqs: string[], max = 5): string {
+  if (uniqs.length === 0) return "-";
+  const head = uniqs.slice(0, max).join(", ");
+  return uniqs.length > max ? `${head} +${uniqs.length - max}` : head;
 }
 
 function getApiType(tab: BudgetTabId): PoBudgetType {
@@ -472,6 +594,28 @@ export default function PoBudgetPage() {
     bomIndex.uomByUniq,
     bomIndex.weightKgByUniq,
   ]);
+
+  // Semua uniq material (turunan BOM) dari satu uniq FG. Pengadaan perlu tahu
+  // material apa yang akan dipesan sejak memilih PRL, bukan hanya uniq FG-nya.
+  const collectMaterialUniqs = useCallback(
+    (parentUniq: string): string[] => {
+      const out: string[] = [];
+      const seen = new Set<string>([parentUniq.trim().toLowerCase()]);
+      const walk = (code: string) => {
+        for (const child of bomChildrenByParentUniq[code.trim().toLowerCase()] ??
+          []) {
+          const childCode = String(child.uniq_code ?? "").trim();
+          if (!childCode || seen.has(childCode.toLowerCase())) continue;
+          seen.add(childCode.toLowerCase());
+          out.push(childCode);
+          walk(childCode);
+        }
+      };
+      walk(parentUniq);
+      return out;
+    },
+    [bomChildrenByParentUniq],
+  );
 
   const [activeTab, setActiveTab] = useState<BudgetTabId>("raw");
   const [paginationByTab, setPaginationByTab] = useState<TabPaginationState>({
@@ -1495,17 +1639,20 @@ export default function PoBudgetPage() {
     }
     return Array.from(prlGroups.entries()).map(([prlId, group]) => {
       const uniqSummary = group.uniqs.length > 0 ? group.uniqs.join(", ") : "-";
+      const materials = Array.from(
+        new Set(group.uniqs.flatMap((u) => collectMaterialUniqs(u))),
+      );
       return {
-        label: `${prlId} — ${uniqSummary} (${group.customerName})`,
+        label: `${prlId} — ${uniqSummary} → Material: ${formatMaterialSummary(materials)} (${group.customerName})`,
         value: `prl::${encodeURIComponent(prlId)}`,
       };
     });
-  }, [approvedPrls]);
+  }, [approvedPrls, collectMaterialUniqs]);
 
   const addPrlOptions = bulkPrlOptions;
 
-  // PRL untuk Step 1 modal Bulk: hanya yang forecast period-nya jatuh di bulan
-  // yang dipilih di "Period" (Step 3). Format periode bebas: "October 2026",
+  // PRL untuk Step 2 modal Bulk: hanya yang forecast period-nya jatuh di bulan
+  // yang dipilih di "Period" (Step 1). Format periode bebas: "October 2026",
   // "Oct-2026", "2026-10", ...
   const bulkPrlMonthOptions = useMemo(() => {
     const bulkPrlMonth = parsePeriodMonth(bulkPeriod);
@@ -1532,11 +1679,16 @@ export default function PoBudgetPage() {
       if (uniqCode && !group.uniqs.includes(uniqCode))
         group.uniqs.push(uniqCode);
     }
-    return Array.from(prlGroups.entries()).map(([prlId, group]) => ({
-      label: `${prlId} — ${group.uniqs.length > 0 ? group.uniqs.join(", ") : "-"} (${group.customerName})`,
-      value: `prl::${encodeURIComponent(prlId)}`,
-    }));
-  }, [approvedPrls, bulkPeriod]);
+    return Array.from(prlGroups.entries()).map(([prlId, group]) => {
+      const materials = Array.from(
+        new Set(group.uniqs.flatMap((u) => collectMaterialUniqs(u))),
+      );
+      return {
+        label: `${prlId} — ${group.uniqs.length > 0 ? group.uniqs.join(", ") : "-"} → Material: ${formatMaterialSummary(materials)} (${group.customerName})`,
+        value: `prl::${encodeURIComponent(prlId)}`,
+      };
+    });
+  }, [approvedPrls, bulkPeriod, collectMaterialUniqs]);
 
   const prlOptions = useMemo(() => {
     const fromPo = (customerPos as any[])
@@ -3797,6 +3949,246 @@ export default function PoBudgetPage() {
     [],
   );
 
+  // ── Detail spesifikasi material (dari detail BOM tiap uniq) ──────────────────
+  // Hanya informasi di bawah Step 3. Uniq yang diambil = uniq induk (FG) dari
+  // item yang sedang dikonfigurasi; detailnya diambil dari endpoint yang sama
+  // dengan halaman /bill-of-material/<id>.
+  const [triggerBomFull] = useLazyGetBomFullByIdQuery();
+  const [bomDetailByUniq, setBomDetailByUniq] = useState<
+    Record<string, BomDetailEntry>
+  >({});
+  const bomDetailRequestedRef = useRef<Set<string>>(new Set());
+
+  const bomIdByUniq = useMemo(() => {
+    const map: Record<string, string> = {};
+    // Node induk (level atas) = satu BOM; id internalnya dipakai halaman daftar
+    // BOM sebagai cadangan bila bom_id kosong. Untuk node turunan hanya bom_id
+    // yang valid (id mereka adalah id baris BOM, bukan id BOM).
+    const walk = (nodes: unknown[], top: boolean) => {
+      for (const raw of nodes) {
+        const n = raw as Record<string, unknown>;
+        const uniq = String(n?.uniq_code ?? n?.uniq ?? "")
+          .trim()
+          .toLowerCase();
+        const bomId =
+          String(n?.bom_id ?? "").trim() ||
+          (top ? String(n?.id ?? "").trim() : "");
+        if (uniq && bomId && !map[uniq]) map[uniq] = bomId;
+        if (Array.isArray(n?.children)) walk(n.children as unknown[], false);
+      }
+    };
+    walk(bomTreeNodes as unknown[], true);
+    return map;
+  }, [bomTreeNodes]);
+
+  const bomSpecUniqs = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const row of bulkItems) {
+      const code = String(row.parentUniqCode || row.uniq || "").trim();
+      if (!code || seen.has(code.toLowerCase())) continue;
+      seen.add(code.toLowerCase());
+      out.push(code);
+    }
+    return out;
+  }, [bulkItems]);
+
+  useEffect(() => {
+    bomSpecUniqs.forEach((uniq) => {
+      const key = uniq.toLowerCase();
+      if (bomDetailRequestedRef.current.has(key)) return;
+      const bomId = bomIdByUniq[key];
+      if (!bomId) {
+        // Pohon BOM mungkin belum selesai dimuat; coba lagi saat bomIdByUniq berubah.
+        if (Object.keys(bomIdByUniq).length > 0) {
+          bomDetailRequestedRef.current.add(key);
+          setBomDetailByUniq((prev) => ({ ...prev, [key]: { status: "missing" } }));
+        }
+        return;
+      }
+      bomDetailRequestedRef.current.add(key);
+      setBomDetailByUniq((prev) => ({
+        ...prev,
+        [key]: { status: "loading", bomId },
+      }));
+      triggerBomFull(bomId, true)
+        .unwrap()
+        .then((res) => {
+          const node = ((res as { data?: BomFullNode })?.data ??
+            res) as BomFullNode;
+          setBomDetailByUniq((prev) => ({
+            ...prev,
+            [key]: { status: "ok", bomId, node },
+          }));
+        })
+        .catch(() => {
+          setBomDetailByUniq((prev) => ({
+            ...prev,
+            [key]: { status: "error", bomId },
+          }));
+        });
+    });
+  }, [bomSpecUniqs, bomIdByUniq, triggerBomFull]);
+
+  const bomSpecChildColumns = useMemo<ColumnsType<BomSpecChildRow>>(
+    () => [
+      {
+        title: "Child UNIQ",
+        dataIndex: "uniq",
+        key: "uniq",
+        width: 150,
+        render: (value: string, record) => (
+          <div>
+            {record.level > 1 ? (
+              <span className="mr-1 text-[10px] text-gray-400">
+                L{record.level}
+              </span>
+            ) : null}
+            <Tag color="geekblue" className="!m-0">
+              {value}
+            </Tag>
+          </div>
+        ),
+      },
+      { title: "Part Name", dataIndex: "partName", key: "partName", width: 180 },
+      {
+        title: "Part Number",
+        dataIndex: "partNumber",
+        key: "partNumber",
+        width: 130,
+      },
+      {
+        title: "Qty / UNIQ",
+        dataIndex: "qpu",
+        key: "qpu",
+        width: 90,
+        align: "right",
+        render: (v?: number) => (v != null ? formatNumber(v) : "-"),
+      },
+      {
+        title: "Material Spec",
+        dataIndex: "spec",
+        key: "spec",
+        render: (spec: BomSpec | null) => (
+          <span className="text-xs text-gray-700">
+            {formatSpecInline(spec)}
+          </span>
+        ),
+      },
+    ],
+    [],
+  );
+
+  // Detail spesifikasi material satu uniq, ditampilkan tepat di bawah item/uniq
+  // tersebut pada Step 3 (hanya informasi).
+  const renderBomSpecDetail = (uniqCode: string) => {
+    const uniq = String(uniqCode ?? "").trim();
+    if (!uniq) return null;
+    const entry = bomDetailByUniq[uniq.toLowerCase()];
+    const node = entry?.node;
+    const spec = pickBomSpec(node);
+    const childRows = flattenBomChildren(node?.children);
+
+    return (
+      <div className="border-t border-gray-100 bg-indigo-50/20 px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs font-semibold text-gray-700">
+            Detail Material Specification
+            <span className="ml-1 font-normal text-gray-400">
+              (dari detail BOM {uniq})
+            </span>
+          </div>
+          {entry?.bomId ? (
+            <a
+              href={`/bill-of-material/${encodeURIComponent(entry.bomId)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-blue-600 shrink-0"
+            >
+              Buka BOM #{entry.bomId}
+            </a>
+          ) : null}
+        </div>
+
+        {!entry || entry.status === "loading" ? (
+          <div className="mt-2 text-xs text-gray-500">Memuat detail BOM...</div>
+        ) : entry.status === "missing" ? (
+          <div className="mt-2 text-xs text-gray-500">
+            BOM untuk uniq ini tidak ditemukan.
+          </div>
+        ) : entry.status === "error" ? (
+          <div className="mt-2 text-xs text-red-500">
+            Gagal memuat detail BOM.
+          </div>
+        ) : (
+          <div className="mt-2 space-y-3">
+            <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                Material Spec
+              </div>
+              {spec ? (
+                <Descriptions size="small" bordered column={{ xs: 2, md: 4 }}>
+                  <Descriptions.Item label="Material Code">
+                    {spec.material_grade ?? "—"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Grade">
+                    {spec.grade ?? "—"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Type Material">
+                    {spec.type_material ?? "—"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Subcon">
+                    {spec.is_subcon ? "Yes" : "No"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Form">
+                    {spec.form ?? "—"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Weight">
+                    {spec.weight_kg != null ? `${spec.weight_kg} kg` : "—"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Width">
+                    {spec.width_mm != null ? `${spec.width_mm} mm` : "—"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Diameter">
+                    {spec.diameter_mm != null ? `${spec.diameter_mm} mm` : "—"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Thickness">
+                    {spec.thickness_mm != null
+                      ? `${spec.thickness_mm} mm`
+                      : "—"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Length">
+                    {spec.length_mm != null ? `${spec.length_mm} mm` : "—"}
+                  </Descriptions.Item>
+                </Descriptions>
+              ) : (
+                <div className="text-xs text-gray-400">No material spec</div>
+              )}
+            </div>
+
+            <div>
+              <div className="text-xs font-semibold text-gray-700 mb-1">
+                Children{childRows.length ? ` (${childRows.length})` : ""}
+              </div>
+              {childRows.length === 0 ? (
+                <div className="text-xs text-gray-400">No children</div>
+              ) : (
+                <Table<BomSpecChildRow>
+                  dataSource={childRows}
+                  columns={bomSpecChildColumns}
+                  rowKey="key"
+                  pagination={false}
+                  size="small"
+                  scroll={{ x: 800 }}
+                />
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const bulkColumns = useMemo<ColumnsType<BulkItemRow>>(
     () => [
       {
@@ -4779,8 +5171,8 @@ export default function PoBudgetPage() {
                 Add New PO Budget
               </div>
               <div className="text-xs text-gray-500 mt-1">
-                Select PRL, configure quantities and suppliers, then set period
-                and PO calculation
+                Set period, select PRL, configure quantities and suppliers,
+                then set PO calculation
               </div>
             </div>
           </div>
@@ -4797,11 +5189,48 @@ export default function PoBudgetPage() {
         }
       >
         <div className="space-y-4">
+          <div className="rounded-xl border border-amber-200 bg-white p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-gray-900">
+                  Step 1: Period
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  Pilih periode lebih dulu. Daftar PRL pada langkah berikutnya
+                  mengikuti bulan ini.
+                </div>
+              </div>
+              <Tag className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold">
+                Required
+              </Tag>
+            </div>
+
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <div className="text-xs text-gray-600 mb-1">Period</div>
+                <DatePicker
+                  picker="month"
+                  value={parsePeriodMonth(bulkPeriod)}
+                  onChange={(date) => {
+                    setBulkPeriod(formatPeriodMonth(date));
+                    // Ganti period = PRL yang sudah dipilih dari bulan lain
+                    // tidak berlaku lagi.
+                    setBulkPrlIds([]);
+                    syncBulkItemsFromPrl([]);
+                  }}
+                  className="w-full"
+                  format={(value) => (value ? value.format("MMMM YYYY") : "")}
+                  placeholder="Select period..."
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="rounded-xl border border-blue-200 bg-white p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-gray-900">
-                  Step 1: Choose Source
+                  Step 2: Choose Source
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
                   Select source for generating PO Budget (PRL or PO)
@@ -4831,7 +5260,7 @@ export default function PoBudgetPage() {
                       Select PRL
                       <span className="text-gray-400">
                         {" "}
-                        (filtered by Period in Step 3)
+                        (filtered by Period in Step 1)
                       </span>
                     </div>
                     <Select
@@ -4849,13 +5278,13 @@ export default function PoBudgetPage() {
                       notFoundContent={
                         bulkPeriod
                           ? "No approved PRL for this period"
-                          : "Select Period in Step 3 first"
+                          : "Select Period in Step 1 first"
                       }
                       className="w-full"
                       placeholder={
                         bulkPeriod
                           ? "Search and select one or more PRL UNIQ"
-                          : "Select Period (Step 3) first"
+                          : "Select Period (Step 1) first"
                       }
                       optionFilterProp="label"
                       filterOption={false}
@@ -4923,7 +5352,7 @@ export default function PoBudgetPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-gray-900">
-                  Step 2: Configure Items & Suppliers
+                  Step 3: Configure Items & Suppliers
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
                   Expand a UNIQ to edit quantities and suppliers.
@@ -4938,7 +5367,7 @@ export default function PoBudgetPage() {
 
             {bulkParentGroups.length === 0 ? (
               <div className="mt-4 rounded-lg border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
-                Select a PRL in Step 1 to see its items here.
+                Select a PRL in Step 2 to see its items here.
               </div>
             ) : (
               <div className="mt-4 space-y-3">
@@ -5048,6 +5477,7 @@ export default function PoBudgetPage() {
                                   {group.rows[0]?.uom || ""}
                                 </span>
                               </div>
+                              {renderBomSpecDetail(group.parentUniqCode)}
                             </>
                           )}
                         </div>
@@ -5063,10 +5493,10 @@ export default function PoBudgetPage() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-gray-900">
-                  Step 3: Period & Purchase Request Calculation
+                  Step 4: Purchase Request Calculation
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
-                  Set period and configure PO split percentages
+                  Configure PO split percentages
                 </div>
               </div>
               <Tag
@@ -5077,25 +5507,7 @@ export default function PoBudgetPage() {
               </Tag>
             </div>
 
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <div className="text-xs text-gray-600 mb-1">Period</div>
-                <DatePicker
-                  picker="month"
-                  value={parsePeriodMonth(bulkPeriod)}
-                  onChange={(date) => {
-                    setBulkPeriod(formatPeriodMonth(date));
-                    // Ganti period = PRL yang sudah dipilih dari bulan lain
-                    // tidak berlaku lagi.
-                    setBulkPrlIds([]);
-                    syncBulkItemsFromPrl([]);
-                  }}
-                  className="w-full"
-                  format={(value) => (value ? value.format("MMMM YYYY") : "")}
-                  placeholder="Select period..."
-                />
-              </div>
-
+            <div className="mt-4 grid grid-cols-1 gap-4">
               <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4">
                 <div className="text-sm font-semibold text-gray-900">
                   Purchase Request Calculation

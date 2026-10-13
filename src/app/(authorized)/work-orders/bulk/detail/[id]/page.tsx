@@ -351,11 +351,22 @@ export default function BulkWorkOrderDetailPage() {
 
       const cards: KanbanCardData[] = [];
 
-      for (const row of rows) {
+      // Satu part bisa punya beberapa baris item WO (satu baris per kanban, dari
+      // kanban_count saat generate). Nomor kartu harus berurutan per part:
+      // 1/N, 2/N, ... N = total kartu semua baris part itu. Dihitung dari SEMUA
+      // baris WO (bukan hanya yang dicetak) supaya cetak satu baris tetap benar.
+      type RowCardInfo = {
+        category: ReturnType<typeof resolveWorkOrderKanbanCategory>["category"];
+        label: string;
+        totalPlan: number;
+        uom: string;
+        perKanban: number;
+        rowCards: number;
+      };
+      const describeRow = (row: DetailRow): RowCardInfo => {
         const { category, label } = resolveWorkOrderKanbanCategory(
           row.processFlowJson,
         );
-
         // row.quantity is already formatted as "120 pcs".
         const totalPlan = Number.parseFloat(row.quantity) || 0;
         const uom =
@@ -363,15 +374,40 @@ export default function BulkWorkOrderDetailPage() {
             .replace(/^[\d.,\s]+/, "")
             .trim()
             .toUpperCase() || "PCS";
-
         // SNP from BOM is the closest available "qty per kanban" source.
         const snp = Number(bomIndex.packingNumberByUniq[row.uniq] ?? 0);
         const perKanban = snp > 0 ? snp : totalPlan;
-        const cardTotal = kanbanCardCount(totalPlan, perKanban);
+        return {
+          category,
+          label,
+          totalPlan,
+          uom,
+          perKanban,
+          rowCards: kanbanCardCount(totalPlan, perKanban),
+        };
+      };
+
+      const partKey = (row: DetailRow) => row.uniq || "-";
+      const allRows = detailRows.length > 0 ? detailRows : rows;
+      const totalByPart = new Map<string, number>();
+      const startByRowKey = new Map<string, number>();
+      for (const row of allRows) {
+        const key = partKey(row);
+        const before = totalByPart.get(key) ?? 0;
+        startByRowKey.set(row.key, before);
+        totalByPart.set(key, before + describeRow(row).rowCards);
+      }
+
+      for (const row of rows) {
+        const { category, label, totalPlan, uom, perKanban, rowCards } =
+          describeRow(row);
+        const cardTotal = totalByPart.get(partKey(row)) ?? rowCards;
+        const startNo = startByRowKey.get(row.key) ?? 0;
         const qr = row.qrDataUrl ?? "";
         const kanbanNumber = row.kanbanNumber === "-" ? "" : row.kanbanNumber;
 
-        for (let index = 1; index <= cardTotal; index += 1) {
+        for (let index = 1; index <= rowCards; index += 1) {
+          const cardNo = startNo + index;
           cards.push({
             key: `${row.key}::${index}`,
             category,
@@ -380,12 +416,14 @@ export default function BulkWorkOrderDetailPage() {
             partName: row.partName,
             qtyPerKanban: kanbanQty(perKanban, uom),
             totalPlan: kanbanQty(totalPlan, uom),
-            cardNo: index,
+            cardNo,
             cardTotal,
+            // Baris yang hanya menghasilkan satu kartu memakai nomor kanban
+            // aslinya (unik per baris); selain itu id dibangun dari urutan.
             kanbanId:
-              cardTotal === 1 && kanbanNumber
+              rowCards === 1 && kanbanNumber
                 ? kanbanNumber
-                : buildKanbanId(category, row.uniq, index, cardTotal),
+                : buildKanbanId(category, row.uniq, cardNo, cardTotal),
             // Internal production: no supplier, and no plant / store / dock
             // source exists on the work order payload.
             supplier: "-",
@@ -409,7 +447,7 @@ export default function BulkWorkOrderDetailPage() {
 
       return cards;
     },
-    [bomIndex, workOrder?.wo_number],
+    [bomIndex, detailRows, workOrder?.wo_number],
   );
 
   /** Prints through a hidden iframe so the page is never navigated away. */
