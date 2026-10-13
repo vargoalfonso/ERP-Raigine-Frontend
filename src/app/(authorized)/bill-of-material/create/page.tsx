@@ -90,6 +90,8 @@ type Step1Values = {
   part_number?: string;
   model?: string;
   uom?: string | number;
+  /** QPU parent (opsional, bilangan bulat). */
+  qpu?: number | null;
   status?: string;
   bom_status?: string;
   description?: string;
@@ -930,9 +932,29 @@ export default function Page() {
               <Form.Item
                 name={[field.name, "qpu"]}
                 label={level === 1 ? "QPU (Quantity Per Unit)" : "QPU"}
-                rules={[{ required: true, message: "QPU is required" }]}
+                rules={[
+                  { required: true, message: "QPU is required" },
+                  {
+                    validator: (_, value) =>
+                      value === undefined ||
+                      value === null ||
+                      (Number.isInteger(value) && value >= 1)
+                        ? Promise.resolve()
+                        : Promise.reject(
+                            new Error("QPU harus bilangan bulat minimal 1"),
+                          ),
+                  },
+                ]}
+                extra="Jumlah child per 1 unit parent (bilangan bulat)."
               >
-                <InputNumber min={0} size="large" style={{ width: "100%" }} />
+                <InputNumber
+                  min={1}
+                  step={1}
+                  precision={0}
+                  size="large"
+                  style={{ width: "100%" }}
+                  placeholder="1"
+                />
               </Form.Item>
               <Form.Item name={[field.name, "version"]} label="Version">
                 <Input placeholder="v1.0" size="large" />
@@ -1309,7 +1331,9 @@ export default function Page() {
               uom: parentUomValue,
               level,
               qty_per_uniq:
-                typeof c.qpu === "number" && Number.isFinite(c.qpu) ? c.qpu : 1,
+                typeof c.qpu === "number" && Number.isFinite(c.qpu)
+                  ? Math.max(1, Math.trunc(c.qpu))
+                  : 1,
             };
             const rawMatType = c.material_spec?.type_material ?? c.category;
             if (rawMatType) childBody.raw_material_type = rawMatType;
@@ -1366,6 +1390,13 @@ export default function Page() {
         uom: parentUomValue,
         description: cleanText(values.description),
       };
+      if (
+        typeof values.qpu === "number" &&
+        Number.isFinite(values.qpu) &&
+        values.qpu >= 1
+      ) {
+        payload.qty_per_uniq = Math.trunc(values.qpu);
+      }
       const parentStatus = toApiStatus(values.status);
       if (parentStatus) payload.status = parentStatus;
       if (parentSpec !== undefined) payload.material_spec = parentSpec;
@@ -1696,6 +1727,33 @@ export default function Page() {
                             .toLowerCase()
                             .includes(input.toLowerCase())
                         }
+                      />
+                    </Form.Item>
+
+                    <Form.Item
+                      name="qpu"
+                      label="QPU (opsional)"
+                      extra="Boleh dikosongkan. Bilangan bulat, minimal 1."
+                      rules={[
+                        {
+                          validator: (_, value) =>
+                            value === undefined ||
+                            value === null ||
+                            (Number.isInteger(value) && value >= 1)
+                              ? Promise.resolve()
+                              : Promise.reject(
+                                  new Error("QPU harus bilangan bulat minimal 1"),
+                                ),
+                        },
+                      ]}
+                    >
+                      <InputNumber
+                        min={1}
+                        step={1}
+                        precision={0}
+                        size="large"
+                        style={{ width: "100%" }}
+                        placeholder="Kosongkan bila tidak ada"
                       />
                     </Form.Item>
 

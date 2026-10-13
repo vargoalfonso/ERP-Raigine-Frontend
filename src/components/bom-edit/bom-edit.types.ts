@@ -59,6 +59,8 @@ export type EditValues = {
   part_number?: string;
   model?: string;
   uom?: string | number;
+  /** QPU parent (opsional, bilangan bulat). */
+  qty_per_uniq?: number | null;
   status?: string;
   description?: string;
   asset_id?: number | string | null;

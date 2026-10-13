@@ -579,6 +579,9 @@ export default function BomDetailPage() {
                   <Descriptions.Item label="UOM">
                     {asStr((bom as any)?.uom) ?? "—"}
                   </Descriptions.Item>
+                  <Descriptions.Item label="QPU">
+                    {asNum((bom as any)?.qty_per_uniq) ?? "—"}
+                  </Descriptions.Item>
                   <Descriptions.Item label="Version">
                     {asStr((bom as any)?.version) ?? "—"}
                   </Descriptions.Item>
