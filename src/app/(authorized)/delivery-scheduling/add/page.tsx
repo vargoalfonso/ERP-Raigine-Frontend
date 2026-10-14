@@ -1,7 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Button, Input, InputNumber, Select, Table, Tag, message } from "antd";
+import {
+  Button,
+  DatePicker,
+  Input,
+  InputNumber,
+  Select,
+  Table,
+  Tag,
+  message,
+} from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   ArrowLeftOutlined,
@@ -720,6 +729,21 @@ export default function AddNewDeliverySchedulePage() {
                   + Add Item
                 </Button>
               </div>
+            </div>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div>
+              <div className="text-xs font-semibold text-gray-500">
+                Delivery Date
+              </div>
+              <DatePicker
+                className="w-full !rounded-lg mt-1"
+                format="MM/DD/YYYY"
+                value={deliveryDate}
+                allowClear={false}
+                onChange={(d) => setDeliveryDate(d ?? dayjs())}
+              />
             </div>
           </div>
         </div>
