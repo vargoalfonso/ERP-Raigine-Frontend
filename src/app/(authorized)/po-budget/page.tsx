@@ -3103,8 +3103,15 @@ export default function PoBudgetPage() {
   };
 
   const bulkSave = async () => {
-    if (bulkPrlIds.length === 0 || !bulkPeriod) {
-      message.warning("Please select at least one PRL UNIQ and period");
+    // Source "po" menyimpan pilihan di bulkPoIds (bulkPrlIds tetap kosong).
+    const hasSelectedSource =
+      bulkSource === "po" ? bulkPoIds.length > 0 : bulkPrlIds.length > 0;
+    if (!hasSelectedSource || !bulkPeriod) {
+      message.warning(
+        bulkSource === "po"
+          ? "Please select at least one Customer PO and period"
+          : "Please select at least one PRL UNIQ and period",
+      );
       return;
     }
 
@@ -3140,8 +3147,10 @@ export default function PoBudgetPage() {
       ),
     );
 
+    // Item dari Customer PO (prlId "po:<id>") memang tidak punya PRL row_id.
     const unresolvedPrlItem = nonHeaderItems.find(
-      (item) => item.prlItemId == null,
+      (item) =>
+        item.prlItemId == null && !String(item.prlId ?? "").startsWith("po:"),
     );
 
     if (unresolvedSupplier) {
@@ -5249,7 +5258,7 @@ export default function PoBudgetPage() {
                   onChange={(v) => setBulkSource(v as "prl" | "po")}
                   options={[
                     { label: "PRL", value: "prl" },
-                    { label: "Customer PO", value: "po" },
+                    { label: "Customer PO/DN/SO", value: "po" },
                   ]}
                   className="w-full mb-3"
                 />
