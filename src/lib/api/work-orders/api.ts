@@ -208,6 +208,8 @@ export type WorkOrderProcessStepStatus = "done" | "in_progress" | "pending";
 export type WorkOrderProcessStep = {
   op_seq: number;
   process_name: string;
+  /** Current process name from System Parameters (process_name is the routing snapshot). */
+  display_name?: string;
   status: WorkOrderProcessStepStatus;
   scanned_in_at?: string;
   scanned_out_at?: string;
@@ -316,6 +318,7 @@ const toProcessSteps = (raw: unknown): WorkOrderProcessStep[] => {
       {
         op_seq: getNumber(entry, ["op_seq", "seq"]) ?? index + 1,
         process_name: name,
+        display_name: getString(entry, ["display_name"]),
         status,
         scanned_in_at: getString(entry, ["scanned_in_at"]),
         scanned_out_at: getString(entry, ["scanned_out_at"]),
