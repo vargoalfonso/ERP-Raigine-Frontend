@@ -164,7 +164,7 @@ const ProcessProgressList = ({
                 )}
               </span>
               <span className="min-w-0 break-words font-semibold text-slate-950">
-                {step.process_name}
+                {step.display_name || step.process_name}
               </span>
               <span
                 className={`shrink-0 text-xs font-medium ${
