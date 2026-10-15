@@ -72,7 +72,7 @@ export const buildBomTreeItems = (values: EditValues): BomTreeNodeItem[] => {
           child.uniq_code?.trim() ||
           `Child ${index + 1}`,
         uniqCode: child.uniq_code?.trim() || "—",
-        qtyLabel: `${qty}${uom ? ` ${uom}` : ""}`,
+        qtyLabel: `QPU ${qty}${uom ? ` ${uom}` : ""}`,
         levelLabel: `L${child.level ?? depth}`,
         hasChildren: nestedChildren.length > 0,
         childCount: nestedChildren.length,

@@ -131,6 +131,23 @@ export default function BomParentEditor(props: ParentEditorProps) {
           <Form.Item name="uom" label="UOM" rules={[{ required: true, message: "UOM is required" }]}>
             <Select showSearch disabled={disabled} loading={isUomsLoading} options={uomOptions} optionFilterProp="label" />
           </Form.Item>
+          <Form.Item
+            name="qty_per_uniq"
+            label="QPU (Quantity Per Unit)"
+            extra="QPU parent (bilangan bulat). QPU tiap child diatur di panel child."
+            rules={[
+              {
+                validator: (_, value) =>
+                  value === undefined ||
+                  value === null ||
+                  (Number.isInteger(value) && value >= 1)
+                    ? Promise.resolve()
+                    : Promise.reject(new Error("QPU harus bilangan bulat minimal 1")),
+              },
+            ]}
+          >
+            <InputNumber min={1} step={1} precision={0} className="w-full" disabled={disabled} />
+          </Form.Item>
           
           {/* <Form.Item name={["material_spec", "cycle_time_sec"]} label="Cycle Time (s)">
             <InputNumber min={0} className="w-full" disabled={disabled} />

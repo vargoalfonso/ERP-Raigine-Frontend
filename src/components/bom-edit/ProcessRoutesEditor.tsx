@@ -37,6 +37,21 @@ export default function ProcessRoutesEditor({
 }: ProcessRoutesEditorProps) {
   const showAdd = !(hideAddWhenAssembly && isAssemblyMode);
 
+  // Urutkan route mengikuti angka Op Seq (1, 2, 3, ...). Sort stabil: route
+  // dengan Op Seq sama tetap pada urutan semula, yang kosong ditaruh di akhir.
+  const sortRoutesBySeq = () => {
+    const path = [...absolutePath, "process_routes"];
+    const current = (form.getFieldValue(path) ?? []) as ProcessRouteForm[];
+    const sorted = [...current].sort(
+      (a, b) =>
+        (typeof a?.op_seq === "number" ? a.op_seq : Number.MAX_SAFE_INTEGER) -
+        (typeof b?.op_seq === "number" ? b.op_seq : Number.MAX_SAFE_INTEGER),
+    );
+    if (sorted.some((route, index) => route !== current[index])) {
+      form.setFieldValue(path, sorted);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -51,9 +66,12 @@ export default function ProcessRoutesEditor({
                 ...current,
                 {
                   op_seq:
-                    typeof current?.[current.length - 1]?.op_seq === "number"
-                      ? current[current.length - 1].op_seq + 10
-                      : (current.length + 1) * 10,
+                    Math.max(
+                      0,
+                      ...(current as ProcessRouteForm[]).map((route) =>
+                        typeof route?.op_seq === "number" ? route.op_seq : 0,
+                      ),
+                    ) + 1,
                 } satisfies ProcessRouteForm,
               ]);
             }}
@@ -89,7 +107,7 @@ export default function ProcessRoutesEditor({
 
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                   <Form.Item name={[field.name, "op_seq"]} label="Op Seq" rules={[{ required: true, message: "Op Seq is required" }]}>
-                    <InputNumber min={1} step={10} className="w-full" />
+                    <InputNumber min={1} step={1} className="w-full" onBlur={sortRoutesBySeq} onPressEnter={sortRoutesBySeq} />
                   </Form.Item>
                   <Form.Item name={[field.name, "process_id"]} label="Process" rules={[{ required: true, message: "Process is required" }]}>
                     <Select showSearch placeholder="Select process" options={processOptions} loading={isProcessesLoading} optionFilterProp="label" />
