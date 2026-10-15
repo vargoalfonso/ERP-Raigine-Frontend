@@ -344,6 +344,12 @@ export default function BomEditPage() {
 
   useEffect(() => {
     if (!bom) return;
+    const sortRoutesBySeq = (routes: ProcessRouteForm[]): ProcessRouteForm[] =>
+      [...routes].sort(
+        (a, b) =>
+          (typeof a.op_seq === "number" ? a.op_seq : Number.MAX_SAFE_INTEGER) -
+          (typeof b.op_seq === "number" ? b.op_seq : Number.MAX_SAFE_INTEGER),
+      );
     const mapRouteFromApi = (route: any): ProcessRouteForm => ({
       route_id: route?.route_id ?? route?.id ?? undefined,
       op_seq: typeof route?.op_seq === "number" ? route.op_seq : undefined,
@@ -469,7 +475,7 @@ export default function BomEditPage() {
       asset_url: typeof child?.asset?.url === "string" ? child.asset.url : null,
       material_spec: mapMaterialSpecFromApi(child?.material_spec),
       process_routes: Array.isArray(child?.process_routes)
-        ? child.process_routes.map(mapRouteFromApi)
+        ? sortRoutesBySeq(child.process_routes.map(mapRouteFromApi))
         : [],
       children: Array.isArray(child?.children)
         ? child.children.map(mapChildFromApi)
@@ -514,7 +520,7 @@ export default function BomEditPage() {
           : null,
       material_spec: mapMaterialSpecFromApi((bom as any)?.material_spec),
       process_routes: Array.isArray((bom as any)?.process_routes)
-        ? (bom as any).process_routes.map(mapRouteFromApi)
+        ? sortRoutesBySeq((bom as any).process_routes.map(mapRouteFromApi))
         : [],
       child_parts: Array.isArray((bom as any)?.children)
         ? (bom as any).children.map(mapChildFromApi)
