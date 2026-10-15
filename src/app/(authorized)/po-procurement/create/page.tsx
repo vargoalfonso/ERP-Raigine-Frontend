@@ -207,6 +207,35 @@ function CreatePoProcurementPageContent() {
         const pct = stage === 1 ? row.po1Pct : row.po2Pct;
         const parents = getStoredParents(row.detailJson);
 
+        // Entry tanpa breakdown children (mis. subcon): backend memakai
+        // po1_qty / po2_qty entry itu sendiri, jadi preview-nya juga satu
+        // baris dari entry, bukan dari detail_jsonb.
+        const hasChildren = parents.some(
+          (p) => Array.isArray(p.children) && p.children.length > 0,
+        );
+        if (!hasChildren) {
+          const flatQty = Math.round(
+            (stage === 1 ? row.po1 : row.po2) ||
+              ((row.pr || 0) * (pct || 0)) / 100,
+          );
+          if (flatQty > 0) {
+            items.push({
+              key: `s${stage}-${row.id ?? row.key}-${seq++}`,
+              parentUniq: String(row.uniq ?? "-"),
+              childUniq: "-",
+              materialGrade: String(row.uniq ?? "-"),
+              partNumber: String(row.partNumber ?? "-"),
+              partName: String(row.partName ?? "-"),
+              form: "-",
+              supplier: String(row.supplier || "-"),
+              qty: flatQty,
+              uom: String(row.uom ?? "-"),
+              weightKg: Number(row.weightKg ?? 0),
+            });
+          }
+          continue;
+        }
+
         for (const parent of parents) {
           const children = Array.isArray(parent.children)
             ? parent.children
