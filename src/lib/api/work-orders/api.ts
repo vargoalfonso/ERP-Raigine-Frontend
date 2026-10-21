@@ -174,7 +174,12 @@ export type RmProcessingWorkOrderRequest = {
   pre_processing: boolean;
 };
 
-export type WorkOrderUniqSource = "raw_material" | "indirect" | "subcon";
+// "assembly_items": hanya UNIQ yang routing-nya punya proses is_assembly = true (form WO Assembly).
+export type WorkOrderUniqSource =
+  | "raw_material"
+  | "indirect"
+  | "subcon"
+  | "assembly_items";
 
 export type WorkOrderUniqOption = {
   uniq_code: string;

@@ -7,6 +7,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Select,
   Tag,
   Tooltip,
@@ -84,7 +85,7 @@ export default function CreateWorkOrderPage() {
   const [createWorkOrder, createWorkOrderState] = useCreateWorkOrderMutation();
 
   const uniqOptionsQuery = useGetWorkOrderUniqOptionsQuery(
-    { limit: 200, sources: ["raw_material", "indirect", "subcon"] },
+    { limit: 10000, sources: ["raw_material", "indirect", "subcon"] },
     { skip: !apiEnabled },
   );
 
@@ -93,7 +94,7 @@ export default function CreateWorkOrderPage() {
     { id: "l-1", kanbanNumber: nextKanbanNumber(0) },
   ]);
   const { data: bomTreeRes } = useGetBomListQuery(
-    { page: 1, limit: 1000 },
+    { page: 1, limit: 10000 },
     {
       skip: !apiEnabled,
     },
@@ -321,6 +322,25 @@ export default function CreateWorkOrderPage() {
   const selectedWoType = Form.useWatch("woType", form) as
     WorkOrderType | undefined;
 
+  // [assembly-stock] Pindah ke tipe Assembly: buang baris child (komponen) yang sudah terlanjur dimuat.
+  useEffect(() => {
+    if (selectedWoType !== "Assembly") return;
+    setLines((prev) =>
+      prev.some((l) => l.parentId)
+        ? prev
+            .filter((l) => !l.parentId)
+            .map((l, idx) => ({ ...l, kanbanNumber: nextKanbanNumber(idx) }))
+        : prev,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedWoType]);
+
+  // [assembly-stock] Mode Assembly: hanya UNIQ dengan proses is_assembly = true.
+  const assemblyUniqQuery = useGetWorkOrderUniqOptionsQuery(
+    { limit: 10000, sources: ["assembly_items"] },
+    { skip: !apiEnabled || selectedWoType !== "Assembly" },
+  );
+
   const uniqSelectOptions = useMemo(() => {
     const bomData = bomTreeRes?.data;
     const topNodes: any[] = Array.isArray(bomData)
@@ -339,9 +359,12 @@ export default function CreateWorkOrderPage() {
       })
       .filter(Boolean) as { label: string; value: string }[];
 
-    // Assembly: hanya tampilkan UNIQ parent (top-level BOM nodes)
+    // Assembly: hanya UNIQ yang punya proses is_assembly = true
     if (selectedWoType === "Assembly") {
-      return fromBom;
+      return (assemblyUniqQuery.data ?? []).map((o) => ({
+        label: o.uniq_code,
+        value: o.uniq_code,
+      }));
     }
 
     const fromApi = uniqOptions.map((u) => ({ label: u.uniq, value: u.uniq }));
@@ -350,7 +373,13 @@ export default function CreateWorkOrderPage() {
       if (!map.has(it.value)) map.set(it.value, it);
     }
     return Array.from(map.values());
-  }, [uniqOptions, bomIndex, bomTreeRes?.data, selectedWoType]);
+  }, [
+    uniqOptions,
+    bomIndex,
+    bomTreeRes?.data,
+    selectedWoType,
+    assemblyUniqQuery.data,
+  ]);
 
   useEffect(() => {
     form.setFieldsValue({ woNumber });
@@ -646,7 +675,10 @@ export default function CreateWorkOrderPage() {
     // Selalu reset children milik parent id ini, bahkan jika detailChildren
     // kosong (uniq baru memang tidak punya BOM child). Ini mencegah children
     // uniq sebelumnya menempel/nyangkut saat user ganti uniq.
-    const applyChildLines = (detailChildren: any[], detailRoot?: any) => {
+    const applyChildLines = (detailChildrenRaw: any[], detailRoot?: any) => {
+      // [assembly-stock] WO Assembly: komponen (child BOM) diambil dari stok WIP /
+      // raw material, BUKAN ikut diproduksi, jadi tidak ditambahkan sebagai baris WO.
+      const detailChildren = selectedWoType === "Assembly" ? [] : detailChildrenRaw;
       setLines((prev) => {
         // Stale-guard: kalau user sudah ganti uniq lagi di parent line ini
         // sebelum fetch async ini selesai, abaikan hasilnya supaya children
@@ -890,12 +922,14 @@ export default function CreateWorkOrderPage() {
         reference_wo: values.woReference ? String(values.woReference) : null,
         created_date: dayjs(createdDate).format("YYYY-MM-DD"),
         target_date: dayjs(targetDate).format("YYYY-MM-DD"),
-        items: lines.map((line) => ({
+        items: lines
+          .filter((line) => selectedWoType !== "Assembly" || !line.parentId)
+          .map((line) => ({
           item_uniq_code: String(line.uniq ?? "").trim(),
           quantity: Number(line.qty ?? 0),
           uom: String(line.uom ?? "pcs"),
           process_name: String(line.process ?? ""),
-        })),
+          })),
         notes: values.woNotes ? String(values.woNotes) : null,
         // [wo-remark] Kirim remark ke backend agar bisa muncul di daftar WO.
         remark: values.woRemark ? String(values.woRemark) : null,
@@ -917,8 +951,33 @@ export default function CreateWorkOrderPage() {
       void values;
     } catch (err) {
       if (err && typeof err === "object" && "errorFields" in err) return;
-      if (err)
-        message.error(getApiErrorMessage(err, "Failed to create work order"));
+      if (err) {
+        const errMsg = getApiErrorMessage(err, "Failed to create work order");
+        // [assembly-stock] WO Assembly ditolak karena stok komponen (WIP / raw material) kurang.
+        if (errMsg.includes("Buat WO New terlebih dahulu")) {
+          const [head, ...rest] = errMsg.split(". ");
+          const detail = rest.join(". ").replace(/\s*\(status \d+\)$/, "");
+          Modal.warning({
+            title: "Stok komponen belum cukup",
+            width: 560,
+            content: (
+              <div>
+                <p>{head}.</p>
+                <ul style={{ paddingLeft: 18, marginTop: 8 }}>
+                  {detail
+                    .split("; ")
+                    .filter(Boolean)
+                    .map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                </ul>
+              </div>
+            ),
+          });
+          return;
+        }
+        message.error(errMsg);
+      }
     }
   };
 
@@ -1077,7 +1136,7 @@ export default function CreateWorkOrderPage() {
                 </div>
                 {selectedWoType === "Assembly" && (
                   <div className="mt-2 text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">
-                    Mode Assembly: hanya menampilkan UNIQ parent (BOM level 1)
+                    Mode Assembly: hanya menampilkan UNIQ yang memiliki proses assembly (is_assembly)
                   </div>
                 )}
               </div>
