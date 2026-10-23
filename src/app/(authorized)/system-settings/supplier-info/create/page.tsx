@@ -29,32 +29,48 @@ export default function CreateSupplierInfoPage() {
     skip: !apiEnabled,
   });
 
-  const uniqOptions = useMemo(() => {
-    const seen = new Set<string>();
-    return supplierItems
-      .filter((item) => {
-        const uniq = String(item.uniq_code ?? "").trim();
-        if (!uniq || seen.has(uniq)) return false;
-        seen.add(uniq);
-        return true;
-      })
-      .map((item) => ({
-        value: String(item.uniq_code ?? "").trim(),
-        label: String(item.uniq_code ?? "").trim(),
-        supplierName: String(item.supplier_name ?? "").trim(),
-        type: String(item.type ?? "").trim(),
-      }));
-  }, [supplierItems]);
-
-  const selectedUniq = Form.useWatch("uniq", form);
-  const selectedItem = uniqOptions.find((item) => item.value === selectedUniq);
-  const supplierName = selectedItem?.supplierName ?? "";
   const typeMap: Record<string, string> = {
     raw_material: "RM",
     indirect: "IRM",
     subcon: "SUBCON",
   };
-  const type = typeMap[selectedItem?.type.toLowerCase() ?? ""] ?? selectedItem?.type.toUpperCase() ?? "";
+
+  // Satu UNIQ bisa dimiliki beberapa supplier/type, jadi opsi dibuat per
+  // kombinasi (uniq, supplier, type) dan tidak di-dedup per uniq saja.
+  const uniqOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const options: {
+      value: string;
+      label: string;
+      uniq: string;
+      supplierName: string;
+      type: string;
+    }[] = [];
+    supplierItems.forEach((item) => {
+      const uniq = String(item.uniq_code ?? "").trim();
+      if (!uniq) return;
+      const supplierName = String(item.supplier_name ?? "").trim();
+      const rawType = String(item.type ?? "").trim();
+      const typeLabel = typeMap[rawType.toLowerCase()] ?? rawType.toUpperCase();
+      const key = [uniq, supplierName, typeLabel].join("||");
+      if (seen.has(key)) return;
+      seen.add(key);
+      options.push({
+        value: key,
+        label: `${uniq} — ${supplierName} (${typeLabel})`,
+        uniq,
+        supplierName,
+        type: typeLabel,
+      });
+    });
+    return options;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplierItems]);
+
+  const selectedKey = Form.useWatch("uniq", form);
+  const selectedItem = uniqOptions.find((item) => item.value === selectedKey);
+  const supplierName = selectedItem?.supplierName ?? "";
+  const type = selectedItem?.type ?? "";
 
   const handleSubmit = async (values: SupplierInfoFormValues) => {
     if (!selectedItem || !supplierName || !type) {
@@ -64,7 +80,7 @@ export default function CreateSupplierInfoPage() {
 
     try {
       await createSupplierInfo({
-        uniq: values.uniq,
+        uniq: selectedItem.uniq,
         uniq_zahir: values.uniq_zahir,
         supplier_name: supplierName,
         type,
