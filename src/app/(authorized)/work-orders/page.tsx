@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Button,
   Drawer,
+  Empty,
   Input,
   Modal,
   Progress,
@@ -18,6 +19,8 @@ import {
   ClockCircleOutlined,
   DownloadOutlined,
   EyeOutlined,
+  FileSearchOutlined,
+  HistoryOutlined,
   PlusOutlined,
   PrinterOutlined,
   PlayCircleOutlined,
@@ -54,6 +57,7 @@ import {
   useListBulkWorkOrdersQuery,
 } from "@/lib/api/work-orders/bulk/api";
 import { useListPrlsQuery, type PrlRecord } from "@/lib/api/prl/api";
+import { useListWorkOrderLogsQuery } from "@/lib/api/work-orders/logs";
 
 const { TextArea } = Input;
 
@@ -539,6 +543,14 @@ export default function WorkOrdersPage() {
   const [bulkWoPage, setBulkWoPage] = useState(1);
   const [bulkWoLimit, setBulkWoLimit] = useState(20);
   const [bulkWoSearch, setBulkWoSearch] = useState("");
+  // History Logs (kegagalan automation) — modal global atau terfilter per WO.
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [logsWoFilter, setLogsWoFilter] = useState<string>("");
+  const openLogs = useCallback((woNumber?: string) => {
+    const wo = (woNumber ?? "").trim();
+    setLogsWoFilter(wo && wo !== "-" ? wo : "");
+    setLogsOpen(true);
+  }, []);
   const [robotPage, setRobotPage] = useState(1);
   const [robotLimit, setRobotLimit] = useState(20);
   const apiEnabled = Boolean(apiBaseUrl);
@@ -694,6 +706,10 @@ export default function WorkOrdersPage() {
     {
       skip: !apiEnabled,
     },
+  );
+  const logsQuery = useListWorkOrderLogsQuery(
+    { wo_number: logsWoFilter || undefined },
+    { skip: !apiEnabled || !logsOpen },
   );
   const robotTasksQuery = useGetRobotWorkOrderTasksQuery(
     { page: robotPage, limit: robotLimit },
@@ -1050,6 +1066,82 @@ export default function WorkOrdersPage() {
     }
   };
 
+  type LogRow = {
+    key: string;
+    no: number;
+    woNumber: string;
+    uniq: string;
+    partName: string;
+    description: string;
+    qty: number;
+    robot: string;
+    reason: string;
+    createdAt: string;
+  };
+
+  const logRows = useMemo<LogRow[]>(() => {
+    const list = logsQuery.data;
+    if (!apiEnabled || !list || list.length === 0) return [];
+    return list.map((log, index) => ({
+      key: log.id || `log-${index}`,
+      no: index + 1,
+      woNumber: log.wo_number || "-",
+      uniq: log.item_uniq_code || "-",
+      partName: log.part_name || "-",
+      description: log.description || "-",
+      qty: Number(log.qty ?? 0),
+      robot: log.robot_name || log.automation_job_id || "-",
+      reason: log.failure_reason || "-",
+      createdAt: log.created_at
+        ? new Date(log.created_at).toLocaleString("id-ID", {
+            dateStyle: "medium",
+            timeStyle: "short",
+          })
+        : "-",
+    }));
+  }, [apiEnabled, logsQuery.data]);
+
+  const logColumns = useMemo<ColumnsType<LogRow>>(
+    () => [
+      { title: "No", dataIndex: "no", key: "no", width: 60, align: "center" },
+      { title: "WO Number", dataIndex: "woNumber", key: "woNumber", width: 150 },
+      { title: "Uniq", dataIndex: "uniq", key: "uniq", width: 110 },
+      { title: "Part Name", dataIndex: "partName", key: "partName" },
+      { title: "Deskripsi", dataIndex: "description", key: "description" },
+      {
+        title: "Qty",
+        dataIndex: "qty",
+        key: "qty",
+        align: "right",
+        width: 90,
+        render: (v: number) => (
+          <span className="text-sm text-gray-700">
+            {Number(v || 0).toLocaleString()}
+          </span>
+        ),
+      },
+      { title: "Robot / Job", dataIndex: "robot", key: "robot", width: 150 },
+      {
+        title: "Alasan Gagal",
+        dataIndex: "reason",
+        key: "reason",
+        render: (v: string) => <span className="text-sm text-red-600">{v}</span>,
+      },
+      { title: "Waktu", dataIndex: "createdAt", key: "createdAt", width: 160 },
+    ],
+    [],
+  );
+
+  const historyLogButton = (woNumber: string) => (
+    <Button
+      size="small"
+      type="text"
+      icon={<FileSearchOutlined />}
+      title="Lihat history logs automation"
+      onClick={() => openLogs(woNumber)}
+    />
+  );
+
   const uniqColumns: ColumnsType<UniqRow> = [
     {
       title: "UNIQ",
@@ -1204,10 +1296,11 @@ export default function WorkOrdersPage() {
     {
       title: "Actions",
       key: "actions",
-      width: 90,
+      width: 130,
       fixed: "right",
       render: (_: unknown, r) => (
         <div className="flex items-center justify-end gap-1">
+          {historyLogButton(r.woNumber)}
           <Button
             size="small"
             type="text"
@@ -1328,6 +1421,7 @@ export default function WorkOrdersPage() {
             >
               View
             </Button>
+            {historyLogButton(row.woNumber)}
             {pending ? (
               <>
                 <Button
@@ -1463,10 +1557,11 @@ export default function WorkOrdersPage() {
     {
       title: "Actions",
       key: "actions",
-      width: 90,
+      width: 130,
       fixed: "right",
       render: (_: unknown, row) => (
         <div className="flex items-center justify-end gap-1">
+          {historyLogButton(row.woNumber)}
           <Button
             size="small"
             type="text"
@@ -1601,10 +1696,11 @@ export default function WorkOrdersPage() {
     {
       title: "Actions",
       key: "actions",
-      width: 90,
+      width: 130,
       fixed: "right",
       render: (_: unknown, row) => (
         <div className="flex items-center justify-end gap-1">
+          {historyLogButton(row.woNumber)}
           <Button
             size="small"
             type="text"
@@ -1642,13 +1738,13 @@ export default function WorkOrdersPage() {
               </div>
             ) : null}
           </div>
-          {/* <Button
+          <Button
             className="!rounded-lg"
-            icon={<PrinterOutlined />}
-            onClick={() => message.info("Print Kanban (mock)")}
+            icon={<HistoryOutlined />}
+            onClick={() => openLogs()}
           >
-            Print Kanban
-          </Button> */}
+            History Logs
+          </Button>
         </div>
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -2482,6 +2578,43 @@ export default function WorkOrdersPage() {
         open={importBulkOpen}
         onClose={() => setImportBulkOpen(false)}
       />
+
+      <Modal
+        title="History Logs — Automation"
+        open={logsOpen}
+        onCancel={() => setLogsOpen(false)}
+        footer={null}
+        width={1100}
+      >
+        <div className="mb-3 text-sm text-gray-500">
+          {logsWoFilter
+            ? `Menampilkan data gagal untuk work order ${logsWoFilter}`
+            : "Menampilkan data yang gagal masuk / gagal terkirim dari automation"}
+        </div>
+        <div className="overflow-hidden rounded-xl border border-gray-100">
+          <Table<LogRow>
+            dataSource={logRows}
+            columns={logColumns}
+            rowKey="key"
+            size="middle"
+            pagination={false}
+            scroll={{ x: "max-content", y: 420 }}
+            loading={apiEnabled ? logsQuery.isFetching : false}
+            locale={{
+              emptyText: (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={
+                    apiEnabled
+                      ? "Tidak ada log kegagalan"
+                      : "API belum terhubung"
+                  }
+                />
+              ),
+            }}
+          />
+        </div>
+      </Modal>
     </div>
   );
 }

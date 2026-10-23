@@ -38,6 +38,11 @@ import {
 import { getApiErrorMessage } from "@/lib/api/error";
 import { apiBaseUrl, generateHeaders } from "@/lib/api/instance";
 import {
+  downloadSupplierInfoImportErrors,
+  downloadSupplierInfoTemplate,
+  importSupplierInfoExcel,
+} from "@/lib/api/system-settings/supplier-info-import";
+import {
   rememberSystemSettingsModule,
   readSystemSettingsModule,
 } from "@/lib/utils/systemSettingsNavigation";
@@ -1152,7 +1157,8 @@ export default function SystemSettingsPage() {
     skip: !shouldLoadBomTree,
   });
   // Supplier Info hooks
-  const { data: supplierInfoApiData } = useGetSupplierInfoListQuery(undefined, {
+  const { data: supplierInfoApiData, refetch: refetchSupplierInfo } =
+    useGetSupplierInfoListQuery(undefined, {
     skip: !shouldLoadSupplierInfo,
   });
   const [createSupplierInfo] = useCreateSupplierInfoMutation();
@@ -1520,42 +1526,60 @@ export default function SystemSettingsPage() {
   const [supplierInfoDeletingRow, setSupplierInfoDeletingRow] =
     useState<SupplierInfoRecord | null>(null);
 
-  // Dropdown UNIQ options dari supplier items (deduplicated)
+  // Dropdown UNIQ options dari supplier items.
+  // Satu UNIQ bisa dimiliki beberapa supplier/type, jadi opsi dibuat per
+  // kombinasi (uniq, supplier, type) dan TIDAK di-dedup per uniq saja.
+  const supplierInfoTypeMap: Record<string, string> = {
+    raw_material: "RM",
+    indirect: "IRM",
+    subcon: "SUBCON",
+  };
   const supplierInfoUniqOptions = React.useMemo(() => {
     const items = supplierItemsForInfoData ?? [];
     const seen = new Set<string>();
-    return items
-      .filter((item) => {
-        const u = String(item.uniq_code ?? "").trim();
-        if (!u || seen.has(u)) return false;
-        seen.add(u);
-        return true;
-      })
-      .map((item) => ({
-        value: String(item.uniq_code ?? ""),
-        label: String(item.uniq_code ?? ""),
-        supplier_name: String(item.supplier_name ?? ""),
-        type: String(item.type ?? ""),
-      }));
+    const options: {
+      value: string;
+      label: string;
+      uniq: string;
+      supplier_name: string;
+      type: string;
+    }[] = [];
+    items.forEach((item) => {
+      const uniq = String(item.uniq_code ?? "").trim();
+      if (!uniq) return;
+      const supplierName = String(item.supplier_name ?? "").trim();
+      const rawType = String(item.type ?? "").trim();
+      const typeLabel =
+        supplierInfoTypeMap[rawType.toLowerCase()] ?? rawType.toUpperCase();
+      const key = [uniq, supplierName, typeLabel].join("||");
+      if (seen.has(key)) return;
+      seen.add(key);
+      options.push({
+        value: key,
+        label: `${uniq} — ${supplierName} (${typeLabel})`,
+        uniq,
+        supplier_name: supplierName,
+        type: typeLabel,
+      });
+    });
+    return options;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supplierItemsForInfoData]);
 
-  // Watch UNIQ field to auto-fill supplier_name + type in form
+  // Watch pilihan UNIQ (value = key kombinasi) untuk auto-fill supplier_name + type
   const supplierInfoWatchedUniq = Form.useWatch("uniq", supplierInfoForm) as
     string | undefined;
   const supplierInfoAutoFilled = React.useMemo(() => {
-    if (!supplierInfoWatchedUniq) return { supplier_name: "", type: "" };
+    const empty = { uniq: "", supplier_name: "", type: "" };
+    if (!supplierInfoWatchedUniq) return empty;
     const found = supplierInfoUniqOptions.find(
       (o) => o.value === supplierInfoWatchedUniq,
     );
-    if (!found) return { supplier_name: "", type: "" };
-    const typeMap: Record<string, string> = {
-      raw_material: "RM",
-      indirect: "IRM",
-      subcon: "SUBCON",
-    };
+    if (!found) return empty;
     return {
+      uniq: found.uniq,
       supplier_name: found.supplier_name,
-      type: typeMap[found.type.toLowerCase()] ?? found.type.toUpperCase(),
+      type: found.type,
     };
   }, [supplierInfoWatchedUniq, supplierInfoUniqOptions]);
 
@@ -1660,8 +1684,12 @@ export default function SystemSettingsPage() {
     try {
       const values = await supplierInfoForm.validateFields();
       if (supplierInfoEditMode === "create") {
+        if (!supplierInfoAutoFilled.uniq) {
+          message.error("Pilih UNIQ dari Supplier Item terlebih dahulu");
+          return;
+        }
         await createSupplierInfo({
-          uniq: values.uniq,
+          uniq: supplierInfoAutoFilled.uniq,
           uniq_zahir: values.uniq_zahir,
           supplier_name: supplierInfoAutoFilled.supplier_name,
           type: supplierInfoAutoFilled.type,
@@ -2871,6 +2899,101 @@ export default function SystemSettingsPage() {
     }
   };
 
+  const handleDownloadTemplateSupplierInfo = async () => {
+    try {
+      await downloadSupplierInfoTemplate();
+      message.success("Template Supplier Info downloaded");
+    } catch (err) {
+      message.error(
+        err instanceof Error ? err.message : "Gagal mengunduh template",
+      );
+    }
+  };
+
+  const handleImportSupplierInfo = async (file: File): Promise<boolean> => {
+    if (!/\.xlsx$/i.test(file.name)) {
+      message.error(
+        "Import Supplier Info hanya mendukung file .xlsx (gunakan Download Template)",
+      );
+      return false;
+    }
+
+    const key = "supplier-info-import";
+    message.loading({ content: "Mengimpor Supplier Info...", key, duration: 0 });
+    try {
+      const result = await importSupplierInfoExcel(file);
+
+      if (result.success_count > 0) {
+        try {
+          await refetchSupplierInfo();
+        } catch {
+          // daftar akan ter-refresh pada pemuatan berikutnya
+        }
+      }
+
+      if (result.import_status === "success") {
+        message.success({
+          content: `Import berhasil: ${result.success_count} baris ditambahkan`,
+          key,
+        });
+        return true;
+      }
+
+      message.destroy(key);
+      const errors = result.errors ?? [];
+      Modal.warning({
+        title:
+          result.import_status === "failed"
+            ? "Import gagal"
+            : "Import sebagian berhasil",
+        width: 640,
+        okText: result.download_url ? "Download file error" : "OK",
+        content: (
+          <div>
+            <p>
+              Total {result.total} baris · Berhasil {result.success_count} ·
+              Gagal {result.failed_count}
+            </p>
+            <ul
+              style={{ maxHeight: 240, overflow: "auto", paddingLeft: 18 }}
+            >
+              {errors.slice(0, 20).map((e, i) => (
+                <li key={`${e.row}-${i}`}>
+                  Baris {e.row}: {e.message}
+                </li>
+              ))}
+            </ul>
+            {errors.length > 20 ? (
+              <p>... dan {errors.length - 20} error lainnya (lihat file error)</p>
+            ) : null}
+            {result.download_url ? (
+              <p style={{ marginTop: 8 }}>
+                File error berisi baris yang gagal; perbaiki lalu unggah ulang.
+                File hanya bisa diunduh sekali.
+              </p>
+            ) : null}
+          </div>
+        ),
+        onOk: () => {
+          if (!result.download_url) return;
+          downloadSupplierInfoImportErrors(result.download_url).catch((e) =>
+            message.error(
+              e instanceof Error ? e.message : "Gagal mengunduh file error",
+            ),
+          );
+        },
+      });
+      return result.import_status !== "failed";
+    } catch (err) {
+      message.error({
+        content:
+          err instanceof Error ? err.message : "Gagal mengimpor Supplier Info",
+        key,
+      });
+      return false;
+    }
+  };
+
   const handleDownloadTemplate = () => {
     if (selectedModuleId === "safety-stock" || selectedModuleId === "stockdays") {
       downloadTextFile(
@@ -2880,12 +3003,19 @@ export default function SystemSettingsPage() {
       message.success("Template downloaded");
       return;
     }
+    if (selectedModuleId === "supplier-info") {
+      void handleDownloadTemplateSupplierInfo();
+      return;
+    }
     handleDownloadTemplateKanban();
   };
 
   const handleImportFile = async (file: File): Promise<boolean> => {
     if (selectedModuleId === "safety-stock" || selectedModuleId === "stockdays") {
       return handleImportParameters(selectedModuleId, file);
+    }
+    if (selectedModuleId === "supplier-info") {
+      return handleImportSupplierInfo(file);
     }
     return handleImportKanban(file);
   };
