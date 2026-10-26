@@ -4,11 +4,20 @@ import { useEffect, useMemo } from "react";
 import { Button, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { LeftOutlined } from "@ant-design/icons";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetProcurementPoByIdQuery } from "@/lib/api/procurement-po/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
+import { useListSupplierItemsQuery } from "@/lib/api/supplier-items/api";
+import { resolveSubconSupplierName } from "@/lib/utils/subconSupplier";
+
+type PoKind = "raw" | "indirect" | "subcon";
+const PO_KIND_LABEL: Record<PoKind, string> = {
+  raw: "Raw Material",
+  indirect: "Indirect",
+  subcon: "Subcon",
+};
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -103,6 +112,7 @@ function buildMock(id: string) {
   return {
     period: "01/2024",
     poNumber: id,
+    externalPoNumber: "-",
     poBudgetNumber: "POB-2024-RM-X",
     totalBudgetPo: 250_000_000,
     supplier: "PT Supplier Raw Material",
@@ -128,8 +138,31 @@ export default function PoProcurementDetailPage() {
     skip: !apiEnabled,
   });
 
+  const searchParams = useSearchParams();
+
   const procurementApiAvailable =
     apiEnabled && !isMissingRouteError(poQuery.error);
+
+  // Tipe PO: dari data PO (po_type), lalu awalan nomor PO (PO-SB- = subcon),
+  // lalu parameter ?tab= dari halaman list. Default raw material.
+  const poKind = useMemo<PoKind>(() => {
+    const po = poQuery.data?.data?.po;
+    const fromType = String(po?.po_type ?? "").toLowerCase();
+    if (fromType.includes("sub")) return "subcon";
+    if (fromType.includes("indirect")) return "indirect";
+    if (fromType.includes("raw")) return "raw";
+    if (String(po?.po_number ?? "").toUpperCase().includes("-SB-")) {
+      return "subcon";
+    }
+    const tab = String(searchParams?.get("tab") ?? "").toLowerCase();
+    if (tab === "subcon" || tab === "indirect" || tab === "raw") return tab;
+    return "raw";
+  }, [poQuery.data?.data?.po, searchParams]);
+  const kindLabel = PO_KIND_LABEL[poKind];
+
+  const supplierItemsQuery = useListSupplierItemsQuery(undefined, {
+    skip: !apiEnabled || poKind !== "subcon",
+  });
 
   useEffect(() => {
     if (!apiEnabled) return;
@@ -153,7 +186,7 @@ export default function PoProcurementDetailPage() {
 
     const supplierIdText =
       po.supplier_id == null ? "" : String(po.supplier_id).trim();
-    const supplierName =
+    const storedSupplierName =
       po.supplier_name ??
       (suppliersQuery.data ?? []).find((s) => {
         const rowId = s.row_id ?? s.id;
@@ -162,6 +195,17 @@ export default function PoProcurementDetailPage() {
       (supplierIdText ? `Supplier #${supplierIdText}` : "-");
 
     const poItems = detail?.items ?? [];
+
+    // PO subcon: nama SubCon mengikuti Master Supplier Item bertipe subcon.
+    const supplierName =
+      poKind === "subcon"
+        ? resolveSubconSupplierName({
+            storedName: storedSupplierName,
+            uniqCodes: poItems.map((it) => String(it.uniq_code ?? "")),
+            supplierItems: supplierItemsQuery.data ?? [],
+          })
+        : storedSupplierName;
+
     const mappedItems: PoItemRow[] = poItems.map((it, idx) => ({
       key: `${po.po_number ?? po.id ?? id}-${idx + 1}`,
       uniq: String(it.uniq_code ?? "-") || "-",
@@ -182,6 +226,7 @@ export default function PoProcurementDetailPage() {
     return {
       period: po.period ?? po.month ?? "-",
       poNumber: po.po_number ?? po.id,
+      externalPoNumber: String(po.external_po_number ?? "").trim() || "-",
       poBudgetNumber:
         po.po_budget_ref ??
         (Array.isArray(po.po_budget_entry_ids)
@@ -198,7 +243,7 @@ export default function PoProcurementDetailPage() {
       notes: po.notes ?? "-",
       items: mappedItems,
     };
-  }, [procurementApiAvailable, id, poQuery.data?.data, suppliersQuery.data]);
+  }, [procurementApiAvailable, id, poQuery.data?.data, suppliersQuery.data, poKind, supplierItemsQuery.data]);
 
   const items = detail.items;
 
@@ -244,14 +289,14 @@ export default function PoProcurementDetailPage() {
       <div className="mb-5 flex items-center justify-between gap-4">
         <button
           type="button"
-          onClick={() => router.push("/po-procurement")}
+          onClick={() => router.push(`/po-procurement?tab=${poKind}`)}
           className="inline-flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700">
           <LeftOutlined />
-          Back to Raw Material
+          Back to {kindLabel}
         </button>
 
         <div className="text-xl font-bold text-gray-900">
-          PO Raw Material Details
+          PO {kindLabel} Details
         </div>
 
         <div />
@@ -263,7 +308,7 @@ export default function PoProcurementDetailPage() {
             Details &amp; History Logs
           </div>
           <div className="text-xs text-gray-500 mt-1">
-            Complete PO Raw Material Information for {detail.poNumber}
+            Complete PO {kindLabel} Information for {detail.poNumber}
             {apiEnabled && poQuery.isFetching && (
               <span className="ml-2 text-gray-400">(Loading…)</span>
             )}
@@ -291,6 +336,12 @@ export default function PoProcurementDetailPage() {
             </div>
           </div>
           <div>
+            <div className="text-xs text-gray-500">No. PO Zahir</div>
+            <div className="text-sm font-medium text-gray-900">
+              {detail.externalPoNumber}
+            </div>
+          </div>
+          <div>
             <div className="text-xs text-gray-500">PR Budget Number</div>
             <div className="text-sm font-medium text-gray-900">
               {detail.poBudgetNumber}
@@ -304,7 +355,9 @@ export default function PoProcurementDetailPage() {
             </div>
           </div>
           <div>
-            <div className="text-xs text-gray-500">Supplier</div>
+            <div className="text-xs text-gray-500">
+              {poKind === "subcon" ? "SubCon" : "Supplier"}
+            </div>
             <div className="text-sm font-medium text-gray-900">
               {detail.supplier}
             </div>
@@ -386,7 +439,7 @@ export default function PoProcurementDetailPage() {
         <div className="mt-4 flex items-center justify-end">
           <Button
             className="!rounded-lg"
-            onClick={() => router.push("/po-procurement")}>
+            onClick={() => router.push(`/po-procurement?tab=${poKind}`)}>
             Close
           </Button>
         </div>

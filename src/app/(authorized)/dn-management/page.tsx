@@ -24,6 +24,11 @@ import {
   type KanbanCategory,
 } from "@/components/kanban/KanbanTransportCard";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { useListSupplierItemsQuery } from "@/lib/api/supplier-items/api";
+import {
+  resolveSubconCycleTime,
+  resolveSubconSupplierName,
+} from "@/lib/utils/subconSupplier";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 
 type ProcurementTab = "raw" | "indirect" | "subcon";
@@ -130,6 +135,10 @@ export default function DnManagementPage() {
     [bomTreeQuery.data?.data]
   );
 
+  const supplierItemsQuery = useListSupplierItemsQuery(undefined, {
+    skip: !apiEnabled || activeTab !== "subcon",
+  });
+
   const procurementApiAvailable = apiEnabled && !listQuery.error;
 
   const rows = useMemo<DnRow[]>(() => {
@@ -147,6 +156,28 @@ export default function DnManagementPage() {
         // Open DN (pending units) is defined as Total PO minus total incoming
         const pending = Math.max(totalPo - totalIncoming, 0);
         const progressPercent = totalPo > 0 ? Math.round((totalIncoming / totalPo) * 100) : 0;
+
+        // DN Subcon: nama SubCon + total pengiriman mengikuti Master Supplier
+        // Item bertipe subcon (DN lama bisa menyimpan pemasok bahan baku).
+        const storedSupplier = String(
+          dn.supplier_name ?? (dn.supplier_id ? `Supplier #${dn.supplier_id}` : "-"),
+        );
+        let supplierDisplay = storedSupplier;
+        let deliveryTotalDisplay = Number(dn.delivery_total ?? 0);
+        if (type === "SC") {
+          const uniqCodes = (dn.items ?? []).map((item) => item.item_uniq_code);
+          supplierDisplay = resolveSubconSupplierName({
+            storedName: storedSupplier,
+            uniqCodes,
+            supplierItems: supplierItemsQuery.data ?? [],
+          });
+          const subconCycle = resolveSubconCycleTime({
+            supplierName: supplierDisplay,
+            uniqCodes,
+            supplierItems: supplierItemsQuery.data ?? [],
+          });
+          if (subconCycle > 0) deliveryTotalDisplay = subconCycle;
+        }
         return {
           key: id,
           id,
@@ -160,14 +191,14 @@ export default function DnManagementPage() {
           pendingUnits: pending,
           dnCreated,
           dnIncoming: Number(dn.total_dn_incoming ?? 0),
-          supplier: String(dn.supplier_name ?? (dn.supplier_id ? `Supplier #${dn.supplier_id}` : "-")),
+          supplier: supplierDisplay,
           deliveryTo: Number(dn.delivery_to ?? 0),
-          deliveryTotal: Number(dn.delivery_total ?? 0),
+          deliveryTotal: deliveryTotalDisplay,
            remark: String(dn.remark ?? "").trim() || "-",
         };
       })
       .filter((row) => !hiddenDn.has(row.dnNumber));
-  }, [activeTab, hiddenDn, listQuery.data, procurementApiAvailable]);
+  }, [activeTab, hiddenDn, listQuery.data, procurementApiAvailable, supplierItemsQuery.data]);
 
   const activePagination = paginationByTab[activeTab];
   const totalPages = Math.max(1, Math.ceil(rows.length / activePagination.pageSize));
