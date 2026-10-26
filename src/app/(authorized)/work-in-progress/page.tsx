@@ -16,20 +16,39 @@ import {
 import {
   DownloadOutlined,
   EyeOutlined,
+  UploadOutlined,
   PlusOutlined,
   ReloadOutlined,
   ScanOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
 import type { ColumnType } from "antd/es/table";
+import * as XLSX from "xlsx";
 import StatsCard from "@/components/StatsCard";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
+  type WipCreateItem,
   type WipListRow,
+  useCreateWipMutation,
   useGetWipListQuery,
   useUpdateWipMutation,
 } from "@/lib/api/wip/api";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { useGetWorkOrdersQuery } from "@/lib/api/work-orders/api";
+import {
+  useGetProcessesQuery,
+  useGetTypeParametersQuery,
+} from "@/lib/api/system-settings/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
+import ExcelImportModal from "@/components/master-data/ExcelImportModal";
+import { downloadTemplate } from "@/lib/utils/excel/masterExcel";
+import type { BulkImportOutcome } from "@/lib/utils/excel/bulkImportTypes";
+import {
+  WIP_EXCEL_COLUMNS,
+  WIP_EXCEL_EXAMPLE_ROWS,
+} from "@/lib/utils/excel/wipExcelConfig";
 import { BsBoxSeam } from "react-icons/bs";
 import { HiOutlineArchiveBox } from "react-icons/hi2";
 import { LuChartColumn } from "react-icons/lu";
@@ -57,6 +76,13 @@ type WipEditFormValues = {
   status?: string;
 };
 
+// Satu baris Excel yang sudah divalidasi, siap dikirim ke POST /wip.
+type WipImportPayload = {
+  woId: string;
+  woNumber: string;
+  item: WipCreateItem;
+};
+
 export default function WorkInProgressPage() {
   const router = useRouter();
   const [messageApi, contextHolder] = message.useMessage();
@@ -71,6 +97,28 @@ export default function WorkInProgressPage() {
     { skip: !apiEnabled },
   );
   const [updateWip] = useUpdateWipMutation();
+  const [createWip] = useCreateWipMutation();
+
+  // ---- Data pendukung untuk validasi import Excel ----
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomTreeRes?.data ?? []),
+    [bomTreeRes?.data],
+  );
+  const workOrdersQuery = useGetWorkOrdersQuery(
+    { page: 1, limit: 200 },
+    { skip: !apiEnabled },
+  );
+  const { data: processRecords = [] } = useGetProcessesQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const { data: typeParameterRecords = [] } = useGetTypeParametersQuery(
+    undefined,
+    { skip: !apiEnabled },
+  );
+  const [importOpen, setImportOpen] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
   const [editingWip, setEditingWip] = useState<WipRecord | null>(null);
@@ -204,6 +252,146 @@ export default function WorkInProgressPage() {
 
     return matchesSearch && matchesProcess && matchesStatus;
   });
+
+  // ================================================================
+  // Export ke Excel (.xlsx)
+  // ----------------------------------------------------------------
+  // Mengekspor baris yang sedang tampil di tabel WIP Inventory, yaitu
+  // sesudah filter Status, filter Process, dan pencarian diterapkan
+  // (seluruh halaman, bukan hanya halaman pagination yang terlihat).
+  // Kolom Actions tidak diekspor.
+  // ================================================================
+  const statusLabel = (status?: string) => {
+    switch (status) {
+      case "queue":
+        return "Queue";
+      case "process":
+        return "In Process";
+      case "done":
+        return "Done";
+      default:
+        return status || "";
+    }
+  };
+
+  const handleExport = () => {
+    if (tab !== "wip") {
+      messageApi.info("Export hanya tersedia pada tab WIP Inventory.");
+      return;
+    }
+    if (filteredData.length === 0) {
+      messageApi.warning("Tidak ada data untuk diekspor");
+      return;
+    }
+
+    const clean = (value: string) => (value === "-" ? "" : value);
+    const rows = filteredData.map((r) => ({
+      Status: statusLabel(r.status),
+      Process: clean(r.process),
+      "Next Process": r.status === "queue" ? clean(r.waitingProcess ?? "") : "",
+      Uniq: clean(r.uniq),
+      "Part Name": clean(r.partName),
+      "Part Number": clean(r.partNumber),
+      "WO Number": clean(r.woNumber),
+      Stock: r.stock,
+      "Kanban No.": clean(r.kanbanCode),
+      "Qty / Kanban": r.kanban,
+    }));
+
+    try {
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      worksheet["!cols"] = [
+        { wch: 12 }, // Status
+        { wch: 16 }, // Process
+        { wch: 16 }, // Next Process
+        { wch: 14 }, // Uniq
+        { wch: 30 }, // Part Name
+        { wch: 18 }, // Part Number
+        { wch: 16 }, // WO Number
+        { wch: 10 }, // Stock
+        { wch: 18 }, // Kanban No.
+        { wch: 14 }, // Qty / Kanban
+      ];
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "WIP Inventory");
+      const dateStr = new Date().toISOString().slice(0, 10);
+      XLSX.writeFile(workbook, `wip-inventory-${dateStr}.xlsx`);
+      messageApi.success(`Berhasil mengekspor ${rows.length} baris`);
+    } catch (err) {
+      console.error("Export WIP gagal", err);
+      messageApi.error("Gagal mengekspor data WIP");
+    }
+  };
+
+  // ================================================================
+  // Import via Excel
+  // ----------------------------------------------------------------
+  // Satu baris = satu item WIP. Payload sama dengan form Create WIP:
+  // process_flow dibuat dari kolom Process (op_seq 10, 20, ...).
+  // Baris dikelompokkan per Work Order, satu request POST /wip per WO.
+  // ================================================================
+  const norm = (value: unknown) =>
+    String(value ?? "")
+      .trim()
+      .toLowerCase();
+
+  const handleDownloadTemplate = () => {
+    downloadTemplate({
+      fileName: "template-import-wip.xlsx",
+      title: "Template Import Work In Progress",
+      columns: WIP_EXCEL_COLUMNS,
+      exampleRows: WIP_EXCEL_EXAMPLE_ROWS,
+    });
+  };
+
+  const handleBulkImport = async (
+    payloads: WipImportPayload[],
+  ): Promise<BulkImportOutcome> => {
+    const byWo = new Map<
+      string,
+      { woNumber: string; items: WipCreateItem[]; indexes: number[] }
+    >();
+    payloads.forEach((payload, index) => {
+      const group = byWo.get(payload.woId) ?? {
+        woNumber: payload.woNumber,
+        items: [],
+        indexes: [],
+      };
+      group.items.push(payload.item);
+      group.indexes.push(index);
+      byWo.set(payload.woId, group);
+    });
+
+    const results: BulkImportOutcome["results"] = [];
+    for (const [woId, group] of byWo) {
+      try {
+        await createWip({
+          wo_id: woId,
+          wo_number: group.woNumber,
+          items: group.items,
+        }).unwrap();
+        group.indexes.forEach((index) =>
+          results.push({ index, status: "success" }),
+        );
+      } catch (error) {
+        const msg = getApiErrorMessage(
+          error,
+          `Gagal menyimpan WIP untuk WO ${group.woNumber}.`,
+        );
+        group.indexes.forEach((index) =>
+          results.push({ index, status: "failed", message: msg }),
+        );
+      }
+    }
+
+    const success = results.filter((r) => r.status === "success").length;
+    return {
+      total: payloads.length,
+      success_count: success,
+      failed_count: payloads.length - success,
+      results,
+    };
+  };
 
   const summaryStats = useMemo(() => {
     // Statistik hanya menghitung WIP aktif; baris "done" hanya riwayat.
@@ -532,12 +720,30 @@ export default function WorkInProgressPage() {
               allowClear
             />
 
-            <Button
-              icon={<DownloadOutlined />}
-              className="flex items-center gap-2"
-            >
-              Export
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                icon={<DownloadOutlined />}
+                className="flex items-center gap-2"
+                onClick={handleDownloadTemplate}
+              >
+                Download Template
+              </Button>
+              <Button
+                icon={<UploadOutlined />}
+                className="flex items-center gap-2"
+                onClick={() => setImportOpen(true)}
+              >
+                Import Excel
+              </Button>
+              <Button
+                icon={<DownloadOutlined />}
+                className="flex items-center gap-2"
+                onClick={handleExport}
+                disabled={apiEnabled && listQuery.isFetching}
+              >
+                Export
+              </Button>
+            </div>
           </div>
 
           <div className="h-px bg-gray-100" />
@@ -593,6 +799,126 @@ export default function WorkInProgressPage() {
           )}
         </div>
       </div>
+
+      <ExcelImportModal<WipImportPayload>
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        title="Import Work In Progress (Data Massal)"
+        entityName="WIP"
+        templateFileName="template-import-wip.xlsx"
+        templateTitle="Template Import Work In Progress"
+        columns={WIP_EXCEL_COLUMNS}
+        exampleRows={WIP_EXCEL_EXAMPLE_ROWS}
+        mapRow={(row) => {
+          const woInput = (row.wo_number ?? "").trim();
+          const uniq = (row.uniq ?? "").trim();
+          const label = [woInput, uniq].filter(Boolean).join(" / ") || "(kosong)";
+
+          if (!woInput) return { ok: false, label, error: "WO Number wajib diisi." };
+          if (!uniq) return { ok: false, label, error: "Uniq wajib diisi." };
+
+          // WO: cocokkan nomor asli atau nomor tampilan, tanpa beda huruf besar/kecil.
+          const workOrders = workOrdersQuery.data?.items ?? [];
+          const wo = workOrders.find(
+            (w) =>
+              norm(w.wo_number) === norm(woInput) ||
+              norm(formatWorkOrderDisplayNumber(w.wo_number)) === norm(woInput),
+          );
+          if (!wo?.id) {
+            return {
+              ok: false,
+              label,
+              error: `WO Number "${woInput}" tidak ditemukan.`,
+            };
+          }
+
+          // Uniq harus ada di BOM (bila data BOM sudah termuat).
+          const matchedUniq = bomIndex.uniqs.find((u) => norm(u) === norm(uniq));
+          if (bomIndex.uniqs.length > 0 && !matchedUniq) {
+            return { ok: false, label, error: `Uniq "${uniq}" tidak ada di BOM.` };
+          }
+          const uniqCode = matchedUniq ?? uniq;
+
+          const stockRaw = (row.stock ?? "").replace(/,/g, "").trim();
+          const stock = Number(stockRaw);
+          if (!stockRaw || !Number.isFinite(stock) || stock <= 0) {
+            return { ok: false, label, error: "Stock wajib diisi dengan angka lebih dari 0." };
+          }
+
+          const perKanbanRaw = (row.qty_per_kanban ?? "").replace(/,/g, "").trim();
+          const perKanban = perKanbanRaw ? Number(perKanbanRaw) : 0;
+          if (perKanbanRaw && (!Number.isFinite(perKanban) || perKanban < 0)) {
+            return { ok: false, label, error: "Qty / Kanban harus berupa angka 0 atau lebih." };
+          }
+
+          // Process: satu atau lebih nama proses (dipisah koma), sesuai master.
+          const processNames = (row.process ?? "")
+            .split(/[,;\n]/)
+            .map((p) => p.trim())
+            .filter(Boolean);
+          if (processNames.length === 0) {
+            return { ok: false, label, error: "Process wajib diisi." };
+          }
+          const masterProcesses = processRecords
+            .map((p) => (p.process_name ? String(p.process_name).trim() : ""))
+            .filter(Boolean);
+          const resolvedProcesses: string[] = [];
+          for (const name of processNames) {
+            if (masterProcesses.length === 0) {
+              resolvedProcesses.push(name);
+              continue;
+            }
+            const found = masterProcesses.find((m) => norm(m) === norm(name));
+            if (!found) {
+              return { ok: false, label, error: `Process "${name}" tidak ada di master Process.` };
+            }
+            resolvedProcesses.push(found);
+          }
+
+          // WIP Type: sesuai Type Parameter; kosong = tipe pertama.
+          const typeNames = typeParameterRecords
+            .map((t) => String(t.type_name ?? "").trim())
+            .filter(Boolean);
+          const typeInput = (row.wip_type ?? "").trim();
+          let wipType = typeNames[0] ?? "";
+          if (typeInput) {
+            const foundType = typeNames.find((t) => norm(t) === norm(typeInput));
+            if (typeNames.length > 0 && !foundType) {
+              return { ok: false, label, error: `WIP Type "${typeInput}" tidak ada di Type Parameter.` };
+            }
+            wipType = foundType ?? typeInput;
+          }
+
+          const packingNumber =
+            (row.packing_number ?? "").trim() ||
+            bomIndex.packingNumberByUniq[uniqCode] ||
+            "";
+
+          return {
+            ok: true,
+            label,
+            payload: {
+              woId: String(wo.id),
+              woNumber: String(wo.wo_number),
+              item: {
+                uniq: uniqCode,
+                kanban_number: packingNumber,
+                wip_type: wipType,
+                uom: bomIndex.uomByUniq[uniqCode] || "Piece",
+                stock,
+                stock_kanban: perKanban,
+                process_flow: resolvedProcesses.map((process, index) => ({
+                  op_seq: (index + 1) * 10,
+                  machine_name: `${process} Station`,
+                  process_name: process,
+                })),
+              },
+            },
+          };
+        }}
+        bulkImport={handleBulkImport}
+        onImported={() => listQuery.refetch()}
+      />
     </div>
   );
 }

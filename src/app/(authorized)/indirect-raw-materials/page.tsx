@@ -12,8 +12,10 @@ import {
 } from "antd";
 import {
   DeleteOutlined,
+  DownloadOutlined,
   EyeOutlined,
   FilterOutlined,
+  UploadOutlined,
   PlusOutlined,
   SearchOutlined,
   QrcodeOutlined,
@@ -22,10 +24,19 @@ import type { ColumnsType } from "antd/es/table";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
+  type InventoryMutationRequest,
   type InventoryRecord,
+  useBulkCreateInventoryMutation,
   useGetInventoryListQuery,
   useLazyGenerateQRIndirectQuery,
 } from "@/lib/api/inventory/api";
+import ExcelImportModal from "@/components/master-data/ExcelImportModal";
+import { downloadTemplate } from "@/lib/utils/excel/masterExcel";
+import type { BulkImportOutcome } from "@/lib/utils/excel/bulkImportTypes";
+import {
+  INDIRECT_EXCEL_COLUMNS,
+  INDIRECT_EXCEL_EXAMPLE_ROWS,
+} from "@/lib/utils/excel/indirectExcelConfig";
 import { consumeFlashMessage } from "@/lib/utils/flashMessage";
 import PrintButton from "@/components/PrintButton";
 import type { PrintCardOptions } from "@/lib/utils/printCard";
@@ -163,6 +174,69 @@ export default function IndirectRawMaterialsPage() {
     { type: "indirect-materials", page: 1, limit: 20 },
     { skip: !apiEnabled }
   );
+
+  // ---- Import via Excel (POST /inventory/indirect-materials/bulk) ----
+  const [importOpen, setImportOpen] = useState(false);
+  const [bulkCreateInventory] = useBulkCreateInventoryMutation();
+
+  const handleDownloadTemplate = () => {
+    downloadTemplate({
+      fileName: "template-import-indirect-raw-material.xlsx",
+      title: "Template Import Indirect Raw Material",
+      columns: INDIRECT_EXCEL_COLUMNS,
+      exampleRows: INDIRECT_EXCEL_EXAMPLE_ROWS,
+    });
+  };
+
+  // Backend menyimpan semua baris dalam satu transaksi (semua berhasil atau
+  // semua gagal). UNIQ dobel di dalam file ditolak di sini supaya satu baris
+  // bermasalah tidak menggagalkan baris lain.
+  const handleBulkImport = async (
+    payloads: InventoryMutationRequest[],
+  ): Promise<BulkImportOutcome> => {
+    const seen = new Set<string>();
+    const sendable: InventoryMutationRequest[] = [];
+    const sendableIndex: number[] = [];
+    const results: BulkImportOutcome["results"] = [];
+
+    payloads.forEach((payload, index) => {
+      const key = payload.uniq_code.trim().toUpperCase();
+      if (seen.has(key)) {
+        results.push({
+          index,
+          status: "failed",
+          message: `UNIQ ${payload.uniq_code} dobel di file.`,
+        });
+        return;
+      }
+      seen.add(key);
+      sendable.push(payload);
+      sendableIndex.push(index);
+    });
+
+    if (sendable.length > 0) {
+      try {
+        await bulkCreateInventory({
+          type: "indirect-materials",
+          items: sendable,
+        }).unwrap();
+        sendableIndex.forEach((index) => results.push({ index, status: "success" }));
+      } catch (error) {
+        const msg = getApiErrorMessage(error, "Gagal menyimpan data indirect raw material.");
+        sendableIndex.forEach((index) =>
+          results.push({ index, status: "failed", message: msg }),
+        );
+      }
+    }
+
+    const success = results.filter((r) => r.status === "success").length;
+    return {
+      total: payloads.length,
+      success_count: success,
+      failed_count: payloads.length - success,
+      results,
+    };
+  };
 
   useEffect(() => {
     const flash = consumeFlashMessage("/indirect-raw-materials");
@@ -383,14 +457,68 @@ export default function IndirectRawMaterialsPage() {
           </p>
         </div>
 
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => router.push("/indirect-raw-material/create")}
-        >
-          Add Material
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>
+            Download Template
+          </Button>
+          <Button icon={<UploadOutlined />} onClick={() => setImportOpen(true)}>
+            Import Excel
+          </Button>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => router.push("/indirect-raw-material/create")}
+          >
+            Add Material
+          </Button>
+        </div>
       </div>
+
+      <ExcelImportModal<InventoryMutationRequest>
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        title="Import Indirect Raw Material (Data Massal)"
+        entityName="material"
+        templateFileName="template-import-indirect-raw-material.xlsx"
+        templateTitle="Template Import Indirect Raw Material"
+        columns={INDIRECT_EXCEL_COLUMNS}
+        exampleRows={INDIRECT_EXCEL_EXAMPLE_ROWS}
+        mapRow={(row) => {
+          const uniq = (row.uniq_code ?? "").trim();
+          const label = uniq || "(tanpa uniq)";
+          if (!uniq) return { ok: false, label, error: "Uniq wajib diisi." };
+
+          const qtyRaw = (row.stock_qty ?? "").replace(/,/g, "").trim();
+          const qty = Number(qtyRaw);
+          if (!qtyRaw || !Number.isFinite(qty) || qty < 0) {
+            return {
+              ok: false,
+              label,
+              error: "Stock Qty wajib diisi dengan angka 0 atau lebih.",
+            };
+          }
+
+          const optional = (value?: string) => {
+            const v = (value ?? "").trim();
+            return v ? v : undefined;
+          };
+          return {
+            ok: true,
+            label,
+            payload: {
+              uniq_code: uniq,
+              raw_material_type: "Indirect",
+              part_number: optional(row.part_number),
+              part_name: optional(row.part_name),
+              warehouse_location: optional(row.warehouse_location),
+              uom: optional(row.uom),
+              stock_qty: qty,
+            },
+          };
+        }}
+        bulkImport={handleBulkImport}
+        onImported={() => listQuery.refetch()}
+      />
 
       <div className="bg-white rounded-lg shadow-sm">
         <div className="p-4 flex items-center gap-3 justify-between flex-wrap">

@@ -24,6 +24,10 @@ import { Button, Empty, Progress, Spin, Tag, Tooltip, message } from "antd";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import {
+  buildBomTimeIndex,
+  normalizeProcessName,
+} from "@/lib/utils/bomCycle";
 import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
 import {
   useGetWorkOrderByIdQuery,
@@ -49,10 +53,17 @@ type DetailRow = {
   partNumber: string;
   model: string;
   quantity: string;
-  /** Nilai kuantitas mentah (angka) untuk perhitungan estimasi per-uniq. */
+  /** Nilai kuantitas mentah (angka). */
   quantityNumber: number;
-  /** Estimasi waktu per-uniq (menit) = qty x cycle_time_min x machine_capacity. */
+  /**
+   * Estimasi waktu baris ini (menit) =
+   * (qty baris x cycle time per pcs) + setup proses yang sedang berjalan.
+   */
   estimatedMinutes: number;
+  /** Setup time (menit) proses yang sedang berjalan, sudah termasuk di estimatedMinutes. */
+  setupMinutes: number;
+  /** Nama proses yang sedang berjalan (acuan setup time). */
+  currentProcessName: string;
   processName: string;
   /** Routing steps (in order) with per-process scan status. */
   processSteps: WorkOrderProcessStep[];
@@ -63,7 +74,7 @@ type DetailRow = {
   processFlowJson: unknown;
 };
 
-// Format estimasi waktu (menit) untuk ditampilkan di tabel/detail.
+// Format estimasi waktu (menit) untuk ditampilkan di tabel.
 // Contoh: 0.5 -> "0.5 menit", 12 -> "12 menit", 0 / undefined -> "-".
 const formatEstimatedMinutes = (value?: number | null) => {
   if (value == null || !Number.isFinite(value) || value <= 0) return "-";
@@ -241,19 +252,66 @@ export default function WorkOrderDetailPage() {
     [bomTreeRes?.data],
   );
 
+  // [wo-estimated-time] Cycle time + setup time per proses per UNIQ dari BOM.
+  const bomTimeByUniq = useMemo(
+    () => buildBomTimeIndex(bomTreeRes?.data ?? []),
+    [bomTreeRes?.data],
+  );
+
   const detailRows = useMemo<DetailRow[]>(() => {
-    // [wo-estimated-time] Estimasi per-uniq mengikuti formula yang sama
-    // dengan halaman create WO: qty x cycle_time_min x machine_capacity.
-    // Nilai cycle_time_min & machine_capacity disimpan di level WO, jadi
-    // total = jumlah semua per-uniq (identik dengan estimated_time_minutes
-    // yang disimpan saat WO dibuat).
-    const cycleMin = Number(workOrder?.cycle_time_min ?? 0);
-    const capacity = Number(workOrder?.machine_capacity ?? 0);
+    // [wo-estimated-time] Estimasi per baris UNIQ (bukan total WO):
+    // = (qty baris x cycle time per pcs) + setup time PROSES YANG SEDANG
+    // BERJALAN. Sumber: BOM per UNIQ; fallback cycle_time_min di WO (data lama).
+    const woCycleMin = Number(workOrder?.cycle_time_min ?? 0);
     return (workOrder?.items ?? []).map((item, index) => {
       const qtyNumber = Number(item.quantity) || 0;
-      const perUniq =
-        cycleMin > 0 && capacity > 0 && qtyNumber > 0
-          ? Math.round(qtyNumber * cycleMin * capacity * 100) / 100
+      const bomTime = bomTimeByUniq[item.item_uniq_code];
+      const cycleMin =
+        bomTime?.cycleMin && bomTime.cycleMin > 0
+          ? bomTime.cycleMin
+          : woCycleMin > 0
+            ? woCycleMin
+            : 0;
+
+      // Proses yang sedang dialami: step in_progress; kalau belum ada yang
+      // berjalan, step pending pertama (proses berikutnya); kalau semua
+      // sudah done, step terakhir; tanpa steps pakai item.process_name.
+      const steps = [...(item.process_steps ?? [])].sort(
+        (x, y) => x.op_seq - y.op_seq,
+      );
+      const currentStep =
+        steps.find((st) => st.status === "in_progress") ??
+        steps.find((st) => st.status === "pending") ??
+        steps[steps.length - 1];
+      const currentProcessName =
+        currentStep?.display_name ||
+        currentStep?.process_name ||
+        item.process_name ||
+        "";
+
+      // Cocokkan ke route BOM: op_seq dulu, lalu nama proses.
+      let setupMin = 0;
+      if (bomTime) {
+        const names = [
+          currentStep?.process_name,
+          currentStep?.display_name,
+          item.process_name,
+        ]
+          .map(normalizeProcessName)
+          .filter(Boolean);
+        const route =
+          (currentStep
+            ? bomTime.routes.find((r) => r.opSeq === currentStep.op_seq)
+            : undefined) ??
+          bomTime.routes.find((r) =>
+            names.includes(normalizeProcessName(r.processName)),
+          );
+        setupMin = route ? route.setupMin : bomTime.setupMin;
+      }
+
+      const estimated =
+        cycleMin > 0 && qtyNumber > 0
+          ? Math.round((qtyNumber * cycleMin + setupMin) * 100) / 100
           : 0;
       return {
         key: item.id || `${item.item_uniq_code}-${index}`,
@@ -269,7 +327,9 @@ export default function WorkOrderDetailPage() {
           item.model ?? bomIndex.assemblyCodeByUniq[item.item_uniq_code] ?? "-",
         quantity: `${item.quantity} ${item.uom || "pcs"}`,
         quantityNumber: qtyNumber,
-        estimatedMinutes: perUniq,
+        estimatedMinutes: estimated,
+        setupMinutes: estimated > 0 ? setupMin : 0,
+        currentProcessName,
         processName: item.process_name || "-",
         processSteps: item.process_steps ?? [],
         status: item.status || "Pending",
@@ -278,24 +338,7 @@ export default function WorkOrderDetailPage() {
         processFlowJson: item.process_flow_json,
       };
     });
-  }, [
-    bomIndex,
-    workOrder?.items,
-    workOrder?.cycle_time_min,
-    workOrder?.machine_capacity,
-  ]);
-
-  // [wo-estimated-time] Total per-uniq (fallback bila WO belum menyimpan
-  // nilai estimated_time_minutes, mis. data lama). Kalau jumlah per-uniq > 0
-  // gunakan itu; jika tidak, pakai nilai yang tersimpan di WO.
-  const totalEstimatedMinutes = useMemo(() => {
-    const sumPerUniq = detailRows.reduce(
-      (acc, r) => acc + (r.estimatedMinutes || 0),
-      0,
-    );
-    if (sumPerUniq > 0) return Math.round(sumPerUniq * 100) / 100;
-    return Number(workOrder?.estimated_time_minutes ?? 0);
-  }, [detailRows, workOrder?.estimated_time_minutes]);
+  }, [bomIndex, bomTimeByUniq, workOrder?.items, workOrder?.cycle_time_min]);
 
   useEffect(() => {
     if (detailRows.length === 0) {
@@ -589,7 +632,6 @@ export default function WorkOrderDetailPage() {
             <div><span class="label">Aging:</span> ${escapePrint(displayAging)}</div>
             <div><span class="label">Total UNIQ:</span> ${escapePrint(String(totalUniq))}</div>
             <div><span class="label">Closed UNIQ:</span> ${escapePrint(String(closedUniq))}</div>
-            <div><span class="label">Estimasi Waktu (Total):</span> ${escapePrint(formatEstimatedMinutes(totalEstimatedMinutes))}</div>
           </div>
           <table>
             <thead>
@@ -616,7 +658,6 @@ export default function WorkOrderDetailPage() {
     closedUniq,
     detailRows,
     displayAging,
-    totalEstimatedMinutes,
     totalUniq,
     workOrder,
   ]);
@@ -841,15 +882,6 @@ export default function WorkOrderDetailPage() {
                     label="Target Date"
                     value={formatDate(workOrder?.target_date)}
                   />
-                  {/* [wo-estimated-time] */}
-                  <DetailField
-                    label="Estimasi Waktu (Total)"
-                    value={
-                      totalEstimatedMinutes > 0
-                        ? `${totalEstimatedMinutes} menit`
-                        : "-"
-                    }
-                  />
                   <DetailField label="Total UNIQ" value={totalUniq} mono />
                   <DetailField label="Closed UNIQ" value={closedUniq} mono />
                 </div>
@@ -992,9 +1024,17 @@ export default function WorkOrderDetailPage() {
                             {row.status}
                           </Tag>
                         </span>
-                        {/* [wo-estimated-time] Estimasi per-uniq */}
+                        {/* [wo-estimated-time] Estimasi baris = qty x cycle time + setup proses berjalan */}
                         <span className="hidden font-mono text-xs text-slate-700 tabular-nums md:block">
                           {formatEstimatedMinutes(row.estimatedMinutes)}
+                          {row.setupMinutes > 0 ? (
+                            <span className="mt-0.5 block font-sans text-[11px] text-slate-400">
+                              incl. setup {row.setupMinutes} mnt
+                              {row.currentProcessName
+                                ? ` (${row.currentProcessName})`
+                                : ""}
+                            </span>
+                          ) : null}
                         </span>
                         <span className="hidden justify-self-end text-sm font-semibold text-blue-700 md:block">
                           {selected ? "Selected" : "View"}

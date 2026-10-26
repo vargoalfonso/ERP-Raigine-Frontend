@@ -553,24 +553,12 @@ function StockOpnameStartCountPageContent() {
     return `${entries.length} entry`;
   }, [bulkRows.length, entries.length, warehouseRows, method]);
 
-  // Generates a complete template. Each row remains a separate item row, and
-  // Plant/Warehouse Location are kept on the row so the save flow can create
-  // one SO session per item in the correct plant.
-  async function handleDownloadTemplate() {
-    let templateUniqs = uniqSearchResults;
-    if (apiEnabled) {
-      try {
-        templateUniqs = await getUniqOptions({
-          type: inventoryType,
-          method: toApiMethod(method),
-          q: "",
-          limit: 10000,
-        }).unwrap();
-      } catch {
-        // Use the options already loaded when the full lookup is unavailable.
-      }
-    }
-
+  // Generates an EMPTY template (header + one blank row prefilled with the
+  // default Plant / Warehouse Location / User Counted). It no longer lists
+  // every UNIQ; the counter just fills in the Uniq and Counted Qty. Rows with
+  // an empty Uniq are ignored on upload. Plant/Warehouse Location stay on the
+  // row so the save flow can create one SO session per item in the right plant.
+  function handleDownloadTemplate() {
     const tabName = tab.toLowerCase();
     const preferredWarehouse =
       warehouseList.find((warehouse) => {
@@ -585,17 +573,15 @@ function StockOpnameStartCountPageContent() {
       preferredWarehouse?.warehouse_name ?? warehouseOptions[0]?.value ?? "";
     const defaultPlant =
       preferredWarehouse?.plant_name ?? preferredWarehouse?.plant_id ?? "";
-    const templateRows = (
-      templateUniqs.length > 0
-        ? templateUniqs
-        : [{ uniq_code: uniqOptions[0]?.value ?? "FG-001" }]
-    ).map((item) => ({
-      Uniq: item.uniq_code,
-      "Counted Qty": 0,
-      "User Counted": currentUserName,
-      Plant: defaultPlant,
-      "Warehouse Location": defaultWarehouse,
-    }));
+    const templateRows = [
+      {
+        Uniq: "",
+        "Counted Qty": "",
+        "User Counted": currentUserName,
+        Plant: defaultPlant,
+        "Warehouse Location": defaultWarehouse,
+      },
+    ];
 
     const worksheet = XLSX.utils.json_to_sheet(templateRows, {
       header: [...BULK_TEMPLATE_HEADERS],
@@ -623,7 +609,7 @@ function StockOpnameStartCountPageContent() {
     XLSX.utils.book_append_sheet(workbook, masterSheet, "Master Warehouse");
 
     XLSX.writeFile(workbook, `stock-opname-template-${tab}.xlsx`);
-    message.success(`${templateRows.length} item template downloaded`);
+    message.success("Template downloaded");
   }
 
   // Auto-fills Part Number / Part Name from the Uniq for each row, resolving
