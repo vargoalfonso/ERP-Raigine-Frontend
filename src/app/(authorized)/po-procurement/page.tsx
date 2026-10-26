@@ -22,6 +22,8 @@ import {
 } from "@/lib/api/procurement-po/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
+import { useListSupplierItemsQuery } from "@/lib/api/supplier-items/api";
+import { resolveSubconSupplierName } from "@/lib/utils/subconSupplier";
 import PrintButton from "@/components/PrintButton";
 
 type UnknownRecord = Record<string, unknown>;
@@ -45,6 +47,8 @@ type PoRow = {
   key: string;
   period: string;
   poNumber: string;
+  /** Nomor PO di sistem eksternal (Zahir), diinput saat Create PO. */
+  externalPoNumber?: string;
   poStage?: number;
   budgetIdr: number;
   qtyDelivered: number;
@@ -269,6 +273,9 @@ function PoProcurementPageContent() {
   const summaryQuery = useGetProcurementPoSummaryQuery({ po_type: poType }, { skip: !apiEnabled });
   const poListQuery = useListProcurementPosQuery({ po_type: poType }, { skip: !apiEnabled });
   const suppliersQuery = useListSuppliersQuery(undefined, { skip: !apiEnabled });
+  const supplierItemsQuery = useListSupplierItemsQuery(undefined, {
+    skip: !apiEnabled || activeTab !== "subcon",
+  });
 
   const procurementApiAvailable =
     apiEnabled &&
@@ -292,16 +299,32 @@ function PoProcurementPageContent() {
         })?.supplier_name ??
         (supplierIdText ? `Supplier #${supplierIdText}` : "-");
 
+      // PO subcon: nama SubCon mengikuti Master Supplier Item bertipe subcon.
+      const displaySupplierName =
+        activeTab === "subcon"
+          ? resolveSubconSupplierName({
+              storedName: resolvedSupplierName,
+              uniqCodes: [
+                ...(r.items ?? []).map((it) =>
+                  String((it as Record<string, unknown>).uniq_code ?? ""),
+                ),
+                r.uniq_code,
+              ],
+              supplierItems: supplierItemsQuery.data ?? [],
+            })
+          : resolvedSupplierName;
+
       const uniqSummary = extractUniqSummary(r.items);
       return {
         key: r.po_id ?? r.id,
         period: r.period ?? r.month ?? "-",
         poNumber: r.po_number ?? String(r.po_id ?? r.id),
+        externalPoNumber: String(r.external_po_number ?? "").trim() || undefined,
         poStage: r.po_stage,
         budgetIdr: totalPo,
         qtyDelivered: totalIncoming,
         uniq: uniqSummary ?? r.uniq_code ?? r.data_order ?? "-",
-        supplier: resolvedSupplierName,
+        supplier: displaySupplierName,
         supplierId: supplierIdText || undefined,
         dnCreated: Number(r.dn_created ?? 0),
         dnIncoming: Number(r.dn_incoming ?? 0),
@@ -310,7 +333,7 @@ function PoProcurementPageContent() {
         poAlert: r.po_alert,
       };
     });
-  }, [activeTab, procurementApiAvailable, poListQuery.data?.data, rowsByTab, suppliersQuery.data]);
+  }, [activeTab, procurementApiAvailable, poListQuery.data?.data, rowsByTab, suppliersQuery.data, supplierItemsQuery.data]);
 
   const poBadgeByNumber = useMemo(() => {
     const map = new Map<string, number>();
@@ -395,6 +418,15 @@ function PoProcurementPageContent() {
       },
     },
     {
+      title: "No. PO Zahir",
+      dataIndex: "externalPoNumber",
+      key: "externalPoNumber",
+      width: 160,
+      render: (v?: string) => (
+        <span className="text-sm text-gray-800">{v || "-"}</span>
+      ),
+    },
+    {
       title: "Total PO",
       dataIndex: "budgetIdr",
       key: "budgetIdr",
@@ -464,7 +496,7 @@ function PoProcurementPageContent() {
             size="small"
             className="!rounded-lg"
             icon={<EyeOutlined />}
-            onClick={() => router.push(`/po-procurement/detail/${encodeURIComponent(record.key)}`)}
+            onClick={() => router.push(`/po-procurement/detail/${encodeURIComponent(record.key)}?tab=${encodeURIComponent(activeTab)}`)}
           />
           <PrintButton
             size="small"
@@ -477,6 +509,7 @@ function PoProcurementPageContent() {
               subheading: record.poNumber,
               fields: [
                 { label: "Supplier", value: record.supplier, full: true },
+                { label: "No. PO Zahir", value: record.externalPoNumber ?? "-" },
                 { label: "Uniq", value: record.uniq },
                 { label: "Period", value: record.period },
                 { label: "Total PO", value: formatNumber(record.budgetIdr) },

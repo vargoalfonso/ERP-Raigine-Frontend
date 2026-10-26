@@ -18,6 +18,10 @@ import {
   type ProcurementDnType,
 } from "@/lib/api/procurement-dn/api";
 import { useListSupplierItemsQuery } from "@/lib/api/supplier-items/api";
+import {
+  resolveSubconCycleTime,
+  resolveSubconSupplierName,
+} from "@/lib/utils/subconSupplier";
 import { type ProcurementPoType, useGetProcurementPoByIdQuery, useListProcurementPosQuery } from "@/lib/api/procurement-po/api";
 import { useGetGlobalWorkingDaysQuery } from "@/lib/api/system-settings/api";
 import { useGetWorkOrdersQuery } from "@/lib/api/work-orders/api";
@@ -385,10 +389,32 @@ function DnRawMaterialCreatePageContent() {
     [draft.packing, draft.uniq, items, previewItems],
   );
 
+  // Supplier yang ditampilkan. DN Subcon: nama SubCon mengikuti Master Supplier
+  // Item bertipe subcon untuk UNIQ di PO ini (PO lama bisa menyimpan pemasok
+  // bahan baku). Tipe lain memakai supplier dari PO apa adanya.
+  const displaySupplier = useMemo(() => {
+    const stored = String(step1.supplier ?? "").trim();
+    if (dnType !== "subcon" || !stored) return stored;
+    return resolveSubconSupplierName({
+      storedName: stored,
+      uniqCodes: previewItems.map((item) => item.value),
+      supplierItems: supplierItemsQuery.data ?? [],
+    });
+  }, [dnType, previewItems, step1.supplier, supplierItemsQuery.data]);
+
   // N = cycle_time (lead time) supplier terpilih -> jumlah total pengiriman terjadwal.
   const supplierCycleTime = useMemo(() => {
-    const name = String(step1.supplier ?? "").trim().toLowerCase();
+    const name = displaySupplier.toLowerCase();
     if (!name) return 0;
+    if (dnType === "subcon") {
+      // Subcon: hanya Supplier Item subcon milik vendor untuk UNIQ di PO ini.
+      const subconCycle = resolveSubconCycleTime({
+        supplierName: displaySupplier,
+        uniqCodes: previewItems.map((item) => item.value),
+        supplierItems: supplierItemsQuery.data ?? [],
+      });
+      if (subconCycle > 0) return subconCycle;
+    }
     let max = 0;
     for (const it of supplierItemsQuery.data ?? []) {
       const sName = String(it.supplier_name ?? "").trim().toLowerCase();
@@ -397,7 +423,7 @@ function DnRawMaterialCreatePageContent() {
       if (Number.isFinite(ct) && ct > max) max = ct;
     }
     return max;
-  }, [step1.supplier, supplierItemsQuery.data]);
+  }, [displaySupplier, dnType, previewItems, supplierItemsQuery.data]);
 
   // Pengiriman berikutnya yang boleh dibuat = jumlah DN yang sudah dibuat + 1.
   // Harus urut mulai dari 1; tidak boleh lompat atau mundur.
@@ -710,7 +736,7 @@ function DnRawMaterialCreatePageContent() {
                 </div>
                 <div className="xl:col-span-2">
                   <div className="mb-2 text-sm font-medium text-gray-700">Supplier</div>
-                  <Input value={step1.supplier ?? ""} disabled placeholder="Autofilled" />
+                  <Input value={displaySupplier} disabled placeholder="Autofilled" />
                 </div>
                 <div className="xl:col-span-2">
                   <div className="mb-2 text-sm font-medium text-gray-700">

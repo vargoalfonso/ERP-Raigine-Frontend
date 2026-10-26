@@ -28,6 +28,10 @@ import { getCurrentUserDisplayName } from "@/lib/utils/currentUser";
 import type { ApiResponse } from "@/types";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import {
+  isSubconMaterialSpec,
+  pickSupplierItemsByType,
+} from "@/lib/utils/supplierItemType";
+import {
   buildBulkChildRowsFromPrlDetail,
   buildSingleChildRowsFromPrlDetail,
   buildSingleStoredDetailPayload,
@@ -1296,8 +1300,19 @@ export default function PoBudgetPage() {
       grouped.set(uniqCode, current);
     });
 
+    // UNIQ subcon (atau tab Subcon): hanya Supplier Item bertipe `subcon`
+    // yang boleh dipakai, supaya pemasok bahan baku tidak ikut menjadi SubCon.
+    grouped.forEach((items, uniqCode) => {
+      if (
+        activeTab === "subcon" ||
+        isSubconMaterialSpec(bomIndex.materialSpecByUniq[uniqCode])
+      ) {
+        grouped.set(uniqCode, pickSupplierItemsByType(items, "subcon"));
+      }
+    });
+
     return grouped;
-  }, [activeTab, supplierItems]);
+  }, [activeTab, supplierItems, bomIndex.materialSpecByUniq]);
 
   // Tab-agnostic index of every active supplier item, keyed by BOTH its
   // uniq_code and sebango_code. Child rows (raw-material / indirect budgets)
@@ -1352,6 +1367,12 @@ export default function PoBudgetPage() {
         grouped.set(lookupKey, current);
       });
     });
+
+    if (activeTab === "subcon") {
+      grouped.forEach((items, lookupKey) => {
+        grouped.set(lookupKey, pickSupplierItemsByType(items, "subcon"));
+      });
+    }
 
     return grouped;
   }, [activeTab, supplierItems]);
@@ -1936,9 +1957,20 @@ export default function PoBudgetPage() {
         if (!deduped.has(key)) deduped.set(key, item);
       });
     });
-    return Array.from(deduped.values()).sort(
+    const sorted = Array.from(deduped.values()).sort(
       (a, b) => Number(a.row_id ?? 0) - Number(b.row_id ?? 0),
     );
+
+    // Pencarian di atas sengaja tidak memfilter tipe (part subcon bisa
+    // terdaftar dengan kode sebango). Tapi bila item ini subcon menurut BOM,
+    // pemasok bahan baku (tipe raw_material) tidak boleh ikut terpilih.
+    const subconSpec =
+      row.materialSpec ??
+      bomIndex.materialSpecByUniq[getChildSupplierLookupUniq(row)] ??
+      bomIndex.materialSpecByUniq[row.uniq];
+    return isSubconMaterialSpec(subconSpec)
+      ? pickSupplierItemsByType(sorted, "subcon")
+      : sorted;
   };
 
   const buildSupplierOptionsFromItems = (
@@ -2526,6 +2558,12 @@ export default function PoBudgetPage() {
       related = supplierItems.filter(
         (it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === uniq,
       );
+      if (
+        activeTab === "subcon" ||
+        isSubconMaterialSpec(bomIndex.materialSpecByUniq[uniq])
+      ) {
+        related = pickSupplierItemsByType(related, "subcon");
+      }
     }
     const relatedNames = new Set(
       related
@@ -3584,6 +3622,15 @@ export default function PoBudgetPage() {
   const addSubtitle = `Enter the PO budget details for ${getBudgetTypeLabel(activeTab).toLowerCase()}`;
   const groupedDetail = detailQuery.data?.data as
     PoBudgetGroupedDetail | undefined;
+
+  // Supplier di modal Detail SELALU sama dengan kolom Supplier di tabel
+  // dashboard (row.supplier sudah dihitung ulang dari Master Supplier Item).
+  // Nilai tersimpan di backend hanya dipakai bila baris dashboard kosong.
+  const detailSupplierName = (() => {
+    const front = String(detailState.row?.supplier ?? "").trim();
+    if (front && front !== "-") return front;
+    return groupedDetail?.basic_information?.supplier_name ?? "-";
+  })();
 
   const openDetail = (row: PoBudgetRow) => {
     if (!row.id && useApi) {
@@ -5652,9 +5699,7 @@ export default function PoBudgetPage() {
                   Supplier Name
                 </div>
                 <div className="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
-                  {groupedDetail?.basic_information?.supplier_name ??
-                    detailState.row?.supplier ??
-                    "-"}
+                  {detailSupplierName}
                 </div>
               </div>
               <div>
