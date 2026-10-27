@@ -139,6 +139,8 @@ type PoBudgetRow = {
   key: string;
   uniq: string;
   prlRef?: string;
+  /** Rincian supplier + quantity per supplier dari API PR Budget. */
+  suppliers?: Array<{ supplierId?: string; supplierName: string; quantity: number }>;
   customer: string;
   productModel: string;
   partName: string;
@@ -3613,6 +3615,24 @@ export default function PoBudgetPage() {
     return groupedDetail?.basic_information?.supplier_name ?? "-";
   })();
 
+  // Rincian supplier + quantity per supplier (dari API PR Budget). Dipakai untuk
+  // memperlihatkan sumber supplier ketika entry punya lebih dari satu supplier.
+  const detailSupplierBreakdown = (() => {
+    const fromApi = groupedDetail?.basic_information?.suppliers;
+    if (Array.isArray(fromApi) && fromApi.length > 0) {
+      return fromApi
+        .map((item) => ({
+          name: String(item?.supplier_name ?? "").trim(),
+          quantity: Number(item?.quantity ?? 0),
+        }))
+        .filter((item) => item.name);
+    }
+    return (detailState.row?.suppliers ?? []).map((item) => ({
+      name: item.supplierName,
+      quantity: item.quantity,
+    }));
+  })();
+
   const openDetail = (row: PoBudgetRow) => {
     if (!row.id && useApi) {
       message.warning("This row does not have a detail reference yet.");
@@ -5699,6 +5719,37 @@ export default function PoBudgetPage() {
                   {detailSupplierName}
                 </div>
               </div>
+              {detailSupplierBreakdown.length > 1 ? (
+                <div className="md:col-span-2">
+                  <div className="text-[11px] font-medium text-gray-500 uppercase">
+                    Suppliers &amp; Quantity
+                  </div>
+                  <div className="mt-1 divide-y divide-gray-100 rounded-lg border border-gray-200 bg-gray-50">
+                    {detailSupplierBreakdown.map((item) => (
+                      <div
+                        key={item.name}
+                        className="flex items-center justify-between px-3 py-2 text-sm"
+                      >
+                        <span className="text-gray-800">{item.name}</span>
+                        <span className="font-medium tabular-nums text-gray-900">
+                          {formatNumber(item.quantity)}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between px-3 py-2 text-sm font-semibold">
+                      <span className="text-gray-600">Total</span>
+                      <span className="tabular-nums text-gray-900">
+                        {formatNumber(
+                          detailSupplierBreakdown.reduce(
+                            (sum, item) => sum + item.quantity,
+                            0,
+                          ),
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               <div>
                 <div className="text-[11px] font-medium text-gray-500 uppercase">
                   Type
