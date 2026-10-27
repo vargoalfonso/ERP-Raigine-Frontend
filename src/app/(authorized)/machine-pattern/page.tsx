@@ -71,9 +71,16 @@ type PatternFormValues = {
 
 type AddPatternFormValues = {
   uniqCode: string;
-  machineId: number;
   period: string;
   cycleTime: number;
+};
+
+// Mesin yang diretrieve otomatis dari Process Routes BOM untuk Uniq terpilih.
+type BomMachine = {
+  machineId: number; // 0 bila mesin belum terdaftar di Machine Master Data
+  machineName: string;
+  cycleTime: number; // detik; dijumlahkan bila satu mesin dipakai di beberapa route
+  resolved: boolean;
 };
 
 type AutoCalcResult = {
@@ -147,6 +154,8 @@ export default function MachinePatternPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [activeRow, setActiveRow] = useState<MachinePatternRow | null>(null);
   const [autoCalc, setAutoCalc] = useState<AutoCalcResult | null>(null);
+  const [bomMachines, setBomMachines] = useState<BomMachine[]>([]);
+  const [bomMachinesLoading, setBomMachinesLoading] = useState(false);
 
   const [addForm] = Form.useForm<AddPatternFormValues>();
   const [editForm] = Form.useForm<PatternFormValues>();
@@ -199,6 +208,41 @@ export default function MachinePatternPage() {
     [machines],
   );
 
+  const machineIdByName = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const machine of machines) {
+      const id = Number(machine.id ?? 0);
+      const name = String(machine.machine_name ?? "").trim().toLowerCase();
+      if (id > 0 && name && !map.has(name)) map.set(name, id);
+    }
+    return map;
+  }, [machines]);
+
+  // Kelompokkan route BOM per mesin. Satu mesin = satu pattern.
+  const buildBomMachines = (routes: any[]): BomMachine[] => {
+    const grouped = new Map<string, BomMachine>();
+    for (const route of routes) {
+      const rawName = String(route?.machine_name ?? "").trim();
+      let id = Number(route?.machine_id ?? 0);
+      if (!Number.isFinite(id) || id <= 0) id = machineIdByName.get(rawName.toLowerCase()) ?? 0;
+      if (id <= 0 && !rawName) continue;
+      const cycle = Number(route?.cycle_time_sec ?? 0);
+      const key = id > 0 ? `id:${id}` : `name:${rawName.toLowerCase()}`;
+      const existing = grouped.get(key);
+      if (existing) {
+        if (Number.isFinite(cycle) && cycle > 0) existing.cycleTime += cycle;
+        continue;
+      }
+      grouped.set(key, {
+        machineId: id > 0 ? id : 0,
+        machineName: (id > 0 ? machineNameById.get(id) : undefined) ?? (rawName || `Machine #${id}`),
+        cycleTime: Number.isFinite(cycle) && cycle > 0 ? cycle : 0,
+        resolved: id > 0,
+      });
+    }
+    return Array.from(grouped.values());
+  };
+
   const uniqOptions = useMemo(() => {
     const options: Array<{ label: string; value: string }> = [];
     const seen = new Set<string>();
@@ -229,7 +273,7 @@ export default function MachinePatternPage() {
   }, [bomTreeData]);
 
   const bomMetaByUniq = useMemo(() => {
-    const map = new Map<string, { bomId: string; cycleTime: number }>();
+    const map = new Map<string, { bomId: string; cycleTime: number; routes: any[] }>();
     const walk = (nodes: any[]) => {
       for (const node of nodes) {
         const uniqCode = String(node?.uniq_code ?? node?.uniq ?? "").trim();
@@ -245,7 +289,9 @@ export default function MachinePatternPage() {
             }
           }
         }
-        if (uniqCode && !map.has(uniqCode)) map.set(uniqCode, { bomId, cycleTime: cycle });
+        if (uniqCode && !map.has(uniqCode)) {
+          map.set(uniqCode, { bomId, cycleTime: cycle, routes: Array.isArray(routes) ? routes : [] });
+        }
         if (Array.isArray(node?.children)) walk(node.children);
       }
     };
@@ -292,32 +338,51 @@ const effectiveWorkingDays = settingsWorkingDays > 0 ? settingsWorkingDays : par
     return matches.reduce((sum, item) => sum + Number(item.quantity ?? 0), 0);
   }, [prlData?.items, watchUniq, watchPeriod]);
 
+  // Mesin + cycle time diretrieve otomatis dari Process Routes BOM untuk Uniq terpilih.
   useEffect(() => {
-    if (!addOpen || !watchUniq) return;
-    const meta = bomMetaByUniq.get(watchUniq);
-    if (meta?.cycleTime && meta.cycleTime > 0) {
-      addForm.setFieldsValue({ cycleTime: meta.cycleTime });
+    if (!addOpen || !watchUniq) {
+      setBomMachines([]);
+      setBomMachinesLoading(false);
       return;
     }
+    const meta = bomMetaByUniq.get(watchUniq);
+    const applyRoutes = (routes: any[]) => {
+      const list = buildBomMachines(routes);
+      setBomMachines(list);
+      const firstCycle = list.find((machine) => machine.cycleTime > 0)?.cycleTime ?? 0;
+      if (firstCycle > 0) addForm.setFieldsValue({ cycleTime: firstCycle });
+      return list.length;
+    };
+    if (meta && applyRoutes(meta.routes) > 0) {
+      setBomMachinesLoading(false);
+      return;
+    }
+    if (meta?.cycleTime && meta.cycleTime > 0) {
+      addForm.setFieldsValue({ cycleTime: meta.cycleTime });
+    }
     if (apiEnabled && meta?.bomId) {
+      let cancelled = false;
+      setBomMachinesLoading(true);
       triggerBomFull(meta.bomId)
         .unwrap()
         .then((response) => {
-          const routes = (((response as any)?.data?.process_routes ?? []) as any[]);
-          let cycle = 0;
-          for (const route of routes) {
-            const value = Number(route?.cycle_time_sec ?? 0);
-            if (value > 0) {
-              cycle = value;
-              break;
-            }
-          }
-          if (cycle > 0) addForm.setFieldsValue({ cycleTime: cycle });
+          if (cancelled) return;
+          applyRoutes((((response as any)?.data?.process_routes ?? []) as any[]));
         })
-        .catch(() => {});
+        .catch(() => {
+          if (!cancelled) setBomMachines([]);
+        })
+        .finally(() => {
+          if (!cancelled) setBomMachinesLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
     }
+    setBomMachines([]);
+    setBomMachinesLoading(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchUniq, addOpen]);
+  }, [watchUniq, addOpen, bomMetaByUniq, machines.length]);
 
   useEffect(() => {
     if (!addOpen) {
@@ -560,73 +625,148 @@ const periodOptions = useMemo(() => {
     setViewOpen(true);
   };
 
+  // Hitung pattern untuk satu cycle time (dipakai bila Uniq punya lebih dari satu mesin).
+  const computeCalc = async (cycle: number): Promise<AutoCalcResult> => {
+    const workingDays = Number(paramWorkingDays);
+    const reference = prlReference;
+    const dailyRequirement = workingDays > 0 ? reference / workingDays : 0;
+    const cycleTimeMin = cycle / 60;
+    const fallback: AutoCalcResult = {
+      prlReference: reference,
+      workingDays,
+      dailyRequirement,
+      cycleTimeMin,
+      patternValue: Math.max(1, Math.round(cycleTimeMin) || 1),
+      minOutput: Math.round(dailyRequirement),
+      movingType:
+        dailyRequirement >= paramFastMovingThreshold
+          ? "Fast Moving"
+          : cycleTimeMin >= paramPatternCycleThresholdMinutes
+            ? "Slow Moving"
+            : "Normal",
+    };
+    if (!apiEnabled) return fallback;
+    try {
+      const result = await triggerCalc({ cycle_time_sec: cycle, prl_reference: reference, working_days: workingDays }).unwrap();
+      return {
+        prlReference: reference,
+        workingDays,
+        dailyRequirement: result.daily_requirement || dailyRequirement,
+        cycleTimeMin: result.cycle_time_min || cycleTimeMin,
+        patternValue: result.pattern_value,
+        minOutput: result.min_output,
+        movingType: toUiMovingType(result.moving_type),
+      };
+    } catch {
+      return fallback;
+    }
+  };
+
   const handleAddSubmit = async () => {
     try {
       const values = await addForm.validateFields();
-      const cycle = Number(values.cycleTime);
+      const uniqCode = String(values.uniqCode ?? "").trim();
       const workingDays = Number(paramWorkingDays);
-      const calc = autoCalc;
-      const machineId = Number(values.machineId);
-      const patternValue = Number(calc?.patternValue ?? 0);
-      const minOutput = Number(calc?.minOutput ?? 0);
-      const reference = Number(calc?.prlReference ?? prlReference);
-      const movingType: MovementType = calc?.movingType ?? "Normal";
+
+      if (bomMachinesLoading) {
+        message.info("Mesin dari BOM masih dimuat, coba lagi sebentar.");
+        return;
+      }
+      if (bomMachines.length === 0) {
+        message.error("BOM untuk Uniq ini belum punya mesin di Process Routes.");
+        return;
+      }
+      const registered = bomMachines.filter((machine) => machine.resolved);
+      const unregistered = bomMachines.filter((machine) => !machine.resolved);
+      if (registered.length === 0) {
+        message.error(`Mesin ${unregistered.map((m) => m.machineName).join(", ")} belum terdaftar di Machine Master Data.`);
+        return;
+      }
+
+      // Satu mesin: pakai Cycle Time di form + Auto-calculated (boleh diedit).
+      // Banyak mesin: tiap mesin memakai cycle time dari route BOM-nya sendiri.
+      const single = registered.length === 1;
+      const plans: Array<{ machine: BomMachine; cycle: number; calc: AutoCalcResult }> = [];
+      for (const machine of registered) {
+        const cycle = single ? Number(values.cycleTime) : machine.cycleTime;
+        if (!(cycle > 0)) continue;
+        const calc = single && autoCalc ? autoCalc : await computeCalc(cycle);
+        plans.push({ machine, cycle, calc });
+      }
+      if (plans.length === 0) {
+        message.error("Cycle time mesin di BOM belum terisi.");
+        return;
+      }
+
+      const toRow = (
+        plan: { machine: BomMachine; cycle: number; calc: AutoCalcResult },
+        created?: Record<string, any>,
+      ): MachinePatternRow => {
+        const machineId = Number(created?.machine_id || plan.machine.machineId);
+        const id = created?.id != null ? String(created.id) : `mock-${Date.now()}-${plan.machine.machineId}`;
+        return {
+          key: id,
+          id,
+          uniqCode: created?.uniq_code || uniqCode,
+          machineId,
+          machineName: machineNameById.get(machineId) ?? plan.machine.machineName,
+          cycleTime: Number(created?.cycle_time || plan.cycle),
+          patternValue: Number(created?.pattern_value ?? plan.calc.patternValue),
+          workingDays: Number(created?.working_days || workingDays),
+          movingType: toUiMovingType(created?.moving_type || plan.calc.movingType),
+          minOutput: Number(created?.min_output ?? plan.calc.minOutput),
+          prlReference: Number(created?.prl_reference ?? plan.calc.prlReference),
+          status: created ? toUiStatus(created.status) : "Active",
+        };
+      };
 
       if (!apiEnabled) {
-        openPatternDetail({
-          key: `mock-${Date.now()}`,
-          id: `mock-${Date.now()}`,
-          uniqCode: values.uniqCode,
-          machineId,
-          machineName: machineNameById.get(machineId) ?? `Machine #${machineId}`,
-          cycleTime: cycle,
-          patternValue,
-          workingDays,
-          movingType,
-          minOutput,
-          prlReference: reference,
-          status: "Active",
-        });
-        message.success("Pattern added (mock)");
+        const mockRows = plans.map((plan) => toRow(plan));
+        if (mockRows.length === 1) openPatternDetail(mockRows[0]);
+        message.success(`${mockRows.length} pattern added (mock)`);
         setAddOpen(false);
         addForm.resetFields();
         setAutoCalc(null);
         return;
       }
 
-      const created = await createMachinePattern({
-        uniq_code: values.uniqCode.trim(),
-        machine_id: machineId,
-        cycle_time: cycle,
-        pattern_value: patternValue,
-        working_days: workingDays,
-        moving_type: movingType,
-     
-        min_output: minOutput,
-        prl_reference: reference,
-        status: "Active",
-      }).unwrap();
+      // Satu pattern per mesin, dibuat berurutan.
+      const createdRows: MachinePatternRow[] = [];
+      const failures: string[] = [];
+      for (const plan of plans) {
+        try {
+          const created = await createMachinePattern({
+            uniq_code: uniqCode,
+            machine_id: plan.machine.machineId,
+            cycle_time: plan.cycle,
+            pattern_value: plan.calc.patternValue,
+            working_days: workingDays,
+            moving_type: plan.calc.movingType,
+            min_output: plan.calc.minOutput,
+            prl_reference: plan.calc.prlReference,
+            status: "Active",
+          }).unwrap();
+          createdRows.push(toRow(plan, created as unknown as Record<string, any>));
+        } catch (error) {
+          failures.push(`${plan.machine.machineName}: ${getApiErrorMessage(error, "gagal ditambahkan")}`);
+        }
+      }
 
-      const createdMachineId = Number(created.machine_id || machineId);
-      openPatternDetail({
-        key: String(created.id),
-        id: String(created.id),
-        uniqCode: created.uniq_code || values.uniqCode,
-        machineId: createdMachineId,
-        machineName: machineNameById.get(createdMachineId) ?? `Machine #${createdMachineId}`,
-        cycleTime: Number(created.cycle_time || cycle),
-        patternValue: Number(created.pattern_value ?? patternValue),
-        workingDays: Number(created.working_days || workingDays),
-        movingType: toUiMovingType(created.moving_type || movingType),
-        minOutput: Number(created.min_output ?? minOutput),
-        prlReference: Number(created.prl_reference ?? reference),
-        status: toUiStatus(created.status),
-      });
-
-      setAddOpen(false);
-      addForm.resetFields();
-      setAutoCalc(null);
-      message.success("Pattern added");
+      if (createdRows.length > 0) {
+        if (createdRows.length === 1) openPatternDetail(createdRows[0]);
+        setAddOpen(false);
+        addForm.resetFields();
+        setAutoCalc(null);
+        message.success(
+          createdRows.length === 1
+            ? "Pattern added"
+            : `${createdRows.length} pattern added (${createdRows.map((row) => row.machineName).join(", ")})`,
+        );
+      }
+      if (failures.length > 0) message.error(failures.join(" | "));
+      if (unregistered.length > 0) {
+        message.warning(`Dilewati, belum terdaftar di Machine Master Data: ${unregistered.map((m) => m.machineName).join(", ")}`);
+      }
     } catch (error) {
       if (error && typeof error === "object" && "errorFields" in error) return;
       message.error(getApiErrorMessage(error, "Failed to add machine pattern"));
@@ -853,8 +993,8 @@ const periodOptions = useMemo(() => {
             >
               Cancel
             </Button>
-            <Button type="primary" className="!rounded-lg" icon={<PlusOutlined />} onClick={handleAddSubmit} loading={createState.isLoading}>
-              Add Pattern
+            <Button type="primary" className="!rounded-lg" icon={<PlusOutlined />} onClick={handleAddSubmit} loading={createState.isLoading} disabled={bomMachinesLoading}>
+              {bomMachines.filter((m) => m.resolved).length > 1 ? `Add ${bomMachines.filter((m) => m.resolved).length} Patterns` : "Add Pattern"}
             </Button>
           </div>
         }
@@ -875,8 +1015,24 @@ const periodOptions = useMemo(() => {
               listHeight={320}
             />
           </Form.Item>
-          <Form.Item name="machineId" label="Machine Name (from Machine Master Data)" rules={[{ required: true, message: "Required" }]}>
-            <Select options={machineOptions} placeholder="Select machine" className="w-full" showSearch optionFilterProp="label" />
+          <Form.Item
+            label="Machine Name (from Bill of Material)"
+            extra={bomMachines.length > 1 ? `${bomMachines.length} mesin di BOM — satu pattern dibuat untuk tiap mesin` : undefined}
+          >
+            <Input
+              disabled
+              className="w-full"
+              value={
+                !watchUniq
+                  ? ""
+                  : bomMachinesLoading
+                    ? "Memuat mesin dari BOM..."
+                    : bomMachines.length === 0
+                      ? "Tidak ada mesin di Process Routes BOM"
+                      : bomMachines.map((machine) => (machine.resolved ? machine.machineName : `${machine.machineName} (belum terdaftar)`)).join(", ")
+              }
+              placeholder="Retrieved from Bill of Material"
+            />
           </Form.Item>
           <Form.Item name="period" label="Period per Month" rules={[{ required: true, message: "Required" }]} extra={effectiveWorkingDays > 0 ? `Working Days: ${effectiveWorkingDays} (from System Settings)` : "Working Days retrieved from System Settings"}>
             <Select options={periodOptions} placeholder="Select period" className="w-full" showSearch optionFilterProp="label" notFoundContent="No periods in System Settings" />
@@ -907,7 +1063,7 @@ const periodOptions = useMemo(() => {
             </div>
           ) : (
             <div className="mt-2 rounded-xl border border-dashed border-gray-200 bg-gray-50 p-4 text-xs text-gray-500">
-              Pilih Uniq, Machine, Period &amp; Cycle Time — Pattern Value, Min Output, PRL Reference, dan Moving Type dihitung otomatis lalu langsung masuk ke detail dashboard.
+              Pilih Uniq, Period &amp; Cycle Time — Pattern Value, Min Output, PRL Reference, dan Moving Type dihitung otomatis lalu langsung masuk ke detail dashboard.
             </div>
           )}
         </Form>

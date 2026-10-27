@@ -167,12 +167,21 @@ export interface PoBudgetUpdateRequest {
   period: string;
 }
 
+/** Satu supplier beserta quantity-nya pada sebuah entry PR Budget. */
+export type PoBudgetEntrySupplier = {
+  supplierId?: string;
+  supplierName: string;
+  quantity: number;
+};
+
 export type PoBudgetRow = {
   key: string;
   id?: string;
   poBudgetRef?: string;
   uniq: string;
   prlRef?: string;
+  /** Rincian supplier + quantity per supplier (semua tipe budget). */
+  suppliers?: PoBudgetEntrySupplier[];
   customer: string;
   customerId?: string;
   contactPerson?: string;
@@ -215,6 +224,11 @@ export type PoBudgetGroupedDetail = {
     part_name?: string;
     part_number?: string;
     supplier_name?: string;
+    suppliers?: Array<{
+      supplier_id?: number | string | null;
+      supplier_name?: string;
+      quantity?: number;
+    }>;
     budget_type?: string;
     type_label?: string;
     period?: string;
@@ -478,6 +492,20 @@ const toPoBudgetRow = (item: unknown, index: number): PoBudgetRow => {
     partNumber: getString(record, ["part_number", "partNumber"]),
     supplier: getString(record, ["supplier_name", "supplier"]) ?? "-",
     supplierId: getString(record, ["supplier_id"]),
+    suppliers: Array.isArray(record.suppliers)
+      ? record.suppliers.flatMap((item): PoBudgetEntrySupplier[] => {
+          if (!isRecord(item)) return [];
+          const supplierName = getString(item, ["supplier_name"]) ?? "";
+          if (!supplierName) return [];
+          return [
+            {
+              supplierId: getString(item, ["supplier_id"]),
+              supplierName,
+              quantity: getNumber(item, ["quantity"]) ?? 0,
+            },
+          ];
+        })
+      : [],
     type: getString(record, ["type_label", "budget_subtype", "type"]) ?? "",
     budgetSubtype:
       (getString(record, ["budget_subtype"]) ?? "").trim().toLowerCase() ||

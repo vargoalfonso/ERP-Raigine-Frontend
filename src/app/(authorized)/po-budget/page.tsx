@@ -27,10 +27,7 @@ import {
 import { getCurrentUserDisplayName } from "@/lib/utils/currentUser";
 import type { ApiResponse } from "@/types";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
-import {
-  isSubconMaterialSpec,
-  pickSupplierItemsByType,
-} from "@/lib/utils/supplierItemType";
+import { pickSupplierItemsByType } from "@/lib/utils/supplierItemType";
 import {
   buildBulkChildRowsFromPrlDetail,
   buildSingleChildRowsFromPrlDetail,
@@ -142,6 +139,8 @@ type PoBudgetRow = {
   key: string;
   uniq: string;
   prlRef?: string;
+  /** Rincian supplier + quantity per supplier dari API PR Budget. */
+  suppliers?: Array<{ supplierId?: string; supplierName: string; quantity: number }>;
   customer: string;
   productModel: string;
   partName: string;
@@ -1300,19 +1299,15 @@ export default function PoBudgetPage() {
       grouped.set(uniqCode, current);
     });
 
-    // UNIQ subcon (atau tab Subcon): hanya Supplier Item bertipe `subcon`
-    // yang boleh dipakai, supaya pemasok bahan baku tidak ikut menjadi SubCon.
+    // Supplier mengikuti KATEGORI tab yang sedang aktif: UNIQ yang terdaftar di
+    // beberapa supplier (mis. M15 di supplier raw dan subcon) hanya mengambil
+    // supplier bertipe sama dengan tab. Tipe lain tidak ikut terpilih.
     grouped.forEach((items, uniqCode) => {
-      if (
-        activeTab === "subcon" ||
-        isSubconMaterialSpec(bomIndex.materialSpecByUniq[uniqCode])
-      ) {
-        grouped.set(uniqCode, pickSupplierItemsByType(items, "subcon"));
-      }
+      grouped.set(uniqCode, pickSupplierItemsByType(items, activeTab));
     });
 
     return grouped;
-  }, [activeTab, supplierItems, bomIndex.materialSpecByUniq]);
+  }, [activeTab, supplierItems]);
 
   // Tab-agnostic index of every active supplier item, keyed by BOTH its
   // uniq_code and sebango_code. Child rows (raw-material / indirect budgets)
@@ -1368,11 +1363,10 @@ export default function PoBudgetPage() {
       });
     });
 
-    if (activeTab === "subcon") {
-      grouped.forEach((items, lookupKey) => {
-        grouped.set(lookupKey, pickSupplierItemsByType(items, "subcon"));
-      });
-    }
+    // Supplier mengikuti kategori tab aktif (raw / indirect / subcon).
+    grouped.forEach((items, lookupKey) => {
+      grouped.set(lookupKey, pickSupplierItemsByType(items, activeTab));
+    });
 
     return grouped;
   }, [activeTab, supplierItems]);
@@ -1961,16 +1955,10 @@ export default function PoBudgetPage() {
       (a, b) => Number(a.row_id ?? 0) - Number(b.row_id ?? 0),
     );
 
-    // Pencarian di atas sengaja tidak memfilter tipe (part subcon bisa
-    // terdaftar dengan kode sebango). Tapi bila item ini subcon menurut BOM,
-    // pemasok bahan baku (tipe raw_material) tidak boleh ikut terpilih.
-    const subconSpec =
-      row.materialSpec ??
-      bomIndex.materialSpecByUniq[getChildSupplierLookupUniq(row)] ??
-      bomIndex.materialSpecByUniq[row.uniq];
-    return isSubconMaterialSpec(subconSpec)
-      ? pickSupplierItemsByType(sorted, "subcon")
-      : sorted;
+    // Pencarian di atas (uniq / kode sebango) tidak memfilter tipe, jadi di sini
+    // supplier dibatasi ke kategori tab aktif: tab Raw hanya supplier raw,
+    // tab Subcon hanya supplier subcon, tab Indirect hanya supplier indirect.
+    return pickSupplierItemsByType(sorted, activeTab);
   };
 
   const buildSupplierOptionsFromItems = (
@@ -2558,12 +2546,7 @@ export default function PoBudgetPage() {
       related = supplierItems.filter(
         (it) => String(it.uniq_code ?? it.item_uniq_code ?? "").trim() === uniq,
       );
-      if (
-        activeTab === "subcon" ||
-        isSubconMaterialSpec(bomIndex.materialSpecByUniq[uniq])
-      ) {
-        related = pickSupplierItemsByType(related, "subcon");
-      }
+      related = pickSupplierItemsByType(related, activeTab);
     }
     const relatedNames = new Set(
       related
@@ -3632,6 +3615,24 @@ export default function PoBudgetPage() {
     return groupedDetail?.basic_information?.supplier_name ?? "-";
   })();
 
+  // Rincian supplier + quantity per supplier (dari API PR Budget). Dipakai untuk
+  // memperlihatkan sumber supplier ketika entry punya lebih dari satu supplier.
+  const detailSupplierBreakdown = (() => {
+    const fromApi = groupedDetail?.basic_information?.suppliers;
+    if (Array.isArray(fromApi) && fromApi.length > 0) {
+      return fromApi
+        .map((item) => ({
+          name: String(item?.supplier_name ?? "").trim(),
+          quantity: Number(item?.quantity ?? 0),
+        }))
+        .filter((item) => item.name);
+    }
+    return (detailState.row?.suppliers ?? []).map((item) => ({
+      name: item.supplierName,
+      quantity: item.quantity,
+    }));
+  })();
+
   const openDetail = (row: PoBudgetRow) => {
     if (!row.id && useApi) {
       message.warning("This row does not have a detail reference yet.");
@@ -3689,7 +3690,7 @@ export default function PoBudgetPage() {
   const columns = useMemo<ColumnsType<PoBudgetRow>>(
     () => [
       {
-        title: activeTab === "subcon" ? "Uniq" : "PRL ID",
+        title: "PRL ID",
         dataIndex: "uniq",
         key: "uniq",
         render: (value: string, record) => {
@@ -3699,8 +3700,12 @@ export default function PoBudgetPage() {
               sum + (Array.isArray(p.children) ? p.children.length : 0),
             0,
           );
-          const displayValue =
-            activeTab !== "subcon" && record.prlRef ? record.prlRef : value;
+          // Tab Subcon: kolom ini murni PRL ID (kolom Uniq terpisah di sebelahnya).
+          const displayValue = record.prlRef
+            ? record.prlRef
+            : activeTab === "subcon"
+              ? "-"
+              : value;
 
           if (activeTab === "subcon" || childCount === 0) {
             return (
@@ -3730,6 +3735,18 @@ export default function PoBudgetPage() {
           );
         },
       },
+      ...(activeTab === "subcon"
+        ? [
+            {
+              title: "Uniq",
+              dataIndex: "uniq",
+              key: "subconUniq",
+              render: (value: string) => (
+                <span className="text-sm font-medium text-gray-700">{value}</span>
+              ),
+            },
+          ]
+        : []),
       {
         title: "Customer",
         dataIndex: "customer",
@@ -5702,6 +5719,37 @@ export default function PoBudgetPage() {
                   {detailSupplierName}
                 </div>
               </div>
+              {detailSupplierBreakdown.length > 1 ? (
+                <div className="md:col-span-2">
+                  <div className="text-[11px] font-medium text-gray-500 uppercase">
+                    Suppliers &amp; Quantity
+                  </div>
+                  <div className="mt-1 divide-y divide-gray-100 rounded-lg border border-gray-200 bg-gray-50">
+                    {detailSupplierBreakdown.map((item) => (
+                      <div
+                        key={item.name}
+                        className="flex items-center justify-between px-3 py-2 text-sm"
+                      >
+                        <span className="text-gray-800">{item.name}</span>
+                        <span className="font-medium tabular-nums text-gray-900">
+                          {formatNumber(item.quantity)}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between px-3 py-2 text-sm font-semibold">
+                      <span className="text-gray-600">Total</span>
+                      <span className="tabular-nums text-gray-900">
+                        {formatNumber(
+                          detailSupplierBreakdown.reduce(
+                            (sum, item) => sum + item.quantity,
+                            0,
+                          ),
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               <div>
                 <div className="text-[11px] font-medium text-gray-500 uppercase">
                   Type
