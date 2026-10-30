@@ -43,6 +43,14 @@ import {
   useUpdateScrapStockMutation,
   useDeleteScrapStockMutation,
 } from "@/lib/api/scrap-stock/api";
+import DateRangeFilter from "@/components/DateRangeFilter";
+import ExportExcelButton from "@/components/ExportExcelButton";
+import {
+  exportRowsToExcel,
+  filterByDateRange,
+  pickDateValue,
+  type DateRangeValue,
+} from "@/lib/utils/dateRange";
 import { useGetEmployeesQuery } from "@/lib/api/system-settings/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
@@ -514,28 +522,33 @@ export default function ScrapStockPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [tab, setTab] = useState("scrap");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(null);
   const apiEnabled = Boolean(apiBaseUrl);
 
-  const scrapStocksQuery = useGetScrapStocksQuery(
-    { page: currentPage, limit: pageSize },
-    { skip: !apiEnabled || tab !== "scrap" },
-  );
+  // Saat filter tanggal aktif, ambil seluruh data lalu filter & paginate di client
+  // supaya hasil filter (dan export) mencakup semua halaman.
+  const dateFilterActive = dateRange !== null;
+  const listArgs = dateFilterActive
+    ? { page: 1, limit: 10000 }
+    : { page: currentPage, limit: pageSize };
+
+  const scrapStocksQuery = useGetScrapStocksQuery(listArgs, {
+    skip: !apiEnabled || tab !== "scrap",
+  });
   const scrapStatsQuery = useGetScrapStocksStatsQuery(undefined, {
     skip: !apiEnabled,
   });
 
-  const releasesQueryPlural = useGetScrapReleasesQuery(
-    { page: currentPage, limit: pageSize },
-    { skip: !apiEnabled || tab !== "release" },
-  );
+  const releasesQueryPlural = useGetScrapReleasesQuery(listArgs, {
+    skip: !apiEnabled || tab !== "release",
+  });
   const useLegacyReleases =
     apiEnabled &&
     tab === "release" &&
     isNotFoundError(releasesQueryPlural.error);
-  const releasesQueryLegacy = useGetScrapReleasesLegacyQuery(
-    { page: currentPage, limit: pageSize },
-    { skip: !useLegacyReleases },
-  );
+  const releasesQueryLegacy = useGetScrapReleasesLegacyQuery(listArgs, {
+    skip: !useLegacyReleases,
+  });
 
   const releasesQuery = useLegacyReleases
     ? releasesQueryLegacy
@@ -739,6 +752,132 @@ export default function ScrapStockPage() {
   const releaseTotal = apiEnabled
     ? (releasesQuery.data?.pagination?.total ?? releaseRows.length)
     : releaseRows.length;
+
+  // Baris yang tampil = filter tanggal + pencarian.
+  const visibleScrapRows = useMemo(() => {
+    const q = searchValue.trim().toLowerCase();
+    return filterByDateRange(scrapRows, dateRange, (r) =>
+      pickDateValue(r, ["date_received", "created_at"]),
+    ).filter((r) => {
+      if (!q) return true;
+      return [
+        r.part_name,
+        r.wo_number ?? "",
+        r.uniq,
+        r.part_number,
+        r.model,
+        r.scrap_type,
+        r.packing_number,
+        r.validator,
+        r.status,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [scrapRows, dateRange, searchValue]);
+
+  const visibleReleaseRows = useMemo(() => {
+    const q = searchValue.trim().toLowerCase();
+    return filterByDateRange(releaseRows, dateRange, (r) =>
+      pickDateValue(r, ["release_date", "created_at"]),
+    ).filter((r) => {
+      if (!q) return true;
+      const stock = scrapStockById.get(r.scrap_stock_id);
+      return [
+        r.release_number,
+        r.release_type,
+        r.customer_name ?? "",
+        r.disposal_reason ?? "",
+        r.approval_status,
+        r.validator ?? "",
+        String(r.scrap_stock_id),
+        stock?.uniq ?? "",
+        stock?.part_number ?? "",
+        stock?.part_name ?? "",
+        stock?.model ?? "",
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [releaseRows, dateRange, searchValue, scrapStockById]);
+
+  const handleExport = () => {
+    const fmt = (v?: string | null) =>
+      v && dayjs(v).isValid() ? dayjs(v).format("YYYY-MM-DD") : "";
+    const count =
+      tab === "scrap"
+        ? exportRowsToExcel(
+            visibleScrapRows.map((r) => ({
+              "Uniq Code": r.uniq,
+              "Part Number": r.part_number,
+              "Part Name": r.part_name,
+              Model: r.model,
+              "WO Number": r.wo_number ?? "",
+              "Scrap Type": r.scrap_type,
+              UoM: r.uom,
+              Qty: r.quantity ?? 0,
+              "Weight (kg)": Number(r.weight_kg ?? 0),
+              "Date Received": fmt(r.date_received),
+              "Packing Number": r.packing_number,
+              Validator: r.validator,
+              Status: r.status,
+            })),
+            {
+              sheetName: "Scrap Stock",
+              fileNamePrefix: "scrap-stock",
+              range: dateRange,
+            },
+          )
+        : exportRowsToExcel(
+            visibleReleaseRows.map((r) => {
+              const stock = scrapStockById.get(r.scrap_stock_id);
+              const uniqs =
+                r.items && r.items.length > 0
+                  ? r.items
+                      .map((it) => `${it.uniq || "-"} (${it.release_qty})`)
+                      .join(", ")
+                  : (stock?.uniq ?? "");
+              return {
+                "Release Number": r.release_number,
+                "Release Date": fmt(r.release_date),
+                Type: r.release_type,
+                "Uniq (Qty)": uniqs,
+                "Part Name": stock?.part_name ?? "",
+                Model: stock?.model ?? "",
+                "Qty Released": r.release_qty ?? 0,
+                Customer: r.customer_name ?? "",
+                "Disposal Reason": r.disposal_reason ?? "",
+                "Approval Status": r.approval_status,
+                Validator: r.validator ?? "",
+              };
+            }),
+            {
+              sheetName: "Scrap Release",
+              fileNamePrefix: "scrap-release",
+              range: dateRange,
+            },
+          );
+    if (count === 0) {
+      messageApi.warning("Tidak ada data untuk diekspor");
+      return;
+    }
+    messageApi.success(`Berhasil mengekspor ${count} baris`);
+  };
+
+  const toolbarActions = (
+    <div className="flex flex-wrap items-center gap-2">
+      <DateRangeFilter
+        value={dateRange}
+        onChange={(v) => {
+          setDateRange(v);
+          setCurrentPage(1);
+        }}
+      />
+      <ExportExcelButton onClick={handleExport} hasDateRange={dateFilterActive} />
+    </div>
+  );
   const columnsStatus: ColumnType<FinishedGoodsRecord>[] = [
     {
       title: "Alert Type",
@@ -1081,31 +1220,15 @@ export default function ScrapStockPage() {
                   sortFieldKey?: string;
                 })[]
               }
-              data={scrapRows.filter((r) => {
-                const q = searchValue.trim().toLowerCase();
-                if (!q) return true;
-                return [
-                  r.part_name,
-                  r.wo_number ?? "",
-                  r.uniq,
-                  r.part_number,
-                  r.model,
-                  r.scrap_type,
-                  r.packing_number,
-                  r.validator,
-                  r.status,
-                ]
-                  .join(" ")
-                  .toLowerCase()
-                  .includes(q);
-              })}
+              data={visibleScrapRows}
               rowKey={(r) => r.uuid || String(r.id)}
               searchValue={searchValue}
               onSearchChange={setSearchValue}
               searchPlaceholder="Search scrap..."
+              actions={toolbarActions}
               pageSize={pageSize}
               currentPage={currentPage}
-              total={scrapTotal}
+              total={dateFilterActive ? visibleScrapRows.length : scrapTotal}
               onPageChange={setCurrentPage}
               onPageSizeChange={setPageSize}
               loading={loading || scrapStocksQuery.isFetching}
@@ -1117,34 +1240,15 @@ export default function ScrapStockPage() {
                   sortFieldKey?: string;
                 })[]
               }
-              data={releaseRows.filter((r) => {
-                const q = searchValue.trim().toLowerCase();
-                if (!q) return true;
-                const stock = scrapStockById.get(r.scrap_stock_id);
-                return [
-                  r.release_number,
-                  r.release_type,
-                  r.customer_name ?? "",
-                  r.disposal_reason ?? "",
-                  r.approval_status,
-                  r.validator ?? "",
-                  String(r.scrap_stock_id),
-                  stock?.uniq ?? "",
-                  stock?.part_number ?? "",
-                  stock?.part_name ?? "",
-                  stock?.model ?? "",
-                ]
-                  .join(" ")
-                  .toLowerCase()
-                  .includes(q);
-              })}
+              data={visibleReleaseRows}
               rowKey={(r) => r.uuid || String(r.id)}
               searchValue={searchValue}
               onSearchChange={setSearchValue}
               searchPlaceholder="Search release..."
+              actions={toolbarActions}
               pageSize={pageSize}
               currentPage={currentPage}
-              total={releaseTotal}
+              total={dateFilterActive ? visibleReleaseRows.length : releaseTotal}
               onPageChange={setCurrentPage}
               onPageSizeChange={setPageSize}
               loading={

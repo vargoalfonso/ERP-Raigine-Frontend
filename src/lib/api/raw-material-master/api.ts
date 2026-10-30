@@ -19,11 +19,18 @@ export type RawMaterialMaster = {
   status: "Active" | "Inactive";
   bom_usage_count: number;
   inventory_qty: number;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 export type RawMaterialMasterInput = Omit<
   RawMaterialMaster,
-  "id" | "spec_key" | "bom_usage_count" | "inventory_qty"
+  | "id"
+  | "spec_key"
+  | "bom_usage_count"
+  | "inventory_qty"
+  | "created_at"
+  | "updated_at"
 >;
 
 export type RawMaterialPlanningItem = {

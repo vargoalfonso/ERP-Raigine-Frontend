@@ -39,6 +39,15 @@ import {
 } from "@/lib/utils/excel/indirectExcelConfig";
 import { consumeFlashMessage } from "@/lib/utils/flashMessage";
 import PrintButton from "@/components/PrintButton";
+import DateRangeFilter from "@/components/DateRangeFilter";
+import ExportExcelButton from "@/components/ExportExcelButton";
+import {
+  exportRowsToExcel,
+  filterByDateRange,
+  formatDateTimeForExport,
+  pickDateValue,
+  type DateRangeValue,
+} from "@/lib/utils/dateRange";
 import type { PrintCardOptions } from "@/lib/utils/printCard";
 
 type IndirectRawMaterialRow = {
@@ -54,6 +63,8 @@ type IndirectRawMaterialRow = {
   safetyStockDays: number;
   status: "NORMAL" | "LOW STOCK";
   buyFlag: "BUY" | "NOT BUY";
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 type UnknownRecord = Record<string, unknown>;
@@ -77,6 +88,8 @@ const mapInventoryToIndirectRow = (record: InventoryRecord): IndirectRawMaterial
     safetyStockDays: 0,
     status: currentStock > 20 ? "NORMAL" : "LOW STOCK",
     buyFlag: currentStock > 20 ? "NOT BUY" : "BUY",
+    createdAt: record.created_at || undefined,
+    updatedAt: record.updated_at || undefined,
   };
 };
 
@@ -168,10 +181,13 @@ export default function IndirectRawMaterialsPage() {
   const [messageApi, contextHolder] = message.useMessage();
 
   const [query, setQuery] = useState("");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(null);
   const [rows, setRows] = useState<IndirectRawMaterialRow[]>(initialRows);
   const apiEnabled = Boolean(apiBaseUrl);
+  // Saat filter tanggal aktif, ambil seluruh data supaya hasil filter & export lengkap.
+  const dateFilterActive = dateRange !== null;
   const listQuery = useGetInventoryListQuery(
-    { type: "indirect-materials", page: 1, limit: 20 },
+    { type: "indirect-materials", page: 1, limit: dateFilterActive ? 10000 : 20 },
     { skip: !apiEnabled }
   );
 
@@ -268,15 +284,44 @@ export default function IndirectRawMaterialsPage() {
 
   const filteredRows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return inventoryRows;
-    return inventoryRows.filter((r) => {
+    const byDate = filterByDateRange(inventoryRows, dateRange, (r) =>
+      pickDateValue(r, ["createdAt", "updatedAt"]),
+    );
+    if (!q) return byDate;
+    return byDate.filter((r) => {
       return (
         r.uniq.toLowerCase().includes(q) ||
         r.partNumber.toLowerCase().includes(q) ||
         r.partName.toLowerCase().includes(q)
       );
     });
-  }, [inventoryRows, query]);
+  }, [inventoryRows, query, dateRange]);
+
+  const handleExport = () => {
+    const count = exportRowsToExcel(
+      filteredRows.map((r) => ({
+        Uniq: r.uniq,
+        "Part Number": r.partNumber,
+        "Part Name": r.partName,
+        Warehouse: r.warehouse,
+        "Current Stock": r.currentStock,
+        Status: r.status,
+        "Buy Flag": r.buyFlag,
+        "Created At": formatDateTimeForExport(r.createdAt),
+        "Updated At": formatDateTimeForExport(r.updatedAt),
+      })),
+      {
+        sheetName: "Indirect Raw Material",
+        fileNamePrefix: "indirect-raw-material",
+        range: dateRange,
+      },
+    );
+    if (count === 0) {
+      messageApi.warning("Tidak ada data untuk diekspor");
+      return;
+    }
+    messageApi.success(`Berhasil mengekspor ${count} baris`);
+  };
 
   const openDelete = (row: IndirectRawMaterialRow) => {
     setDeletingRow(row);
@@ -530,7 +575,12 @@ export default function IndirectRawMaterialsPage() {
             className="max-w-xl"
           />
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <DateRangeFilter value={dateRange} onChange={setDateRange} />
+            <ExportExcelButton
+              onClick={handleExport}
+              hasDateRange={dateFilterActive}
+            />
             <Button icon={<FilterOutlined />}>Filter</Button>
             <Button>Create DN for Supplier</Button>
           </div>

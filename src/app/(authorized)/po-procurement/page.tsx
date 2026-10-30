@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { Button, InputNumber, Pagination, Select, Table, Tag, message } from "antd";
+import { Button, Input, InputNumber, Pagination, Select, Table, Tag, message } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
   DownloadOutlined,
@@ -12,6 +12,7 @@ import {
   ShoppingCartOutlined,
   WarningOutlined,
   QrcodeOutlined,
+  SearchOutlined,
 } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
@@ -240,6 +241,7 @@ function PoProcurementPageContent() {
   const [activeTab, setActiveTab] = useState<ProcurementTab>("raw");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [searchValue, setSearchValue] = useState("");
 
   const apiEnabled = Boolean(apiBaseUrl);
 
@@ -372,11 +374,20 @@ function PoProcurementPageContent() {
     message.error(getApiErrorMessage(error, "Failed to load purchase orders"));
   }, [apiEnabled, poListQuery.error, summaryQuery.error]);
 
+  // Search berdasarkan nomor PO (PO Number & No. PO Zahir).
+  const filteredRows = useMemo(() => {
+    const q = searchValue.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) =>
+      [r.poNumber, r.externalPoNumber ?? ""].some((v) => v.toLowerCase().includes(q)),
+    );
+  }, [rows, searchValue]);
+
   const pagedRows = useMemo(() => {
     const start = (page - 1) * pageSize;
     const end = start + pageSize;
-    return rows.slice(start, end);
-  }, [rows, page, pageSize]);
+    return filteredRows.slice(start, end);
+  }, [filteredRows, page, pageSize]);
 
   const columns: ColumnsType<PoRow> = [
     {
@@ -545,7 +556,7 @@ function PoProcurementPageContent() {
     "rounded-lg px-4 py-2 text-sm font-medium transition-colors border " +
     (on ? "bg-white text-gray-900 border-gray-200 shadow-sm" : "bg-transparent text-gray-600 border-transparent hover:bg-white");
 
-  const totalRows = rows.length;
+  const totalRows = filteredRows.length;
   const startText = totalRows === 0 ? 0 : (page - 1) * pageSize + 1;
   const endText = Math.min(page * pageSize, totalRows);
 
@@ -656,7 +667,9 @@ function PoProcurementPageContent() {
               <div className="text-sm text-gray-500 mt-1">
                 Track PO totals, incoming deliveries, and supplier performance with DN monitoring
               </div>
-              <div className="mt-2 text-xs text-gray-500">{rows.length} purchase orders</div>
+              <div className="mt-2 text-xs text-gray-500">
+                {searchValue.trim() ? `${filteredRows.length} of ${rows.length}` : rows.length} purchase orders
+              </div>
               {apiEnabled && (poListQuery.isFetching || summaryQuery.isFetching) && <div className="mt-1 text-xs text-gray-400">Loading from API…</div>}
             </div>
 
@@ -667,6 +680,20 @@ function PoProcurementPageContent() {
             >
               View DN Board
             </Button>
+          </div>
+
+          <div className="mt-4">
+            <Input
+              value={searchValue}
+              onChange={(e) => {
+                setSearchValue(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Search by PO Number or No. PO Zahir..."
+              prefix={<SearchOutlined className="text-gray-400" />}
+              className="md:max-w-[420px]"
+              allowClear
+            />
           </div>
 
           <div className="mt-4 overflow-hidden rounded-xl border border-gray-100">

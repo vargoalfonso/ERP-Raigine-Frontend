@@ -50,6 +50,14 @@ import {
   useLazyGetDeliveryNoteByUniqQuery,
 } from "@/lib/api/finished-goods/api";
 import PrintButton from "@/components/PrintButton";
+import DateRangeFilter from "@/components/DateRangeFilter";
+import {
+  filterByDateRange,
+  formatDateTimeForExport,
+  formatRangeForFileName,
+  pickDateValue,
+  type DateRangeValue,
+} from "@/lib/utils/dateRange";
 import type { PrintCardOptions } from "@/lib/utils/printCard";
 
 function StatusTag({ status }: { status?: string }) {
@@ -575,6 +583,7 @@ export default function FinishedGoodsPage() {
 
   const [tab, setTab] = useState<"inventory" | "status">("inventory");
   const [searchValue, setSearchValue] = useState("");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(null);
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -599,8 +608,13 @@ export default function FinishedGoodsPage() {
     );
   }, []);
 
+  // Saat filter tanggal aktif, ambil seluruh data lalu filter & paginate di client
+  // supaya hasil filter mencakup semua halaman (bukan hanya halaman yang sedang dibuka).
+  const dateFilterActive = dateRange !== null;
   const listQuery = useGetFinishedGoodsQuery(
-    { page: currentPage, limit: pageSize },
+    dateFilterActive
+      ? { page: 1, limit: 10000 }
+      : { page: currentPage, limit: pageSize },
     { skip: !apiEnabled },
   );
   const summaryQuery = useGetFinishedGoodsSummaryQuery(undefined, {
@@ -608,12 +622,19 @@ export default function FinishedGoodsPage() {
   });
 
   const items = listQuery.data?.items ?? [];
-  const total = listQuery.data?.pagination.total ?? items.length;
+  const getItemDate = (r: FinishedGoodListItem) =>
+    pickDateValue(r, ["created_at", "updated_at"]);
+
+  const dateFilteredItems = useMemo(
+    () => filterByDateRange(items, dateRange, getItemDate),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, dateRange],
+  );
 
   const filteredItems = useMemo(() => {
     const q = searchValue.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((r) =>
+    if (!q) return dateFilteredItems;
+    return dateFilteredItems.filter((r) =>
       [
         r.uniq_code,
         r.part_number,
@@ -627,7 +648,11 @@ export default function FinishedGoodsPage() {
         .toLowerCase()
         .includes(q),
     );
-  }, [items, searchValue]);
+  }, [dateFilteredItems, searchValue]);
+
+  const total = dateFilterActive
+    ? filteredItems.length
+    : (listQuery.data?.pagination.total ?? items.length);
 
   const openDetail = (record: FinishedGoodListItem) => {
     setDetailRecord(record);
@@ -670,6 +695,7 @@ export default function FinishedGoodsPage() {
       "Warehouse Location": r.warehouse_location || "",
       UOM: r.uom || "",
       "Stock Status": statusMap[r.uniq_code] || "",
+      "Created At": formatDateTimeForExport(r.created_at),
       "Last Updated": r.updated_at
         ? new Date(r.updated_at).toLocaleString()
         : "",
@@ -691,12 +717,15 @@ export default function FinishedGoodsPage() {
       { wch: 20 }, // Warehouse Location
       { wch: 8 }, // UOM
       { wch: 14 }, // Stock Status
+      { wch: 20 }, // Created At
       { wch: 20 }, // Last Updated
     ];
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Finished Goods");
-    const dateStr = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(workbook, `finished-goods-${fileSuffix}-${dateStr}.xlsx`);
+    XLSX.writeFile(
+      workbook,
+      `finished-goods-${fileSuffix}-${formatRangeForFileName(dateRange)}.xlsx`,
+    );
     message.success(`Berhasil mengekspor ${rows.length} baris`);
   };
 
@@ -746,8 +775,8 @@ export default function FinishedGoodsPage() {
         { page: 1, limit: 10000 },
         true,
       ).unwrap();
-      const all = res?.items ?? [];
-      downloadExcel(all, "all");
+      const all = filterByDateRange(res?.items ?? [], dateRange, getItemDate);
+      downloadExcel(all, dateRange ? "filtered" : "all");
     } catch (e) {
       message.error("Gagal mengambil data untuk ekspor");
     } finally {
@@ -778,12 +807,15 @@ export default function FinishedGoodsPage() {
   // Urutkan UNIQ berdasarkan urgensi stok: Low -> Normal -> Overstock.
   // Array.sort stabil, jadi item dengan rank sama mempertahankan urutan aslinya.
   const sortedItems = useMemo(() => {
+    // Dengan filter tanggal aktif, urutan mengikuti data (tidak di-sort per status)
+    // karena status hanya di-probe untuk halaman yang sedang tampil.
+    if (dateFilterActive) return displayItems;
     return [...displayItems].sort(
       (a, b) =>
         stockStatusRank(statusMap[a.uniq_code]) -
         stockStatusRank(statusMap[b.uniq_code]),
     );
-  }, [displayItems, statusMap]);
+  }, [displayItems, statusMap, dateFilterActive]);
 
   const columns: ColumnsType<FinishedGoodListItem> = [
     { title: "Uniq", dataIndex: "uniq_code", key: "uniq", width: 110 },
@@ -1078,7 +1110,14 @@ export default function FinishedGoodsPage() {
               allowClear
             />
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <DateRangeFilter
+                value={dateRange}
+                onChange={(v) => {
+                  setDateRange(v);
+                  setCurrentPage(1);
+                }}
+              />
               <Select
                 value={typeFilter}
                 onChange={setTypeFilter}
@@ -1104,7 +1143,9 @@ export default function FinishedGoodsPage() {
                     },
                     {
                       key: "all",
-                      label: "Export All",
+                      label: dateRange
+                        ? "Export by Date Range"
+                        : "Export All",
                       onClick: () => handleExportAll(),
                     },
                   ],
@@ -1130,7 +1171,13 @@ export default function FinishedGoodsPage() {
           </div>
 
           {tab === "inventory"
-            ? displayItems.map((it) => (
+            ? (dateFilterActive
+                ? displayItems.slice(
+                    (currentPage - 1) * pageSize,
+                    currentPage * pageSize,
+                  )
+                : displayItems
+              ).map((it) => (
                 <StockStatusProbe
                   key={`probe-${it.uniq_code}`}
                   uniqCode={it.uniq_code}

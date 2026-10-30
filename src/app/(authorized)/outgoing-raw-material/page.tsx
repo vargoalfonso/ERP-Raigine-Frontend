@@ -25,6 +25,15 @@ import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
 import { useListWarehousesQuery } from "@/lib/api/warehouse/api";
 import { useGetEmployeesQuery } from "@/lib/api/system-settings/api";
 import { useGetWorkOrdersQuery } from "@/lib/api/work-orders/api";
+import DateRangeFilter from "@/components/DateRangeFilter";
+import ExportExcelButton from "@/components/ExportExcelButton";
+import {
+  exportRowsToExcel,
+  filterByDateRange,
+  formatDateTimeForExport,
+  pickDateValue,
+  type DateRangeValue,
+} from "@/lib/utils/dateRange";
 
 type OutgoingFormValues = {
   po_number?: string;
@@ -68,13 +77,17 @@ export default function OutgoingRawMaterialPage() {
   const [pageSize, setPageSize] = useState(20);
 
   const [reasonFilter, setReasonFilter] = useState<string>("ALL");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(null);
   const [trxOpen, setTrxOpen] = useState(false);
   // When set, the transaction modal is in "edit" mode for this row id.
   const [editId, setEditId] = useState<number | null>(null);
   const [form] = Form.useForm<OutgoingFormValues>();
 
+  // Saat filter tanggal aktif, ambil seluruh data lalu filter & paginate di client
+  // supaya hasil filter (dan export) mencakup semua halaman.
+  const dateFilterActive = dateRange !== null;
   const listQuery = useGetOutgoingRawMaterialsQuery(
-    { page: currentPage, limit: pageSize },
+    dateFilterActive ? { page: 1, limit: 10000 } : { page: currentPage, limit: pageSize },
     { skip: !apiEnabled }
   );
   const [createOutgoingRawMaterial, createState] = useCreateOutgoingRawMaterialMutation();
@@ -218,12 +231,44 @@ export default function OutgoingRawMaterialPage() {
   const incomingQty = selectedIncomingItem?.quantity ?? 0;
 
   const rows = listQuery.data?.items ?? [];
-  const total = listQuery.data?.pagination.total ?? rows.length;
 
   const data = useMemo(() => {
-    if (reasonFilter === "ALL") return rows;
-    return rows.filter((r) => (r.reason || "").toLowerCase() === reasonFilter.toLowerCase());
-  }, [reasonFilter, rows]);
+    const byDate = filterByDateRange(rows, dateRange, (r) =>
+      pickDateValue(r, ["transaction_date", "created_at"]),
+    );
+    if (reasonFilter === "ALL") return byDate;
+    return byDate.filter((r) => (r.reason || "").toLowerCase() === reasonFilter.toLowerCase());
+  }, [reasonFilter, rows, dateRange]);
+
+  const total = dateFilterActive ? data.length : (listQuery.data?.pagination.total ?? rows.length);
+
+  const handleExport = () => {
+    const count = exportRowsToExcel(
+      data.map((r) => ({
+        "Transaction ID": r.transaction_id ?? "",
+        Date: r.transaction_date ? r.transaction_date.substring(0, 10) : "",
+        Uniq: r.uniq ?? "",
+        "RM Name": r.rm_name ?? "",
+        "Qty Out": r.quantity_out,
+        Unit: r.unit ?? "",
+        "Stock Before": r.stock_before,
+        "Stock After": r.stock_after,
+        Reason: r.reason ?? "",
+        "Requested By": r.requested_by ?? "",
+        "Created At": formatDateTimeForExport(r.created_at),
+      })),
+      {
+        sheetName: "Outgoing Raw Material",
+        fileNamePrefix: "outgoing-raw-material",
+        range: dateRange,
+      },
+    );
+    if (count === 0) {
+      message.warning("Tidak ada data untuk diekspor");
+      return;
+    }
+    message.success(`Berhasil mengekspor ${count} baris`);
+  };
 
   const openTrx = () => {
     setTrxOpen(true);
@@ -536,6 +581,15 @@ export default function OutgoingRawMaterialPage() {
             ...reasonOptions.map((r) => ({ label: r, value: r })),
           ]}
         />
+        <span className="ml-2 text-gray-600">Date:</span>
+        <DateRangeFilter
+          value={dateRange}
+          onChange={(v) => {
+            setDateRange(v);
+            setCurrentPage(1);
+          }}
+        />
+        <ExportExcelButton onClick={handleExport} hasDateRange={dateFilterActive} />
       </div>
 
       <Table<OutgoingRawMaterial>
