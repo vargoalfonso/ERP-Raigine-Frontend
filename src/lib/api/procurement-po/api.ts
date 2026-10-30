@@ -146,6 +146,11 @@ export type GenerateProcurementPoRequest = {
   generate_mode?: "both_stages" | "stage_1" | "stage_2" | string;
 };
 
+export type UpdateProcurementPoRequest = {
+  po_id: string | number;
+  body: GenerateProcurementPoRequest;
+};
+
 const toProcurementPo = (raw: unknown): ProcurementPoRecord => {
   const record = isRecord(raw) ? raw : {};
   const totalPo =
@@ -321,6 +326,24 @@ export const procurementPoApiSlice = apiSlice
           { type: TAG, id: `SUMMARY-${arg.po_type}` },
         ],
       }),
+
+      // Edit PO: kirim ulang data yang sama seperti generate (period, budget entries,
+      // generate mode, external PO) untuk PO yang sudah ada.
+      updateProcurementPo: builder.mutation<ApiResponse<ProcurementPoRecord>, UpdateProcurementPoRequest>({
+        query: ({ po_id, body }) => ({
+          url: `/procurement/purchase-orders/${encodeURIComponent(String(po_id))}`,
+          method: "PUT",
+          body,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => ok(toProcurementPo(parseObjectResponse<unknown>(response)), "Updated"),
+        invalidatesTags: (_result, _error, arg) => [
+          { type: TAG, id: "LIST" },
+          { type: TAG, id: String(arg.po_id) },
+          { type: TAG, id: `LIST-${arg.body.po_type}` },
+          { type: TAG, id: `SUMMARY-${arg.body.po_type}` },
+        ],
+      }),
     }),
   });
 
@@ -330,5 +353,6 @@ export const {
   useLazyListProcurementPosQuery,
   useGetProcurementPoByIdQuery,
   useGenerateProcurementPoMutation,
+  useUpdateProcurementPoMutation,
 } = procurementPoApiSlice;
 

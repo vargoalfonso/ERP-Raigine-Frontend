@@ -537,7 +537,11 @@ function PoProcurementPageContent() {
             size="small"
             className="!rounded-lg"
             icon={<EditOutlined />}
-            onClick={() => message.info(`Edit PO: ${record.poNumber}`)}
+            onClick={() =>
+              router.push(
+                `/po-procurement/create?tab=${encodeURIComponent(activeTab)}&edit=${encodeURIComponent(record.key)}`,
+              )
+            }
           />
         </div>
       ),
