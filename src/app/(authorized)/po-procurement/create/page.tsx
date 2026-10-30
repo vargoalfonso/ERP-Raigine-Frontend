@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   DatePicker,
@@ -18,6 +18,8 @@ import dayjs, { Dayjs } from "dayjs";
 import { apiBaseUrl } from "@/lib/api/instance";
 import {
   useGenerateProcurementPoMutation,
+  useGetProcurementPoByIdQuery,
+  useUpdateProcurementPoMutation,
   type ProcurementPoType,
 } from "@/lib/api/procurement-po/api";
 import { getApiErrorMessage } from "@/lib/api/error";
@@ -92,6 +94,14 @@ function CreatePoProcurementPageContent() {
 
   const apiEnabled = Boolean(apiBaseUrl);
   const [generatePo, generatePoState] = useGenerateProcurementPoMutation();
+  const [updatePo, updatePoState] = useUpdateProcurementPoMutation();
+
+  // Mode edit: /po-procurement/create?tab=raw&edit=<po_id>
+  const editId = searchParams.get("edit");
+  const isEdit = Boolean(editId);
+  const poDetailQuery = useGetProcurementPoByIdQuery(editId ?? "", {
+    skip: !isEdit || !apiEnabled,
+  });
 
   const poType = useMemo(
     () => tabToPoType(searchParams.get("tab")),
@@ -121,6 +131,62 @@ function CreatePoProcurementPageContent() {
   >({});
   const [generateMode, setGenerateMode] = useState<string>("both_stages");
 
+  // Prefill dari data PO yang pernah diinput (mode edit).
+  const hydratedRef = useRef(false);
+  // True setelah daftar budget termuat & entry lama dicocokkan; sebelum itu grup PO
+  // yang tampil belum final, jadi External PO Number belum boleh diisi.
+  const [editResolved, setEditResolved] = useState(false);
+  const subtypeCheckedRef = useRef(false);
+  const pendingExternalRef = useRef<{
+    raw: string;
+    stage?: number;
+    supplier?: string;
+  } | null>(null);
+  const editBudgetIds = useRef<number[]>([]);
+  const editBudgetRefs = useRef<string[]>([]);
+  const editRefIds = useRef<number[]>([]);
+  const editPeriodRaw = useRef<string>("");
+
+  useEffect(() => {
+    if (!isEdit || hydratedRef.current) return;
+    const po = poDetailQuery.data?.data?.po;
+    if (!po) return;
+    hydratedRef.current = true;
+
+    const rawPeriod = String(po.period ?? po.month ?? "").trim();
+    if (rawPeriod) {
+      const strict = dayjs(rawPeriod, ["MMMM YYYY", "YYYY-MM", "MM/YYYY"], true);
+      const parsed = strict.isValid() ? strict : dayjs(rawPeriod);
+      if (parsed.isValid()) setPeriod(parsed);
+    }
+
+    const ids = (po.po_budget_entry_ids ?? [])
+      .map((v) => Number(v))
+      .filter(Number.isFinite);
+    editBudgetIds.current = ids;
+    editBudgetRefs.current = String(po.po_budget_ref ?? "")
+      .split(/[,|;]/)
+      .map((v) => v.trim())
+      .filter(Boolean);
+    editPeriodRaw.current = rawPeriod;
+    // Backend kadang hanya mengirim po_budget_ref (mis. POB-2026-RAW_MATERIAL-74)
+    // tanpa po_budget_entry_ids; angka di akhir ref adalah id entry budget-nya.
+    editRefIds.current = editBudgetRefs.current
+      .map((ref) => Number(ref.match(/-(\d+)$/)?.[1]))
+      .filter((n) => Number.isFinite(n) && n > 0);
+    setSelectedBudgetIds(ids.length ? ids : editRefIds.current);
+
+    if (po.generate_mode) setGenerateMode(po.generate_mode);
+    if (po.external_system) setExternalSystem(po.external_system);
+    if (po.external_po_number) {
+      pendingExternalRef.current = {
+        raw: po.external_po_number,
+        stage: po.po_stage,
+        supplier: po.supplier_name,
+      };
+    }
+  }, [isEdit, poDetailQuery.data]);
+
   // Loads incrementally (100 at a time) instead of stopping at the first
   // page (limit=100), so the PR Budget dropdown eventually shows everything.
   const poBudgetEntries = useAllPoBudgetEntries(
@@ -128,6 +194,77 @@ function CreatePoProcurementPageContent() {
     budgetSubtype,
     apiEnabled,
   );
+
+  // Edit: daftar budget jenis lainnya (adhoc/regular) dimuat juga, karena PO tidak
+  // menyimpan jenis budget-nya. Dipakai untuk mencari entry yang dulu dipilih.
+  const otherSubtype: BudgetSubtype = budgetSubtype === "adhoc" ? "regular" : "adhoc";
+  const otherBudgetEntries = useAllPoBudgetEntries(
+    poBudgetType,
+    otherSubtype,
+    apiEnabled && isEdit,
+  );
+
+  // Edit (tahap 2): setelah daftar budget termuat, cocokkan entry yang dulu dipilih
+  // (lewat id, atau lewat po_budget_ref kalau id tidak dikirim backend), lalu set
+  // jenis budget + period mengikuti entry tersebut supaya semuanya langsung tampil.
+  useEffect(() => {
+    if (!isEdit || !hydratedRef.current || subtypeCheckedRef.current) return;
+    const lists = [
+      { subtype: budgetSubtype, state: poBudgetEntries },
+      { subtype: otherSubtype, state: otherBudgetEntries },
+    ];
+    if (lists.some((l) => l.state.isFetching || l.state.isFetchingMore)) return;
+    subtypeCheckedRef.current = true;
+    setEditResolved(true);
+
+    const ids = new Set(
+      editBudgetIds.current.length ? editBudgetIds.current : editRefIds.current,
+    );
+    const refs = new Set(editBudgetRefs.current);
+
+    let found: { subtype: BudgetSubtype; rows: typeof poBudgetEntries.items } | null =
+      null;
+    for (const l of lists) {
+      const rows = l.state.items.filter((row) => {
+        const rowId = Number(row.id ?? row.key);
+        if (ids.has(rowId)) return true;
+        return Boolean(row.poBudgetRef) && refs.has(String(row.poBudgetRef));
+      });
+      if (rows.length > 0) {
+        found = { subtype: l.subtype, rows };
+        break;
+      }
+    }
+
+    if (!found) {
+      // Entry tidak ada di daftar budget (mis. sudah dipakai). Pilihan tetap diisi
+      // dari data PO, dan preview diambil dari item PO itu sendiri.
+      if (ids.size === 0) {
+        message.warning(
+          "Data budget PO sebelumnya tidak ditemukan, silakan pilih ulang.",
+        );
+      }
+      return;
+    }
+
+    setBudgetSubtype(found.subtype);
+    setSelectedBudgetIds(found.rows.map((row) => Number(row.id ?? row.key)));
+
+    // Period mengikuti period entry budget agar entry tidak tersaring.
+    const rowPeriod = String(found.rows[0].period ?? "").trim();
+    if (rowPeriod) {
+      const strict = dayjs(rowPeriod, ["MMMM YYYY", "YYYY-MM", "MM/YYYY"], true);
+      const parsed = strict.isValid() ? strict : dayjs(rowPeriod);
+      if (parsed.isValid()) setPeriod(parsed);
+    }
+  }, [
+    isEdit,
+    budgetSubtype,
+    otherSubtype,
+    poDetailQuery.data,
+    poBudgetEntries,
+    otherBudgetEntries,
+  ]);
 
   // Only budget entries whose period matches the Period selected in Step 1 are
   // eligible — the backend generate call filters by period too, so surfacing
@@ -167,11 +304,24 @@ function CreatePoProcurementPageContent() {
       ];
     }
 
-    return budgetRowsForPeriod.map((row) => ({
+    const options = budgetRowsForPeriod.map((row) => ({
       label: `${row.poBudgetRef ?? row.id ?? row.key} - ${row.uniq} - ${row.supplier}`,
       value: Number(row.id ?? row.key),
     }));
-  }, [apiEnabled, budgetRowsForPeriod]);
+    // Pilihan yang belum ada di daftar (mis. daftar masih dimuat) tetap tampil
+    // dengan label sementara, bukan angka mentah.
+    const known = new Set(options.map((o) => o.value));
+    for (const id of selectedBudgetIds) {
+      if (!known.has(id)) {
+        const refs = editBudgetRefs.current;
+        options.push({
+          label: refs.length === 1 ? refs[0] : `Budget entry #${id}`,
+          value: id,
+        });
+      }
+    }
+    return options;
+  }, [apiEnabled, budgetRowsForPeriod, selectedBudgetIds]);
 
   const poSequenceOptions = useMemo(
     () => [
@@ -193,7 +343,7 @@ function CreatePoProcurementPageContent() {
   // Split every selected budget entry's detail_jsonb children into PO1 / PO2
   // preview rows (childQty * pct / 100), then break each stage down per supplier
   // so mixed suppliers render as separate "PO n (Supplier)" groups.
-  const poSupplierGroups: PoSupplierGroup[] = useMemo(() => {
+  const computedSupplierGroups: PoSupplierGroup[] = useMemo(() => {
     const selectedRows = budgetRowsForPeriod.filter((row) =>
       selectedBudgetIds.includes(Number(row.id ?? row.key)),
     );
@@ -323,6 +473,70 @@ function CreatePoProcurementPageContent() {
     return groups;
   }, [budgetRowsForPeriod, selectedBudgetIds, generateMode]);
 
+  // Edit: kalau entry budget tidak bisa dihitung ulang (tidak ada di daftar budget),
+  // tampilkan item dari PO yang tersimpan supaya datanya tetap terisi.
+  const poSupplierGroups: PoSupplierGroup[] = useMemo(() => {
+    if (computedSupplierGroups.length > 0 || !isEdit) return computedSupplierGroups;
+    if (!editResolved) return computedSupplierGroups;
+    const detail = poDetailQuery.data?.data;
+    if (!detail || detail.items.length === 0) return computedSupplierGroups;
+
+    const stage: 1 | 2 = detail.po.po_stage === 2 ? 2 : 1;
+    const supplier = detail.po.supplier_name ?? "-";
+    const items: PoItemRow[] = detail.items.map((it, idx) => ({
+      key: `po-${stage}-${idx}`,
+      parentUniq: String(it.uniq_code ?? "-"),
+      childUniq: String(it.child_uniq_code ?? "-"),
+      materialGrade: String(it.material_grade ?? it.child_uniq_code ?? it.uniq_code ?? "-"),
+      partNumber: String(it.part_number ?? "-"),
+      partName: String(it.part_name ?? "-"),
+      form: specText(it.material_spec, "form"),
+      supplier,
+      qty: Number(it.qty ?? 0),
+      uom: String(it.uom ?? "-"),
+      weightKg: Number(it.weight_kg ?? 0),
+    }));
+    return [
+      {
+        key: `s${stage}::${supplier}`,
+        stage,
+        supplier,
+        label: `PO ${stage} (${supplier})`,
+        items,
+        totalQty: items.reduce((sum, r) => sum + r.qty, 0),
+      },
+    ];
+  }, [computedSupplierGroups, isEdit, editResolved, poDetailQuery.data]);
+
+  // Edit: isi kembali External PO Number (Zahir) ke grup stage+supplier yang sesuai.
+  useEffect(() => {
+    const pending = pendingExternalRef.current;
+    if (!pending || poSupplierGroups.length === 0) return;
+    if (isEdit && !editResolved) return;
+    pendingExternalRef.current = null;
+
+    const parts = pending.raw
+      .split("|")
+      .map((v) => v.trim())
+      .filter(Boolean);
+    const next: Record<string, string> = {};
+    const ownKey =
+      pending.stage && pending.supplier
+        ? `s${pending.stage}::${pending.supplier}`
+        : undefined;
+    if (ownKey && parts.length <= 1 && poSupplierGroups.some((g) => g.key === ownKey)) {
+      next[ownKey] = parts[0] ?? "";
+    } else if (poSupplierGroups.length === 1) {
+      // Satu grup tapi tersimpan beberapa nomor (digabung " | "): isi semuanya.
+      next[poSupplierGroups[0].key] = parts.join(" | ");
+    } else {
+      poSupplierGroups.forEach((g, i) => {
+        if (parts[i]) next[g.key] = parts[i];
+      });
+    }
+    setExternalPoNumbers(next);
+  }, [poSupplierGroups, isEdit, editResolved]);
+
   const columns: ColumnsType<PoItemRow> = [
     {
       title: "Parent UNIQ",
@@ -388,7 +602,7 @@ function CreatePoProcurementPageContent() {
     }
 
     if (!apiEnabled) {
-      message.success("PO saved (mock)");
+      message.success(isEdit ? "PO updated (mock)" : "PO saved (mock)");
       router.replace(returnUrl);
       router.refresh();
       return;
@@ -401,20 +615,28 @@ function CreatePoProcurementPageContent() {
           .filter(Boolean)
           .join(" | ") || undefined;
 
-      await generatePo({
+      const body = {
         po_type: poType,
         period: period.format("MMMM YYYY"),
         po_budget_entry_ids: selectedBudgetIds,
         external_system: externalSystem,
         external_po_number: combinedExternalPoNumber,
         generate_mode: generateMode,
-      }).unwrap();
+      };
 
-      message.success("PO generated successfully");
+      if (isEdit && editId) {
+        await updatePo({ po_id: editId, body }).unwrap();
+        message.success("PO updated successfully");
+      } else {
+        await generatePo(body).unwrap();
+        message.success("PO generated successfully");
+      }
       router.replace(returnUrl);
       router.refresh();
     } catch (e) {
-      message.error(getApiErrorMessage(e, "Failed to generate PO"));
+      message.error(
+        getApiErrorMessage(e, isEdit ? "Failed to update PO" : "Failed to generate PO"),
+      );
     }
   };
 
@@ -441,9 +663,10 @@ function CreatePoProcurementPageContent() {
             type="primary"
             className="!rounded-lg"
             onClick={handleSave}
-            loading={generatePoState.isLoading}
+            loading={generatePoState.isLoading || updatePoState.isLoading}
+            disabled={isEdit && poDetailQuery.isFetching}
           >
-            Save PO
+            {isEdit ? "Update PO" : "Save PO"}
           </Button>
         </div>
       </div>
@@ -451,11 +674,21 @@ function CreatePoProcurementPageContent() {
       <div className="mb-5">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
           <div className="text-xl font-bold text-gray-900">
-            PO Procurement Management
+            {isEdit ? "Edit Purchase Order" : "PO Procurement Management"}
           </div>
           <div className="text-sm text-gray-500">
-            Generate purchase order from PO Budget entries
+            {isEdit
+              ? `Edit PO ${poDetailQuery.data?.data?.po?.po_number ?? editId} - data sebelumnya sudah terisi`
+              : "Generate purchase order from PO Budget entries"}
           </div>
+          {isEdit && poDetailQuery.isFetching ? (
+            <div className="mt-1 text-xs text-gray-400">Loading PO data…</div>
+          ) : null}
+          {isEdit && poDetailQuery.isError ? (
+            <div className="mt-1 text-xs text-red-500">
+              Failed to load PO data
+            </div>
+          ) : null}
         </div>
       </div>
 
