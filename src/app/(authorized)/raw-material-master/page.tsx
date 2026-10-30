@@ -33,6 +33,15 @@ import {
   useUpdateRawMaterialMasterMutation,
 } from "@/lib/api/raw-material-master/api";
 import { getApiErrorMessage } from "@/lib/api/error";
+import DateRangeFilter from "@/components/DateRangeFilter";
+import ExportExcelButton from "@/components/ExportExcelButton";
+import {
+  exportRowsToExcel,
+  filterByDateRange,
+  formatDateTimeForExport,
+  pickDateValue,
+  type DateRangeValue,
+} from "@/lib/utils/dateRange";
 import { useLazyGetBomTreeQuery, type BackendBomNode } from "@/lib/api/bom/api";
 
 const number = (value: number | null | undefined) =>
@@ -42,6 +51,7 @@ const number = (value: number | null | undefined) =>
 
 export default function RawMaterialMasterPage() {
   const [search, setSearch] = useState("");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<RawMaterialMaster | null>(null);
   const [form] = Form.useForm<RawMaterialMasterInput>();
@@ -50,12 +60,21 @@ export default function RawMaterialMasterPage() {
   const [updateMaster, updateState] = useUpdateRawMaterialMasterMutation();
   const [findBomReference, findBomReferenceState] = useLazyGetBomTreeQuery();
 
+  // Filter tanggal diterapkan pada record master sebelum dikelompokkan.
+  const dateFilteredMasters = useMemo(
+    () =>
+      filterByDateRange(masters.data?.items ?? [], dateRange, (r) =>
+        pickDateValue(r, ["created_at", "updated_at"]),
+      ),
+    [masters.data?.items, dateRange],
+  );
+
   const items = useMemo(() => {
     const groups = new Map<
       string,
       RawMaterialMaster & { variants: RawMaterialMaster[] }
     >();
-    for (const item of masters.data?.items ?? []) {
+    for (const item of dateFilteredMasters) {
       const key = item.material_name.trim().replace(/\s+/g, " ").toUpperCase();
       const current = groups.get(key);
       if (!current) groups.set(key, { ...item, variants: [item] });
@@ -73,7 +92,39 @@ export default function RawMaterialMasterPage() {
       }
     }
     return Array.from(groups.values());
-  }, [masters.data?.items]);
+  }, [dateFilteredMasters]);
+
+  const handleExport = () => {
+    const count = exportRowsToExcel(
+      dateFilteredMasters.map((r) => ({
+        "Material Code": r.material_code,
+        "Material Name": r.material_name,
+        Grade: r.material_grade ?? r.grade ?? "",
+        Form: r.form ?? "",
+        Type: r.type_material,
+        "Thickness (mm)": r.thickness_mm ?? "",
+        "Width (mm)": r.width_mm ?? "",
+        "Length (mm)": r.length_mm ?? "",
+        "Diameter (mm)": r.diameter_mm ?? "",
+        UOM: r.uom ?? "",
+        "BOM Links": r.bom_usage_count ?? 0,
+        "Stock Pool": r.inventory_qty ?? 0,
+        Status: r.status,
+        "Created At": formatDateTimeForExport(r.created_at),
+        "Updated At": formatDateTimeForExport(r.updated_at),
+      })),
+      {
+        sheetName: "Raw Material Master",
+        fileNamePrefix: "raw-material-master",
+        range: dateRange,
+      },
+    );
+    if (count === 0) {
+      message.warning("Tidak ada data untuk diekspor");
+      return;
+    }
+    message.success(`Berhasil mengekspor ${count} baris`);
+  };
   const activeCount = items.filter((item) => item.status === "Active").length;
   const linkedBOMs = items.reduce(
     (sum, item) => sum + (item.bom_usage_count ?? 0),
@@ -262,7 +313,12 @@ export default function RawMaterialMasterPage() {
                 style={{ width: 360 }}
                 onSearch={setSearch}
               />
-              <Space>
+              <Space wrap>
+                <DateRangeFilter value={dateRange} onChange={setDateRange} />
+                <ExportExcelButton
+                  onClick={handleExport}
+                  hasDateRange={dateRange !== null}
+                />
                 <Button
                   icon={<ReloadOutlined />}
                   onClick={() => masters.refetch()}

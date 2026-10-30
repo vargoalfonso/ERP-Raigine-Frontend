@@ -23,7 +23,6 @@ import {
   SearchOutlined,
 } from "@ant-design/icons";
 import type { ColumnType } from "antd/es/table";
-import * as XLSX from "xlsx";
 import StatsCard from "@/components/StatsCard";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
@@ -43,6 +42,14 @@ import {
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import { formatWorkOrderDisplayNumber } from "@/lib/utils/workOrder";
 import ExcelImportModal from "@/components/master-data/ExcelImportModal";
+import DateRangeFilter from "@/components/DateRangeFilter";
+import {
+  exportRowsToExcel,
+  filterByDateRange,
+  formatDateTimeForExport,
+  pickDateValue,
+  type DateRangeValue,
+} from "@/lib/utils/dateRange";
 import { downloadTemplate } from "@/lib/utils/excel/masterExcel";
 import type { BulkImportOutcome } from "@/lib/utils/excel/bulkImportTypes";
 import {
@@ -70,6 +77,8 @@ type WipRecord = {
   /** process = sedang diproses, queue = menunggu proses berikutnya. */
   status?: string;
   waitingProcess?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 type WipEditFormValues = {
@@ -90,6 +99,7 @@ export default function WorkInProgressPage() {
   const [tab, setTab] = useState("wip");
   const [statusFilter, setStatusFilter] = useState<string>("active");
   const [processFilter, setProcessFilter] = useState<string>("all");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(null);
 
   const apiEnabled = Boolean(apiBaseUrl);
   const listQuery = useGetWipListQuery(
@@ -151,6 +161,8 @@ export default function WorkInProgressPage() {
       kanban: Number(row.kanban ?? 0),
       status: (row.status ?? "").toLowerCase(),
       waitingProcess: row.waiting_process ?? "-",
+      createdAt: row.created_at || undefined,
+      updatedAt: row.updated_at || undefined,
     };
   };
 
@@ -223,7 +235,15 @@ export default function WorkInProgressPage() {
     closeDeleteModal();
   };
 
-  const filteredData = tableRows.filter((row) => {
+  const dateFilteredRows = useMemo(
+    () =>
+      filterByDateRange(tableRows, dateRange, (r) =>
+        pickDateValue(r, ["createdAt", "updatedAt"]),
+      ),
+    [tableRows, dateRange],
+  );
+
+  const filteredData = dateFilteredRows.filter((row) => {
     const matchesSearch =
       !searchValue ||
       [
@@ -296,27 +316,17 @@ export default function WorkInProgressPage() {
       Stock: r.stock,
       "Kanban No.": clean(r.kanbanCode),
       "Qty / Kanban": r.kanban,
+      "Created At": formatDateTimeForExport(r.createdAt),
+      "Updated At": formatDateTimeForExport(r.updatedAt),
     }));
 
     try {
-      const worksheet = XLSX.utils.json_to_sheet(rows);
-      worksheet["!cols"] = [
-        { wch: 12 }, // Status
-        { wch: 16 }, // Process
-        { wch: 16 }, // Next Process
-        { wch: 14 }, // Uniq
-        { wch: 30 }, // Part Name
-        { wch: 18 }, // Part Number
-        { wch: 16 }, // WO Number
-        { wch: 10 }, // Stock
-        { wch: 18 }, // Kanban No.
-        { wch: 14 }, // Qty / Kanban
-      ];
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "WIP Inventory");
-      const dateStr = new Date().toISOString().slice(0, 10);
-      XLSX.writeFile(workbook, `wip-inventory-${dateStr}.xlsx`);
-      messageApi.success(`Berhasil mengekspor ${rows.length} baris`);
+      const count = exportRowsToExcel(rows, {
+        sheetName: "WIP Inventory",
+        fileNamePrefix: "wip-inventory",
+        range: dateRange,
+      });
+      messageApi.success(`Berhasil mengekspor ${count} baris`);
     } catch (err) {
       console.error("Export WIP gagal", err);
       messageApi.error("Gagal mengekspor data WIP");
@@ -754,7 +764,8 @@ export default function WorkInProgressPage() {
                 <div className="text-sm font-semibold text-gray-900">
                   WIP Inventory
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <DateRangeFilter value={dateRange} onChange={setDateRange} />
                   <Select
                     value={statusFilter}
                     onChange={setStatusFilter}

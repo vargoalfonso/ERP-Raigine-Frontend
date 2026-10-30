@@ -75,6 +75,8 @@ export type WipListRow = {
   status?: string;
   /** Proses yang akan/sedang mengerjakan baris ini. */
   waiting_process?: string;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type WipDetailProcess = {
@@ -152,6 +154,8 @@ const toWipListRow = (raw: unknown): WipListRow => {
     kanban: toNumber(r.kanban ?? r.kanban_count ?? r.kanbanCount),
     status: toText(r.status ?? r.Status),
     waiting_process: toText(r.waiting_process ?? r.waitingProcess),
+    created_at: toText(r.created_at ?? r.createdAt),
+    updated_at: toText(r.updated_at ?? r.updatedAt),
   };
 };
 

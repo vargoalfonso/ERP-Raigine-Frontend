@@ -40,6 +40,15 @@ import { LuChartColumn } from "react-icons/lu";
 import { FaRegEdit, FaRegTrashAlt } from "react-icons/fa";
 import { RawMaterialRecord } from "@/lib/api/raw-materials/interface";
 import PrintButton from "@/components/PrintButton";
+import DateRangeFilter from "@/components/DateRangeFilter";
+import ExportExcelButton from "@/components/ExportExcelButton";
+import {
+  exportRowsToExcel,
+  filterByDateRange,
+  formatDateTimeForExport,
+  pickDateValue,
+  type DateRangeValue,
+} from "@/lib/utils/dateRange";
 import type { PrintCardOptions } from "@/lib/utils/printCard";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
@@ -460,6 +469,7 @@ export default function RawMaterialsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [searchValue, setSearchValue] = useState("");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletingRecord, setDeletingRecord] =
     useState<RawMaterialRecord | null>(null);
@@ -476,11 +486,14 @@ export default function RawMaterialsPage() {
   const [rawMaterials, setRawMaterials] =
     useState<RawMaterialRecord[]>(MOCK_RAW_MATERIALS);
   const apiEnabled = Boolean(apiBaseUrl);
+  // Saat filter tanggal aktif, ambil seluruh data lalu filter & paginate di client
+  // supaya hasil filter (dan export) mencakup semua halaman.
+  const dateFilterActive = dateRange !== null;
   const listQuery = useGetInventoryListQuery(
     {
       type: "raw-materials",
-      page: currentPage,
-      limit: pageSize,
+      page: dateFilterActive ? 1 : currentPage,
+      limit: dateFilterActive ? 10000 : pageSize,
       search: searchValue,
     },
     { skip: !apiEnabled },
@@ -541,14 +554,22 @@ export default function RawMaterialsPage() {
     return items.map(mapInventoryToRawMaterial);
   }, [apiEnabled, listQuery.data, listQuery.error, rawMaterials]);
 
+  const dateFilteredRows = useMemo(
+    () =>
+      filterByDateRange(inventoryRows, dateRange, (r) =>
+        pickDateValue(r, ["created_at", "updated_at"]),
+      ),
+    [inventoryRows, dateRange],
+  );
+
   const filteredRows = useMemo(() => {
     const q = searchValue.trim().toLowerCase();
-    if (!q) return inventoryRows;
+    if (!q) return dateFilteredRows;
     // Mode API: pencarian sudah dilakukan server di seluruh data (lintas halaman),
     // jadi jangan difilter ulang di sisi klien.
     if (apiEnabled && !isMissingRouteError(listQuery.error))
-      return inventoryRows;
-    return inventoryRows.filter((item) => {
+      return dateFilteredRows;
+    return dateFilteredRows.filter((item) => {
       return [
         item.uniq,
         item.material_code,
@@ -562,7 +583,7 @@ export default function RawMaterialsPage() {
         .some((value) => String(value).toLowerCase().includes(q));
     });
   }, [
-    inventoryRows,
+    dateFilteredRows,
     searchValue,
     resolveMaterialCode,
     apiEnabled,
@@ -608,9 +629,37 @@ export default function RawMaterialsPage() {
   ]);
 
   const paginationTotal =
-    apiEnabled && !isMissingRouteError(listQuery.error)
+    apiEnabled && !isMissingRouteError(listQuery.error) && !dateFilterActive
       ? (listQuery.data?.pagination?.total ?? inventoryRows.length)
       : filteredRows.length;
+
+  const handleExport = () => {
+    const count = exportRowsToExcel(
+      filteredRows.map((r) => ({
+        "Material Code": r.material_code || resolveMaterialCode(r.uniq) || "",
+        Uniq: r.uniq ?? "",
+        "Part Name": r.name ?? "",
+        "RM Type": r.category ?? "",
+        "RM Source": r.code ?? "",
+        Warehouse: r.warehouse?.name ?? "",
+        Stock: r.stock ?? 0,
+        Unit: r.unit ?? "",
+        Status: r.status ?? "",
+        "Created At": formatDateTimeForExport(r.created_at),
+        "Updated At": formatDateTimeForExport(r.updated_at),
+      })),
+      {
+        sheetName: "Raw Materials",
+        fileNamePrefix: "raw-materials",
+        range: dateRange,
+      },
+    );
+    if (count === 0) {
+      message.warning("Tidak ada data untuk diekspor");
+      return;
+    }
+    message.success(`Berhasil mengekspor ${count} baris`);
+  };
 
   const stats = {
     totalItems: paginationTotal || 0,
@@ -1268,6 +1317,21 @@ export default function RawMaterialsPage() {
               setCurrentPage(1);
             }}
             searchPlaceholder="Search raw materials..."
+            actions={
+              <div className="flex flex-wrap items-center gap-2">
+                <DateRangeFilter
+                  value={dateRange}
+                  onChange={(v) => {
+                    setDateRange(v);
+                    setCurrentPage(1);
+                  }}
+                />
+                <ExportExcelButton
+                  onClick={handleExport}
+                  hasDateRange={dateFilterActive}
+                />
+              </div>
+            }
             pageSize={pageSize}
             currentPage={currentPage}
             total={paginationTotal}

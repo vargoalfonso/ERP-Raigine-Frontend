@@ -22,6 +22,13 @@ import {
 } from "react-icons/md";
 import * as XLSX from "xlsx";
 import { apiBaseUrl } from "@/lib/api/instance";
+import DateRangeFilter from "@/components/DateRangeFilter";
+import {
+  filterByDateRange,
+  formatRangeForFileName,
+  pickDateValue,
+  type DateRangeValue,
+} from "@/lib/utils/dateRange";
 import {
   type StockInventoryType,
   type StockOpnameSessionListRecord,
@@ -48,6 +55,7 @@ type StockOpnameRow = {
   itemCode?: string;
   countedBy?: string;
   countedAt?: string;
+  createdAt?: string;
   impact?: "Adjusted" | "Pending";
 };
 
@@ -105,6 +113,7 @@ function mapRecordToRow(record: StockOpnameSessionListRecord): StockOpnameRow {
     itemCode: String(record.inventory_type ?? "-"),
     countedBy: record.submitted_by ?? record.created_by ?? undefined,
     countedAt: record.counted_date ?? record.schedule_date ?? undefined,
+    createdAt: record.created_at ?? undefined,
     impact:
       (impactSource ?? "").toLowerCase().includes("waiting") ||
       (impactSource ?? "").toLowerCase().includes("pending") ||
@@ -174,6 +183,7 @@ export default function StockOpnamePage() {
   }, []);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(null);
   const [scanMode, setScanMode] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -183,11 +193,14 @@ export default function StockOpnamePage() {
     setPage(1);
   }, [tab]);
 
+  // Saat filter tanggal aktif, ambil seluruh sesi lalu filter & paginate di client
+  // supaya hasil filter (dan export) mencakup semua halaman.
+  const dateFilterActive = dateRange !== null;
   const { data: listData, isFetching: listLoading } = useGetStockOpnameSessionsQuery(
     {
       type: inventoryType,
-      page,
-      limit: pageSize,
+      page: dateFilterActive ? 1 : page,
+      limit: dateFilterActive ? 10000 : pageSize,
     },
     { skip: !apiEnabled }
   );
@@ -402,7 +415,10 @@ export default function StockOpnamePage() {
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return allRows.filter((r) => {
+    const byDate = filterByDateRange(allRows, dateRange, (r) =>
+      pickDateValue(r, ["countedAt", "createdAt"]),
+    );
+    return byDate.filter((r) => {
       const v = variance(r.systemQty, r.physicalQty);
       const withVariance = v.diff !== 0;
 
@@ -422,7 +438,7 @@ export default function StockOpnamePage() {
 
       return passType && passSearch;
     });
-  }, [allRows, search, typeFilter]);
+  }, [allRows, search, typeFilter, dateRange]);
 
   const kpis = useMemo(() => {
     if (apiEnabled) {
@@ -751,8 +767,10 @@ export default function StockOpnamePage() {
     ];
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, tabLabel.slice(0, 31));
-    const dateStr = new Date().toISOString().slice(0, 10);
-    XLSX.writeFile(workbook, `stock-opname-${tab}-${dateStr}.xlsx`);
+    XLSX.writeFile(
+      workbook,
+      `stock-opname-${tab}-${formatRangeForFileName(dateRange)}.xlsx`,
+    );
     message.success(`${exportData.length} baris berhasil diexport ke Excel`);
   };
 
@@ -835,7 +853,14 @@ export default function StockOpnamePage() {
             />
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <DateRangeFilter
+              value={dateRange}
+              onChange={(v) => {
+                setDateRange(v);
+                setPage(1);
+              }}
+            />
             <Select
               value={typeFilter}
               onChange={setTypeFilter}
@@ -878,7 +903,11 @@ export default function StockOpnamePage() {
             pagination={{
               current: page,
               pageSize,
-              total: apiEnabled ? (listData?.pagination.total ?? filteredRows.length) : 521390,
+              total: dateFilterActive
+                ? filteredRows.length
+                : apiEnabled
+                  ? (listData?.pagination.total ?? filteredRows.length)
+                  : 521390,
               showSizeChanger: true,
               showQuickJumper: true,
               showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} Results`,

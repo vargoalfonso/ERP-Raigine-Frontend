@@ -45,6 +45,14 @@ import {
 } from "@/lib/api/subcon-inventory/api";
 import { useLazyGenerateQRSubconQuery } from "@/lib/api/inventory/api";
 import PrintButton from "@/components/PrintButton";
+import DateRangeFilter from "@/components/DateRangeFilter";
+import ExportExcelButton from "@/components/ExportExcelButton";
+import {
+  exportRowsToExcel,
+  filterByDateRange,
+  pickDateValue,
+  type DateRangeValue,
+} from "@/lib/utils/dateRange";
 import type { PrintCardOptions } from "@/lib/utils/printCard";
 
 type ApprovalStatus = "pending" | "approved" | "rejected";
@@ -67,6 +75,7 @@ type SubConRow = {
   status: "NORMAL" | "LOW STOCK";
   dnLogs: number;
   approvalStatus?: ApprovalStatus;
+  createdAt?: string;
 };
 
 const stockInVendorInitialRows: SubConRow[] = [
@@ -183,6 +192,7 @@ export default function SubConMaterialsClient() {
   const searchParams = useSearchParams();
   const [mode, setMode] = useState<ViewMode>("Stock In Vendor");
   const [query, setQuery] = useState("");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(null);
   const [rowsVendor, setRowsVendor] = useState<SubConRow[]>(stockInVendorInitialRows);
   const [rowsReceived, setRowsReceived] = useState<SubConRow[]>(stockReceivedInitialRows);
 
@@ -213,7 +223,10 @@ export default function SubConMaterialsClient() {
     isSuccess: apiReceivedSuccess,
     isFetching: apiReceivedLoading,
     refetch: refetchReceivedRows,
-  } = useGetSubconReceivedQuery({ page: 1, limit: 100 }, { skip: !useApi });
+  } = useGetSubconReceivedQuery(
+    { page: 1, limit: dateRange ? 10000 : 100 },
+    { skip: !useApi },
+  );
 
   const [deleteSubconInventory] = useDeleteSubconInventoryMutation();
   const [updateSubcon] = useUpdateSubconRawMaterialMutation();
@@ -224,7 +237,10 @@ export default function SubConMaterialsClient() {
     isSuccess: apiVendorSuccess,
     isFetching: apiVendorLoading,
     refetch: refetchVendorRows,
-  } = useGetSubconInventoryQuery({ page: 1, limit: 100 }, { skip: !useApi });
+  } = useGetSubconInventoryQuery(
+    { page: 1, limit: dateRange ? 10000 : 100 },
+    { skip: !useApi },
+  );
 
   const [approveSubcon, { isLoading: approving }] =
     useApproveSubconInventoryMutation();
@@ -273,6 +289,7 @@ export default function SubConMaterialsClient() {
         status,
         dnLogs: 0,
         approvalStatus: r.approval_status,
+        createdAt: r.created_at || undefined,
       };
     });
   }, [apiVendorRes?.data, apiVendorSuccess, bomIndex.partNameByUniq, bomIndex.partNumberByUniq, useApi]);
@@ -307,6 +324,7 @@ export default function SubConMaterialsClient() {
         status,
         dnLogs: 0,
         approvalStatus: r.approval_status,
+        createdAt: r.created_at || undefined,
       };
     });
   }, [apiReceivedRes?.data, apiReceivedSuccess, bomIndex.partNameByUniq, bomIndex.partNumberByUniq, useApi]);
@@ -361,14 +379,47 @@ export default function SubConMaterialsClient() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const base = activeRows
+    const base = filterByDateRange(activeRows, dateRange, (r) =>
+      pickDateValue(r, ["dateDelivery", "createdAt"]),
+    )
       .filter((r) => (periodFilter ? r.period === periodFilter : true))
       .filter((r) => {
         if (!q) return true;
         return [r.uniq, r.partName, r.subconVendor].some((v) => v.toLowerCase().includes(q));
       });
     return base;
-  }, [activeRows, periodFilter, query]);
+  }, [activeRows, periodFilter, query, dateRange]);
+
+  const handleExport = () => {
+    const received = mode === "Stock Received from Vendor";
+    const count = exportRowsToExcel(
+      filtered.map((r) => ({
+        "PO / DN Number": r.deliveryNotesNumber ?? "",
+        Uniq: r.uniq,
+        "Part Number": r.partNumber ?? "",
+        "Part Name": r.partName,
+        "Subcon Vendor": r.subconVendor,
+        Period: r.period === "-" ? "" : r.period,
+        [received ? "Date Received" : "Date Delivery"]:
+          r.dateDelivery === "-" ? "" : r.dateDelivery,
+        [received ? "Total Received" : "Total Stock at Vendor"]: r.totalStock,
+        "Total PO": r.totalPO,
+        "Delta PO": r.deltaPoStock,
+        Status: r.status,
+        "Approval Status": r.approvalStatus ?? "",
+      })),
+      {
+        sheetName: received ? "Stock Received" : "Stock In Vendor",
+        fileNamePrefix: received ? "subcon-stock-received" : "subcon-stock-in-vendor",
+        range: dateRange,
+      },
+    );
+    if (count === 0) {
+      message.warning("Tidak ada data untuk diekspor");
+      return;
+    }
+    message.success(`Berhasil mengekspor ${count} baris`);
+  };
 
   const openDelete = (row: SubConRow) => {
     setDeletingRow(row);
@@ -941,7 +992,12 @@ export default function SubConMaterialsClient() {
               className="max-w-xl"
             />
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <DateRangeFilter value={dateRange} onChange={setDateRange} />
+              <ExportExcelButton
+                onClick={handleExport}
+                hasDateRange={dateRange !== null}
+              />
               {mode === "Stock Received from Vendor" ? (
                 <Button icon={<FilterOutlined />} onClick={() => setPeriodModalOpen(true)}>
                   Filter by Period

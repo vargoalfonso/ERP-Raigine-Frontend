@@ -35,6 +35,15 @@ import {
 import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import DateRangeFilter from "@/components/DateRangeFilter";
+import ExportExcelButton from "@/components/ExportExcelButton";
+import {
+  exportRowsToExcel,
+  filterByDateRange,
+  formatDateTimeForExport,
+  pickDateValue,
+  type DateRangeValue,
+} from "@/lib/utils/dateRange";
 
 type ReturnTab = "pending" | "qc" | "history";
 
@@ -109,6 +118,7 @@ export default function ProductReturnPage() {
   const [tab, setTab] = useState<ReturnTab>("qc");
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
+  const [dateRange, setDateRange] = useState<DateRangeValue>(null);
   const [isSubmitOpen, setIsSubmitOpen] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [form] = Form.useForm<SubmitFormValues>();
@@ -118,8 +128,11 @@ export default function ProductReturnPage() {
   const [scanProductReturn, { isLoading: scanLoading }] =
     useScanProductReturnMutation();
 
+  // Saat filter tanggal aktif, ambil seluruh data lalu filter & paginate di client
+  // supaya hasil filter (dan export) mencakup semua halaman.
+  const dateFilterActive = dateRange !== null;
   const listQuery = useGetProductReturnListQuery(
-    { page, limit },
+    dateFilterActive ? { page: 1, limit: 10000 } : { page, limit },
     { skip: !apiEnabled },
   );
   const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
@@ -309,9 +322,40 @@ export default function ProductReturnPage() {
 
   const tableRows = useMemo(() => {
     // if (tab === "pending") return pendingRows;
-    if (tab === "qc") return qcRows;
-    return historyRows;
-  }, [historyRows, pendingRows, qcRows, tab]);
+    const base = tab === "qc" ? qcRows : historyRows;
+    return filterByDateRange(base, dateRange, (r) =>
+      pickDateValue(r, ["date", "dateReceived"]),
+    );
+  }, [historyRows, pendingRows, qcRows, tab, dateRange]);
+
+  const handleExport = () => {
+    const clean = (v?: string) => (!v || v === "-" ? "" : v);
+    const count = exportRowsToExcel(
+      tableRows.map((r) => ({
+        "Return ID": r.returnId,
+        Date: clean(r.date),
+        Uniq: clean(r.uniq),
+        "DN Number": r.dnNumber ?? "",
+        "Scrap Qty": r.scrapQty,
+        "Rework Qty": r.reworkQty,
+        Weight: r.weight ?? "",
+        UOM: r.uom ?? "",
+        "Scrap Type": r.scrapType ?? "",
+        Status: r.statusLabel,
+        "Updated At": formatDateTimeForExport(r.updatedAt),
+      })),
+      {
+        sheetName: tab === "qc" ? "QC Validation" : "Return History",
+        fileNamePrefix: tab === "qc" ? "product-return-qc" : "product-return-history",
+        range: dateRange,
+      },
+    );
+    if (count === 0) {
+      message.warning("Tidak ada data untuk diekspor");
+      return;
+    }
+    message.success(`Berhasil mengekspor ${count} baris`);
+  };
 
   const openDetail = (id: string) => {
     router.push(`/product-return/detail/${encodeURIComponent(id)}`);
@@ -699,6 +743,20 @@ export default function ProductReturnPage() {
           </div>
         )}
 
+        <div className="mb-3 flex flex-wrap items-center justify-end gap-2">
+          <DateRangeFilter
+            value={dateRange}
+            onChange={(v) => {
+              setDateRange(v);
+              setPage(1);
+            }}
+          />
+          <ExportExcelButton
+            onClick={handleExport}
+            hasDateRange={dateFilterActive}
+          />
+        </div>
+
         <div className="overflow-hidden rounded-xl border border-gray-100">
           <Table<ProductReturnRow>
             dataSource={tableRows}
@@ -708,10 +766,11 @@ export default function ProductReturnPage() {
             pagination={{
               current: page,
               pageSize: limit,
-              total:
-                listQuery.data?.data.pagination.total ??
-                listQuery.data?.data.items.length ??
-                0,
+              total: dateFilterActive
+                ? tableRows.length
+                : (listQuery.data?.data.pagination.total ??
+                  listQuery.data?.data.items.length ??
+                  0),
               showSizeChanger: true,
               onChange: (nextPage, nextSize) => {
                 setPage(nextPage);
