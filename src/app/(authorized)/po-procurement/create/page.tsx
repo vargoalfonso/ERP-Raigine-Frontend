@@ -410,8 +410,8 @@ function CreatePoProcurementPageContent() {
               parentUniq: String(parent.uniq_code ?? row.uniq ?? "-"),
               childUniq: String(child.uniq_code ?? "-"),
               materialGrade: String(
+                childSpec.material_grade ??
                 child.uniq ??
-                  childSpec.material_grade ??
                   child.uniq_code ??
                   "-",
               ),
@@ -553,7 +553,7 @@ function CreatePoProcurementPageContent() {
         <div>
           <span className="text-sm font-medium text-gray-800">{v}</span>
           {r.childUniq && r.childUniq !== "-" ? (
-            <div className="text-[11px] text-gray-400">{r.childUniq}</div>
+            <div className="text-[11px] text-gray-400"></div>
           ) : null}
         </div>
       ),
