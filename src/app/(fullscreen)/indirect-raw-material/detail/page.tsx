@@ -550,7 +550,7 @@ function IndirectRawMaterialDetailPageContent() {
           </div>
           <div className="w-full text-center">
             <p className="m-0 text-gray-400 text-sm">Packing List</p>
-            <p className="m-0 font-semibold">{barcodeModal?.packing ?? "-"}</p>
+            <p className="m-0 max-h-48 overflow-y-auto font-semibold">{barcodeModal?.packing ?? "-"}</p>
           </div>
         </div>
       </Modal>

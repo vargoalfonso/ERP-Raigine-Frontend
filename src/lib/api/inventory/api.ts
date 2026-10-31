@@ -245,24 +245,35 @@ const toInventoryPackingItem = (raw: unknown): InventoryPackingItem => {
   };
 };
 
+/**
+ * Packing yang berasal dari work order tetapi belum pernah di-scan: tidak punya DN,
+ * qty saat ini 0 dan progress 0. Ini hanya kartu kanban yang dibuat saat WO dibuat
+ * (mis. dari WO Draft/Rejected), bukan packing stok, jadi tidak ditampilkan.
+ * Packing opening stock / delivery note tidak terkena (punya DN atau qty > 0).
+ */
+export const isUnscannedWorkOrderPacking = (item: InventoryPackingItem): boolean =>
+  !item.dn_number &&
+  Boolean(item.wo_number) &&
+  item.qty_current <= 0 &&
+  item.progress <= 0;
+
 const toInventoryPackingList = (
   response: unknown,
   uniqCode: string,
 ): InventoryPackingList => {
   const data = parseObjectResponse<UnknownRecord>(response) ?? {};
-  const items = Array.isArray(data.items)
+  const allItems = Array.isArray(data.items)
     ? data.items.map(toInventoryPackingItem)
     : parseArrayResponse<unknown>(response).map(toInventoryPackingItem);
+  const items = allItems.filter((item) => !isUnscannedWorkOrderPacking(item));
+  // Total dihitung ulang dari baris yang ditampilkan (angka dari backend masih
+  // ikut menghitung packing WO yang belum di-scan).
   return {
     uniq_code: toText(data.uniq_code) ?? uniqCode,
     items,
-    total_packing: toNumber(data.total_packing) ?? items.length,
-    total_qty_current:
-      toNumber(data.total_qty_current) ??
-      items.reduce((acc, item) => acc + item.qty_current, 0),
-    total_qty_max:
-      toNumber(data.total_qty_max) ??
-      items.reduce((acc, item) => acc + item.qty_max, 0),
+    total_packing: items.length,
+    total_qty_current: items.reduce((acc, item) => acc + item.qty_current, 0),
+    total_qty_max: items.reduce((acc, item) => acc + item.qty_max, 0),
   };
 };
 

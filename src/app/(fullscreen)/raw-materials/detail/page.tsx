@@ -597,7 +597,7 @@ function RawMaterialsDetailPageContent() {
                 {record.packing_number || "-"}
               </p>
               <p className="m-0 text-center text-[11px] text-gray-500">
-                {uniqCode || uniq} &middot; Qty {formatNumber(record.qty_current ?? record.quantity)}
+                {uniqCode || uniq} &middot; Qty {formatNumber(record.qty_current > 0 ? record.qty_current : record.quantity)}
               </p>
             </div>
           ))}
@@ -621,7 +621,7 @@ function RawMaterialsDetailPageContent() {
           </div>
           <div className="w-full text-center">
             <p className="m-0 text-gray-400 text-sm">Packing List</p>
-            <p className="m-0 font-semibold">{barcodeModal?.packing ?? "-"}</p>
+            <p className="m-0 max-h-48 overflow-y-auto font-semibold">{barcodeModal?.packing ?? "-"}</p>
           </div>
         </div>
       </Modal>
