@@ -2713,7 +2713,7 @@ export default function PoBudgetPage() {
   );
 
   React.useEffect(() => {
-    if (!useApi || expandedBudgetRowKeys.length === 0) return;
+    if (!useApi || filteredRows.length === 0) return;
 
     const collectUniqs = (
       children: PoBudgetPrlChild[] | undefined,
@@ -2727,13 +2727,12 @@ export default function PoBudgetPage() {
     };
 
     const wanted = new Set<string>();
-    filteredRows
-      .filter((row) => expandedBudgetRowKeys.includes(row.key))
-      .forEach((row) =>
-        getStoredParents(row.detailJson).forEach((parent) =>
-          collectUniqs(parent.children, wanted),
-        ),
-      );
+    // Semua baris di tabel (kolom Material Code) + isi tree yang di-expand.
+    filteredRows.forEach((row) =>
+      getStoredParents(row.detailJson).forEach((parent) =>
+        collectUniqs(parent.children, wanted),
+      ),
+    );
 
     const missing = Array.from(wanted).filter(
       (code) => !requestedMaterialUniqsRef.current.has(code),
@@ -2745,13 +2744,13 @@ export default function PoBudgetPage() {
       .unwrap()
       .then((map) => setMaterialCodeByUniq((prev) => ({ ...prev, ...map })))
       .catch((error) => {
-        // Izinkan percobaan ulang pada expand berikutnya.
+        // Izinkan percobaan ulang pada render berikutnya.
         missing.forEach((code) =>
           requestedMaterialUniqsRef.current.delete(code),
         );
         console.error("[po-budget-tree] material code lookup failed", error);
       });
-  }, [expandedBudgetRowKeys, filteredRows, lookupMaterialCodes]);
+  }, [filteredRows, lookupMaterialCodes]);
 
   const renderStoredChildren = (row: PoBudgetRow) => {
     const parents = getStoredParents(row.detailJson);
@@ -3929,39 +3928,57 @@ export default function PoBudgetPage() {
           ]
         : [
             {
-              // Uniq (parent PRL) apa saja yang ada di PR Budget ini.
-              title: "Uniq",
-              key: "parentUniqs",
-              width: 180,
+              // Material Code (BOM) item-item di PR Budget ini. Material code
+              // yang sama hanya ditampilkan sekali.
+              title: "Material Code",
+              key: "materialCodes",
+              width: 160,
               render: (_: unknown, record: PoBudgetRow) => {
-                const uniqs = Array.from(
-                  new Set(
-                    getStoredParents(record.detailJson)
-                      .map((parent) => String(parent.uniq_code ?? "").trim())
-                      .filter(Boolean),
-                  ),
+                const codes = new Set<string>();
+                const collect = (children: PoBudgetPrlChild[] | undefined) =>
+                  (Array.isArray(children) ? children : []).forEach((child) => {
+                    const uniqKey = String(child.uniq_code ?? "").trim();
+                    const code = String(
+                      materialCodeByUniq[uniqKey] ?? "",
+                    ).trim();
+                    if (code) codes.add(code);
+                    collect(child.children);
+                  });
+                getStoredParents(record.detailJson).forEach((parent) =>
+                  collect(parent.children),
                 );
-                if (uniqs.length === 0) {
+
+                // Belum ada hasil lookup / tanpa child: pakai material code
+                // pada spesifikasi baris itu sendiri.
+                if (codes.size === 0) {
+                  const own = String(
+                    record.materialSpec?.material_grade ?? "",
+                  ).trim();
+                  if (own && own !== "-") codes.add(own);
+                }
+                if (codes.size === 0) {
                   return <span className="text-sm text-gray-400">-</span>;
                 }
 
-                const chipClass =
-                  "inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700";
+                const list = Array.from(codes);
                 const maxShow = 3;
-                const extra = uniqs.slice(maxShow);
+                const extra = list.slice(maxShow);
                 return (
                   <div className="flex flex-wrap items-center gap-1">
-                    {uniqs.slice(0, maxShow).map((uniq) => (
-                      <span key={uniq} className={chipClass}>
-                        {uniq}
+                    {list.slice(0, maxShow).map((code) => (
+                      <span
+                        key={code}
+                        className="inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700"
+                      >
+                        {code}
                       </span>
                     ))}
                     {extra.length > 0 ? (
                       <Tooltip
                         title={
                           <div className="flex max-w-xs flex-wrap gap-1">
-                            {uniqs.map((uniq) => (
-                              <span key={uniq}>{uniq}</span>
+                            {list.map((code) => (
+                              <span key={code}>{code}</span>
                             ))}
                           </div>
                         }
@@ -4255,7 +4272,7 @@ export default function PoBudgetPage() {
         ),
       },
     ],
-    [activeTab, expandedBudgetRowKeys, openDetail, openEdit],
+    [activeTab, expandedBudgetRowKeys, openDetail, openEdit, materialCodeByUniq],
   );
 
   const tabOptions = useMemo(
