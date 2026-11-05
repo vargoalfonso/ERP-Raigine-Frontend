@@ -315,6 +315,36 @@ function signedPercent(value: number, digits = 1): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}%`;
 }
 
+const PERIOD_MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+// PRL rows store periods as "November-2026", but Global Parameters (the source
+// of the period dropdown) writes "November 2026". Normalize to the stored
+// "Month-Year" form so both spellings filter/compare/save the same way.
+const toStoredPeriod = (value: string) =>
+  String(value ?? "")
+    .trim()
+    .replace(/[\s_/]+/g, "-");
+const samePeriod = (a: string, b: string) =>
+  toStoredPeriod(a).toLowerCase() === toStoredPeriod(b).toLowerCase();
+
+// Period label of the current month, in the same "November-2026" format the
+// PRL rows use.
+const getCurrentPeriodLabel = (now = new Date()) =>
+  `${PERIOD_MONTHS[now.getMonth()]}-${now.getFullYear()}`;
+
 // Delays a fast-changing value (typing) so each keystroke does not hit the API.
 function useDebouncedValue<T>(value: T, delayMs = 400): T {
   const [debounced, setDebounced] = useState(value);
@@ -333,7 +363,16 @@ export default function PrlManagementPage() {
   // pagination is intentionally fixed at ten PRL IDs per page.
   const pageSize = 10;
   const [search, setSearch] = useState<string>("");
+  // "current" = period of the current month, "all" = no period filter,
+  // anything else = that exact period (e.g. "October-2026").
   const [periodFilter, setPeriodFilter] = useState<string>("current");
+  const currentPeriodLabel = useMemo(() => getCurrentPeriodLabel(), []);
+  const effectivePeriod =
+    periodFilter === "all"
+      ? undefined
+      : periodFilter === "current"
+        ? currentPeriodLabel
+        : toStoredPeriod(periodFilter);
   const [customerFilter, setCustomerFilter] = useState<string>("");
   // Free-typed, partial-match filters. They are sent to the backend (debounced)
   // so they search the whole database, not only the rows already in the browser.
@@ -387,7 +426,7 @@ export default function PrlManagementPage() {
       ...(debouncedUniqFilter.trim()
         ? { uniq_code: debouncedUniqFilter.trim() }
         : {}),
-      ...(periodFilter !== "current" ? { forecast_period: periodFilter } : {}),
+      ...(effectivePeriod ? { forecast_period: effectivePeriod } : {}),
     },
     { skip: !apiEnabled || activeTab !== "forecast-table" },
   );
@@ -1129,12 +1168,12 @@ export default function PrlManagementPage() {
       const matchesCustomer =
         !customerQ || r.customer.toLowerCase().includes(customerQ);
       const matchesPeriod =
-        periodFilter === "current" ? true : r.period === periodFilter;
+        !effectivePeriod || samePeriod(String(r.period ?? ""), effectivePeriod);
       const matchesType = typeFilter === "all" ? true : true; // placeholder for future type mapping
 
       return matchesQuery && matchesCustomer && matchesPeriod && matchesType;
     });
-  }, [filteredForecastRows, search, customerFilter, periodFilter, typeFilter]);
+  }, [filteredForecastRows, search, customerFilter, effectivePeriod, typeFilter]);
 
   // Non-API fallback only: group the in-memory rows by PRL ID.
   const localGroupedRows = useMemo(() => {
@@ -1288,10 +1327,21 @@ export default function PrlManagementPage() {
           : fallbackPeriodsFromRows
     ).filter((value, index, array) => array.indexOf(value) === index);
 
-    return [{ label: "Current Period", value: "current" }].concat(
-      periods.map((value) => ({ label: value, value })),
+    return [
+      { label: `Current Period (${currentPeriodLabel})`, value: "current" },
+      { label: "All Periods", value: "all" },
+    ].concat(
+      periods
+        .map((value) => ({ label: value, value: toStoredPeriod(value) }))
+        // "November 2026" and "November-2026" are the same period.
+        .filter(
+          (option, index, list) =>
+            list.findIndex(
+              (other) => other.value.toLowerCase() === option.value.toLowerCase(),
+            ) === index,
+        ),
     );
-  }, [globalParameters, resolvedForecastRows]);
+  }, [globalParameters, resolvedForecastRows, currentPeriodLabel]);
 
   const typeOptions = useMemo(
     () => [
@@ -1304,7 +1354,7 @@ export default function PrlManagementPage() {
 
   const editablePeriodOptions = useMemo(() => {
     const options = periodOptions.filter(
-      (option) => option.value !== "current",
+      (option) => option.value !== "current" && option.value !== "all",
     );
     if (
       editingPrl?.period &&
@@ -1836,7 +1886,7 @@ export default function PrlManagementPage() {
               options={periodOptions}
               className="min-w-[160px]"
             />
-            <Input
+            {/* <Input
               allowClear
               value={customerFilter}
               onChange={(e) => setCustomerFilter(e.target.value)}
@@ -1848,7 +1898,7 @@ export default function PrlManagementPage() {
               onChange={setTypeFilter}
               options={typeOptions}
               className="min-w-[130px]"
-            />
+            /> */}
           </div>
         </div>
 
@@ -1856,7 +1906,7 @@ export default function PrlManagementPage() {
         {activeTab === "forecast-table" && (
           <>
             <div className="flex items-center justify-between mb-3">
-              <div>
+              {/* <div>
                 <div className="text-base font-semibold text-gray-900">
                   Production Forecast by Uniq
                 </div>
@@ -1882,7 +1932,7 @@ export default function PrlManagementPage() {
                     />
                   </div>
                 </div>
-              </div>
+              </div> */}
               <div className="flex items-center gap-2">
                 <Badge
                   count={`${formatNumber(forecastPaginationTotal)} PRLs`}
