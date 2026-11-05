@@ -859,27 +859,29 @@ function CreatePoProcurementPageContent() {
   }, [poSupplierGroups, isEdit, editResolved]);
 
   const columns: ColumnsType<PoItemRow> = [
-    // {
-    //   title: "Parent UNIQ",
-    //   dataIndex: "parentUniq",
-    //   key: "parentUniq",
-    //   width: 110,
-    // },
-    // Uniq tiap item (child). Parent UNIQ sama untuk satu parent group,
-    // sedangkan uniq item beragam. Subcon tidak punya struktur child.
+    // Tab raw & indirect: kolom Parent UNIQ, Uniq, Part Name, dan Part Number
+    // di-comment (tidak ditampilkan). Subcon tetap memakai Parent UNIQ,
+    // Part Name, dan Part Number.
     ...(poType === "subcon"
-      ? []
-      : ([
+      ? ([
           {
-            title: "Uniq",
-            dataIndex: "childUniq",
-            key: "childUniq",
-            width: 90,
-            render: (v: string) => (
-              <span className="text-sm font-medium text-gray-800">{v}</span>
-            ),
+            title: "Parent UNIQ",
+            dataIndex: "parentUniq",
+            key: "parentUniq",
+            width: 110,
           },
-        ] as ColumnsType<PoItemRow>)),
+        ] as ColumnsType<PoItemRow>)
+      : []),
+    // {
+    //   // Uniq tiap item (child) - raw & indirect.
+    //   title: "Uniq",
+    //   dataIndex: "childUniq",
+    //   key: "childUniq",
+    //   width: 90,
+    //   render: (v: string) => (
+    //     <span className="text-sm font-medium text-gray-800">{v}</span>
+    //   ),
+    // },
     {
       title: "Material Code",
       dataIndex: "materialGrade",
@@ -894,13 +896,25 @@ function CreatePoProcurementPageContent() {
         </div>
       ),
     },
-    { title: "Part Name", dataIndex: "partName", key: "partName", width: 160 },
-    {
-      title: "Part Number",
-      dataIndex: "partNumber",
-      key: "partNumber",
-      width: 120,
-    },
+    // Part Name & Part Number: hanya subcon (raw & indirect di-comment).
+    ...(poType === "subcon"
+      ? ([
+          { title: "Part Name", dataIndex: "partName", key: "partName", width: 160 },
+          {
+            title: "Part Number",
+            dataIndex: "partNumber",
+            key: "partNumber",
+            width: 120,
+          },
+        ] as ColumnsType<PoItemRow>)
+      : []),
+    // { title: "Part Name", dataIndex: "partName", key: "partName", width: 160 },
+    // {
+    //   title: "Part Number",
+    //   dataIndex: "partNumber",
+    //   key: "partNumber",
+    //   width: 120,
+    // },
     { title: "Form", dataIndex: "form", key: "form", width: 90 },
     // Spesifikasi material item (raw & indirect). Subcon tidak memakainya.
     ...(poType === "subcon"
