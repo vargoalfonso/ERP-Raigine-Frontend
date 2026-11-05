@@ -613,7 +613,7 @@ function CreatePoProcurementPageContent() {
       width: 110,
     },
     {
-      title: "Material Grade",
+      title: "Material Code",
       dataIndex: "materialGrade",
       key: "materialGrade",
       width: 130,
