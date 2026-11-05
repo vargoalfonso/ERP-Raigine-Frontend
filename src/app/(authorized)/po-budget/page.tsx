@@ -17,6 +17,7 @@ import {
   useLazyGetPoBudgetPrlDetailQuery,
   useUpdatePoBudgetEntryMutation,
   useLookupPoBudgetMaterialCodesMutation,
+  useLookupPoBudgetMaterialSpecsMutation,
   type PoBudgetRow as ApiPoBudgetRow,
   type PoBudgetType,
   type PoBudgetEntryRequest,
@@ -783,6 +784,7 @@ export default function PoBudgetPage() {
   // supaya tidak terbatas oleh pagination tabel yang sedang tampil.
   const [loadAllPoBudgetForExport] = useLazyGetPoBudgetListQuery();
   const [lookupMaterialCodes] = useLookupPoBudgetMaterialCodesMutation();
+  const [lookupMaterialSpecs] = useLookupPoBudgetMaterialSpecsMutation();
 
   // [po-budget-pdf-per-day] State untuk modal download PDF "Permintaan Barang" per hari.
   const [prBudgetPdfOpen, setPrBudgetPdfOpen] = useState(false);
@@ -3390,7 +3392,34 @@ export default function PoBudgetPage() {
     satuan: string;
     noPart: string;
     deskripsi: string;
+    /** Ukuran material (mis. "Ø4 x 121 mm"); ditambahkan ke deskripsi. */
+    sizeText: string;
     keterangan: string;
+  };
+
+  // Ukuran material: bentuk bulat (diameter) -> "Ø4 x 121 mm"; lainnya ->
+  // "tebal x lebar x panjang mm" dari dimensi yang terisi.
+  const formatMaterialSize = (
+    spec:
+      | {
+          width_mm?: number;
+          diameter_mm?: number;
+          thickness_mm?: number;
+          length_mm?: number;
+        }
+      | undefined,
+  ): string => {
+    if (!spec) return "";
+    const fmt = (value: unknown): string => {
+      const n = Number(value);
+      return Number.isFinite(n) && n > 0 ? String(Number(n.toFixed(4))) : "";
+    };
+    const diameter = fmt(spec.diameter_mm);
+    const parts = diameter
+      ? [`Ø${diameter}`, fmt(spec.length_mm)]
+      : [fmt(spec.thickness_mm), fmt(spec.width_mm), fmt(spec.length_mm)];
+    const filled = parts.filter(Boolean);
+    return filled.length > 0 ? `${filled.join(" x ")} mm` : "";
   };
 
   const pickPrintCode = (...values: unknown[]): string => {
@@ -3482,6 +3511,7 @@ export default function PoBudgetPage() {
             satuan: String(child.uom ?? row.uom ?? "Pcs").trim() || "Pcs",
             noPart: String(child.part_number ?? "-").trim() || "-",
             deskripsi: String(child.part_name ?? "-").trim() || "-",
+            sizeText: formatMaterialSize(child.material_spec),
             keterangan,
           }),
         ),
@@ -3498,6 +3528,7 @@ export default function PoBudgetPage() {
           satuan: row.uom || "Pcs",
           noPart: row.partNumber || "-",
           deskripsi: row.partName || "-",
+          sizeText: "",
           keterangan,
         },
       ];
@@ -3512,6 +3543,7 @@ export default function PoBudgetPage() {
         satuan: row.uom || "Pcs",
         noPart: row.partNumber || "-",
         deskripsi: row.partName || "-",
+        sizeText: "",
         keterangan,
       },
     ];
@@ -3690,11 +3722,21 @@ export default function PoBudgetPage() {
       );
 
       // Kode Barang = Material Code item tersebut seperti di detail BOM
-      // (bukan uniq). Diambil dari backend berdasarkan uniq_code tiap baris.
-      let materialCodeByUniq: Record<string, string> = {};
+      // (bukan uniq), dan ukuran material ditambahkan ke Deskripsi Barang.
+      // Keduanya diambil dari backend berdasarkan uniq_code tiap baris.
+      let specByUniq: Record<
+        string,
+        {
+          material_code?: string;
+          width_mm?: number;
+          diameter_mm?: number;
+          thickness_mm?: number;
+          length_mm?: number;
+        }
+      > = {};
       if (useApi) {
         try {
-          materialCodeByUniq = await lookupMaterialCodes(
+          specByUniq = await lookupMaterialSpecs(
             Array.from(
               new Set(
                 rawPrintRows
@@ -3704,18 +3746,27 @@ export default function PoBudgetPage() {
             ),
           ).unwrap();
         } catch (error) {
-          console.error("[po-budget-pdf] material code lookup failed", error);
+          console.error("[po-budget-pdf] material spec lookup failed", error);
           message.warning(
-            "Material code tidak dapat diambil dari server; Kode Barang memakai kode lama.",
+            "Material code/ukuran tidak dapat diambil dari server; PDF memakai data yang tersimpan.",
           );
         }
       }
 
       const printRows = mergePrBudgetPrintRows(
-        rawPrintRows.map((r) => ({
-          ...r,
-          kodeBarang: materialCodeByUniq[r.uniqCode] ?? r.kodeBarang,
-        })),
+        rawPrintRows.map((r) => {
+          const spec = specByUniq[r.uniqCode];
+          const size = formatMaterialSize(spec) || r.sizeText;
+          const baseDesc = r.deskripsi && r.deskripsi !== "-" ? r.deskripsi : "";
+          return {
+            ...r,
+            kodeBarang: spec?.material_code || r.kodeBarang,
+            deskripsi:
+              baseDesc && size
+                ? `${baseDesc} (${size})`
+                : baseDesc || size || "-",
+          };
+        }),
       );
 
       const dateLabel = formatIdLongDate(prBudgetPdfDate);

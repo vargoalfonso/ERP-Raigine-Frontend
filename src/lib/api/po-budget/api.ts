@@ -34,6 +34,18 @@ export type PoBudgetChildSupplier = {
   quantity: number;
 };
 
+/** Material code + form/dimensions of an item, from the BOM material spec. */
+export type PoBudgetMaterialSpecLookup = {
+  material_code?: string;
+  grade?: string;
+  type_material?: string;
+  form?: string;
+  width_mm?: number;
+  diameter_mm?: number;
+  thickness_mm?: number;
+  length_mm?: number;
+};
+
 export type PoBudgetPrlChild = {
   uniq: string;
   uniq_code: string;
@@ -683,6 +695,43 @@ export const poBudgetSlice = apiSlice
         },
       }),
 
+      // Same endpoint as lookupPoBudgetMaterialCodes, but keeps the form and
+      // dimensions too: { [uniq_code]: { material_code, form, diameter_mm, ... } }.
+      lookupPoBudgetMaterialSpecs: builder.mutation<
+        Record<string, PoBudgetMaterialSpecLookup>,
+        string[]
+      >({
+        query: (uniqCodes) => ({
+          url: `/po-budget/material-codes`,
+          method: "POST",
+          body: { uniq_codes: uniqCodes },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => {
+          const map: Record<string, PoBudgetMaterialSpecLookup> = {};
+          for (const item of normalizeListResponse(response)) {
+            if (!isRecord(item)) continue;
+            const uniq = getString(item, ["uniq_code"]);
+            if (!uniq) continue;
+            const num = (key: string) => {
+              const value = Number(item[key]);
+              return Number.isFinite(value) && value > 0 ? value : undefined;
+            };
+            map[uniq] = {
+              material_code: getString(item, ["material_code"]) || undefined,
+              grade: getString(item, ["grade"]) || undefined,
+              type_material: getString(item, ["type_material"]) || undefined,
+              form: getString(item, ["form"]) || undefined,
+              width_mm: num("width_mm"),
+              diameter_mm: num("diameter_mm"),
+              thickness_mm: num("thickness_mm"),
+              length_mm: num("length_mm"),
+            };
+          }
+          return map;
+        },
+      }),
+
       updatePoBudgetEntry: builder.mutation<
         ApiResponse<PoBudgetRow>,
         { type: PoBudgetType; id: string | number; body: PoBudgetUpdateRequest }
@@ -715,4 +764,5 @@ export const {
   useLazyGetPoBudgetPrlDetailQuery,
   useUpdatePoBudgetEntryMutation,
   useLookupPoBudgetMaterialCodesMutation,
+  useLookupPoBudgetMaterialSpecsMutation,
 } = poBudgetSlice;
