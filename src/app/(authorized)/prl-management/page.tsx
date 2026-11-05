@@ -48,13 +48,15 @@ import {
 import { apiBaseUrl, generateHeaders } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
-  useDeletePrlMutation,
+  useDeletePrlGroupMutation,
   useGetPrlGapAnalysisQuery,
   useGetPrlByIdQuery,
   useImportPrlsMutation,
+  useListPrlGroupsQuery,
   useListPrlsQuery,
   useUpdatePrlMutation,
 } from "@/lib/api/prl/api";
+import type { PrlRecord } from "@/lib/api/prl/api";
 import { useGetBomTreeQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 import { useGetGlobalWorkingDaysQuery } from "@/lib/api/system-settings/api";
@@ -163,6 +165,12 @@ type ForecastRow = {
   createdAt?: string;
   updatedAt?: string;
   deliveryQuantity?: number;
+  /** Grouped (per PRL ID) rows only: every UNIQ under the PRL ID. */
+  uniqs?: string[];
+  /** Grouped rows only: how many UNIQ rows the PRL ID holds. */
+  rowCount?: number;
+  /** Grouped rows only: backend says the whole PRL ID may be deleted. */
+  deletable?: boolean;
 };
 
 type ForecastDetailState = {
@@ -307,6 +315,16 @@ function signedPercent(value: number, digits = 1): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}%`;
 }
 
+// Delays a fast-changing value (typing) so each keystroke does not hit the API.
+function useDebouncedValue<T>(value: T, delayMs = 400): T {
+  const [debounced, setDebounced] = useState(value);
+  React.useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
+
 export default function PrlManagementPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<PrlTabId>("forecast-table");
@@ -317,8 +335,14 @@ export default function PrlManagementPage() {
   const [search, setSearch] = useState<string>("");
   const [periodFilter, setPeriodFilter] = useState<string>("current");
   const [customerFilter, setCustomerFilter] = useState<string>("");
-  const [prlIdFilter, setPrlIdFilter] = useState<string | undefined>(undefined);
-  const [uniqFilter, setUniqFilter] = useState<string | undefined>(undefined);
+  // Free-typed, partial-match filters. They are sent to the backend (debounced)
+  // so they search the whole database, not only the rows already in the browser.
+  const [prlIdFilter, setPrlIdFilter] = useState<string>("");
+  const [uniqFilter, setUniqFilter] = useState<string>("");
+  const debouncedSearch = useDebouncedValue(search);
+  const debouncedCustomerFilter = useDebouncedValue(customerFilter);
+  const debouncedPrlIdFilter = useDebouncedValue(prlIdFilter);
+  const debouncedUniqFilter = useDebouncedValue(uniqFilter);
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [excelModalOpen, setExcelModalOpen] = useState(false);
@@ -348,9 +372,32 @@ export default function PrlManagementPage() {
     { page: 1, limit: 1000 },
     { skip: !apiEnabled },
   );
-  const prlDetailQuery = useGetPrlByIdQuery(forecastDetail.record?.key ?? "", {
-    skip: !apiEnabled || !forecastDetail.open || !forecastDetail.record?.key,
-  });
+  // Table data: one row per PRL ID, filtered + paginated by the backend.
+  const prlGroupQuery = useListPrlGroupsQuery(
+    {
+      page: currentPage,
+      limit: pageSize,
+      ...(debouncedSearch.trim() ? { search: debouncedSearch.trim() } : {}),
+      ...(debouncedCustomerFilter.trim()
+        ? { customer_name: debouncedCustomerFilter.trim() }
+        : {}),
+      ...(debouncedPrlIdFilter.trim()
+        ? { prl_id: debouncedPrlIdFilter.trim() }
+        : {}),
+      ...(debouncedUniqFilter.trim()
+        ? { uniq_code: debouncedUniqFilter.trim() }
+        : {}),
+      ...(periodFilter !== "current" ? { forecast_period: periodFilter } : {}),
+    },
+    { skip: !apiEnabled || activeTab !== "forecast-table" },
+  );
+  // The UNIQ rows of the PRL opened in the detail modal (fetched on demand,
+  // so it works for any PRL, not only those in the first 1000 rows).
+  const detailPrlId = forecastDetail.record?.prlId;
+  const detailRowsQuery = useListPrlsQuery(
+    { page: 1, limit: 1000, prl_id: detailPrlId },
+    { skip: !apiEnabled || !forecastDetail.open || !detailPrlId },
+  );
   // Gap analysis juga dipakai oleh Analytics View (tab Risk Analysis),
   // jadi jangan di-skip saat modal analytics dibuka.
   // Sumber data: GET /prls/history-vs-delivery (grouped per forecast_period + uniq_code).
@@ -361,7 +408,7 @@ export default function PrlManagementPage() {
 
   const [importPrls, importPrlsState] = useImportPrlsMutation();
   const [updatePrl, updatePrlState] = useUpdatePrlMutation();
-  const [deletePrl, deletePrlState] = useDeletePrlMutation();
+  const [deletePrlGroup, deletePrlState] = useDeletePrlGroupMutation();
 
   const bomIndex = useMemo(
     () => buildBomUniqIndex(bomTreeRes?.data ?? []),
@@ -454,12 +501,8 @@ export default function PrlManagementPage() {
     }
   };
 
-  const resolvedForecastRows = useMemo<ForecastRow[]>(() => {
-    if (!apiEnabled) return initialRows;
-    const list = prlListQuery.data?.items;
-    if (!list) return initialRows;
-
-    return list.map((r) => {
+  const toForecastRow = React.useCallback(
+    (r: PrlRecord): ForecastRow => {
       const customerName =
         r.customer?.customer_name ??
         r.customer_name ??
@@ -505,22 +548,34 @@ export default function PrlManagementPage() {
         updatedAt: r.updated_at,
         deliveryQuantity: Number(r.delivery_quantity ?? 0),
       };
-    });
-  }, [
-    apiEnabled,
-    bomIndex.assemblyCodeByUniq,
-    bomIndex.modelByUniq,
-    bomIndex.partNameByUniq,
-    bomIndex.partNumberByUniq,
-    prlListQuery.data,
-  ]);
+    },
+    [
+      bomIndex.assemblyCodeByUniq,
+      bomIndex.modelByUniq,
+      bomIndex.partNameByUniq,
+      bomIndex.partNumberByUniq,
+    ],
+  );
+
+  // Flat rows (one per UNIQ). Used by Analytics and the non-API fallback only.
+  // NOTE: the API caps this list at 1000 rows, so it must not drive the PRL table.
+  const resolvedForecastRows = useMemo<ForecastRow[]>(() => {
+    if (!apiEnabled) return initialRows;
+    const list = prlListQuery.data?.items;
+    if (!list) return initialRows;
+    return list.map(toForecastRow);
+  }, [apiEnabled, prlListQuery.data, toForecastRow]);
 
   const filteredForecastRows = useMemo(() => {
     let rows = resolvedForecastRows;
-    if (prlIdFilter)
-      rows = rows.filter((r) => String(r.prlId) === String(prlIdFilter));
-    if (uniqFilter)
-      rows = rows.filter((r) => String(r.uniq) === String(uniqFilter));
+    if (prlIdFilter.trim())
+      rows = rows.filter((r) =>
+        String(r.prlId).toLowerCase().includes(prlIdFilter.trim().toLowerCase()),
+      );
+    if (uniqFilter.trim())
+      rows = rows.filter((r) =>
+        String(r.uniq).toLowerCase().includes(uniqFilter.trim().toLowerCase()),
+      );
     if (search) {
       const s = search.trim().toLowerCase();
       rows = rows.filter((r) => {
@@ -536,37 +591,6 @@ export default function PrlManagementPage() {
     }
     return rows;
   }, [resolvedForecastRows, prlIdFilter, uniqFilter, search]);
-
-  // PRL grouping: map prlId -> uniq codes
-  const prlGroups = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    const list = prlListQuery.data?.items ?? [];
-    for (const r of list) {
-      const prlId = String(r.prl_id ?? r.id ?? "").trim();
-      const uniq = String(r.uniq_code ?? r.item_uniq_code ?? "").trim();
-      if (!prlId) continue;
-      const s = map.get(prlId) ?? new Set<string>();
-      if (uniq) s.add(uniq);
-      map.set(prlId, s);
-    }
-    return map;
-  }, [prlListQuery.data]);
-
-  const prlIdOptions = useMemo(
-    () => Array.from(prlGroups.keys()).map((id) => ({ label: id, value: id })),
-    [prlGroups],
-  );
-
-  const uniqOptionsForSelectedPrl = useMemo(() => {
-    if (prlIdFilter) {
-      const set = prlGroups.get(prlIdFilter) ?? new Set();
-      return Array.from(set).map((u) => ({ label: u, value: u }));
-    }
-    // all uniqs
-    const all = new Set<string>();
-    for (const s of prlGroups.values()) for (const u of s) all.add(u);
-    return Array.from(all).map((u) => ({ label: u, value: u }));
-  }, [prlGroups, prlIdFilter]);
 
   const selectedUniqRows = useMemo(() => {
     if (!forecastDetail.record) return [] as ForecastRow[];
@@ -603,8 +627,23 @@ export default function PrlManagementPage() {
   const detailUniqRows = useMemo(() => {
     if (!forecastDetail.record) return [] as ForecastRow[];
     const pid = String(forecastDetail.record.prlId ?? "");
+    if (apiEnabled) {
+      return (detailRowsQuery.data?.items ?? []).map(toForecastRow);
+    }
     return resolvedForecastRows.filter((row) => String(row.prlId) === pid);
-  }, [forecastDetail.record, resolvedForecastRows]);
+  }, [
+    apiEnabled,
+    detailRowsQuery.data,
+    forecastDetail.record,
+    resolvedForecastRows,
+    toForecastRow,
+  ]);
+
+  // Single-row detail (GET /prls/:uuid) needs a row UUID, not the PRL ID.
+  const detailFirstRowKey = detailUniqRows[0]?.key ?? "";
+  const prlDetailQuery = useGetPrlByIdQuery(detailFirstRowKey, {
+    skip: !apiEnabled || !forecastDetail.open || !detailFirstRowKey,
+  });
 
   const resolvedDemandGapRows = useMemo<DemandGapRow[]>(() => {
     if (!apiEnabled) return demandGapRows;
@@ -1097,8 +1136,8 @@ export default function PrlManagementPage() {
     });
   }, [filteredForecastRows, search, customerFilter, periodFilter, typeFilter]);
 
-  // Group rows by PRL ID so table shows one row per PRL with uniq list
-  const groupedRows = useMemo(() => {
+  // Non-API fallback only: group the in-memory rows by PRL ID.
+  const localGroupedRows = useMemo(() => {
     const map = new Map<
       string,
       {
@@ -1138,7 +1177,8 @@ export default function PrlManagementPage() {
       key: e.key,
       prlId: e.prlId,
       customer: e.customer,
-      uniq: e.uniqs.join(", ") as any,
+      uniq: e.uniqs.join(", "),
+      uniqs: e.uniqs,
       productModel: e.productModel,
       partName: e.partName,
       partNumber: e.partNumber,
@@ -1148,11 +1188,60 @@ export default function PrlManagementPage() {
     }));
   }, [rows]);
 
-  const forecastPaginationTotal = groupedRows.length;
+  // API mode: one row per PRL ID straight from the backend (already filtered
+  // and paginated server-side), so every PRL ID in the database is reachable.
+  const serverGroupedRows = useMemo<ForecastRow[]>(
+    () =>
+      (prlGroupQuery.data?.items ?? []).map((g) => ({
+        key: g.prl_id,
+        prlId: g.prl_id,
+        customer: g.customer_name ?? "-",
+        customerId: g.customer_uuid,
+        uniq: g.uniq_codes.join(", "),
+        uniqs: g.uniq_codes,
+        rowCount: g.row_count,
+        deletable: g.deletable,
+        productModel: g.product_model ?? "-",
+        partName: g.part_name ?? "-",
+        partNumber: g.part_number ?? "-",
+        quantity: g.quantity,
+        period: g.forecast_period ?? "-",
+        status: normalizePrlStatus(g.status) as PrlStatus,
+        createdAt: g.created_at,
+        updatedAt: g.updated_at,
+      })),
+    [prlGroupQuery.data],
+  );
 
+  const groupedRows: ForecastRow[] = apiEnabled
+    ? serverGroupedRows
+    : (localGroupedRows as ForecastRow[]);
+
+  const forecastPaginationTotal = apiEnabled
+    ? (prlGroupQuery.data?.pagination.total ?? 0)
+    : localGroupedRows.length;
+
+  // Any filter change goes back to page 1 (typed filters use their debounced
+  // value so the page does not jump on every keystroke).
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [search, customerFilter, periodFilter, typeFilter]);
+  }, [
+    debouncedSearch,
+    debouncedCustomerFilter,
+    debouncedPrlIdFilter,
+    debouncedUniqFilter,
+    periodFilter,
+    typeFilter,
+  ]);
+
+  // If the last row of the last page was removed, step back one page.
+  React.useEffect(() => {
+    if (!apiEnabled || prlGroupQuery.isFetching) return;
+    const total = prlGroupQuery.data?.pagination.total;
+    if (total === undefined) return;
+    const lastPage = Math.max(1, Math.ceil(total / pageSize));
+    if (currentPage > lastPage) setCurrentPage(lastPage);
+  }, [apiEnabled, prlGroupQuery.isFetching, prlGroupQuery.data, currentPage]);
 
   const periodOptions = useMemo(() => {
     const activePlanningPeriods = globalParameters
@@ -1250,11 +1339,13 @@ export default function PrlManagementPage() {
       key: "uniq",
       width: 120,
       render: (v: string | string[], record) => {
-        const vals = Array.isArray(v)
-          ? v
-          : String(v ?? "")
-              .split(/,\s*/)
-              .filter(Boolean);
+        const vals = record.uniqs
+          ? record.uniqs
+          : Array.isArray(v)
+            ? v
+            : String(v ?? "")
+                .split(/,\s*/)
+                .filter(Boolean);
         if (vals.length === 0)
           return <span className="text-sm text-gray-500">-</span>;
         if (vals.length === 1) {
@@ -1294,15 +1385,9 @@ export default function PrlManagementPage() {
                       <Tag
                         key={u}
                         className="cursor-pointer inline-flex"
-                        onClick={() => {
-                          const match = resolvedForecastRows.find(
-                            (rr) =>
-                              String(rr.prlId) === String(record.prlId) &&
-                              rr.uniq === u,
-                          );
-                          if (match)
-                            setForecastDetail({ open: true, record: match });
-                        }}
+                        onClick={() =>
+                          setForecastDetail({ open: true, record })
+                        }
                       >
                         {u}
                       </Tag>
@@ -1421,13 +1506,21 @@ export default function PrlManagementPage() {
             size="small"
             type="text"
             danger
-            disabled={!canDeletePrlStatus(record.status)}
+            disabled={
+              apiEnabled && record.deletable !== undefined
+                ? !record.deletable
+                : !canDeletePrlStatus(record.status)
+            }
             icon={<DeleteOutlined />}
             onClick={() => {
               let confirmModal: any = null;
+              const entryCount = record.rowCount ?? record.uniqs?.length ?? 1;
               confirmModal = Modal.confirm({
-                title: "Delete PRL entry?",
-                content: `This will delete ${record.prlId}.`,
+                title: "Delete PRL?",
+                content:
+                  entryCount > 1
+                    ? `This will delete ${record.prlId} together with all ${formatNumber(entryCount)} UNIQ entries under it. This cannot be undone.`
+                    : `This will delete ${record.prlId}.`,
                 okText: "Delete",
                 okButtonProps: { danger: true },
                 cancelText: "Cancel",
@@ -1442,13 +1535,20 @@ export default function PrlManagementPage() {
                   }
 
                   try {
-                    await deletePrl(record.key).unwrap();
-                    message.success("PRL entry deleted");
+                    // The row is a whole PRL ID (many UNIQ rows), so delete by
+                    // PRL ID. record.key is NOT a row UUID, so deletePrl can't be used.
+                    await deletePrlGroup(String(record.prlId)).unwrap();
+                    message.success(`${record.prlId} deleted`);
+                    setSelectedRowKeys((keys) =>
+                      keys.filter((k) => k !== record.key),
+                    );
+                    // The list tag is invalidated by the mutation (table refetches);
+                    // the flat list feeds Analytics, so refresh it too.
                     prlListQuery.refetch();
                     refetchDemandGapIfActive();
                   } catch (error) {
                     message.error(
-                      getApiErrorMessage(error, "Failed to delete PRL entry"),
+                      getApiErrorMessage(error, "Failed to delete PRL"),
                     );
                   } finally {
                     confirmModal?.destroy();
@@ -1760,37 +1860,32 @@ export default function PrlManagementPage() {
                 <div className="text-base font-semibold text-gray-900">
                   Production Forecast by Uniq
                 </div>
-                <div className="min-w-[160px]">
-                  <div className="text-xs text-gray-500 mb-1">PRL ID</div>
-                  <Select
-                    allowClear
-                    showSearch
-                    options={prlIdOptions}
-                    value={prlIdFilter}
-                    onChange={(v) => {
-                      setPrlIdFilter(v);
-                      setUniqFilter(undefined);
-                    }}
-                    placeholder="Filter by PRL ID"
-                    className="min-w-[160px]"
-                  />
-                </div>
-                <div className="min-w-[200px]">
-                  <div className="text-xs text-gray-500 mb-1">Uniq</div>
-                  <Select
-                    allowClear
-                    showSearch
-                    options={uniqOptionsForSelectedPrl}
-                    value={uniqFilter}
-                    onChange={(v) => setUniqFilter(v)}
-                    placeholder="Filter by Uniq"
-                    className="min-w-[200px]"
-                  />
+                <div className="flex items-end gap-3 mt-2">
+                  <div className="min-w-[160px]">
+                    <div className="text-xs text-gray-500 mb-1">PRL ID</div>
+                    <Input
+                      allowClear
+                      value={prlIdFilter}
+                      onChange={(e) => setPrlIdFilter(e.target.value)}
+                      placeholder="Type PRL ID"
+                      className="!rounded-lg min-w-[160px]"
+                    />
+                  </div>
+                  <div className="min-w-[200px]">
+                    <div className="text-xs text-gray-500 mb-1">Uniq</div>
+                    <Input
+                      allowClear
+                      value={uniqFilter}
+                      onChange={(e) => setUniqFilter(e.target.value)}
+                      placeholder="Type Uniq (e.g. WI03)"
+                      className="!rounded-lg min-w-[200px]"
+                    />
+                  </div>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <Badge
-                  count={`${forecastPaginationTotal} forecasts`}
+                  count={`${formatNumber(forecastPaginationTotal)} PRLs`}
                   style={{ backgroundColor: "#EEF2FF", color: "#3730A3" }}
                 />
                 <Button
@@ -1808,6 +1903,7 @@ export default function PrlManagementPage() {
               dataSource={groupedRows}
               rowKey="key"
               size="middle"
+              loading={apiEnabled && prlGroupQuery.isFetching}
               scroll={{ x: "max-content" }}
               rowSelection={{
                 selectedRowKeys,
