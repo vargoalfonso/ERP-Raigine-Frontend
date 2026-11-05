@@ -95,6 +95,54 @@ export type PrlListRequest = {
   uniq_code?: string;
   /** Single type or comma-separated list, e.g. "reguler" or "reguler,additional". */
   prl_type?: string;
+  /** Exact PRL ID; returns every UNIQ row that belongs to that PRL. */
+  prl_id?: string;
+};
+
+// One row per PRL ID, aggregated and paginated by the backend
+// (GET /prls/groups). Use this for the PRL table instead of grouping the flat
+// /prls list on the client: that list holds one row per UNIQ (hundreds per PRL)
+// and is capped at 1000 rows, so client-side grouping silently drops most PRLs.
+export type PrlGroupRecord = {
+  prl_id: string;
+  customer_uuid?: string;
+  customer_name?: string;
+  product_model?: string;
+  part_name?: string;
+  part_number?: string;
+  forecast_period?: string;
+  quantity: number;
+  /** Uniform status of the group, or "mixed" when its rows differ. */
+  status?: string;
+  prl_type?: PrlType;
+  row_count: number;
+  uniq_count: number;
+  uniq_codes: string[];
+  /** True when every row is pending/rejected, i.e. the whole PRL may be deleted. */
+  deletable: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type PrlGroupListRequest = {
+  page: number;
+  limit: number;
+  /** Partial match on PRL ID, customer, UNIQ, model, part name/number. */
+  search?: string;
+  /** Partial, case-insensitive match on UNIQ code. */
+  uniq_code?: string;
+  /** Partial, case-insensitive match on PRL ID. */
+  prl_id?: string;
+  customer_name?: string;
+  customer_uuid?: string;
+  status?: string;
+  forecast_period?: string;
+  prl_type?: string;
+};
+
+export type PrlGroupListResponse = {
+  items: PrlGroupRecord[];
+  pagination: PrlListPagination;
 };
 
 export type PrlListPagination = {
@@ -278,6 +326,57 @@ const normalizePrlListResponse = (response: unknown, fallback: PrlListRequest): 
   return result;
 };
 
+const normalizePrlGroupRecord = (raw: unknown): PrlGroupRecord => {
+  const record = isRecord(raw) ? raw : {};
+  const uniqCodes = Array.isArray(record.uniq_codes)
+    ? record.uniq_codes.map((u) => toText(u)).filter((u): u is string => Boolean(u))
+    : [];
+
+  return {
+    prl_id: toText(record.prl_id) ?? "",
+    customer_uuid: toText(record.customer_uuid),
+    customer_name: toText(record.customer_name),
+    product_model: toText(record.product_model),
+    part_name: toText(record.part_name),
+    part_number: toText(record.part_number),
+    forecast_period: toText(record.forecast_period),
+    quantity: toNumber(record.quantity) ?? 0,
+    status: toText(record.status),
+    prl_type: toText(record.prl_type) as PrlType | undefined,
+    row_count: toNumber(record.row_count) ?? uniqCodes.length,
+    uniq_count: toNumber(record.uniq_count) ?? uniqCodes.length,
+    uniq_codes: uniqCodes,
+    deletable: record.deletable === true,
+    created_at: toText(record.created_at),
+    updated_at: toText(record.updated_at),
+  };
+};
+
+const normalizePrlGroupListResponse = (
+  response: unknown,
+  fallback: PrlGroupListRequest,
+): PrlGroupListResponse => {
+  const root = isRecord(response) ? response : {};
+  const data = isRecord(root.data) ? root.data : {};
+  const items = parseArrayResponse<unknown>(response).map(normalizePrlGroupRecord);
+  const pagination = isRecord(data.pagination) ? data.pagination : {};
+  const total = toNumber(pagination.total) ?? items.length;
+  const page = toNumber(pagination.page) ?? fallback.page;
+  const limit = toNumber(pagination.limit) ?? fallback.limit;
+
+  return {
+    items,
+    pagination: {
+      total,
+      page,
+      limit,
+      total_pages:
+        toNumber(pagination.total_pages) ??
+        Math.max(1, Math.ceil(total / Math.max(1, limit))),
+    },
+  };
+};
+
 const TAG = "PRL" as const;
 
 export const prlApiSlice = apiSlice
@@ -301,6 +400,7 @@ export const prlApiSlice = apiSlice
             ...(params?.customer_uuid ? { customer_uuid: params.customer_uuid } : {}),
             ...(params?.uniq_code ? { uniq_code: params.uniq_code } : {}),
             ...(params?.prl_type ? { prl_type: params.prl_type } : {}),
+            ...(params?.prl_id ? { prl_id: params.prl_id } : {}),
           },
           meta: { useAuthorization: true, contentType: "application/json" },
         };
@@ -315,6 +415,30 @@ export const prlApiSlice = apiSlice
           if (!result) return base;
           return base.concat(result.items.filter((item) => item.id).map((item) => ({ type: TAG, id: item.id })));
         },
+      }),
+
+      listPrlGroups: builder.query<PrlGroupListResponse, PrlGroupListRequest>({
+        query: (params) => ({
+          url: "/prls/groups",
+          method: "GET",
+          params: {
+            page: params.page,
+            limit: params.limit,
+            ...(params.search ? { search: params.search } : {}),
+            ...(params.uniq_code ? { uniq_code: params.uniq_code } : {}),
+            ...(params.prl_id ? { prl_id: params.prl_id } : {}),
+            ...(params.customer_name ? { customer_name: params.customer_name } : {}),
+            ...(params.customer_uuid ? { customer_uuid: params.customer_uuid } : {}),
+            ...(params.status ? { status: params.status } : {}),
+            ...(params.forecast_period ? { forecast_period: params.forecast_period } : {}),
+            ...(params.prl_type ? { prl_type: params.prl_type } : {}),
+          },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown, _meta, arg) =>
+          normalizePrlGroupListResponse(response, arg),
+        // Same LIST tag as listPrls so create/update/import/delete refresh both.
+        providesTags: [{ type: TAG, id: "LIST" }],
       }),
 
       getPrlById: builder.query<PrlRecord, string | number>({
@@ -380,6 +504,18 @@ export const prlApiSlice = apiSlice
         ],
       }),
 
+      // Deletes EVERY UNIQ row under one PRL ID (backend: DELETE /prls/groups/:prl_id).
+      // The table shows one row per PRL ID, so its delete button must use this and
+      // not deletePrl, which expects the UUID of a single UNIQ row.
+      deletePrlGroup: builder.mutation<{ success?: boolean }, string>({
+        query: (prlId) => ({
+          url: `/prls/groups/${encodeURIComponent(prlId)}`,
+          method: "DELETE",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        invalidatesTags: [{ type: TAG, id: "LIST" }],
+      }),
+
       importPrls: builder.mutation<ImportPrlsResponse, File>({
         query: (file) => {
           const formData = new FormData();
@@ -418,11 +554,13 @@ export const prlApiSlice = apiSlice
 
 export const {
   useListPrlsQuery,
+  useListPrlGroupsQuery,
   useGetPrlByIdQuery,
   useCreatePrlMutation,
   useCreatePrlsBulkMutation,
   useUpdatePrlMutation,
   useDeletePrlMutation,
+  useDeletePrlGroupMutation,
   useImportPrlsMutation,
   useGetPrlGapAnalysisQuery,
 } = prlApiSlice;
