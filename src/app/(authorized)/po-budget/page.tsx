@@ -16,6 +16,7 @@ import {
   useGetPoBudgetDetailQuery,
   useLazyGetPoBudgetPrlDetailQuery,
   useUpdatePoBudgetEntryMutation,
+  useLookupPoBudgetMaterialCodesMutation,
   type PoBudgetRow as ApiPoBudgetRow,
   type PoBudgetType,
   type PoBudgetEntryRequest,
@@ -781,6 +782,7 @@ export default function PoBudgetPage() {
   // [po-budget-pdf-per-day] Lazy fetch dipakai khusus untuk export PDF harian,
   // supaya tidak terbatas oleh pagination tabel yang sedang tampil.
   const [loadAllPoBudgetForExport] = useLazyGetPoBudgetListQuery();
+  const [lookupMaterialCodes] = useLookupPoBudgetMaterialCodesMutation();
 
   // [po-budget-pdf-per-day] State untuk modal download PDF "Permintaan Barang" per hari.
   const [prBudgetPdfOpen, setPrBudgetPdfOpen] = useState(false);
@@ -2616,25 +2618,40 @@ export default function PoBudgetPage() {
     );
   };
 
+  // Material Code (BOM) per uniq child untuk Material Tree. Diambil dari backend
+  // saat baris di-expand; nilai tersimpan di detail child bisa berisi uniq
+  // sebagai pengganti grade.
+  const [materialCodeByUniq, setMaterialCodeByUniq] = useState<
+    Record<string, string>
+  >({});
+  const requestedMaterialUniqsRef = React.useRef<Set<string>>(new Set());
+
   const bomChildColumns = useMemo<ColumnsType<BomChildDetailRow>>(
     () => [
       {
-        title: "Material Grade",
-        dataIndex: "uniq",
-        key: "uniq",
-        width: 200,
-        render: (value: string, record) => (
-          <div className="flex items-center gap-2">
-            <Tag color="blue" className="!m-0">
-              {value || "-"}
-            </Tag>
-            {record.childUniqCode ? (
-              <span className="text-xs text-gray-500">
-                {record.childUniqCode}
-              </span>
-            ) : null}
-          </div>
+        title: "Uniq",
+        dataIndex: "childUniqCode",
+        key: "childUniqCode",
+        width: 120,
+        render: (value: string | undefined, record) => (
+          <Tag color="blue" className="!m-0">
+            {value || record.uniq || "-"}
+          </Tag>
         ),
+      },
+      {
+        title: "Material Code",
+        key: "materialCode",
+        width: 140,
+        render: (_: unknown, record) => {
+          const uniqKey = String(record.childUniqCode ?? "").trim();
+          const code = materialCodeByUniq[uniqKey] ?? record.uniq;
+          return (
+            <span className="text-sm font-semibold text-gray-800">
+              {code || "-"}
+            </span>
+          );
+        },
       },
       {
         title: "Part Name",
@@ -2692,8 +2709,49 @@ export default function PoBudgetPage() {
         ),
       },
     ],
-    [],
+    [materialCodeByUniq],
   );
+
+  React.useEffect(() => {
+    if (!useApi || expandedBudgetRowKeys.length === 0) return;
+
+    const collectUniqs = (
+      children: PoBudgetPrlChild[] | undefined,
+      into: Set<string>,
+    ) => {
+      (Array.isArray(children) ? children : []).forEach((child) => {
+        const code = String(child.uniq_code ?? "").trim();
+        if (code) into.add(code);
+        collectUniqs(child.children, into);
+      });
+    };
+
+    const wanted = new Set<string>();
+    filteredRows
+      .filter((row) => expandedBudgetRowKeys.includes(row.key))
+      .forEach((row) =>
+        getStoredParents(row.detailJson).forEach((parent) =>
+          collectUniqs(parent.children, wanted),
+        ),
+      );
+
+    const missing = Array.from(wanted).filter(
+      (code) => !requestedMaterialUniqsRef.current.has(code),
+    );
+    if (missing.length === 0) return;
+    missing.forEach((code) => requestedMaterialUniqsRef.current.add(code));
+
+    lookupMaterialCodes(missing)
+      .unwrap()
+      .then((map) => setMaterialCodeByUniq((prev) => ({ ...prev, ...map })))
+      .catch((error) => {
+        // Izinkan percobaan ulang pada expand berikutnya.
+        missing.forEach((code) =>
+          requestedMaterialUniqsRef.current.delete(code),
+        );
+        console.error("[po-budget-tree] material code lookup failed", error);
+      });
+  }, [expandedBudgetRowKeys, filteredRows, lookupMaterialCodes]);
 
   const renderStoredChildren = (row: PoBudgetRow) => {
     const parents = getStoredParents(row.detailJson);
@@ -3286,9 +3344,13 @@ export default function PoBudgetPage() {
   //    tanggal terpilih.
   // 3. Setiap entri di-flatten menjadi baris-baris "barang": untuk tipe
   //    budget yang punya struktur child (raw-material & indirect), kolom
-  //    "Kode Barang" WAJIB memakai CHILD uniq_code, bukan uniq/PRL milik
-  //    parent. Subcon tidak punya struktur child sehingga memakai uniq itu
-  //    sendiri.
+  //    "Kode Barang" WAJIB memakai MATERIAL CODE item child tersebut, yaitu
+  //    nilai "Material Code" di Material Spec halaman detail BOM
+  //    (item_material_specs.material_grade, mis. BR40), bukan uniq/PRL parent.
+  //    Diambil dari backend (POST /po-budget/material-codes) karena detail
+  //    child yang tersimpan bisa berisi uniq sebagai pengganti grade; bila
+  //    item tidak punya material code, jatuh ke kode lama.
+  // 3b. Baris dengan Kode Barang yang sama digabung dan Jumlah dijumlahkan.
   // 4. Render satu halaman print dengan layout dokumen PERMINTAAN BARANG
   //    (mengikuti contoh PT. MATRA RODA PIRANTI) lalu window.print() supaya
   //    user bisa Save-as-PDF via dialog browser.
@@ -3322,12 +3384,73 @@ export default function PoBudgetPage() {
     `PERSEDIAN ${getBudgetTypeLabel(tab).toUpperCase()} MATERIAL`;
 
   type PrBudgetPrintRow = {
+    /** uniq_code of the item; used to look up its material code. */
+    uniqCode: string;
     kodeBarang: string;
     jumlah: number;
     satuan: string;
     noPart: string;
     deskripsi: string;
     keterangan: string;
+  };
+
+  const pickPrintCode = (...values: unknown[]): string => {
+    for (const value of values) {
+      const text = String(value ?? "").trim();
+      if (text && text !== "-") return text;
+    }
+    return "-";
+  };
+
+  // Gabungkan baris dengan Kode Barang (material code) yang sama menjadi satu
+  // baris dan jumlahkan Jumlah-nya, walaupun asalnya dari uniq/parent yang
+  // berbeda. Satuan ikut menjadi kunci supaya satuan berbeda tidak dijumlahkan.
+  // Pembulatan ke atas dilakukan pada TOTAL (saat render), bukan per baris.
+  const mergePrBudgetPrintRows = (
+    rows: PrBudgetPrintRow[],
+  ): PrBudgetPrintRow[] => {
+    const merged = new Map<
+      string,
+      PrBudgetPrintRow & {
+        uniqSet: Set<string>;
+        noParts: Set<string>;
+        deskripsis: Set<string>;
+      }
+    >();
+
+    for (const r of rows) {
+      const key = `${r.kodeBarang.toLowerCase()}||${r.satuan.toLowerCase()}`;
+      const existing = merged.get(key);
+      const noPart = r.noPart && r.noPart !== "-" ? r.noPart : "";
+      const deskripsi = r.deskripsi && r.deskripsi !== "-" ? r.deskripsi : "";
+      const uniq = r.uniqCode && r.uniqCode !== "-" ? r.uniqCode : "";
+
+      if (!existing) {
+        merged.set(key, {
+          ...r,
+          jumlah: Number(r.jumlah || 0),
+          uniqSet: new Set(uniq ? [uniq] : []),
+          noParts: new Set(noPart ? [noPart] : []),
+          deskripsis: new Set(deskripsi ? [deskripsi] : []),
+        });
+        continue;
+      }
+      existing.jumlah += Number(r.jumlah || 0);
+      if (uniq) existing.uniqSet.add(uniq);
+      if (noPart) existing.noParts.add(noPart);
+      if (deskripsi) existing.deskripsis.add(deskripsi);
+    }
+
+    return Array.from(merged.values()).map(
+      ({ uniqSet, noParts, deskripsis, ...rest }) => ({
+        ...rest,
+        // Semua uniq yang punya material code (Kode Barang) yang sama.
+        uniqCode: uniqSet.size > 0 ? Array.from(uniqSet).join(", ") : "-",
+        noPart: noParts.size > 0 ? Array.from(noParts).join(", ") : "-",
+        deskripsi:
+          deskripsis.size > 0 ? Array.from(deskripsis).join(", ") : "-",
+      }),
+    );
   };
 
   // Flatten satu entri PO Budget menjadi baris-baris siap cetak. Untuk tipe
@@ -3346,9 +3469,16 @@ export default function PoBudgetPage() {
       const childRows: PrBudgetPrintRow[] = parents.flatMap((parent) =>
         (Array.isArray(parent.children) ? parent.children : []).map(
           (child) => ({
-            kodeBarang:
-              String(child.uniq_code ?? child.uniq ?? row.uniq ?? "-").trim() ||
-              "-",
+            uniqCode: pickPrintCode(child.uniq_code, child.uniq, row.uniq),
+            // Placeholder: diganti dengan Material Code dari BOM (lookup
+            // backend) sebelum dicetak. Fallback ini hanya dipakai bila
+            // lookup tidak menemukan material code untuk item tersebut.
+            kodeBarang: pickPrintCode(
+              child.material_spec?.material_grade,
+              child.uniq,
+              child.uniq_code,
+              row.uniq,
+            ),
             jumlah: Number(child.quantity ?? child.qty_per_uniq ?? row.pr ?? 0),
             satuan: String(child.uom ?? row.uom ?? "Pcs").trim() || "Pcs",
             noPart: String(child.part_number ?? "-").trim() || "-",
@@ -3363,6 +3493,7 @@ export default function PoBudgetPage() {
       // Fallback bila entri belum punya detail child tersimpan.
       return [
         {
+          uniqCode: pickPrintCode(row.uniq),
           kodeBarang: row.uniq || "-",
           jumlah: Number(row.pr || 0),
           satuan: row.uom || "Pcs",
@@ -3376,6 +3507,7 @@ export default function PoBudgetPage() {
     // Subcon budget tidak mempunyai struktur parent/child.
     return [
       {
+        uniqCode: pickPrintCode(row.uniq),
         kodeBarang: row.uniq || "-",
         jumlah: Number(row.pr || 0),
         satuan: row.uom || "Pcs",
@@ -3407,6 +3539,7 @@ export default function PoBudgetPage() {
           <tr>
             <td class="c">${index + 1}</td>
             <td class="c b">${escapeHtml(r.kodeBarang)}</td>
+            <td class="c">${escapeHtml(r.uniqCode)}</td>
             <td class="r">${formatNumber(Math.ceil(r.jumlah))}</td>
             <td class="c">${escapeHtml(r.satuan)}</td>
             <td class="c">${escapeHtml(r.noPart)}</td>
@@ -3474,6 +3607,7 @@ export default function PoBudgetPage() {
                   <tr>
                     <th style="width:32px">NO.</th>
                     <th style="width:110px">Kode Barang</th>
+                    <th style="width:130px">Uniq</th>
                     <th style="width:70px">Jumlah</th>
                     <th style="width:60px">Satuan</th>
                     <th style="width:120px">No Part</th>
@@ -3481,7 +3615,7 @@ export default function PoBudgetPage() {
                     <th style="width:170px">Keterangan</th>
                   </tr>
                 </thead>
-                <tbody>${rowsHtml || `<tr><td colspan="7" class="c">Tidak ada item pada tanggal ini.</td></tr>`}</tbody>
+                <tbody>${rowsHtml || `<tr><td colspan="8" class="c">Tidak ada item pada tanggal ini.</td></tr>`}</tbody>
               </table>
 
               <div class="note">Note : ${escapeHtml(meta.note)}</div>
@@ -3552,8 +3686,37 @@ export default function PoBudgetPage() {
         return;
       }
 
-      const printRows = matchedRows.flatMap((row) =>
+      const rawPrintRows = matchedRows.flatMap((row) =>
         buildPrBudgetPrintRowsForEntry(row, activeTab),
+      );
+
+      // Kode Barang = Material Code item tersebut seperti di detail BOM
+      // (bukan uniq). Diambil dari backend berdasarkan uniq_code tiap baris.
+      let materialCodeByUniq: Record<string, string> = {};
+      if (useApi) {
+        try {
+          materialCodeByUniq = await lookupMaterialCodes(
+            Array.from(
+              new Set(
+                rawPrintRows
+                  .map((r) => r.uniqCode)
+                  .filter((code) => code && code !== "-"),
+              ),
+            ),
+          ).unwrap();
+        } catch (error) {
+          console.error("[po-budget-pdf] material code lookup failed", error);
+          message.warning(
+            "Material code tidak dapat diambil dari server; Kode Barang memakai kode lama.",
+          );
+        }
+      }
+
+      const printRows = mergePrBudgetPrintRows(
+        rawPrintRows.map((r) => ({
+          ...r,
+          kodeBarang: materialCodeByUniq[r.uniqCode] ?? r.kodeBarang,
+        })),
       );
 
       const dateLabel = formatIdLongDate(prBudgetPdfDate);
@@ -3693,6 +3856,7 @@ export default function PoBudgetPage() {
         title: "PRL ID",
         dataIndex: "uniq",
         key: "uniq",
+        width: 230,
         render: (value: string, record) => {
           const parentCount = getStoredParents(record.detailJson).length;
           const childCount = getStoredParents(record.detailJson).reduce(
@@ -3707,11 +3871,27 @@ export default function PoBudgetPage() {
               ? "-"
               : value;
 
+          // prl_ref bisa berbentuk "<nomor dokumen>|<tanggal>" (mis.
+          // "127B/RKK/KBU/XI/2026|2026-11-26"). Tampilkan nomor di baris atas
+          // dan tanggal kecil di bawahnya supaya tidak melebar/menimpa kolom lain.
+          const [refMain, ...refRest] = String(displayValue ?? "").split("|");
+          const refSub = refRest.join("|").trim();
+          const refNode = (
+            <>
+              <div className="break-all leading-snug">{refMain.trim()}</div>
+              {refSub ? (
+                <div className="text-[11px] font-normal text-gray-500">
+                  {refSub}
+                </div>
+              ) : null}
+            </>
+          );
+
           if (activeTab === "subcon" || childCount === 0) {
             return (
-              <span className="text-sm font-medium text-gray-700">
-                {displayValue}
-              </span>
+              <div className="text-sm font-medium text-gray-700">
+                {refNode}
+              </div>
             );
           }
 
@@ -3725,7 +3905,7 @@ export default function PoBudgetPage() {
               }
             >
               <div className="text-sm font-semibold text-blue-700 group-hover:text-blue-800">
-                {displayValue}
+                {refNode}
               </div>
               <div className="text-[11px] text-blue-500 mt-0.5">
                 {expanded ? "Hide" : "Show"} {parentCount} parent group
@@ -3741,16 +3921,65 @@ export default function PoBudgetPage() {
               title: "Uniq",
               dataIndex: "uniq",
               key: "subconUniq",
+              width: 140,
               render: (value: string) => (
                 <span className="text-sm font-medium text-gray-700">{value}</span>
               ),
             },
           ]
-        : []),
+        : [
+            {
+              // Uniq (parent PRL) apa saja yang ada di PR Budget ini.
+              title: "Uniq",
+              key: "parentUniqs",
+              width: 180,
+              render: (_: unknown, record: PoBudgetRow) => {
+                const uniqs = Array.from(
+                  new Set(
+                    getStoredParents(record.detailJson)
+                      .map((parent) => String(parent.uniq_code ?? "").trim())
+                      .filter(Boolean),
+                  ),
+                );
+                if (uniqs.length === 0) {
+                  return <span className="text-sm text-gray-400">-</span>;
+                }
+
+                const chipClass =
+                  "inline-flex items-center rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700";
+                const maxShow = 3;
+                const extra = uniqs.slice(maxShow);
+                return (
+                  <div className="flex flex-wrap items-center gap-1">
+                    {uniqs.slice(0, maxShow).map((uniq) => (
+                      <span key={uniq} className={chipClass}>
+                        {uniq}
+                      </span>
+                    ))}
+                    {extra.length > 0 ? (
+                      <Tooltip
+                        title={
+                          <div className="flex max-w-xs flex-wrap gap-1">
+                            {uniqs.map((uniq) => (
+                              <span key={uniq}>{uniq}</span>
+                            ))}
+                          </div>
+                        }
+                      >
+                        <Tag className="!m-0 cursor-help">+{extra.length}</Tag>
+                      </Tooltip>
+                    ) : null}
+                  </div>
+                );
+              },
+            },
+          ]),
       {
         title: "Customer",
         dataIndex: "customer",
         key: "customer",
+        width: 190,
+        ellipsis: true,
         render: (v: string) => (
           <span className="text-sm text-gray-700">{v}</span>
         ),
@@ -3759,6 +3988,8 @@ export default function PoBudgetPage() {
         title: "Product Model",
         dataIndex: "productModel",
         key: "productModel",
+        width: 130,
+        ellipsis: true,
         render: (v: string) => (
           <span className="text-sm text-gray-700">{v}</span>
         ),
@@ -3767,6 +3998,8 @@ export default function PoBudgetPage() {
         title: "Part Name",
         dataIndex: "partName",
         key: "partName",
+        width: 200,
+        ellipsis: true,
         render: (v: string) => (
           <span className="text-sm text-gray-700">{v}</span>
         ),
@@ -3813,6 +4046,7 @@ export default function PoBudgetPage() {
         title: "Supplier",
         dataIndex: "supplier",
         key: "supplier",
+        width: 150,
         render: (v: string) => {
           const suppliers = String(v ?? "")
             .split(",")
@@ -3845,6 +4079,7 @@ export default function PoBudgetPage() {
         title: "Type",
         dataIndex: "type",
         key: "type",
+        width: 110,
         render: (v: string) =>
           v ? (
             <Tag
@@ -3861,6 +4096,7 @@ export default function PoBudgetPage() {
         title: "Sales Plan",
         dataIndex: "salesPlan",
         key: "salesPlan",
+        width: 110,
         align: "right",
         render: (v: number) => (
           <span className="text-sm text-gray-700">
@@ -3872,6 +4108,7 @@ export default function PoBudgetPage() {
         title: "PR",
         dataIndex: "pr",
         key: "pr",
+        width: 100,
         align: "right",
         render: (v: number) => (
           <span className="text-sm text-gray-700">
@@ -3883,6 +4120,7 @@ export default function PoBudgetPage() {
         title: "PO1",
         dataIndex: "po1",
         key: "po1",
+        width: 100,
         align: "right",
         render: (v: number) => (
           <span className="text-sm text-gray-700">
@@ -3894,6 +4132,7 @@ export default function PoBudgetPage() {
         title: "PO2",
         dataIndex: "po2",
         key: "po2",
+        width: 100,
         align: "right",
         render: (v: number) => (
           <span className="text-sm text-gray-700">
@@ -3905,6 +4144,7 @@ export default function PoBudgetPage() {
         title: "PRL",
         dataIndex: "prl",
         key: "prl",
+        width: 100,
         align: "right",
         render: (v: number) => (
           <span className="text-sm text-gray-700">
@@ -3916,6 +4156,7 @@ export default function PoBudgetPage() {
         title: "Total PO",
         dataIndex: "totalPo",
         key: "totalPo",
+        width: 110,
         align: "right",
         render: (v: number) => (
           <span className="text-sm text-gray-700">
@@ -3927,6 +4168,7 @@ export default function PoBudgetPage() {
         title: "APO-PRL",
         dataIndex: "apoPrl",
         key: "apoPrl",
+        width: 110,
         align: "right",
         render: (v: number) => (
           <span className="text-sm font-semibold text-orange-600">
@@ -3938,6 +4180,7 @@ export default function PoBudgetPage() {
         title: "Period",
         dataIndex: "period",
         key: "period",
+        width: 130,
         render: (v: string) => (
           <span className="text-sm text-gray-700">{v}</span>
         ),
@@ -3946,6 +4189,7 @@ export default function PoBudgetPage() {
         title: "Status",
         dataIndex: "status",
         key: "status",
+        width: 110,
         render: (v: PoBudgetRow["status"]) => (
           <Tag
             color={v === "approved" ? "green" : "gold"}
@@ -3988,6 +4232,7 @@ export default function PoBudgetPage() {
         title: "Actions",
         key: "actions",
         fixed: "right",
+        width: 190,
         render: (_, r) => (
           <div className="flex items-center gap-2">
             <Button
@@ -4697,7 +4942,7 @@ export default function PoBudgetPage() {
                 }));
               },
             }}
-            scroll={{ x: 1600 }}
+            scroll={{ x: "max-content" }}
           />
         </div>
       </div>
@@ -6278,7 +6523,8 @@ export default function PoBudgetPage() {
             Permintaan Barang. Kolom <span className="font-semibold">
               Kode Barang
             </span>{" "}
-            memakai kode CHILD, bukan kode parent/PRL.
+            memakai MATERIAL CODE, bukan uniq/kode parent/PRL. Baris dengan
+            material code yang sama digabung dan jumlahnya dijumlahkan.
           </div>
           <div>
             <div className="text-xs font-medium text-gray-700 mb-1">
