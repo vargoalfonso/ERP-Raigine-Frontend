@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   DatePicker,
@@ -24,7 +24,13 @@ import {
 } from "@/lib/api/procurement-po/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
-  useLookupPoBudgetMaterialCodesMutation,
+  useGetBomTreeQuery,
+  useLazyGetBomFullByIdQuery,
+  type BomFullNode,
+} from "@/lib/api/bom/api";
+import {
+  useLookupPoBudgetMaterialSpecsMutation,
+  type PoBudgetMaterialSpecLookup,
   type PoBudgetType,
 } from "@/lib/api/po-budget/api";
 import { useAllPoBudgetEntries } from "@/lib/hooks/useAllPoBudgetEntries";
@@ -38,6 +44,13 @@ type PoItemRow = {
   partNumber: string;
   partName: string;
   form: string;
+  /** Spesifikasi material (dari BOM) item ini. */
+  gradeText: string;
+  typeMaterial: string;
+  widthMm: string;
+  diameterMm: string;
+  thicknessMm: string;
+  lengthMm: string;
   supplier: string;
   qty: number;
   uom: string;
@@ -65,6 +78,55 @@ const specText = (
 };
 
 const formatNumber = (n: number) => new Intl.NumberFormat("en-US").format(n);
+
+// Material spec dari detail BOM (field yang sama dengan halaman
+// /bill-of-material/<id>) diubah ke bentuk PoBudgetMaterialSpecLookup.
+const bomSpecToLookup = (
+  spec: Record<string, unknown> | null | undefined,
+): PoBudgetMaterialSpecLookup => {
+  if (!spec || typeof spec !== "object") return {};
+  const str = (v: unknown) => {
+    const t = String(v ?? "").trim();
+    return t && t !== "-" ? t : undefined;
+  };
+  const num = (v: unknown) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+  return {
+    material_code: str(spec.material_grade) ?? str(spec.material_code),
+    grade: str(spec.grade),
+    type_material: str(spec.type_material) ?? str(spec.material_type),
+    form: str(spec.form),
+    width_mm: num(spec.width_mm),
+    diameter_mm: num(spec.diameter_mm),
+    thickness_mm: num(spec.thickness_mm),
+    length_mm: num(spec.length_mm),
+  };
+};
+
+// Nilai spesifikasi material: utamakan hasil lookup BOM (selalu lengkap),
+// lalu spec yang tersimpan di detail budget/PO bila lookup tidak punya.
+const specValue = (
+  lookup: PoBudgetMaterialSpecLookup | undefined,
+  stored: Record<string, unknown> | undefined,
+  key: keyof PoBudgetMaterialSpecLookup,
+): string => {
+  const fromLookup = lookup?.[key];
+  if (fromLookup != null && String(fromLookup).trim() !== "") {
+    return typeof fromLookup === "number"
+      ? String(Number(fromLookup.toFixed(4)))
+      : String(fromLookup);
+  }
+  const value = stored?.[key];
+  if (value == null || String(value).trim() === "" || Number(value) === 0) {
+    return "-";
+  }
+  const num = Number(value);
+  return Number.isFinite(num) && typeof value !== "string"
+    ? String(Number(num.toFixed(4)))
+    : String(value);
+};
 
 const tabToPoType = (tab: string | null): ProcurementPoType => {
   if (tab === "indirect") return "indirect";
@@ -300,9 +362,9 @@ function CreatePoProcurementPageContent() {
   // Material Code (BOM) per uniq child. Nilai material_grade yang tersimpan di
   // detail budget/PO bisa berisi uniq sebagai pengganti grade, jadi diambil
   // dari backend (POST /po-budget/material-codes) dan dipakai bila ada.
-  const [lookupMaterialCodes] = useLookupPoBudgetMaterialCodesMutation();
-  const [materialCodeByUniq, setMaterialCodeByUniq] = useState<
-    Record<string, string>
+  const [lookupMaterialSpecs] = useLookupPoBudgetMaterialSpecsMutation();
+  const [materialSpecByUniq, setMaterialSpecByUniq] = useState<
+    Record<string, PoBudgetMaterialSpecLookup>
   >({});
   const requestedMaterialUniqsRef = useRef<Set<string>>(new Set());
 
@@ -334,9 +396,9 @@ function CreatePoProcurementPageContent() {
     if (missing.length === 0) return;
     missing.forEach((code) => requestedMaterialUniqsRef.current.add(code));
 
-    lookupMaterialCodes(missing)
+    lookupMaterialSpecs(missing)
       .unwrap()
-      .then((map) => setMaterialCodeByUniq((prev) => ({ ...prev, ...map })))
+      .then((map) => setMaterialSpecByUniq((prev) => ({ ...prev, ...map })))
       .catch((error) => {
         missing.forEach((code) =>
           requestedMaterialUniqsRef.current.delete(code),
@@ -348,8 +410,176 @@ function CreatePoProcurementPageContent() {
     budgetRowsForPeriod,
     selectedBudgetIds,
     poDetailQuery.data,
-    lookupMaterialCodes,
+    lookupMaterialSpecs,
   ]);
+
+  // ── Material spec dari detail BOM ────────────────────────────────────────
+  // Sumber utama spesifikasi material: detail BOM TIAP uniq (parent dan setiap
+  // item/child punya BOM sendiri; endpoint yang sama dengan halaman
+  // /bill-of-material/<id>). material_spec node utama BOM itu dipakai untuk
+  // uniq-nya. Spec dari node child di dalam BOM parent hanya cadangan, lalu
+  // lookup backend.
+  const { data: bomTreeRes } = useGetBomTreeQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const [triggerBomFull] = useLazyGetBomFullByIdQuery();
+  // Spec node utama BOM milik uniq itu sendiri (prioritas).
+  const [bomSpecByUniq, setBomSpecByUniq] = useState<
+    Record<string, PoBudgetMaterialSpecLookup>
+  >({});
+  // Spec node child di dalam BOM parent (cadangan).
+  const [bomChildSpecByUniq, setBomChildSpecByUniq] = useState<
+    Record<string, PoBudgetMaterialSpecLookup>
+  >({});
+  const bomRequestedRef = useRef<Set<string>>(new Set());
+
+  const bomIdByUniq = useMemo(() => {
+    const map: Record<string, string> = {};
+    const raw = bomTreeRes?.data as unknown;
+    const rootItems = (raw as { items?: unknown[] } | undefined)?.items;
+    const nodes: unknown[] = Array.isArray(rootItems)
+      ? rootItems
+      : Array.isArray(raw)
+        ? raw
+        : raw && typeof raw === "object"
+          ? [raw]
+          : [];
+    const walk = (list: unknown[], top: boolean) => {
+      for (const item of list) {
+        const n = item as Record<string, unknown>;
+        const uniq = String(n?.uniq_code ?? n?.uniq ?? "")
+          .trim()
+          .toLowerCase();
+        const bomId =
+          String(n?.bom_id ?? "").trim() ||
+          (top ? String(n?.id ?? "").trim() : "");
+        if (uniq && bomId && !map[uniq]) map[uniq] = bomId;
+        if (!top && Array.isArray(n?.children)) {
+          walk(n.children as unknown[], false);
+        }
+      }
+    };
+    // Node level atas = BOM milik uniq itu sendiri, jadi didahulukan. Node
+    // bersarang hanya dipakai bila uniq tersebut tidak punya BOM level atas.
+    walk(nodes, true);
+    const nested = (list: unknown[]) => {
+      for (const item of list) {
+        const n = item as Record<string, unknown>;
+        if (Array.isArray(n?.children)) {
+          walk(n.children as unknown[], false);
+        }
+      }
+    };
+    nested(nodes);
+    return map;
+  }, [bomTreeRes?.data]);
+
+  useEffect(() => {
+    if (!apiEnabled || Object.keys(bomIdByUniq).length === 0) return;
+
+    // Semua uniq yang spec-nya dibutuhkan: parent dan tiap item (child).
+    const uniqs = new Set<string>();
+    const add = (value: unknown) => {
+      const code = String(value ?? "").trim();
+      if (code && code !== "-") uniqs.add(code);
+    };
+    budgetRowsForPeriod
+      .filter((row) => selectedBudgetIds.includes(Number(row.id ?? row.key)))
+      .forEach((row) => {
+        const stored = getStoredParents(row.detailJson);
+        if (stored.length === 0) add(row.uniq);
+        stored.forEach((parent) => {
+          add(parent.uniq_code ?? row.uniq);
+          (Array.isArray(parent.children) ? parent.children : []).forEach(
+            (child) => add(child.uniq_code),
+          );
+        });
+      });
+    (poDetailQuery.data?.data?.items ?? []).forEach((it) => {
+      add(it.uniq_code);
+      add(it.child_uniq_code);
+    });
+
+    uniqs.forEach((uniq) => {
+      const key = uniq.toLowerCase();
+      const bomId = bomIdByUniq[key];
+      if (!bomId || bomRequestedRef.current.has(key)) return;
+      bomRequestedRef.current.add(key);
+
+      triggerBomFull(bomId, true)
+        .unwrap()
+        .then((res) => {
+          const root = ((res as { data?: BomFullNode })?.data ??
+            res) as BomFullNode;
+          const hasValue = (spec: PoBudgetMaterialSpecLookup) =>
+            Object.values(spec).some((v) => v !== undefined);
+
+          // Node utama BOM = spec milik uniq ini (sama dengan Material Spec
+          // di halaman detail BOM).
+          const own = bomSpecToLookup(root?.material_spec);
+          const rootUniq = String(root?.uniq_code ?? "").trim().toLowerCase();
+          // Pastikan BOM yang dimuat memang milik uniq ini.
+          if (hasValue(own) && (!rootUniq || rootUniq === key)) {
+            setBomSpecByUniq((prev) => ({ ...prev, [key]: own }));
+          }
+
+          // Node child di dalam BOM ini: cadangan untuk uniq yang tidak punya
+          // BOM sendiri.
+          const childFound: Record<string, PoBudgetMaterialSpecLookup> = {};
+          const walk = (nodes: BomFullNode[] | undefined) => {
+            (nodes ?? []).forEach((node) => {
+              const childKey = String(node.uniq_code ?? "")
+                .trim()
+                .toLowerCase();
+              const spec = bomSpecToLookup(node.material_spec);
+              if (childKey && hasValue(spec)) childFound[childKey] = spec;
+              walk(node.children);
+            });
+          };
+          walk(root?.children);
+          if (Object.keys(childFound).length > 0) {
+            setBomChildSpecByUniq((prev) => ({ ...childFound, ...prev }));
+          }
+        })
+        .catch((error) => {
+          bomRequestedRef.current.delete(key);
+          console.error("[po-create] BOM detail load failed", error);
+        });
+    });
+  }, [
+    apiEnabled,
+    bomIdByUniq,
+    budgetRowsForPeriod,
+    selectedBudgetIds,
+    poDetailQuery.data,
+    triggerBomFull,
+  ]);
+
+  // Spec final per uniq. Urutan prioritas per field: detail BOM milik uniq itu
+  // -> node child di BOM parent -> lookup backend.
+  const resolveMaterialSpec = useCallback(
+    (uniq: unknown): PoBudgetMaterialSpecLookup | undefined => {
+      const key = String(uniq ?? "").trim();
+      if (!key) return undefined;
+      const layers = [
+        materialSpecByUniq[key],
+        bomChildSpecByUniq[key.toLowerCase()],
+        bomSpecByUniq[key.toLowerCase()],
+      ];
+      if (!layers.some(Boolean)) return undefined;
+      const merged: Record<string, unknown> = {};
+      layers.forEach((layer) => {
+        if (!layer) return;
+        (Object.keys(layer) as (keyof PoBudgetMaterialSpecLookup)[]).forEach(
+          (field) => {
+            if (layer[field] !== undefined) merged[field] = layer[field];
+          },
+        );
+      });
+      return merged as PoBudgetMaterialSpecLookup;
+    },
+    [bomSpecByUniq, bomChildSpecByUniq, materialSpecByUniq],
+  );
 
   const poBudgetOptions = useMemo<{ label: string; value: number }[]>(() => {
     if (!apiEnabled) {
@@ -432,6 +662,12 @@ function CreatePoProcurementPageContent() {
               partNumber: String(row.partNumber ?? "-"),
               partName: String(row.partName ?? "-"),
               form: "-",
+              gradeText: "-",
+              typeMaterial: "-",
+              widthMm: "-",
+              diameterMm: "-",
+              thicknessMm: "-",
+              lengthMm: "-",
               supplier: String(row.supplier || "-"),
               qty: flatQty,
               uom: String(row.uom ?? "-"),
@@ -460,12 +696,13 @@ function CreatePoProcurementPageContent() {
             const supplierName =
               suppliers[0]?.supplier_name ?? row.supplier ?? "-";
 
+            const lookup = resolveMaterialSpec(child.uniq_code);
             items.push({
               key: `s${stage}-${row.id ?? row.key}-${seq++}`,
               parentUniq: String(parent.uniq_code ?? row.uniq ?? "-"),
               childUniq: String(child.uniq_code ?? "-"),
               materialGrade: String(
-                materialCodeByUniq[String(child.uniq_code ?? "").trim()] ??
+                lookup?.material_code ??
                   childSpec.material_grade ??
                   child.uniq ??
                   child.uniq_code ??
@@ -473,7 +710,13 @@ function CreatePoProcurementPageContent() {
               ),
               partNumber: String(child.part_number ?? "-"),
               partName: String(child.part_name ?? "-"),
-              form: specText(childSpec, "form"),
+              form: specValue(lookup, childSpec, "form"),
+              gradeText: specValue(lookup, childSpec, "grade"),
+              typeMaterial: specValue(lookup, childSpec, "type_material"),
+              widthMm: specValue(lookup, childSpec, "width_mm"),
+              diameterMm: specValue(lookup, childSpec, "diameter_mm"),
+              thicknessMm: specValue(lookup, childSpec, "thickness_mm"),
+              lengthMm: specValue(lookup, childSpec, "length_mm"),
               supplier: String(supplierName),
               qty: stageQty,
               uom: String(child.uom ?? row.uom ?? "-"),
@@ -527,7 +770,7 @@ function CreatePoProcurementPageContent() {
     }
 
     return groups;
-  }, [budgetRowsForPeriod, selectedBudgetIds, generateMode, materialCodeByUniq]);
+  }, [budgetRowsForPeriod, selectedBudgetIds, generateMode, resolveMaterialSpec]);
 
   // Edit: kalau entry budget tidak bisa dihitung ulang (tidak ada di daftar budget),
   // tampilkan item dari PO yang tersimpan supaya datanya tetap terisi.
@@ -539,12 +782,15 @@ function CreatePoProcurementPageContent() {
 
     const stage: 1 | 2 = detail.po.po_stage === 2 ? 2 : 1;
     const supplier = detail.po.supplier_name ?? "-";
-    const items: PoItemRow[] = detail.items.map((it, idx) => ({
+    const items: PoItemRow[] = detail.items.map((it, idx) => {
+      const lookup = resolveMaterialSpec(it.child_uniq_code);
+      const storedSpec = (it.material_spec ?? {}) as Record<string, unknown>;
+      return {
       key: `po-${stage}-${idx}`,
       parentUniq: String(it.uniq_code ?? "-"),
       childUniq: String(it.child_uniq_code ?? "-"),
       materialGrade: String(
-        materialCodeByUniq[String(it.child_uniq_code ?? "").trim()] ??
+        lookup?.material_code ??
           it.material_grade ??
           it.child_uniq_code ??
           it.uniq_code ??
@@ -552,12 +798,19 @@ function CreatePoProcurementPageContent() {
       ),
       partNumber: String(it.part_number ?? "-"),
       partName: String(it.part_name ?? "-"),
-      form: specText(it.material_spec, "form"),
+      form: specValue(lookup, storedSpec, "form"),
+      gradeText: specValue(lookup, storedSpec, "grade"),
+      typeMaterial: specValue(lookup, storedSpec, "type_material"),
+      widthMm: specValue(lookup, storedSpec, "width_mm"),
+      diameterMm: specValue(lookup, storedSpec, "diameter_mm"),
+      thicknessMm: specValue(lookup, storedSpec, "thickness_mm"),
+      lengthMm: specValue(lookup, storedSpec, "length_mm"),
       supplier,
       qty: Number(it.qty ?? 0),
       uom: String(it.uom ?? "-"),
       weightKg: Number(it.weight_kg ?? 0),
-    }));
+      };
+    });
     return [
       {
         key: `s${stage}::${supplier}`,
@@ -573,7 +826,7 @@ function CreatePoProcurementPageContent() {
     isEdit,
     editResolved,
     poDetailQuery.data,
-    materialCodeByUniq,
+    resolveMaterialSpec,
   ]);
 
   // Edit: isi kembali External PO Number (Zahir) ke grup stage+supplier yang sesuai.
@@ -606,12 +859,27 @@ function CreatePoProcurementPageContent() {
   }, [poSupplierGroups, isEdit, editResolved]);
 
   const columns: ColumnsType<PoItemRow> = [
-    {
-      title: "Parent UNIQ",
-      dataIndex: "parentUniq",
-      key: "parentUniq",
-      width: 110,
-    },
+    // {
+    //   title: "Parent UNIQ",
+    //   dataIndex: "parentUniq",
+    //   key: "parentUniq",
+    //   width: 110,
+    // },
+    // Uniq tiap item (child). Parent UNIQ sama untuk satu parent group,
+    // sedangkan uniq item beragam. Subcon tidak punya struktur child.
+    ...(poType === "subcon"
+      ? []
+      : ([
+          {
+            title: "Uniq",
+            dataIndex: "childUniq",
+            key: "childUniq",
+            width: 90,
+            render: (v: string) => (
+              <span className="text-sm font-medium text-gray-800">{v}</span>
+            ),
+          },
+        ] as ColumnsType<PoItemRow>)),
     {
       title: "Material Code",
       dataIndex: "materialGrade",
@@ -634,6 +902,46 @@ function CreatePoProcurementPageContent() {
       width: 120,
     },
     { title: "Form", dataIndex: "form", key: "form", width: 90 },
+    // Spesifikasi material item (raw & indirect). Subcon tidak memakainya.
+    ...(poType === "subcon"
+      ? []
+      : ([
+          { title: "Grade", dataIndex: "gradeText", key: "gradeText", width: 110 },
+          {
+            title: "Type Material",
+            dataIndex: "typeMaterial",
+            key: "typeMaterial",
+            width: 120,
+          },
+          {
+            title: "Width (mm)",
+            dataIndex: "widthMm",
+            key: "widthMm",
+            width: 110,
+            align: "right",
+          },
+          {
+            title: "Diameter (mm)",
+            dataIndex: "diameterMm",
+            key: "diameterMm",
+            width: 125,
+            align: "right",
+          },
+          {
+            title: "Thickness (mm)",
+            dataIndex: "thicknessMm",
+            key: "thicknessMm",
+            width: 130,
+            align: "right",
+          },
+          {
+            title: "Length (mm)",
+            dataIndex: "lengthMm",
+            key: "lengthMm",
+            width: 115,
+            align: "right",
+          },
+        ] as ColumnsType<PoItemRow>)),
     { title: "Supplier", dataIndex: "supplier", key: "supplier", width: 150 },
     {
       title: "Qty",
