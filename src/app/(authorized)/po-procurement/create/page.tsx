@@ -24,6 +24,7 @@ import {
 } from "@/lib/api/procurement-po/api";
 import { getApiErrorMessage } from "@/lib/api/error";
 import {
+  useLookupPoBudgetMaterialCodesMutation,
   type PoBudgetType,
 } from "@/lib/api/po-budget/api";
 import { useAllPoBudgetEntries } from "@/lib/hooks/useAllPoBudgetEntries";
@@ -296,6 +297,60 @@ function CreatePoProcurementPageContent() {
     });
   }, [budgetSubtype, poBudgetEntries.items, periodKey]);
 
+  // Material Code (BOM) per uniq child. Nilai material_grade yang tersimpan di
+  // detail budget/PO bisa berisi uniq sebagai pengganti grade, jadi diambil
+  // dari backend (POST /po-budget/material-codes) dan dipakai bila ada.
+  const [lookupMaterialCodes] = useLookupPoBudgetMaterialCodesMutation();
+  const [materialCodeByUniq, setMaterialCodeByUniq] = useState<
+    Record<string, string>
+  >({});
+  const requestedMaterialUniqsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!apiEnabled) return;
+
+    const wanted = new Set<string>();
+    const addCode = (value: unknown) => {
+      const code = String(value ?? "").trim();
+      if (code && code !== "-") wanted.add(code);
+    };
+
+    budgetRowsForPeriod
+      .filter((row) => selectedBudgetIds.includes(Number(row.id ?? row.key)))
+      .forEach((row) =>
+        getStoredParents(row.detailJson).forEach((parent) =>
+          (Array.isArray(parent.children) ? parent.children : []).forEach(
+            (child) => addCode(child.uniq_code),
+          ),
+        ),
+      );
+    (poDetailQuery.data?.data?.items ?? []).forEach((it) =>
+      addCode(it.child_uniq_code),
+    );
+
+    const missing = Array.from(wanted).filter(
+      (code) => !requestedMaterialUniqsRef.current.has(code),
+    );
+    if (missing.length === 0) return;
+    missing.forEach((code) => requestedMaterialUniqsRef.current.add(code));
+
+    lookupMaterialCodes(missing)
+      .unwrap()
+      .then((map) => setMaterialCodeByUniq((prev) => ({ ...prev, ...map })))
+      .catch((error) => {
+        missing.forEach((code) =>
+          requestedMaterialUniqsRef.current.delete(code),
+        );
+        console.error("[po-create] material code lookup failed", error);
+      });
+  }, [
+    apiEnabled,
+    budgetRowsForPeriod,
+    selectedBudgetIds,
+    poDetailQuery.data,
+    lookupMaterialCodes,
+  ]);
+
   const poBudgetOptions = useMemo<{ label: string; value: number }[]>(() => {
     if (!apiEnabled) {
       return [
@@ -410,8 +465,9 @@ function CreatePoProcurementPageContent() {
               parentUniq: String(parent.uniq_code ?? row.uniq ?? "-"),
               childUniq: String(child.uniq_code ?? "-"),
               materialGrade: String(
-                childSpec.material_grade ??
-                child.uniq ??
+                materialCodeByUniq[String(child.uniq_code ?? "").trim()] ??
+                  childSpec.material_grade ??
+                  child.uniq ??
                   child.uniq_code ??
                   "-",
               ),
@@ -471,7 +527,7 @@ function CreatePoProcurementPageContent() {
     }
 
     return groups;
-  }, [budgetRowsForPeriod, selectedBudgetIds, generateMode]);
+  }, [budgetRowsForPeriod, selectedBudgetIds, generateMode, materialCodeByUniq]);
 
   // Edit: kalau entry budget tidak bisa dihitung ulang (tidak ada di daftar budget),
   // tampilkan item dari PO yang tersimpan supaya datanya tetap terisi.
@@ -487,7 +543,13 @@ function CreatePoProcurementPageContent() {
       key: `po-${stage}-${idx}`,
       parentUniq: String(it.uniq_code ?? "-"),
       childUniq: String(it.child_uniq_code ?? "-"),
-      materialGrade: String(it.material_grade ?? it.child_uniq_code ?? it.uniq_code ?? "-"),
+      materialGrade: String(
+        materialCodeByUniq[String(it.child_uniq_code ?? "").trim()] ??
+          it.material_grade ??
+          it.child_uniq_code ??
+          it.uniq_code ??
+          "-",
+      ),
       partNumber: String(it.part_number ?? "-"),
       partName: String(it.part_name ?? "-"),
       form: specText(it.material_spec, "form"),
@@ -506,7 +568,13 @@ function CreatePoProcurementPageContent() {
         totalQty: items.reduce((sum, r) => sum + r.qty, 0),
       },
     ];
-  }, [computedSupplierGroups, isEdit, editResolved, poDetailQuery.data]);
+  }, [
+    computedSupplierGroups,
+    isEdit,
+    editResolved,
+    poDetailQuery.data,
+    materialCodeByUniq,
+  ]);
 
   // Edit: isi kembali External PO Number (Zahir) ke grup stage+supplier yang sesuai.
   useEffect(() => {

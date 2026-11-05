@@ -657,6 +657,32 @@ export const poBudgetSlice = apiSlice
         ],
       }),
 
+      // Resolves item uniq_codes to their BOM "Material Code"
+      // (item_material_specs.material_grade; backend: POST
+      // /po-budget/material-codes). Returns a map { [uniq_code]: material_code }.
+      // Items without a material code are absent.
+      lookupPoBudgetMaterialCodes: builder.mutation<
+        Record<string, string>,
+        string[]
+      >({
+        query: (uniqCodes) => ({
+          url: `/po-budget/material-codes`,
+          method: "POST",
+          body: { uniq_codes: uniqCodes },
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => {
+          const map: Record<string, string> = {};
+          for (const item of normalizeListResponse(response)) {
+            if (!isRecord(item)) continue;
+            const uniq = getString(item, ["uniq_code"]);
+            const code = getString(item, ["material_code"]);
+            if (uniq && code) map[uniq] = code;
+          }
+          return map;
+        },
+      }),
+
       updatePoBudgetEntry: builder.mutation<
         ApiResponse<PoBudgetRow>,
         { type: PoBudgetType; id: string | number; body: PoBudgetUpdateRequest }
@@ -688,4 +714,5 @@ export const {
   useGetPoBudgetPrlDetailQuery,
   useLazyGetPoBudgetPrlDetailQuery,
   useUpdatePoBudgetEntryMutation,
+  useLookupPoBudgetMaterialCodesMutation,
 } = poBudgetSlice;
