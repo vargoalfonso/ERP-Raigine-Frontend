@@ -54,6 +54,29 @@ export const isChildBudgetType = (type: PoBudgetType) =>
 export const getChildSupplierLookupUniq = (row: PoBudgetChildRow) =>
   text(row.childUniqCode || row.uniq);
 
+/** True when the material spec (from the BOM detail) has form "Wire". */
+export const isWireSpec = (spec?: { form?: unknown } | null) =>
+  text(spec?.form).toLowerCase() === "wire";
+
+/** Weight (kg) of a BOM child: its own weight, else the material spec weight. */
+const childWeightKg = (child: PoBudgetPrlChild) => {
+  const own = num(child.weight_kg);
+  return own > 0 ? own : num(child.material_spec?.weight_kg);
+};
+
+/** Wire quantities are weights, so keep up to 3 decimals instead of integers. */
+export const roundChildQty = (value: number, isWire: boolean) =>
+  isWire ? Math.round(value * 1000) / 1000 : Math.round(value);
+
+/**
+ * Multiplier a row applies on top of its units: the weight (kg) for WIRE
+ * form (units x weight = quantity), otherwise 1. Needs a positive weight.
+ */
+export const wireQuantityFactor = (row: {
+  materialSpec?: { form?: unknown } | null;
+  weightKg?: number;
+}) => (isWireSpec(row.materialSpec) && num(row.weightKg) > 0 ? num(row.weightKg) : 1);
+
 const toChildRow = (
   detail: PoBudgetPrlDetail | undefined,
   parentItem: PoBudgetPrlDetail["items"][number] | undefined,
@@ -73,7 +96,7 @@ const toChildRow = (
   productModel: text(child.model ?? parentItem?.product_model, "-"),
   partName: text(child.part_name, "-"),
   partNumber: text(child.part_number, "-"),
-  weightKg: num(child.weight_kg ?? child.material_spec?.weight_kg),
+  weightKg: childWeightKg(child),
   uom: text(child.uom),
   quantity: effectiveQty ?? 0,
   existingRawMaterial: text(child.existing_raw_material, "-"),
@@ -120,8 +143,10 @@ const getNestedChildren = (
 
 /**
  * `baseQty` is the quantity of the parent these children belong to. Each
- * child's quantity is baseQty x its QPU (e.g. total 1000 with QPU 1 and 2 gives
- * 1000 and 2000); nested children multiply on from their own parent's quantity.
+ * child's units are baseQty x its QPU (e.g. total 1000 with QPU 1 and 2 gives
+ * 1000 and 2000). For WIRE form the quantity is units x weight (kg), e.g. total
+ * 1000, weight 0.1, QPU 1 -> 100. Nested children multiply on from their own
+ * parent's units.
  */
 function flattenPrlChildren(
   detail: PoBudgetPrlDetail | undefined,
@@ -135,7 +160,11 @@ function flattenPrlChildren(
   const rows: PoBudgetChildRow[] = [];
 
   children.forEach((child, index) => {
-    const childQty = Math.round(baseQty * childQpu(child));
+    const childUnits = baseQty * childQpu(child);
+    const wire = isWireSpec(child.material_spec) && childWeightKg(child) > 0;
+    const childQty = wire
+      ? roundChildQty(childUnits * childWeightKg(child), true)
+      : roundChildQty(childUnits, false);
     const row = toChildRow(
       detail,
       parentItem,
@@ -157,7 +186,7 @@ function flattenPrlChildren(
         detail,
         parentItem,
         nested,
-        childQty,
+        childUnits,
         lookup,
         level + 1,
         new Set([...path, childCode]),

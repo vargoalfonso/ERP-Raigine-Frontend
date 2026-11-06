@@ -157,6 +157,7 @@ export const supplierApiSlice = apiSlice
             search: params?.search,
             uniq_code: params?.uniq_code,
             limit: params?.limit !== undefined ? String(params.limit) : undefined,
+            page: params?.page !== undefined ? String(params.page) : undefined,
           })}`,
           method: "GET",
           meta: { useAuthorization: true, contentType: "application/json" },
@@ -260,6 +261,7 @@ export const supplierApiSlice = apiSlice
 export const {
   useGetNextSupplierCodeQuery,
   useListSuppliersQuery,
+  useLazyListSuppliersQuery,
   useCreateSupplierMutation,
   useBulkImportSuppliersMutation,
   useGetSupplierByIdQuery,
