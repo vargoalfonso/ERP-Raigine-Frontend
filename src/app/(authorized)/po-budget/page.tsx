@@ -2292,7 +2292,7 @@ export default function PoBudgetPage() {
           if (!row.isHeader) return;
 
           const nextRow = childRows[index + 1];
-          if (nextRow && !nextRow.isHeader) return;
+          const hasChildren = Boolean(nextRow && !nextRow.isHeader);
 
           const parentUniqCode = row.parentUniqCode || row.uniq;
           const parentSupplierItem = findSupplierItemsForProduct(
@@ -2302,6 +2302,18 @@ export default function PoBudgetPage() {
           // Spec dari detail BOM parent; untuk form WIRE quantity =
           // total qty x berat (kg) x QPU (QPU parent sendiri = 1).
           const parentBomSpec = bomIndex.materialSpecByUniq[parentUniqCode];
+
+          // Parent yang punya child: baris material parent hanya dibuat bila
+          // parent itu sendiri secara eksplisit SUBCON (child-nya kategori lain,
+          // mis. raw). Backend memasukkannya ke tab Subcon, child ke tab
+          // masing-masing. Parent tanpa child selalu dibuat (perilaku lama).
+          const parentIsSubcon =
+            parentBomSpec?.is_subcon === true ||
+            String(parentBomSpec?.type_material ?? "")
+              .trim()
+              .toLowerCase() === "subcon";
+          if (hasChildren && !parentIsSubcon) return;
+
           const parentWeight =
             Number(row.weightKg) > 0
               ? Number(row.weightKg)
@@ -2320,6 +2332,7 @@ export default function PoBudgetPage() {
             level: 1,
             weightKg: parentWeight,
             quantity: roundChildQty(row.quantity * parentFactor, parentFactor !== 1),
+            budgetCategory: hasChildren ? "subcon" : undefined,
             materialSpec: parentBomSpec,
             existingRawMaterial: String(
               parentSupplierItem?.description ?? row.existingRawMaterial ?? "-",
@@ -4855,6 +4868,11 @@ export default function PoBudgetPage() {
               <div className="text-[11px] text-gray-500 mt-1">
                 {record.childUniqCode}
               </div>
+            ) : null}
+            {record.budgetCategory === "subcon" ? (
+              <Tag color="orange" className="!m-0 !mt-1 !text-[10px]">
+                Masuk tab Subcon
+              </Tag>
             ) : null}
           </div>
         ),
