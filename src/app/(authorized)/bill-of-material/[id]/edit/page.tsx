@@ -215,19 +215,6 @@ export default function BomEditPage() {
       );
   }, [processes]);
 
-  const processSequenceByValue = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const p of processes ?? []) {
-      const rawId = (p as any)?.id ?? (p as any)?.ID;
-      const idStr =
-        typeof rawId === "string" ? rawId.trim() : String(rawId ?? "").trim();
-      if (!idStr) continue;
-      const seq = Number((p as any)?.sequence ?? (p as any)?.Sequence);
-      map.set(idStr, Number.isFinite(seq) ? seq : Number.MAX_SAFE_INTEGER);
-    }
-    return map;
-  }, [processes]);
-
   const machineOptions = useMemo<
     Array<{ value: string | number; label: string }>
   >(() => {
@@ -748,16 +735,30 @@ export default function BomEditPage() {
           })
           .filter((item): item is Record<string, unknown> => Boolean(item));
 
-        return mapped
-          .map((body, index) => ({
-            body,
-            index,
-            seq:
-              processSequenceByValue.get(String(body.process_id)) ??
-              Number.MAX_SAFE_INTEGER,
-          }))
+        // Pakai Op Seq yang diisi/diubah pengguna: urutkan menurut Op Seq (sort
+        // stabil, Op Seq sama tetap pada urutan form) dan SIMPAN nilainya apa
+        // adanya. Dulu daftar diurutkan ulang menurut master proses lalu Op Seq
+        // ditimpa 10, 20, 30, sehingga perubahan urutan tidak pernah tersimpan.
+        const entered = mapped.map((body, index) => ({
+          body,
+          index,
+          seq: Number(body.op_seq),
+        }));
+        // Backend mewajibkan op_seq >= 10. Bila pengguna memakai angka kecil
+        // (1, 2, 3, ...), seluruhnya dikalikan 10 bersama-sama sehingga urutan
+        // dan Op Seq yang sama (langkah paralel) tetap terjaga.
+        const smallest = entered.reduce(
+          (min, entry) => Math.min(min, entry.seq),
+          Number.POSITIVE_INFINITY,
+        );
+        const scale = entered.length > 0 && smallest < 10 ? 10 : 1;
+
+        return entered
           .sort((a, b) => a.seq - b.seq || a.index - b.index)
-          .map((entry, i) => ({ ...entry.body, op_seq: (i + 1) * 10 }));
+          .map((entry) => ({
+            ...entry.body,
+            op_seq: Math.round(entry.seq * scale),
+          }));
       };
 
       const files: Array<{ key: string; file: File }> = [];
