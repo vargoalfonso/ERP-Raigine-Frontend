@@ -149,7 +149,12 @@ export type FinishedGoodParameterizedSummary = {
   parameter_source: string;
 };
 
-export type GetFinishedGoodsParams = { page: number; limit: number };
+export type GetFinishedGoodsParams = {
+  page: number;
+  limit: number;
+  /** Server-side search across uniq, part number/name, model, WO, location, UOM. */
+  search?: string;
+};
 
 export type CreateFinishedGoodRequest = {
   uniq_code: string;
@@ -377,10 +382,10 @@ export const finishedGoodsSlice = apiSlice.injectEndpoints({
       Paginated<FinishedGoodListItem>,
       GetFinishedGoodsParams
     >({
-      query: ({ page, limit }) => ({
+      query: ({ page, limit, search }) => ({
         url: "/finished-goods",
         method: "GET",
-        params: { page, limit },
+        params: { page, limit, ...(search ? { search } : {}) },
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       providesTags: (result) => {
