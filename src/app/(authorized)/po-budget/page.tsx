@@ -37,11 +37,13 @@ import {
   getChildSupplierLookupUniq,
   getStoredParents,
   isChildBudgetType,
+  roundChildQty,
+  wireQuantityFactor,
   type PoBudgetChildRow,
   type PoBudgetChildRowSupplier,
 } from "../../../components/po-budget/poBudgetChildAdapters";
 import {
-  useListSuppliersQuery,
+  useLazyListSuppliersQuery,
   type SupplierRecord,
 } from "@/lib/api/suppliers/api";
 import {
@@ -170,6 +172,8 @@ type PoBudgetRow = {
 type SupplierOption = {
   value: string;
   label: string;
+  /** Kode supplier (dipakai untuk pencarian). */
+  code?: string;
   supplierName: string;
   supplierId?: number;
   uniqCode?: string;
@@ -1037,9 +1041,37 @@ export default function PoBudgetPage() {
   const [addSupplierItemKey, setAddSupplierItemKey] = useState<string | null>(
     null,
   );
-  const { data: supplierOnlyList = [] } = useListSuppliersQuery(undefined, {
-    skip: !useApi,
-  });
+  // Master supplier LENGKAP: backend membatasi 10 data bila limit tidak dikirim
+  // (maks 1000/halaman), jadi semua halaman diambil sampai habis.
+  const [triggerListSuppliers] = useLazyListSuppliersQuery();
+  const [supplierOnlyList, setSupplierOnlyList] = useState<SupplierRecord[]>(
+    [],
+  );
+  useEffect(() => {
+    if (!useApi) return;
+    let cancelled = false;
+    fetchAllPages<SupplierRecord>(async (page, limit) => {
+      const items = await triggerListSuppliers({ page, limit }, true).unwrap();
+      // Tanpa total dari API: halaman yang tidak penuh = halaman terakhir.
+      return {
+        items,
+        total:
+          items.length < limit
+            ? (page - 1) * limit + items.length
+            : Number.MAX_SAFE_INTEGER,
+      };
+    })
+      .then((items) => {
+        if (!cancelled) setSupplierOnlyList(items);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        message.error(getApiErrorMessage(error, "Failed to load suppliers"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [addSupplierForm, setAddSupplierForm] = useState<{
     supplier?: string;
     qty?: number;
@@ -1495,6 +1527,68 @@ export default function PoBudgetPage() {
     });
     return map;
   }, [supplierItemsByUniq, supplierOptions]);
+
+  // Semua supplier dari master (tanpa filter uniq/tipe/status) untuk dropdown
+  // supplier di Step 3. Nilai opsi = id (uuid) supplier, sama dengan nilai dari
+  // supplier-item, sehingga pilihan yang sudah ada tetap cocok.
+  const masterSupplierOptions = useMemo<SupplierOption[]>(
+    () =>
+      dedupeSupplierOptions(
+        supplierOnlyList.flatMap((supplier) => {
+          const name = String(supplier.supplier_name ?? "").trim();
+          if (!name) return [] as SupplierOption[];
+          const value = String(
+            supplier.id ?? supplier.supplier_code ?? supplier.row_id ?? name,
+          ).trim();
+          return [
+            {
+              value,
+              label: name,
+              code: String(supplier.supplier_code ?? "").trim() || undefined,
+              supplierName: name,
+              supplierId:
+                toIntegerId(supplier.row_id) ??
+                toIntegerId(supplier.id) ??
+                undefined,
+            } as SupplierOption,
+          ];
+        }),
+      ),
+    [supplierOnlyList],
+  );
+
+  // Opsi supplier untuk satu baris Step 3: SELURUH master supplier. Supplier yang
+  // juga terdaftar di supplier-item uniq itu membawa persentase (kanban split)
+  // untuk label dan qty otomatis; supplier-item di luar master tetap ditambahkan
+  // supaya pilihan yang sudah ada tidak hilang.
+  const getBulkSupplierOptions = (row: BulkItemRow): SupplierOption[] => {
+    const childBudget = isChildBudgetType(getApiType(activeTab));
+    const childOpts = childBudget ? getChildSupplierOptions(row) : [];
+    const source = childBudget
+      ? childOpts.length
+        ? childOpts
+        : supplierOptions
+      : (supplierOptionsByUniq.get(row.uniq) ?? supplierOptions);
+    const specific = dedupeSupplierOptions(source);
+    const nameKey = (o: SupplierOption) =>
+      String(o.label ?? "").trim().toLowerCase();
+    const masterNames = new Set(masterSupplierOptions.map(nameKey));
+
+    const fromMaster = masterSupplierOptions.map((master) => {
+      const match = specific.find(
+        (o) => o.value === master.value || nameKey(o) === nameKey(master),
+      );
+      return match?.percentage != null
+        ? { ...master, percentage: match.percentage }
+        : master;
+    });
+    const extras = specific.filter(
+      (o) =>
+        !masterSupplierOptions.some((m) => m.value === o.value) &&
+        !masterNames.has(nameKey(o)),
+    );
+    return [...fromMaster, ...extras];
+  };
 
   const findApprovedPrlMatch = (
     customerId: number | null | undefined,
@@ -2205,6 +2299,17 @@ export default function PoBudgetPage() {
             parentUniqCode,
             row.partNumber,
           )[0];
+          // Spec dari detail BOM parent; untuk form WIRE quantity =
+          // total qty x berat (kg) x QPU (QPU parent sendiri = 1).
+          const parentBomSpec = bomIndex.materialSpecByUniq[parentUniqCode];
+          const parentWeight =
+            Number(row.weightKg) > 0
+              ? Number(row.weightKg)
+              : Number(parentBomSpec?.weight_kg ?? 0);
+          const parentFactor = wireQuantityFactor({
+            materialSpec: parentBomSpec,
+            weightKg: parentWeight,
+          });
           const fallbackRow: BulkItemRow = {
             ...row,
             key: `${row.key}-material-spec`,
@@ -2213,7 +2318,9 @@ export default function PoBudgetPage() {
             isHeader: false,
             childCount: undefined,
             level: 1,
-            materialSpec: bomIndex.materialSpecByUniq[parentUniqCode],
+            weightKg: parentWeight,
+            quantity: roundChildQty(row.quantity * parentFactor, parentFactor !== 1),
+            materialSpec: parentBomSpec,
             existingRawMaterial: String(
               parentSupplierItem?.description ?? row.existingRawMaterial ?? "-",
             ),
@@ -2833,6 +2940,11 @@ export default function PoBudgetPage() {
         collectUniqs(parent.children, wanted),
       ),
     );
+    // Child di Step 3 modal Bulk (kolom Child UNIQ menampilkan material code).
+    bulkItems.forEach((item) => {
+      const code = String(item.childUniqCode ?? "").trim();
+      if (!item.isHeader && code) wanted.add(code);
+    });
 
     const missing = Array.from(wanted).filter(
       (code) => !requestedMaterialUniqsRef.current.has(code),
@@ -2850,7 +2962,7 @@ export default function PoBudgetPage() {
         );
         console.error("[po-budget-tree] material code lookup failed", error);
       });
-  }, [filteredRows, lookupMaterialCodes]);
+  }, [filteredRows, bulkItems, lookupMaterialCodes]);
 
   const renderStoredChildren = (row: PoBudgetRow) => {
     const parents = getStoredParents(row.detailJson);
@@ -3117,8 +3229,9 @@ export default function PoBudgetPage() {
 
   // Update total qty of one UNIQ group: header keeps the total, each child gets
   // total x its QPU (e.g. total 1000, QPU 1 and 2 -> 1000 and 2000; nested
-  // children multiply on from their parent's QPU), and each supplier line with a
-  // percentage is rescaled from it.
+  // children multiply on from their parent's QPU). For form WIRE (from the BOM
+  // detail) the quantity is total x weight (kg) x QPU, e.g. 1000 x 0.1 x 1 = 100.
+  // Each supplier line with a percentage is rescaled from it.
   const bulkUpdateGroupQty = (
     group: (typeof bulkParentGroups)[number],
     nextQty: number,
@@ -3126,8 +3239,10 @@ export default function PoBudgetPage() {
     const qty = Math.max(0, Number(nextQty || 0));
     const childKeys = new Set(group.rows.map((row) => row.key));
 
-    // Cumulative QPU multiplier per child row (rows are in tree order).
+    // Cumulative QPU multiplier per child row (rows are in tree order). WIRE rows
+    // additionally multiply by their weight (kg) below.
     const multiplierByKey = new Map<string, number>();
+    const wireFactorByKey = new Map<string, number>();
     const multiplierAtLevel: number[] = [];
     for (const row of group.rows) {
       const level = Math.max(1, Number(row.level ?? 1));
@@ -3139,6 +3254,7 @@ export default function PoBudgetPage() {
       multiplierAtLevel[level - 1] = multiplier;
       multiplierAtLevel.length = level;
       multiplierByKey.set(row.key, multiplier);
+      wireFactorByKey.set(row.key, wireQuantityFactor(row));
     }
 
     setBulkItems((prev) =>
@@ -3148,7 +3264,11 @@ export default function PoBudgetPage() {
         if (it.isHeader) return { ...it, quantity: qty };
         if (!childKeys.has(it.key)) return it;
 
-        const perChildQty = Math.round(qty * (multiplierByKey.get(it.key) ?? 1));
+        const wireFactor = wireFactorByKey.get(it.key) ?? 1;
+        const perChildQty = roundChildQty(
+          qty * (multiplierByKey.get(it.key) ?? 1) * wireFactor,
+          wireFactor !== 1,
+        );
         const suppliers = it.suppliers.map((s) =>
           s.percentage && s.percentage > 0
             ? { ...s, qty: Math.round((perChildQty * s.percentage) / 100) }
@@ -3390,9 +3510,11 @@ export default function PoBudgetPage() {
         existing_raw_material: item.existingRawMaterial,
         material_spec: item.materialSpec,
         suppliers: item.suppliers.map((supplier) => {
-          const option = supplierOptions.find(
-            (opt) => opt.value === supplier.supplier,
-          );
+          const option =
+            supplierOptions.find((opt) => opt.value === supplier.supplier) ??
+            masterSupplierOptions.find(
+              (opt) => opt.value === supplier.supplier,
+            );
           const resolvedId = option?.supplierId;
           return {
             supplier_id:
@@ -4718,7 +4840,12 @@ export default function PoBudgetPage() {
                 color="blue"
                 className="!rounded-full !px-3 !py-0.5 !text-xs !font-semibold"
               >
-                {value || "-"}
+                {/* Pil biru = Material Code dari BOM (bukan uniq). Uniq item ada
+                    di baris kecil di bawahnya. */}
+                {materialCodeByUniq[String(record.childUniqCode ?? "").trim()] ||
+                  String(record.materialSpec?.material_grade ?? "").trim() ||
+                  value ||
+                  "-"}
               </Tag>
             ) : (
               <span className="text-sm text-gray-700">{value}</span>
@@ -4857,17 +4984,27 @@ export default function PoBudgetPage() {
                   </span>
                   <Select
                     value={s.supplier}
+                    showSearch
+                    optionFilterProp="label"
+                    filterOption={(input, option) => {
+                      const q = input.trim().toLowerCase();
+                      if (!q) return true;
+                      const opt = option as { label?: unknown; code?: string };
+                      return (
+                        String(opt?.label ?? "")
+                          .toLowerCase()
+                          .includes(q) ||
+                        String(opt?.code ?? "")
+                          .toLowerCase()
+                          .includes(q)
+                      );
+                    }}
+                    placeholder="Search supplier"
+                    popupMatchSelectWidth={false}
                     onChange={(v) => {
-                      const childOpts = isChildBudgetType(getApiType(activeTab))
-                        ? getChildSupplierOptions(r)
-                        : [];
-                      const opts = isChildBudgetType(getApiType(activeTab))
-                        ? childOpts.length
-                          ? childOpts
-                          : supplierOptions
-                        : (supplierOptionsByUniq.get(r.uniq) ??
-                          supplierOptions);
-                      const opt = opts.find((o) => o.value === v);
+                      const opt = getBulkSupplierOptions(r).find(
+                        (o) => o.value === v,
+                      );
                       const pct = opt?.percentage;
                       const autoQty =
                         pct != null && pct > 0
@@ -4880,18 +5017,7 @@ export default function PoBudgetPage() {
                         percentage: pct,
                       });
                     }}
-                    options={(() => {
-                      const childOpts = isChildBudgetType(getApiType(activeTab))
-                        ? getChildSupplierOptions(r)
-                        : [];
-                      const source = isChildBudgetType(getApiType(activeTab))
-                        ? childOpts.length
-                          ? childOpts
-                          : supplierOptions
-                        : (supplierOptionsByUniq.get(r.uniq) ??
-                          supplierOptions);
-                      return dedupeSupplierOptions(source);
-                    })()
+                    options={getBulkSupplierOptions(r)
                       .filter(
                         (opt) =>
                           opt.value === s.supplier ||
@@ -4902,6 +5028,7 @@ export default function PoBudgetPage() {
                       )
                       .map((opt) => ({
                         value: opt.value,
+                        code: opt.code,
                         label:
                           opt.percentage != null
                             ? `${opt.label} (${opt.percentage}%)`
@@ -4967,7 +5094,15 @@ export default function PoBudgetPage() {
         ),
       },
     ],
-    [activeTab, supplierOptions, supplierOptionsByUniq, uomOptions, bulkItems],
+    [
+      activeTab,
+      supplierOptions,
+      supplierOptionsByUniq,
+      uomOptions,
+      bulkItems,
+      materialCodeByUniq,
+      masterSupplierOptions,
+    ],
   );
 
   return (
