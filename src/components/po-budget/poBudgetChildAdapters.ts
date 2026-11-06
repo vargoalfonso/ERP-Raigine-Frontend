@@ -101,6 +101,15 @@ const getLookupChildren = (
   return lookup[key] ?? [];
 };
 
+/**
+ * Quantity per uniq (QPU) of a BOM child. A missing/zero QPU counts as 1, so
+ * the child needs exactly the parent's quantity.
+ */
+const childQpu = (child: PoBudgetPrlChild) => {
+  const qpu = num(child.qty_per_uniq);
+  return qpu > 0 ? qpu : 1;
+};
+
 const getNestedChildren = (
   child: PoBudgetPrlChild,
   lookup: BomChildLookup | undefined,
@@ -109,11 +118,16 @@ const getNestedChildren = (
     ? child.children
     : getLookupChildren(lookup, child.uniq_code);
 
+/**
+ * `baseQty` is the quantity of the parent these children belong to. Each
+ * child's quantity is baseQty x its QPU (e.g. total 1000 with QPU 1 and 2 gives
+ * 1000 and 2000); nested children multiply on from their own parent's quantity.
+ */
 function flattenPrlChildren(
   detail: PoBudgetPrlDetail | undefined,
   parentItem: PoBudgetPrlDetail["items"][number],
   children: PoBudgetPrlChild[],
-  effectiveQty: number,
+  baseQty: number,
   lookup: BomChildLookup | undefined,
   level: number,
   path: Set<string>,
@@ -121,12 +135,13 @@ function flattenPrlChildren(
   const rows: PoBudgetChildRow[] = [];
 
   children.forEach((child, index) => {
+    const childQty = Math.round(baseQty * childQpu(child));
     const row = toChildRow(
       detail,
       parentItem,
       child,
       index,
-      effectiveQty,
+      childQty,
       level,
     );
     rows.push(row);
@@ -137,14 +152,12 @@ function flattenPrlChildren(
     const nested = getNestedChildren(child, lookup);
     if (nested.length === 0) return;
 
-    const nextQty = num(child.quantity ?? child.qty_per_uniq, effectiveQty);
-    const nestedQty = nextQty / nested.length;
     rows.push(
       ...flattenPrlChildren(
         detail,
         parentItem,
         nested,
-        nestedQty,
+        childQty,
         lookup,
         level + 1,
         new Set([...path, childCode]),
@@ -165,14 +178,12 @@ export function buildSingleChildRowsFromPrlDetail(
       Array.isArray(parent.children) && parent.children.length > 0
         ? parent.children
         : getLookupChildren(bomChildrenByParentUniq, parent.uniq_code);
-    const childCount = children.length > 0 ? children.length : 1;
     const parentQty = num(parent?.remaining_qty ?? parent?.quantity);
-    const perChildQty = Math.round(parentQty / childCount);
     return flattenPrlChildren(
       detail,
       parent,
       children,
-      perChildQty,
+      parentQty,
       bomChildrenByParentUniq,
       1,
       new Set([text(parent.uniq_code).toLowerCase()]),
@@ -198,8 +209,6 @@ export function buildBulkChildRowsFromPrlDetail(
         ? item.children
         : getLookupChildren(bomChildrenByParentUniq, item.uniq_code);
     const parentQty = num(item?.remaining_qty ?? item?.quantity);
-    const childCount = children.length > 0 ? children.length : 1;
-    const perChildQty = Math.round(parentQty / childCount);
 
     // Insert header row for this parent UNIQ
     rows.push({
@@ -230,7 +239,7 @@ export function buildBulkChildRowsFromPrlDetail(
         detail,
         item,
         children,
-        perChildQty,
+        parentQty,
         bomChildrenByParentUniq,
         1,
         new Set([text(item.uniq_code).toLowerCase()]),
