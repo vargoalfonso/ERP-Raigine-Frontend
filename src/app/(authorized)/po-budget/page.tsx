@@ -3115,15 +3115,31 @@ export default function PoBudgetPage() {
     );
   };
 
-  // Update total qty of one UNIQ group: header keeps the total, children get an
-  // equal split, and each supplier line with a percentage is rescaled from it.
+  // Update total qty of one UNIQ group: header keeps the total, each child gets
+  // total x its QPU (e.g. total 1000, QPU 1 and 2 -> 1000 and 2000; nested
+  // children multiply on from their parent's QPU), and each supplier line with a
+  // percentage is rescaled from it.
   const bulkUpdateGroupQty = (
     group: (typeof bulkParentGroups)[number],
     nextQty: number,
   ) => {
     const qty = Math.max(0, Number(nextQty || 0));
     const childKeys = new Set(group.rows.map((row) => row.key));
-    const perChildQty = Math.round(qty / Math.max(1, group.rows.length));
+
+    // Cumulative QPU multiplier per child row (rows are in tree order).
+    const multiplierByKey = new Map<string, number>();
+    const multiplierAtLevel: number[] = [];
+    for (const row of group.rows) {
+      const level = Math.max(1, Number(row.level ?? 1));
+      const qpu =
+        row.qtyPerUniq && row.qtyPerUniq > 0 ? Number(row.qtyPerUniq) : 1;
+      const parentMultiplier =
+        level === 1 ? 1 : (multiplierAtLevel[level - 2] ?? 1);
+      const multiplier = parentMultiplier * qpu;
+      multiplierAtLevel[level - 1] = multiplier;
+      multiplierAtLevel.length = level;
+      multiplierByKey.set(row.key, multiplier);
+    }
 
     setBulkItems((prev) =>
       prev.map((it) => {
@@ -3132,6 +3148,7 @@ export default function PoBudgetPage() {
         if (it.isHeader) return { ...it, quantity: qty };
         if (!childKeys.has(it.key)) return it;
 
+        const perChildQty = Math.round(qty * (multiplierByKey.get(it.key) ?? 1));
         const suppliers = it.suppliers.map((s) =>
           s.percentage && s.percentage > 0
             ? { ...s, qty: Math.round((perChildQty * s.percentage) / 100) }
