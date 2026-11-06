@@ -53,10 +53,14 @@ import {
   type CustomerRecord,
 } from "@/lib/api/customers/api";
 import {
+  useLazyListPrlGroupsQuery,
+  useLazyListPrlsQuery,
   useListPrlsQuery,
+  type PrlGroupRecord,
   type PrlRecord,
   type PrlType,
 } from "@/lib/api/prl/api";
+import { fetchAllPages } from "@/lib/api/prl/fetchAllPages";
 import { useListCustomerPosQuery } from "@/lib/api/customer-orders/api";
 import {
   useGetGlobalWorkingDaysQuery,
@@ -848,6 +852,56 @@ export default function PoBudgetPage() {
     },
     { skip: !shouldFetchPrls },
   );
+  // Opsi "Select PRL" (modal Bulk): satu baris per PRL ID untuk bulan yang
+  // dipilih di Step 1, difilter di server (status approved + periode + tipe +
+  // pencarian). SEMUA halaman diambil, jadi jumlah PRL tidak dibatasi.
+  const bulkPeriodStored = useMemo(() => {
+    const month = parsePeriodMonth(bulkPeriod);
+    return month ? month.format("MMMM-YYYY") : undefined;
+  }, [bulkPeriod]);
+  const [triggerListPrlGroups] = useLazyListPrlGroupsQuery();
+  const [prlGroupRows, setPrlGroupRows] = useState<PrlGroupRecord[]>([]);
+  const [prlGroupsFetching, setPrlGroupsFetching] = useState(false);
+  useEffect(() => {
+    if (!useApi || !bulkOpen || !bulkPeriodStored) {
+      setPrlGroupRows([]);
+      return;
+    }
+    let cancelled = false;
+    setPrlGroupsFetching(true);
+    fetchAllPages<PrlGroupRecord>(async (page, limit) => {
+      const res = await triggerListPrlGroups(
+        {
+          page,
+          limit,
+          status: "approved",
+          forecast_period: bulkPeriodStored,
+          search: bulkPrlSearch.trim() || undefined,
+          prl_type: activePrlTypeFilter,
+        },
+        true,
+      ).unwrap();
+      return { items: res.items, total: res.pagination.total };
+    })
+      .then((items) => {
+        if (!cancelled) setPrlGroupRows(items);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        message.error(getApiErrorMessage(error, "Failed to load PRL list"));
+      })
+      .finally(() => {
+        if (!cancelled) setPrlGroupsFetching(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bulkOpen, bulkPeriodStored, bulkPrlSearch, activePrlTypeFilter]);
+  // Baris UNIQ milik PRL yang dipilih, dimuat per PRL ID saat dipilih.
+  const [triggerListPrls] = useLazyListPrlsQuery();
+  const [bulkPrlRowsCache, setBulkPrlRowsCache] = useState<
+    Record<string, PrlRecord[]>
+  >({});
   const { data: customerPosResponse } = useListCustomerPosQuery(undefined, {
     skip: !useApi,
   });
@@ -1270,16 +1324,32 @@ export default function PoBudgetPage() {
     );
   }, [addForm.partNumber, addForm.uniq, supplierItems, supplierOptions]);
 
-  const approvedPrls = useMemo(
-    () =>
-      prls.filter((item) => {
-        const status = String(item.approval_status ?? item.status ?? "")
-          .trim()
-          .toLowerCase();
-        return status === "approved";
-      }),
-    [prls],
-  );
+  const approvedPrls = useMemo(() => {
+    // Gabungkan baris dari daftar umum dengan baris PRL yang dipilih di modal
+    // Bulk (dimuat per PRL ID), tanpa duplikat.
+    const seen = new Set<string>();
+    const merged: PrlRecord[] = [];
+    const keyOf = (item: PrlRecord, index: number) =>
+      String(
+        item.row_id ??
+          item.id ??
+          `${item.prl_id ?? "prl"}-${item.uniq_code ?? item.item_uniq_code ?? index}`,
+      );
+    [...prls, ...Object.values(bulkPrlRowsCache).flat()].forEach(
+      (item, index) => {
+        const key = keyOf(item, index);
+        if (seen.has(key)) return;
+        seen.add(key);
+        merged.push(item);
+      },
+    );
+    return merged.filter((item) => {
+      const status = String(item.approval_status ?? item.status ?? "")
+        .trim()
+        .toLowerCase();
+      return status === "approved";
+    });
+  }, [prls, bulkPrlRowsCache]);
 
   const supplierItemsByUniq = useMemo(() => {
     const grouped = new Map<string, SupplierItemRecord[]>();
@@ -1674,40 +1744,24 @@ export default function PoBudgetPage() {
   // yang dipilih di "Period" (Step 1). Format periode bebas: "October 2026",
   // "Oct-2026", "2026-10", ...
   const bulkPrlMonthOptions = useMemo(() => {
-    const bulkPrlMonth = parsePeriodMonth(bulkPeriod);
-    if (!bulkPrlMonth) return [];
-    const prlGroups = new Map<
-      string,
-      { customerName: string; uniqs: string[] }
-    >();
-    for (const item of approvedPrls) {
-      const itemMonth = parsePeriodMonth(getPrlPeriodValue(item));
-      if (!itemMonth || !itemMonth.isSame(bulkPrlMonth, "month")) continue;
-      const prlId = String(item.prl_id ?? item.id ?? "");
-      if (!prlId) continue;
-      const customerName = String(
-        item.customer?.customer_name ?? item.customer_name ?? "-",
-      );
-      const uniqCode = String(
-        item.uniq_code ?? item.item_uniq_code ?? "",
-      ).trim();
-      if (!prlGroups.has(prlId)) {
-        prlGroups.set(prlId, { customerName, uniqs: [] });
-      }
-      const group = prlGroups.get(prlId)!;
-      if (uniqCode && !group.uniqs.includes(uniqCode))
-        group.uniqs.push(uniqCode);
-    }
-    return Array.from(prlGroups.entries()).map(([prlId, group]) => {
+    return prlGroupRows.map((group) => {
+      const uniqs = group.uniq_codes;
       const materials = Array.from(
-        new Set(group.uniqs.flatMap((u) => collectMaterialUniqs(u))),
+        new Set(uniqs.flatMap((u) => collectMaterialUniqs(u))),
       );
+      const uniqShown = uniqs.slice(0, 5).join(", ");
+      const uniqSummary =
+        uniqs.length === 0
+          ? "-"
+          : uniqs.length > 5
+            ? `${uniqShown} +${uniqs.length - 5}`
+            : uniqShown;
       return {
-        label: `${prlId} — ${group.uniqs.length > 0 ? group.uniqs.join(", ") : "-"} → Material: ${formatMaterialSummary(materials)} (${group.customerName})`,
-        value: `prl::${encodeURIComponent(prlId)}`,
+        label: `${group.prl_id} — ${uniqSummary} → Material: ${formatMaterialSummary(materials)} (${group.customer_name ?? "-"})`,
+        value: `prl::${encodeURIComponent(group.prl_id)}`,
       };
     });
-  }, [approvedPrls, bulkPeriod, collectMaterialUniqs]);
+  }, [prlGroupRows, collectMaterialUniqs]);
 
   const prlOptions = useMemo(() => {
     const fromPo = (customerPos as any[])
@@ -2521,6 +2575,49 @@ export default function PoBudgetPage() {
     bulkPrlDetailCache,
   ]);
 
+  // Muat baris UNIQ untuk PRL yang dipilih (opsi PRL hanya membawa ringkasan).
+  // Setelah masuk ke cache, jumlah approvedPrls berubah sehingga efek di atas
+  // menyusun ulang item bulk secara otomatis.
+  useEffect(() => {
+    if (!useApi || !bulkOpen) return;
+    const ids = Array.from(
+      new Set(
+        bulkPrlIds
+          .map((value) => parsePrlSelection(value)?.prlId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+    const missing = ids.filter((id) => !bulkPrlRowsCache[id]);
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    Promise.all(
+      missing.map((id) =>
+        fetchAllPages<PrlRecord>(async (page, limit) => {
+          const res = await triggerListPrls(
+            { page, limit, prl_id: id },
+            true,
+          ).unwrap();
+          return { items: res.items, total: res.pagination.total };
+        }).then((items) => [id, items] as const),
+      ),
+    )
+      .then((entries) => {
+        if (cancelled) return;
+        setBulkPrlRowsCache((prev) => ({
+          ...prev,
+          ...Object.fromEntries(entries),
+        }));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        message.error(getApiErrorMessage(error, "Failed to load PRL items"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [bulkPrlIds, bulkOpen]);
+
   useEffect(() => {
     const selectedPeriod = getPrlPeriodValue(selectedBulkPrl);
     if (selectedPeriod) {
@@ -2588,6 +2685,7 @@ export default function PoBudgetPage() {
     // [prl-type-switch] paksa repopulasi cache saat modal dibuka kembali
     prlCacheSigRef.current = "";
     setBulkPrlDetailCache({});
+    setBulkPrlRowsCache({});
     setBulkItems([]);
     setExpandedBulkRowKeys([]);
     setCollapsedBulkGroupKeys([]);
@@ -5674,7 +5772,7 @@ export default function PoBudgetPage() {
                       }
                       optionFilterProp="label"
                       filterOption={false}
-                      loading={prlsFetching}
+                      loading={prlGroupsFetching}
                       maxTagCount="responsive"
                     />
                   </>
