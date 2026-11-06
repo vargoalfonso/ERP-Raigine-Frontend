@@ -555,6 +555,8 @@ export const prlApiSlice = apiSlice
 export const {
   useListPrlsQuery,
   useListPrlGroupsQuery,
+  useLazyListPrlGroupsQuery,
+  useLazyListPrlsQuery,
   useGetPrlByIdQuery,
   useCreatePrlMutation,
   useCreatePrlsBulkMutation,
