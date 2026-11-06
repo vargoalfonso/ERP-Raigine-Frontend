@@ -32,8 +32,8 @@ import {
   useCreateWorkOrderMutation,
   useGetWorkOrderUniqOptionsQuery,
 } from "@/lib/api/work-orders/api";
+import { useLazyGetFinishedGoodParameterizedSummaryQuery } from "@/lib/api/finished-goods/api";
 import { useLazyGetInventoryKanbanSummaryQuery } from "@/lib/api/inventory/api";
-import { useGetFinishedGoodParameterizedSummaryQuery } from "@/lib/api/finished-goods/api";
 
 type WorkOrderType = "New" | "Additional" | "Rework" | "Assembly";
 
@@ -102,15 +102,9 @@ export default function CreateWorkOrderPage() {
   const { data: processRecords = [] } = useGetProcessesQuery(undefined, {
     skip: !apiEnabled,
   });
+  const [getFinishedSummary] =
+    useLazyGetFinishedGoodParameterizedSummaryQuery();
   const [getInventoryKanbanSummary] = useLazyGetInventoryKanbanSummaryQuery();
-  const [requestedFinished, setRequestedFinished] = useState<{
-    id: string;
-    uniq: string;
-  } | null>(null);
-  const finishedQuery = useGetFinishedGoodParameterizedSummaryQuery(
-    requestedFinished ? { uniq_code: requestedFinished.uniq } : (null as any),
-    { skip: !apiEnabled || !requestedFinished },
-  );
 
   const fallbackUniqOptions: UniqOption[] = [
     {
@@ -767,19 +761,7 @@ export default function CreateWorkOrderPage() {
           // fallback ke shallow jika fetch gagal
           if (shallowChildren.length) applyChildLines(shallowChildren);
         }
-        // kanban summary
-        try {
-          const kanbanRes = await getInventoryKanbanSummary({ uniq_code: uniq })
-            .unwrap()
-            .catch(() => null);
-          const kanbanData = (kanbanRes as any)?.data ?? null;
-          const targetFromKanban =
-            kanbanData?.kanban_pkg_qty ?? kanbanData?.safety_stock_qty ?? null;
-          if (typeof targetFromKanban === "number")
-            updateLine(id, { targetStock: targetFromKanban });
-        } catch {
-          /* ignore */
-        }
+        void loadStockInfo(id, uniq);
       })();
       if (shallowChildren.length) return; // children akan diisi oleh async di atas
     } else if (shallowChildren.length) {
@@ -787,56 +769,49 @@ export default function CreateWorkOrderPage() {
       return;
     }
 
-    if (apiEnabled && uniq) {
-      void (async () => {
-        try {
-          const kanbanPromise = getInventoryKanbanSummary({
-            uniq_code: uniq,
-          }).unwrap();
-          const kanbanRes = await kanbanPromise.catch(() => null);
-          const kanbanData = kanbanRes?.data ?? null;
-          const kanbanPkg = kanbanData?.kanban_pkg_qty ?? null;
-          const safety = kanbanData?.safety_stock_qty ?? null;
-          const targetFromKanban = kanbanPkg ?? safety ?? null;
-          if (
-            targetFromKanban !== null &&
-            typeof targetFromKanban === "number"
-          ) {
-            updateLine(id, { targetStock: targetFromKanban });
-          }
-        } catch (e) {
-          /* ignore */
-        }
-      })();
-
-      setRequestedFinished({ id, uniq });
-    }
+    if (apiEnabled && uniq) void loadStockInfo(id, uniq);
   };
 
-  useEffect(() => {
-    if (!requestedFinished) return;
-    if (finishedQuery.isError) {
-      setRequestedFinished(null);
-      return;
-    }
-    if (finishedQuery.data) {
-      const finishedData = finishedQuery.data;
-      const targetFromFinished =
-        (finishedData as any)?.target_stock_qty ??
-        (finishedData as any)?.targetStockQty ??
-        null;
-      const stockQty =
-        (finishedData as any)?.stock_qty ??
-        (finishedData as any)?.stockQty ??
-        null;
-      updateLine(requestedFinished.id, {
-        targetStock:
-          typeof targetFromFinished === "number" ? targetFromFinished : null,
-        stockQty: typeof stockQty === "number" ? stockQty : null,
-      });
-      setRequestedFinished(null);
-    }
-  }, [finishedQuery.data, finishedQuery.isError, requestedFinished]);
+  // Target Stock & Stock Qty satu baris UNIQ: diambil dari Finished Goods ATAU
+  // Inventory, mana yang ada. Keduanya diminta bersamaan (tiap baris punya
+  // permintaan sendiri) lalu digabung: nilai Finished Goods dipakai bila terisi,
+  // jika tidak nilai Inventory, jika tidak keduanya 0.
+  //  - Finished Goods : target_stock_qty (parameter Kanban), stock_qty
+  //  - Inventory      : safety_stock_qty (target), stock_qty
+  // (kanban_pkg_qty = isi kemasan, bukan target, jadi tidak dipakai.)
+  const loadStockInfo = async (lineId: string, uniq: string) => {
+    if (!apiEnabled || !uniq) return;
+    const [fgResult, invResult] = await Promise.allSettled([
+      getFinishedSummary({ uniq_code: uniq }, true).unwrap(),
+      getInventoryKanbanSummary({ uniq_code: uniq }, true).unwrap(),
+    ]);
+    const fg =
+      fgResult.status === "fulfilled"
+        ? (fgResult.value as unknown as Record<string, unknown> | null)
+        : null;
+    const inv =
+      invResult.status === "fulfilled"
+        ? (((invResult.value as any)?.data ?? invResult.value) as Record<
+            string,
+            unknown
+          > | null)
+        : null;
+
+    const firstPositive = (...values: unknown[]) => {
+      for (const v of values) {
+        if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+      }
+      return 0;
+    };
+    updateLine(lineId, {
+      targetStock: firstPositive(
+        fg?.target_stock_qty,
+        fg?.targetStockQty,
+        inv?.safety_stock_qty,
+      ),
+      stockQty: firstPositive(fg?.stock_qty, fg?.stockQty, inv?.stock_qty),
+    });
+  };
 
   // [wo-estimated-time] Estimasi waktu WO (menit) = SUM(qty x cycle) + setup
   // hanya saat UNIQ berubah dari baris valid sebelumnya.
