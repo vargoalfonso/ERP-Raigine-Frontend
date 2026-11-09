@@ -154,6 +154,8 @@ export type GetFinishedGoodsParams = {
   limit: number;
   /** Server-side search across uniq, part number/name, model, WO, location, UOM. */
   search?: string;
+  /** Filter status stok di server: "low" | "normal" | "overstock" (kosong = semua). */
+  status?: string;
 };
 
 export type CreateFinishedGoodRequest = {
@@ -382,10 +384,15 @@ export const finishedGoodsSlice = apiSlice.injectEndpoints({
       Paginated<FinishedGoodListItem>,
       GetFinishedGoodsParams
     >({
-      query: ({ page, limit, search }) => ({
+      query: ({ page, limit, search, status }) => ({
         url: "/finished-goods",
         method: "GET",
-        params: { page, limit, ...(search ? { search } : {}) },
+        params: {
+          page,
+          limit,
+          ...(search ? { search } : {}),
+          ...(status ? { status } : {}),
+        },
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       providesTags: (result) => {

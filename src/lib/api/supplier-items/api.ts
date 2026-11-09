@@ -291,6 +291,44 @@ const buildQueryString = (params: Record<string, string | undefined>): string =>
   return str ? `?${str}` : "";
 };
 
+// ── Pendaftaran supplier per Material Code ──────────────────────────────────
+export type MaterialCodeUniq = {
+  uniq_code: string;
+  part_number?: string | null;
+  part_name?: string | null;
+  model?: string | null;
+  uom?: string | null;
+  material_code?: string | null;
+  already_registered?: boolean;
+};
+
+export type UniqsByMaterialCodeParams = {
+  material_code: string;
+  supplier_uuid?: string;
+  type: "raw_material" | "indirect";
+};
+
+export type BulkByMaterialCodeRequest = {
+  supplier_uuid: string;
+  material_code: string;
+  type: "raw_material" | "indirect";
+  warehouse_uuid?: string;
+  warehouse_name?: string;
+  quantity?: string;
+  uom?: string;
+  status: string;
+  selected_uniq_codes?: string[];
+};
+
+export type BulkByMaterialCodeResult = {
+  material_code: string;
+  matched: number;
+  created: number;
+  skipped: number;
+  created_uniq_codes: string[];
+  skipped_uniq_codes: string[];
+};
+
 const TAG = "SupplierItems" as const;
 
 export const supplierItemsApiSlice = apiSlice
@@ -354,6 +392,32 @@ export const supplierItemsApiSlice = apiSlice
         invalidatesTags: [{ type: TAG, id: "LIST" }],
       }),
 
+      getUniqsByMaterialCode: builder.query<MaterialCodeUniq[], UniqsByMaterialCodeParams>({
+        query: (params) => ({
+          url: `/supplier-items/by-material-code${buildQueryString({
+            material_code: params.material_code,
+            supplier_uuid: params.supplier_uuid,
+            type: params.type,
+          })}`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => parseArrayResponse<MaterialCodeUniq>(response),
+        providesTags: [{ type: TAG, id: "LIST" }],
+      }),
+
+      createSupplierItemsByMaterialCode: builder.mutation<BulkByMaterialCodeResult, BulkByMaterialCodeRequest>({
+        query: (body) => ({
+          url: "/supplier-items/bulk-by-material-code",
+          method: "POST",
+          body,
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) =>
+          parseObjectResponse<BulkByMaterialCodeResult>(response) ?? (response as BulkByMaterialCodeResult),
+        invalidatesTags: [{ type: TAG, id: "LIST" }],
+      }),
+
       updateSupplierItem: builder.mutation<SupplierItemRecord, { id: string | number; body: Partial<SupplierItemMutationRequest> & Record<string, unknown> }>({
         query: ({ id, body }) => ({
           url: `/supplier-items/${encodeURIComponent(String(id))}`,
@@ -386,6 +450,8 @@ export const {
   useListSupplierItemsQuery,
   useGetSupplierItemByIdQuery,
   useCreateSupplierItemMutation,
+  useGetUniqsByMaterialCodeQuery,
+  useCreateSupplierItemsByMaterialCodeMutation,
   useUpdateSupplierItemMutation,
   useDeleteSupplierItemMutation,
 } = supplierItemsApiSlice;

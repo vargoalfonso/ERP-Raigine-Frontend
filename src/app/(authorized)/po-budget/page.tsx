@@ -385,6 +385,26 @@ function normalizeLookupValue(value: unknown) {
     .toLowerCase();
 }
 
+// [material-code-lookup] Kunci pencarian supplier item: uniq_code, sebango_code,
+// DAN material code (mis. "BR50") sehingga child BOM dengan material code yang
+// sama otomatis menemukan supplier-nya, tidak harus persis uniq-nya. Item lama
+// dari form raw-material menyimpan NAMA master di uniq/sebango_code, tetapi
+// material_grade master tersimpan di `material_code` / `grade`.
+function getSupplierItemLookupKeys(item: SupplierItemRecord): string[] {
+  const typeText = String(item.type ?? item.material_type ?? "").toLowerCase();
+  const isRaw = typeText.includes("raw") && !typeText.includes("indirect");
+  return Array.from(
+    new Set(
+      [
+        normalizeLookupValue(item.uniq_code),
+        normalizeLookupValue(item.sebango_code),
+        normalizeLookupValue(item.material_code),
+        isRaw && !item.material_code ? normalizeLookupValue(item.grade) : "",
+      ].filter(Boolean),
+    ),
+  );
+}
+
 function isIntegerId(value: string) {
   return /^\d+$/.test(value.trim());
 }
@@ -1425,14 +1445,7 @@ export default function PoBudgetPage() {
     supplierItems.forEach((item) => {
       const status = String(item.status ?? "active").toLowerCase();
       if (status && status !== "active") return;
-      const keys = Array.from(
-        new Set(
-          [
-            normalizeLookupValue(item.uniq_code),
-            normalizeLookupValue(item.sebango_code),
-          ].filter(Boolean),
-        ),
-      );
+      const keys = getSupplierItemLookupKeys(item);
       keys.forEach((key) => {
         const current = grouped.get(key) ?? [];
         current.push(item);
@@ -1457,10 +1470,7 @@ export default function PoBudgetPage() {
         return;
       }
 
-      const lookupKeys = [
-        normalizeLookupValue(item.uniq_code),
-        normalizeLookupValue(item.sebango_code),
-      ].filter(Boolean);
+      const lookupKeys = getSupplierItemLookupKeys(item);
 
       lookupKeys.forEach((lookupKey) => {
         const current = grouped.get(lookupKey) ?? [];
@@ -2088,6 +2098,15 @@ export default function PoBudgetPage() {
           normalizeLookupValue(getChildSupplierLookupUniq(row)),
           normalizeLookupValue(row.uniq),
           normalizeLookupValue(row.childUniqCode),
+          // material code dari spec BOM child (mis. "BR50")
+          normalizeLookupValue(
+            (row.materialSpec as { material_grade?: unknown } | undefined)
+              ?.material_grade,
+          ),
+          normalizeLookupValue(
+            (row.materialSpec as { material_code?: unknown } | undefined)
+              ?.material_code,
+          ),
         ].filter(Boolean),
       ),
     );
@@ -2110,7 +2129,38 @@ export default function PoBudgetPage() {
     // Pencarian di atas (uniq / kode sebango) tidak memfilter tipe, jadi di sini
     // supplier dibatasi ke kategori tab aktif: tab Raw hanya supplier raw,
     // tab Subcon hanya supplier subcon, tab Indirect hanya supplier indirect.
-    return pickSupplierItemsByType(sorted, activeTab);
+    const picked = pickSupplierItemsByType(sorted, activeTab);
+
+    // [material-code-lookup] Satu supplier cukup satu kali per child. Supplier
+    // yang terdaftar dua kali (mis. baris lama berbasis nama master + baris
+    // per-uniq, atau cocok lewat uniq DAN material code) jangan tampil dobel.
+    // Bila ada beberapa baris, yang uniq_code-nya persis sama dengan child
+    // diutamakan; selebihnya yang paling awal (row_id terkecil).
+    const exactCodes = new Set(
+      [
+        normalizeLookupValue(row.childUniqCode),
+        normalizeLookupValue(getChildSupplierLookupUniq(row)),
+      ].filter(Boolean),
+    );
+    const bySupplier = new Map<string, SupplierItemRecord>();
+    picked.forEach((item, index) => {
+      const supplierKey = String(item.supplier_uuid ?? item.supplier_name ?? "")
+        .trim()
+        .toLowerCase();
+      if (!supplierKey) {
+        bySupplier.set(`__no-supplier-${index}`, item);
+        return;
+      }
+      const current = bySupplier.get(supplierKey);
+      const isExact = exactCodes.has(normalizeLookupValue(item.uniq_code));
+      const currentIsExact =
+        current !== undefined &&
+        exactCodes.has(normalizeLookupValue(current.uniq_code));
+      if (!current || (isExact && !currentIsExact)) {
+        bySupplier.set(supplierKey, item);
+      }
+    });
+    return Array.from(bySupplier.values());
   };
 
   const buildSupplierOptionsFromItems = (
