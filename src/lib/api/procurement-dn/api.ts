@@ -171,6 +171,10 @@ export type ProcurementDnPreview = {
 
 export type ProcurementDnPreviewItem = {
   item_uniq_code?: string;
+  /** Uniq BOM child (mis. MR052). */
+  child_uniq_code?: string;
+  /** Material code baris PO (mis. BR50). */
+  material_code?: string;
   material_info?: string;
   total_qty?: number;
   remaining_qty?: number;
@@ -302,6 +306,8 @@ const toPreviewItem = (raw: unknown): ProcurementDnPreviewItem => {
   const record = isRecord(raw) ? raw : {};
   return {
     item_uniq_code: toText(record.item_uniq_code) ?? toText(record.uniq_code) ?? toText(record.uniq),
+    child_uniq_code: toText(record.child_uniq_code),
+    material_code: toText(record.material_code),
     material_info: toText(record.material_info) ?? toText(record.material) ?? toText(record.material_name),
     total_qty: toNumber(record.total_qty) ?? toNumber(record.total_quantity) ?? toNumber(record.quantity),
     remaining_qty: toNumber(record.remaining_qty) ?? toNumber(record.remaining_quantity),

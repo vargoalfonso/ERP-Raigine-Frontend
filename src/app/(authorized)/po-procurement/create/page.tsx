@@ -10,6 +10,7 @@ import {
   Table,
   Tag,
   message,
+  Tooltip,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { LeftOutlined } from "@ant-design/icons";
@@ -55,6 +56,19 @@ type PoItemRow = {
   qty: number;
   uom: string;
   weightKg: number;
+  /** Jumlah baris asli yang digabung (>1 = baris gabungan). */
+  mergedCount?: number;
+  /** Rincian baris asli yang digabung (untuk tooltip: punya siapa, panjang berapa). */
+  sources?: PoItemSource[];
+};
+
+type PoItemSource = {
+  parentUniq: string;
+  childUniq: string;
+  partName: string;
+  lengthMm: string;
+  qty: number;
+  weightKg: number; // per pcs
 };
 
 type PoSupplierGroup = {
@@ -76,6 +90,165 @@ const specText = (
   if (value == null || value === "") return "-";
   return String(value);
 };
+
+/**
+ * Gabungkan baris material yang sama di list PO: material code (mis. BR40),
+ * form, grade, tipe, lebar, diameter, tebal, supplier, dan UoM sama -> satu
+ * baris (qty dijumlahkan). Baris tetap terpisah bila grade / diameter /
+ * ukuran (lebar, tebal) berbeda. PANJANG tidak ikut menentukan: potongan
+ * dengan panjang berbeda tetap satu material code, jadi panjang ditampilkan
+ * "Beragam" dan berat menjadi TOTAL (qty x berat per pcs).
+ */
+const mergeKey = (r: PoItemRow) =>
+  [
+    r.materialGrade,
+    r.form,
+    r.gradeText,
+    r.typeMaterial,
+    r.widthMm,
+    r.diameterMm,
+    r.thicknessMm,
+    r.supplier,
+    r.uom,
+  ]
+    .map((v) => String(v ?? "").trim().toLowerCase())
+    .join("|");
+
+const toSource = (r: PoItemRow): PoItemSource => ({
+  parentUniq: r.parentUniq,
+  childUniq: r.childUniq,
+  partName: r.partName,
+  lengthMm: r.lengthMm,
+  qty: r.qty,
+  weightKg: r.weightKg,
+});
+
+/** Panjang baris gabungan: satu angka bila semua sama, selain itu rentang "min – max". */
+const summarizeLength = (sources: PoItemSource[]): string => {
+  const distinct = Array.from(new Set(sources.map((x) => x.lengthMm)));
+  if (distinct.length === 1) return distinct[0];
+  const nums = distinct.map((v) => Number(v));
+  if (nums.every((n) => Number.isFinite(n))) {
+    return `${formatNumber(Math.min(...nums))} – ${formatNumber(Math.max(...nums))}`;
+  }
+  return "Beragam";
+};
+
+const mergePoItemRows = (items: PoItemRow[]): PoItemRow[] => {
+  const merged = new Map<string, PoItemRow>();
+  for (const item of items) {
+    // Baris tanpa material code (mis. subcon / flat) tidak digabung.
+    if (!item.materialGrade || item.materialGrade === "-") {
+      merged.set(`__single-${item.key}`, item);
+      continue;
+    }
+    const key = mergeKey(item);
+    const current = merged.get(key);
+    const itemWeightTotal = item.qty * item.weightKg;
+    if (!current) {
+      merged.set(key, {
+        ...item,
+        mergedCount: 1,
+        weightKg: itemWeightTotal,
+        sources: [toSource(item)],
+      });
+      continue;
+    }
+    current.qty += item.qty;
+    current.weightKg += itemWeightTotal;
+    current.mergedCount = (current.mergedCount ?? 1) + 1;
+    current.sources = [...(current.sources ?? []), toSource(item)];
+  }
+  return Array.from(merged.values()).map((row) => {
+    if ((row.mergedCount ?? 1) === 1) {
+      // Tidak benar-benar digabung: kembali ke berat per pcs semula.
+      return row.qty > 0
+        ? { ...row, weightKg: row.weightKg / row.qty, mergedCount: undefined, sources: undefined }
+        : { ...row, mergedCount: undefined, sources: undefined };
+    }
+    return { ...row, lengthMm: summarizeLength(row.sources ?? []) };
+  });
+};
+
+/**
+ * Rincian baris gabungan untuk tooltip: tiap potongan (panjang) milik child /
+ * parent UNIQ mana. Baris yang persis sama (child + parent + panjang) dijumlahkan.
+ */
+const MergedDetail = ({ sources }: { sources: PoItemSource[] }) => {
+  const grouped = new Map<string, PoItemSource & { lines: number }>();
+  for (const src of sources) {
+    const k = `${src.childUniq}|${src.parentUniq}|${src.lengthMm}`;
+    const cur = grouped.get(k);
+    if (cur) {
+      cur.qty += src.qty;
+      cur.lines += 1;
+    } else {
+      grouped.set(k, { ...src, lines: 1 });
+    }
+  }
+  const rows = Array.from(grouped.values()).sort(
+    (x, y) => Number(x.lengthMm) - Number(y.lengthMm),
+  );
+  const totalQty = rows.reduce((sum, r) => sum + r.qty, 0);
+  const totalKg = rows.reduce((sum, r) => sum + r.qty * r.weightKg, 0);
+  return (
+    <div className="text-[11px] text-gray-700">
+      <table className="border-collapse">
+        <thead>
+          <tr className="text-left text-gray-500">
+            <th className="pr-3 pb-1 font-medium">Child UNIQ</th>
+            <th className="pr-3 pb-1 font-medium">Parent UNIQ</th>
+            <th className="pr-3 pb-1 text-right font-medium">Length (mm)</th>
+            <th className="pr-3 pb-1 text-right font-medium">Qty</th>
+            <th className="pb-1 text-right font-medium">Kg/pcs</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={`${r.childUniq}|${r.parentUniq}|${r.lengthMm}`}>
+              <td className="pr-3 font-medium">
+                {r.childUniq}
+                {r.partName && r.partName !== "-" ? (
+                  <div className="text-[10px] font-normal text-gray-400">
+                    {r.partName}
+                  </div>
+                ) : null}
+              </td>
+              <td className="pr-3">{r.parentUniq}</td>
+              <td className="pr-3 text-right">{r.lengthMm}</td>
+              <td className="pr-3 text-right">
+                {formatNumber(r.qty)}
+                {r.lines > 1 ? (
+                  <span className="text-gray-400"> ({r.lines}×)</span>
+                ) : null}
+              </td>
+              <td className="text-right">{formatNumber(r.weightKg)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="border-t border-gray-200 font-semibold">
+            <td className="pt-1 pr-3" colSpan={3}>
+              Total
+            </td>
+            <td className="pt-1 pr-3 text-right">{formatNumber(totalQty)}</td>
+            <td className="pt-1 text-right">{formatNumber(totalKg)} kg</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  );
+};
+
+const mergeSupplierGroups = (groups: PoSupplierGroup[]): PoSupplierGroup[] =>
+  groups.map((g) => {
+    const items = mergePoItemRows(g.items);
+    return {
+      ...g,
+      items,
+      totalQty: items.reduce((sum, r) => sum + r.qty, 0),
+    };
+  });
 
 const formatNumber = (n: number) => new Intl.NumberFormat("en-US").format(n);
 
@@ -774,7 +947,7 @@ function CreatePoProcurementPageContent() {
 
   // Edit: kalau entry budget tidak bisa dihitung ulang (tidak ada di daftar budget),
   // tampilkan item dari PO yang tersimpan supaya datanya tetap terisi.
-  const poSupplierGroups: PoSupplierGroup[] = useMemo(() => {
+  const rawSupplierGroups: PoSupplierGroup[] = useMemo(() => {
     if (computedSupplierGroups.length > 0 || !isEdit) return computedSupplierGroups;
     if (!editResolved) return computedSupplierGroups;
     const detail = poDetailQuery.data?.data;
@@ -828,6 +1001,16 @@ function CreatePoProcurementPageContent() {
     poDetailQuery.data,
     resolveMaterialSpec,
   ]);
+
+  // Tampilan list: material yang sama (material code, grade, diameter, ukuran)
+  // digabung jadi satu baris. Subcon tidak digabung (tiap part berdiri sendiri).
+  const poSupplierGroups: PoSupplierGroup[] = useMemo(
+    () =>
+      poType === "subcon"
+        ? rawSupplierGroups
+        : mergeSupplierGroups(rawSupplierGroups),
+    [rawSupplierGroups, poType],
+  );
 
   // Edit: isi kembali External PO Number (Zahir) ke grup stage+supplier yang sesuai.
   useEffect(() => {
@@ -890,8 +1073,18 @@ function CreatePoProcurementPageContent() {
       render: (v: string, r) => (
         <div>
           <span className="text-sm font-medium text-gray-800">{v}</span>
-          {r.childUniq && r.childUniq !== "-" ? (
-            <div className="text-[11px] text-gray-400"></div>
+          {(r.mergedCount ?? 1) > 1 ? (
+            <Tooltip
+              color="#ffffff"
+              placement="right"
+              overlayInnerStyle={{ color: "#374151", padding: 12 }}
+              overlayStyle={{ maxWidth: 560 }}
+              title={r.sources ? <MergedDetail sources={r.sources} /> : null}
+            >
+              <div className="cursor-help text-[11px] text-gray-400">
+                {r.mergedCount} item digabung
+              </div>
+            </Tooltip>
           ) : null}
         </div>
       ),
@@ -952,8 +1145,30 @@ function CreatePoProcurementPageContent() {
             title: "Length (mm)",
             dataIndex: "lengthMm",
             key: "lengthMm",
-            width: 115,
+            width: 140,
             align: "right",
+            render: (v: string, r) => {
+              if ((r.mergedCount ?? 1) <= 1 || !r.sources) return v;
+              const distinct = new Set(r.sources.map((x) => x.lengthMm)).size;
+              return (
+                <Tooltip
+                  color="#ffffff"
+                  placement="left"
+                  overlayInnerStyle={{ color: "#374151", padding: 12 }}
+                  overlayStyle={{ maxWidth: 560 }}
+                  title={<MergedDetail sources={r.sources} />}
+                >
+                  <span className="cursor-help border-b border-dotted border-gray-400">
+                    {v}
+                  </span>
+                  {distinct > 1 ? (
+                    <div className="text-[10px] text-gray-400">
+                      {distinct} ukuran · hover untuk rincian
+                    </div>
+                  ) : null}
+                </Tooltip>
+              );
+            },
           },
         ] as ColumnsType<PoItemRow>)),
     { title: "Supplier", dataIndex: "supplier", key: "supplier", width: 150 },
@@ -974,8 +1189,13 @@ function CreatePoProcurementPageContent() {
       key: "weightKg",
       width: 100,
       align: "right",
-      render: (v: number) => (
-        <span className="text-xs text-gray-700">{formatNumber(v)}</span>
+      render: (v: number, r) => (
+        <span className="text-xs text-gray-700">
+          {formatNumber(v)}
+          {(r.mergedCount ?? 1) > 1 ? (
+            <span className="ml-1 text-[10px] text-gray-400">total</span>
+          ) : null}
+        </span>
       ),
     },
   ];

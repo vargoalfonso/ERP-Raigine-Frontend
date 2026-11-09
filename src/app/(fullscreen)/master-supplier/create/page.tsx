@@ -6,6 +6,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Descriptions,
   Form,
   Input,
@@ -33,6 +34,8 @@ import {
   type SupplierItemPayloadJSON,
   type SupplierItemPayloadMaterialSpecDetail,
   useCreateSupplierItemMutation,
+  useCreateSupplierItemsByMaterialCodeMutation,
+  useGetUniqsByMaterialCodeQuery,
   useGetSupplierItemByIdQuery,
   useUpdateSupplierItemMutation,
 } from "@/lib/api/supplier-items/api";
@@ -788,6 +791,45 @@ function MasterSupplierCreatePageContent() {
   });
 
   const [createSupplierItem, createState] = useCreateSupplierItemMutation();
+  const [createByMaterialCode, createByMaterialCodeState] =
+    useCreateSupplierItemsByMaterialCodeMutation();
+
+  // [bulk-material-code] Di section raw-material (mode create), memilih
+  // Material Code langsung mendaftarkan SEMUA uniq ber-material-code itu ke
+  // supplier terpilih, tanpa memilih uniq satu per satu.
+  const [selectedMaterialCode, setSelectedMaterialCode] = useState("");
+  const [bulkUniqSelection, setBulkUniqSelection] = useState<string[]>([]);
+  const bulkEnabled =
+    section === "raw-material" && mode === "create" && !readOnly;
+  const bulkUniqQuery = useGetUniqsByMaterialCodeQuery(
+    {
+      material_code: selectedMaterialCode,
+      supplier_uuid: selectedSupplierId,
+      type: "raw_material",
+    },
+    {
+      skip:
+        !apiEnabled ||
+        !bulkEnabled ||
+        !selectedMaterialCode ||
+        !selectedSupplierId,
+    },
+  );
+  const bulkUniqRows = useMemo(
+    () => (bulkEnabled && selectedMaterialCode ? bulkUniqQuery.data ?? [] : []),
+    [bulkEnabled, selectedMaterialCode, bulkUniqQuery.data],
+  );
+  const bulkSelectableUniqs = useMemo(
+    () =>
+      bulkUniqRows
+        .filter((row) => !row.already_registered)
+        .map((row) => row.uniq_code),
+    [bulkUniqRows],
+  );
+  // Default: semua uniq yang belum terdaftar ikut tercentang.
+  useEffect(() => {
+    setBulkUniqSelection(bulkSelectableUniqs);
+  }, [bulkSelectableUniqs]);
   const [updateSupplierItem, updateState] = useUpdateSupplierItemMutation();
 
   const supplierOptions = useMemo<SupplierOption[]>(
@@ -1231,6 +1273,38 @@ function MasterSupplierCreatePageContent() {
           })
         : undefined;
 
+      // [bulk-material-code] Daftarkan semua uniq ber-material-code sekaligus.
+      if (
+        bulkEnabled &&
+        selectedMaterialCode &&
+        bulkUniqRows.length > 0
+      ) {
+        if (bulkUniqSelection.length === 0) {
+          messageApi.warning(
+            "Tidak ada uniq yang dipilih (semua uniq mungkin sudah terdaftar untuk supplier ini).",
+          );
+          return;
+        }
+        const result = await createByMaterialCode({
+          supplier_uuid: pickText(values.supplier_uuid),
+          material_code: selectedMaterialCode,
+          type: "raw_material",
+          warehouse_uuid: pickText(values.warehouse_uuid) || undefined,
+          warehouse_name: selectedWarehouse?.label,
+          quantity: String(values.quantity ?? 0),
+          uom: pickText(values.uom) || undefined,
+          status: pickText(values.status) || "active",
+          selected_uniq_codes: bulkUniqSelection,
+        }).unwrap();
+        setFlashMessage({
+          type: "success",
+          content: `Material Code ${result.material_code}: ${result.created} uniq didaftarkan${result.skipped ? `, ${result.skipped} dilewati (sudah terdaftar)` : ""}`,
+          targetPath: "/master-supplier",
+        });
+        router.push("/master-supplier");
+        return;
+      }
+
       const payload: SupplierItemMutationRequest = {
         supplier_uuid: pickText(values.supplier_uuid),
         // prefer explicit `sebango_code`, but fall back to material code when missing
@@ -1239,6 +1313,7 @@ function MasterSupplierCreatePageContent() {
           values.sebango_code,
           (values as any).materialCode,
           (values as any).material_code,
+          selectedMaterialCode,
           values.uniq_code,
         ),
         uniq_code: pickText(values.uniq_code),
@@ -1374,7 +1449,11 @@ function MasterSupplierCreatePageContent() {
               <Button
                 type="primary"
                 icon={<SaveOutlined />}
-                loading={createState.isLoading || updateState.isLoading}
+                loading={
+                  createState.isLoading ||
+                  updateState.isLoading ||
+                  createByMaterialCodeState.isLoading
+                }
                 onClick={handleSave}
               >
                 {isEditing ? "Update" : "Save"}
@@ -1652,6 +1731,15 @@ function MasterSupplierCreatePageContent() {
                                         item.material_name.trim() ===
                                         materialCode,
                                     );
+                                    // Material Code di BOM = item_material_specs.material_grade
+                                    // (mis. "BR50"), BUKAN master.material_code.
+                                    setSelectedMaterialCode(
+                                      String(
+                                        master?.material_grade ??
+                                          master?.material_code ??
+                                          "",
+                                      ).trim(),
+                                    );
                                     form.setFieldsValue({
                                       uniq_code: materialCode,
                                       part_name: master?.material_name,
@@ -1696,6 +1784,62 @@ function MasterSupplierCreatePageContent() {
                                 }
                               />
                             </Form.Item>
+
+                            {bulkEnabled && selectedMaterialCode ? (
+                              <div className="md:col-span-2 xl:col-span-12">
+                                <Alert
+                                  type="info"
+                                  showIcon
+                                  message={`Material Code ${selectedMaterialCode}: semua uniq dengan material code ini akan didaftarkan ke supplier terpilih`}
+                                  description={
+                                    !selectedSupplierId ? (
+                                      "Pilih supplier terlebih dahulu."
+                                    ) : bulkUniqQuery.isFetching ? (
+                                      "Memuat daftar uniq..."
+                                    ) : bulkUniqRows.length === 0 ? (
+                                      "Tidak ada uniq di BOM dengan material code ini. Simpan akan mendaftarkan item master seperti biasa."
+                                    ) : (
+                                      <div className="mt-2 space-y-2">
+                                        <Checkbox.Group
+                                          value={bulkUniqSelection}
+                                          onChange={(vals) =>
+                                            setBulkUniqSelection(
+                                              vals as string[],
+                                            )
+                                          }
+                                          className="flex flex-col gap-1"
+                                        >
+                                          {bulkUniqRows.map((row) => (
+                                            <Checkbox
+                                              key={row.uniq_code}
+                                              value={row.uniq_code}
+                                              disabled={row.already_registered}
+                                            >
+                                              <span className="font-semibold">
+                                                {row.uniq_code}
+                                              </span>
+                                              {row.part_name
+                                                ? ` — ${row.part_name}`
+                                                : ""}
+                                              {row.already_registered ? (
+                                                <Tag className="ml-2">
+                                                  sudah terdaftar
+                                                </Tag>
+                                              ) : null}
+                                            </Checkbox>
+                                          ))}
+                                        </Checkbox.Group>
+                                        <div className="text-xs text-gray-500">
+                                          {bulkUniqSelection.length} dari{" "}
+                                          {bulkUniqRows.length} uniq akan
+                                          didaftarkan.
+                                        </div>
+                                      </div>
+                                    )
+                                  }
+                                />
+                              </div>
+                            ) : null}
 
                             <Form.Item
                               className="md:col-span-1 xl:col-span-2"

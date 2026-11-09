@@ -329,10 +329,16 @@ export default function CreateWorkOrderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedWoType]);
 
-  // [assembly-stock] Mode Assembly: hanya UNIQ dengan proses is_assembly = true.
+  // [assembly-stock] UNIQ assembly = item yang routing-nya punya proses is_assembly = true.
+  //  - tipe Assembly : HANYA uniq assembly
+  //  - tipe New      : semua uniq KECUALI uniq assembly
   const assemblyUniqQuery = useGetWorkOrderUniqOptionsQuery(
     { limit: 10000, sources: ["assembly_items"] },
-    { skip: !apiEnabled || selectedWoType !== "Assembly" },
+    {
+      skip:
+        !apiEnabled ||
+        (selectedWoType !== "Assembly" && selectedWoType !== "New"),
+    },
   );
 
   const uniqSelectOptions = useMemo(() => {
@@ -362,8 +368,19 @@ export default function CreateWorkOrderPage() {
     }
 
     const fromApi = uniqOptions.map((u) => ({ label: u.uniq, value: u.uniq }));
+    // New: buang uniq assembly dari daftar (assembly dibuat lewat tipe Assembly).
+    const assemblyCodes =
+      selectedWoType === "New"
+        ? new Set(
+            (assemblyUniqQuery.data ?? []).map((o) =>
+              String(o.uniq_code ?? "").trim().toLowerCase(),
+            ),
+          )
+        : null;
+
     const map = new Map<string, { label: string; value: string }>();
     for (const it of [...fromBom, ...fromApi]) {
+      if (assemblyCodes?.has(String(it.value).trim().toLowerCase())) continue;
       if (!map.has(it.value)) map.set(it.value, it);
     }
     return Array.from(map.values());
