@@ -75,6 +75,8 @@ type UniqOption = {
   value: string;
   /** Uniq BOM child (mis. MR052); kosong bila tidak diketahui. */
   childUniq?: string;
+  /** Material code baris PO (mis. BR40); dipakai untuk menggabungkan opsi dropdown. */
+  materialCode?: string;
   material: {
     code: string;
     name: string;
@@ -184,7 +186,16 @@ const toPeriodKey = (value: unknown): string | null => {
   return null;
 };
 
-const uniqOptionKey = (uniq: string, childUniq?: string) => `${uniq}::${String(childUniq ?? "").trim()}`;
+type UniqGroupOption = {
+  key: string;
+  materialCode?: string;
+  uniqs: string[];
+  label: string;
+};
+
+/** Kunci grup dropdown: material code sama = satu opsi; tanpa material code, uniq berdiri sendiri. */
+const groupKeyOf = (item: { materialCode?: string; value: string }) =>
+  item.materialCode?.trim() ? `mc:${item.materialCode.trim().toLowerCase()}` : `u:${item.value}`;
 
 /** Label dropdown Uniq: "<material code> - <uniq>"; hanya uniq bila material code tidak diketahui / sama. */
 const buildUniqLabel = (materialCode: string | undefined, uniq: string): string => {
@@ -352,6 +363,7 @@ function DnRawMaterialCreatePageContent() {
             label: buildUniqLabel(toText(item.material_code), uniq),
             value: uniq,
             childUniq,
+            materialCode: toText(item.material_code),
             material: {
               code: toText(item.material_info) ?? uniq,
               name: toText(item.material_info) ?? uniq,
@@ -390,6 +402,7 @@ function DnRawMaterialCreatePageContent() {
           label: buildUniqLabel(toText(item.material_code) ?? toText(item.material_grade), uniq),
           value: uniq,
           childUniq,
+          materialCode: toText(item.material_code) ?? toText(item.material_grade),
           material: {
             code:
               toText(item.material_code) ??
@@ -422,34 +435,44 @@ function DnRawMaterialCreatePageContent() {
     return mapped;
   }, [poDetailQuery.data, preview]);
 
-  const uniqOptions = useMemo(() => {
-    const deduped = new Map<string, UniqOption>();
+  // Opsi dropdown digabung per material code: "BR40 - Y01, Y03, Y05, ...".
+  // Material code yang sama = satu opsi; uniq-nya dicantumkan dipisah koma.
+  const uniqGroups = useMemo<UniqGroupOption[]>(() => {
+    const groups = new Map<string, UniqGroupOption>();
     previewItems.forEach((item) => {
-      // Satu opsi per (uniq, child): child berbeda dengan material code sama
-      // (mis. MR052-BR50 dan MR053-BR50) tidak lagi melebur jadi satu.
-      const key = uniqOptionKey(item.value, item.childUniq);
-      if (!deduped.has(key)) deduped.set(key, item);
+      const key = groupKeyOf(item);
+      const group = groups.get(key) ?? { key, materialCode: item.materialCode, uniqs: [], label: "" };
+      if (!group.uniqs.includes(item.value)) group.uniqs.push(item.value);
+      groups.set(key, group);
     });
-    return Array.from(deduped.values());
+    return Array.from(groups.values()).map((group) => {
+      const uniqs = [...group.uniqs].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      const code = group.materialCode?.trim();
+      const sameAsUniq = uniqs.length === 1 && code?.toLowerCase() === uniqs[0].toLowerCase();
+      return { ...group, uniqs, label: code && !sameAsUniq ? `${code} - ${uniqs.join(", ")}` : uniqs.join(", ") };
+    });
   }, [previewItems]);
 
-  const getPreviewItemForUniq = (uniq: string, packingNumber?: string, childUniq?: string) => {
+  const getPreviewItemForUniq = (uniq: string, packingNumber?: string) => {
     if (packingNumber) {
       const exact = previewItems.find((item) => item.value === uniq && item.packingNumber === packingNumber);
       if (exact) return exact;
     }
 
-    // Bila child dipilih, hanya baris PO milik child itu yang dipertimbangkan.
-    const pool =
-      childUniq !== undefined
-        ? previewItems.filter((item) => String(item.childUniq ?? "") === childUniq)
-        : previewItems;
-
-    const nextUnused = pool.find(
+    const nextUnused = previewItems.find(
       (item) => item.value === uniq && !items.some((existing) => existing.uniq === uniq && existing.packingNumber === item.packingNumber),
     );
 
-    return nextUnused ?? pool.find((item) => item.value === uniq) ?? previewItems.find((item) => item.value === uniq);
+    return nextUnused ?? previewItems.find((item) => item.value === uniq);
+  };
+
+  // Baris PO berikutnya (urut sesuai PO) di grup material code yang belum ditambahkan ke DN.
+  const getNextLineForGroup = (groupKey: string) => {
+    const pool = previewItems.filter((item) => groupKeyOf(item) === groupKey);
+    const nextUnused = pool.find(
+      (item) => !items.some((existing) => existing.uniq === item.value && existing.packingNumber === item.packingNumber),
+    );
+    return { line: nextUnused ?? pool[0], allUsed: pool.length > 0 && !nextUnused };
   };
 
   const selectedDraftItem = useMemo(
@@ -630,9 +653,13 @@ function DnRawMaterialCreatePageContent() {
   };
 
   const onPickUniq = (optionKey: string) => {
-    const option = uniqOptions.find((o) => uniqOptionKey(o.value, o.childUniq) === optionKey);
-    const uniq = option?.value ?? optionKey;
-    const found = getPreviewItemForUniq(uniq, undefined, option ? String(option.childUniq ?? "") : undefined);
+    // Satu opsi = satu material code (banyak uniq). Ambil baris PO berikutnya yang
+    // belum ditambahkan; pilih opsi yang sama lagi untuk baris/uniq selanjutnya.
+    const { line: found, allUsed } = getNextLineForGroup(optionKey);
+    const uniq = found?.value ?? "";
+    if (allUsed) {
+      message.info("Semua baris untuk material code ini sudah ditambahkan ke tabel DN.");
+    }
     const previewPcs = Number(found?.pcsPerKanban ?? 0);
     const resolvedPcs = previewPcs > 0 ? previewPcs : undefined;
 
@@ -906,11 +933,21 @@ function DnRawMaterialCreatePageContent() {
                     value={draft.optionKey}
                     onChange={onPickUniq}
                     placeholder={step1.poNumber ? "Select Uniq" : "Select PO Number first"}
-                    options={uniqOptions.map((u) => ({ label: u.label, value: uniqOptionKey(u.value, u.childUniq) }))}
+                    options={uniqGroups.map((g) => ({ label: g.label, value: g.key }))}
                     className="w-full"
                     disabled={!step1.poNumber || previewing}
                     showSearch
                     optionFilterProp="label"
+                    popupMatchSelectWidth={false}
+                    labelRender={(opt) => {
+                      // Setelah dipilih, tampilkan uniq baris yang sedang diisi: "BR40 - Y01".
+                      const group = uniqGroups.find((g) => g.key === opt.value);
+                      if (group && draft.uniq && draft.optionKey === group.key) {
+                        const code = group.materialCode?.trim();
+                        return code && code.toLowerCase() !== draft.uniq.toLowerCase() ? `${code} - ${draft.uniq}` : draft.uniq;
+                      }
+                      return group?.label ?? opt.label;
+                    }}
                   />
                 </div>
                 <div>
