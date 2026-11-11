@@ -380,6 +380,76 @@ export type PredictResponse = {
 };
 
 // ---------------------------------------------------------------------------
+// Training Schedule (Automation)
+// ---------------------------------------------------------------------------
+//
+// These settings are a FEEDER for the external forecasting script: the ERP only
+// stores "when should DN / PRL be trained"; the script reads them, runs the
+// training itself (data window / limits are configured inside the script) and
+// reports the result back.
+//
+// Backend contract (NOT implemented yet on the Go side):
+//   GET  /api/v1/forecasting/schedules               -> data: ForecastSchedule[] (max 1 per domain)
+//        used by the ERP UI and polled by the forecasting script
+//   PUT  /api/v1/forecasting/schedules/:domain       -> body: UpsertForecastScheduleRequest, data: ForecastSchedule
+//        used by the ERP UI (JWT + permission "forecasting")
+//   POST /api/v1/forecasting/schedules/:domain/runs  -> body: ForecastScheduleRunReport
+//        called by the forecasting script (service auth, e.g. BasicAuth like admin_jobs)
+//        to update last_run_at / last_run_status / last_run_message on the schedule
+//
+// PRL data is monthly, so PRL only accepts `frequency = "monthly"`.
+
+export type ScheduleFrequency = "daily" | "weekly" | "monthly";
+export type ScheduleDayOfWeek =
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday"
+  | "sunday";
+
+export type ForecastSchedule = {
+  domain: ForecastDomain;
+  is_active: boolean;
+  frequency: ScheduleFrequency;
+  /** "HH:mm", 24h */
+  run_time: string;
+  /** required when frequency = weekly */
+  day_of_week?: ScheduleDayOfWeek | null;
+  /** 1-31, required when frequency = monthly; months that are shorter run on their last day */
+  day_of_month?: number | null;
+  timezone?: string;
+  selected_model?: SelectedModel;
+  /** filled by the forecasting script via POST .../runs */
+  last_run_at?: string | null;
+  last_run_status?: TrainingStatus | null;
+  last_run_message?: string | null;
+  next_run_at?: string | null;
+  updated_at?: string | null;
+  updated_by?: string | null;
+};
+
+export type UpsertForecastScheduleRequest = Omit<
+  ForecastSchedule,
+  | "last_run_at"
+  | "last_run_status"
+  | "last_run_message"
+  | "next_run_at"
+  | "updated_at"
+  | "updated_by"
+>;
+
+/** Body the forecasting script POSTs to /forecasting/schedules/:domain/runs. */
+export type ForecastScheduleRunReport = {
+  status: "RUNNING" | "SUCCEEDED" | "FAILED";
+  started_at: string;
+  finished_at?: string | null;
+  message?: string | null;
+  training_run_id?: string | null;
+};
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -417,6 +487,7 @@ const forecastingApi = apiSlice
       "ForecastingModelVersion",
       "ForecastingDeployment",
       "ForecastingInferenceResult",
+      "ForecastingSchedule",
     ],
   })
   .injectEndpoints({
@@ -659,6 +730,27 @@ const forecastingApi = apiSlice
         transformResponse: (response: unknown) => unwrapBackendData<PredictResponse>(response),
         invalidatesTags: [{ type: "ForecastingInferenceResult", id: "LIST" }],
       }),
+
+      // --- Training Schedule (Automation) ---------------------------------
+      listForecastSchedules: builder.query<ForecastSchedule[], void>({
+        query: () => ({
+          url: `${FORECASTING_BASE}/schedules`,
+          method: "GET",
+          meta: AUTH_META,
+        }),
+        transformResponse: (response: unknown) => unwrapList<ForecastSchedule>(response),
+        providesTags: [{ type: "ForecastingSchedule", id: "LIST" }],
+      }),
+      upsertForecastSchedule: builder.mutation<ForecastSchedule, UpsertForecastScheduleRequest>({
+        query: ({ domain, ...body }) => ({
+          url: `${FORECASTING_BASE}/schedules/${domain}`,
+          method: "PUT",
+          body: { domain, ...body },
+          meta: AUTH_META,
+        }),
+        transformResponse: (response: unknown) => unwrapBackendData<ForecastSchedule>(response),
+        invalidatesTags: [{ type: "ForecastingSchedule", id: "LIST" }],
+      }),
     }),
   });
 
@@ -683,6 +775,8 @@ export const {
   usePromoteModelMutation,
   useReloadModelMutation,
   usePredictMutation,
+  useListForecastSchedulesQuery,
+  useUpsertForecastScheduleMutation,
 } = forecastingApi;
 
 export { forecastingApi };
