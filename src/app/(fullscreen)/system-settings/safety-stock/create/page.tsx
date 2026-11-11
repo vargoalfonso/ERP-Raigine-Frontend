@@ -420,6 +420,13 @@ function PageContent() {
                         onChange={(v) => updateEntry(e.id, { calculationType: v, created: false })}
                         options={CALCULATION_OPTIONS}
                       />
+                      {e.calculationType === "forecast" && (
+                        <div className="mt-2 text-xs text-gray-500">
+                          Safety stock = forecast per hari kerja × Constanta (days). Dihitung
+                          otomatis oleh job harian forecasting (lihat hasilnya di System Settings →
+                          Automation). Constanta tetap wajib diisi.
+                        </div>
+                      )}
                        <div className="lg:col-span-2 flex items-end mt-10">
                       <Button
                         type="primary"
