@@ -2110,9 +2110,24 @@ export default function PoBudgetPage() {
         ].filter(Boolean),
       ),
     );
+    // [material-code-lookup] Material code child (mis. "BR60") juga dicocokkan
+    // ke supplier item lama yang menyimpan NAMA master (material code + form,
+    // mis. "BR60 WIRE"). Berlaku untuk SEMUA material code, bukan kode tertentu.
+    const childSpec = (row.materialSpec ?? {}) as {
+      material_grade?: unknown;
+      material_code?: unknown;
+      form?: unknown;
+    };
+    const childMaterialCode = normalizeLookupValue(
+      childSpec.material_grade || childSpec.material_code,
+    );
+    const childForm = normalizeLookupValue(childSpec.form);
+    if (childMaterialCode && childForm) {
+      codes.push(`${childMaterialCode} ${childForm}`);
+    }
     const deduped = new Map<string, SupplierItemRecord>();
-    codes.forEach((code) => {
-      (supplierItemsByCode.get(code) ?? []).forEach((item, index) => {
+    const addItems = (code: string, items: SupplierItemRecord[]) => {
+      items.forEach((item, index) => {
         const key = String(
           item.id ??
             item.supplier_item_uuid ??
@@ -2121,7 +2136,16 @@ export default function PoBudgetPage() {
         );
         if (!deduped.has(key)) deduped.set(key, item);
       });
-    });
+    };
+    codes.forEach((code) => addItems(code, supplierItemsByCode.get(code) ?? []));
+    // Fallback: belum ada yang cocok persis -> ambil supplier item yang kodenya
+    // diawali material code child + spasi (mis. "br60 plate" untuk "br60").
+    if (deduped.size === 0 && childMaterialCode) {
+      const prefix = `${childMaterialCode} `;
+      supplierItemsByCode.forEach((items, code) => {
+        if (code.startsWith(prefix)) addItems(code, items);
+      });
+    }
     const sorted = Array.from(deduped.values()).sort(
       (a, b) => Number(a.row_id ?? 0) - Number(b.row_id ?? 0),
     );
