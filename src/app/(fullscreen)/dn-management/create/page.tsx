@@ -59,6 +59,8 @@ type DnItemRow = {
 };
 
 type Step2Draft = {
+  /** Kunci opsi dropdown (uniq + child) -- value Select; `uniq` tetap item_uniq_code. */
+  optionKey?: string;
   uniq?: string;
   orderQty?: number;
   uom?: string;
@@ -71,6 +73,10 @@ type Step2Draft = {
 type UniqOption = {
   label: string;
   value: string;
+  /** Uniq BOM child (mis. MR052); kosong bila tidak diketahui. */
+  childUniq?: string;
+  /** Material code baris PO (mis. BR40); dipakai untuk menggabungkan opsi dropdown. */
+  materialCode?: string;
   material: {
     code: string;
     name: string;
@@ -147,6 +153,56 @@ const typeCopy = (type: DnManagementType) => {
 const formatDisplayNumber = (value?: number) => {
   if (value == null || !Number.isFinite(value)) return "";
   return String(value);
+};
+
+const PERIOD_MONTHS: Record<string, number> = {
+  january: 1, januari: 1, jan: 1,
+  february: 2, februari: 2, feb: 2,
+  march: 3, maret: 3, mar: 3,
+  april: 4, apr: 4,
+  may: 5, mei: 5,
+  june: 6, juni: 6, jun: 6,
+  july: 7, juli: 7, jul: 7,
+  august: 8, agustus: 8, aug: 8, agu: 8,
+  september: 9, sep: 9, sept: 9,
+  october: 10, oktober: 10, oct: 10, okt: 10,
+  november: 11, nov: 11, nop: 11,
+  december: 12, desember: 12, dec: 12, des: 12,
+};
+
+/**
+ * Normalisasi period ke "YYYY-MM" supaya period PO ("November 2026" / "11-2026")
+ * bisa dibandingkan dengan pilihan Period ("2026-11"). null = format tak dikenali.
+ */
+const toPeriodKey = (value: unknown): string | null => {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return null;
+  let m = raw.match(/^(\d{4})[-/](\d{1,2})$/);
+  if (m) return `${m[1]}-${m[2].padStart(2, "0")}`;
+  m = raw.match(/^(\d{1,2})[-/](\d{4})$/);
+  if (m) return `${m[2]}-${m[1].padStart(2, "0")}`;
+  m = raw.match(/^([a-z]+)\s+(\d{4})$/);
+  if (m && PERIOD_MONTHS[m[1]]) return `${m[2]}-${String(PERIOD_MONTHS[m[1]]).padStart(2, "0")}`;
+  return null;
+};
+
+type UniqGroupOption = {
+  key: string;
+  materialCode?: string;
+  uniqs: string[];
+  label: string;
+};
+
+/** Kunci grup dropdown: material code sama = satu opsi; tanpa material code, uniq berdiri sendiri. */
+const groupKeyOf = (item: { materialCode?: string; value: string }) =>
+  item.materialCode?.trim() ? `mc:${item.materialCode.trim().toLowerCase()}` : `u:${item.value}`;
+
+/** Label dropdown Uniq: "<material code> - <uniq>"; hanya uniq bila material code tidak diketahui / sama. */
+const buildUniqLabel = (materialCode: string | undefined, uniq: string): string => {
+  const code = String(materialCode ?? "").trim();
+  const u = String(uniq ?? "").trim();
+  if (code && u && code.toLowerCase() !== u.toLowerCase()) return `${code} - ${u}`;
+  return u || code;
 };
 
 function DnRawMaterialCreatePageContent() {
@@ -247,8 +303,17 @@ function DnRawMaterialCreatePageContent() {
   });
 
 
+  // PO yang ada di period terpilih. PO dengan format period tak dikenali tetap
+  // ditampilkan (tidak disembunyikan diam-diam).
+  const poInSelectedPeriod = (po: { period?: string; month?: string }) => {
+    const wanted = toPeriodKey(step1.period);
+    if (!wanted) return true;
+    const poKey = toPeriodKey(po.period ?? po.month);
+    return poKey === null || poKey === wanted;
+  };
+
   const poOptions = useMemo(() => {
-    const list = poListQuery.data?.data ?? [];
+    const list = (poListQuery.data?.data ?? []).filter(poInSelectedPeriod);
     return list
       .map((po) => ({
         label: String(po.po_number ?? "-")
@@ -257,7 +322,8 @@ function DnRawMaterialCreatePageContent() {
         supplier: String(po.supplier_name ?? "-").trim(),
       }))
       .filter((opt) => Boolean(opt.value));
-  }, [poListQuery.data]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [poListQuery.data, step1.period]);
 
   const periodOptions = useMemo(() => {
     const activePlanningPeriods = globalParameters
@@ -292,9 +358,12 @@ function DnRawMaterialCreatePageContent() {
           if (!uniq) return null;
           const totalQty = Number(item.total_qty ?? 0);
           const remainingQty = Number(item.remaining_qty ?? 0);
+          const childUniq = toText(item.child_uniq_code);
           return {
-            label: uniq,
+            label: buildUniqLabel(toText(item.material_code), uniq),
             value: uniq,
+            childUniq,
+            materialCode: toText(item.material_code),
             material: {
               code: toText(item.material_info) ?? uniq,
               name: toText(item.material_info) ?? uniq,
@@ -328,9 +397,12 @@ function DnRawMaterialCreatePageContent() {
           toNumber(item.total_qty) ??
           0;
 
+        const childUniq = toText(item.child_uniq_code);
         return {
-          label: uniq,
+          label: buildUniqLabel(toText(item.material_code) ?? toText(item.material_grade), uniq),
           value: uniq,
+          childUniq,
+          materialCode: toText(item.material_code) ?? toText(item.material_grade),
           material: {
             code:
               toText(item.material_code) ??
@@ -363,12 +435,22 @@ function DnRawMaterialCreatePageContent() {
     return mapped;
   }, [poDetailQuery.data, preview]);
 
-  const uniqOptions = useMemo(() => {
-    const deduped = new Map<string, UniqOption>();
+  // Opsi dropdown digabung per material code: "BR40 - Y01, Y03, Y05, ...".
+  // Material code yang sama = satu opsi; uniq-nya dicantumkan dipisah koma.
+  const uniqGroups = useMemo<UniqGroupOption[]>(() => {
+    const groups = new Map<string, UniqGroupOption>();
     previewItems.forEach((item) => {
-      if (!deduped.has(item.value)) deduped.set(item.value, item);
+      const key = groupKeyOf(item);
+      const group = groups.get(key) ?? { key, materialCode: item.materialCode, uniqs: [], label: "" };
+      if (!group.uniqs.includes(item.value)) group.uniqs.push(item.value);
+      groups.set(key, group);
     });
-    return Array.from(deduped.values());
+    return Array.from(groups.values()).map((group) => {
+      const uniqs = [...group.uniqs].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      const code = group.materialCode?.trim();
+      const sameAsUniq = uniqs.length === 1 && code?.toLowerCase() === uniqs[0].toLowerCase();
+      return { ...group, uniqs, label: code && !sameAsUniq ? `${code} - ${uniqs.join(", ")}` : uniqs.join(", ") };
+    });
   }, [previewItems]);
 
   const getPreviewItemForUniq = (uniq: string, packingNumber?: string) => {
@@ -382,6 +464,15 @@ function DnRawMaterialCreatePageContent() {
     );
 
     return nextUnused ?? previewItems.find((item) => item.value === uniq);
+  };
+
+  // Baris PO berikutnya (urut sesuai PO) di grup material code yang belum ditambahkan ke DN.
+  const getNextLineForGroup = (groupKey: string) => {
+    const pool = previewItems.filter((item) => groupKeyOf(item) === groupKey);
+    const nextUnused = pool.find(
+      (item) => !items.some((existing) => existing.uniq === item.value && existing.packingNumber === item.packingNumber),
+    );
+    return { line: nextUnused ?? pool[0], allUsed: pool.length > 0 && !nextUnused };
   };
 
   const selectedDraftItem = useMemo(
@@ -536,26 +627,45 @@ function DnRawMaterialCreatePageContent() {
     setItems([]);
     setPreview(null);
 
+    // PO terpilih yang bukan milik period baru dilepas (daftar PO mengikuti period).
+    const currentPo = (poListQuery.data?.data ?? []).find(
+      (po) => String(po.po_number ?? "").trim() === String(step1.poNumber ?? "").trim(),
+    );
+    const wantedKey = toPeriodKey(value);
+    const currentPoKey = toPeriodKey(currentPo?.period ?? currentPo?.month);
+    const poStillValid =
+      Boolean(step1.poNumber) && (!wantedKey || currentPoKey === null || currentPoKey === wantedKey);
+
     setStep1((prev) => ({
       ...prev,
       period: value,
+      ...(step1.poNumber && !poStillValid
+        ? { poNumber: undefined, supplierId: undefined, supplier: undefined }
+        : {}),
       totalPo: undefined,
       totalIncoming: undefined,
       dnCreated: undefined,
       dnIncoming: undefined,
     }));
 
-    if (!step1.poNumber || !value) return;
+    if (!step1.poNumber || !value || !poStillValid) return;
     await requestPreview(step1.poNumber, value);
   };
 
-  const onPickUniq = (uniq: string) => {
-    const found = getPreviewItemForUniq(uniq);
+  const onPickUniq = (optionKey: string) => {
+    // Satu opsi = satu material code (banyak uniq). Ambil baris PO berikutnya yang
+    // belum ditambahkan; pilih opsi yang sama lagi untuk baris/uniq selanjutnya.
+    const { line: found, allUsed } = getNextLineForGroup(optionKey);
+    const uniq = found?.value ?? "";
+    if (allUsed) {
+      message.info("Semua baris untuk material code ini sudah ditambahkan ke tabel DN.");
+    }
     const previewPcs = Number(found?.pcsPerKanban ?? 0);
     const resolvedPcs = previewPcs > 0 ? previewPcs : undefined;
 
     setDraft((prev) => ({
       ...prev,
+      optionKey,
       uniq,
       orderQty: undefined,
       uom: found?.uom ?? prev.uom,
@@ -732,6 +842,7 @@ function DnRawMaterialCreatePageContent() {
                     allowClear
                     showSearch
                     optionFilterProp="label"
+                    notFoundContent={step1.period ? `Tidak ada PO di period ${step1.period}` : "Tidak ada PO"}
                   />
                 </div>
                 <div className="xl:col-span-2">
@@ -819,12 +930,24 @@ function DnRawMaterialCreatePageContent() {
                 <div>
                   <div className="mb-2 text-sm font-medium text-gray-700">Uniq</div>
                   <Select
-                    value={draft.uniq}
+                    value={draft.optionKey}
                     onChange={onPickUniq}
                     placeholder={step1.poNumber ? "Select Uniq" : "Select PO Number first"}
-                    options={uniqOptions.map((u) => ({ label: u.label, value: u.value }))}
+                    options={uniqGroups.map((g) => ({ label: g.label, value: g.key }))}
                     className="w-full"
                     disabled={!step1.poNumber || previewing}
+                    showSearch
+                    optionFilterProp="label"
+                    popupMatchSelectWidth={false}
+                    labelRender={(opt) => {
+                      // Setelah dipilih, tampilkan uniq baris yang sedang diisi: "BR40 - Y01".
+                      const group = uniqGroups.find((g) => g.key === opt.value);
+                      if (group && draft.uniq && draft.optionKey === group.key) {
+                        const code = group.materialCode?.trim();
+                        return code && code.toLowerCase() !== draft.uniq.toLowerCase() ? `${code} - ${draft.uniq}` : draft.uniq;
+                      }
+                      return group?.label ?? opt.label;
+                    }}
                   />
                 </div>
                 <div>

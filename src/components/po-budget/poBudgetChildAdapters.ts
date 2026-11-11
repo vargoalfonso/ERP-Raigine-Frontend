@@ -34,6 +34,12 @@ export type PoBudgetChildRow = {
   materialSpec?: PoBudgetPrlChild["material_spec"];
   qtyPerUniq?: number;
   level?: number;
+  /**
+   * Set on a parent's OWN material row when the parent is a subcon item but its
+   * children are not: the backend files this row under the Subcon tab while the
+   * children go to their own tab (e.g. Raw Material).
+   */
+  budgetCategory?: "subcon";
   /** If true, this row is a non-editable group header (parent UNIQ) */
   isHeader?: boolean;
   /** Number of children under this header */

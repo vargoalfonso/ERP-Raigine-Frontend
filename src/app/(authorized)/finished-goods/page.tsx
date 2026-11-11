@@ -60,6 +60,16 @@ import {
 } from "@/lib/utils/dateRange";
 import type { PrintCardOptions } from "@/lib/utils/printCard";
 
+// Menunda nilai yang cepat berubah (mengetik) supaya tiap huruf tidak memanggil API.
+function useDebouncedValue<T>(value: T, delayMs = 400): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
+
 function StatusTag({ status }: { status?: string }) {
   const normalized = (status ?? "").trim().toLowerCase();
   if (normalized.includes("low"))
@@ -611,12 +621,23 @@ export default function FinishedGoodsPage() {
   // Saat filter tanggal aktif, ambil seluruh data lalu filter & paginate di client
   // supaya hasil filter mencakup semua halaman (bukan hanya halaman yang sedang dibuka).
   const dateFilterActive = dateRange !== null;
+  // Pencarian dikerjakan di server (semua baris, bukan hanya halaman yang
+  // sedang dibuka); diketik dengan jeda supaya tidak memanggil API tiap huruf.
+  const debouncedSearch = useDebouncedValue(searchValue.trim());
+  const searchParam = debouncedSearch || undefined;
+  // Filter status dikerjakan di server (semua halaman, total & paginasi ikut benar).
+  const statusParam = typeFilter === "all" ? undefined : typeFilter;
   const listQuery = useGetFinishedGoodsQuery(
     dateFilterActive
-      ? { page: 1, limit: 10000 }
-      : { page: currentPage, limit: pageSize },
+      ? { page: 1, limit: 10000, search: searchParam, status: statusParam }
+      : { page: currentPage, limit: pageSize, search: searchParam, status: statusParam },
     { skip: !apiEnabled },
   );
+
+  // Pencarian baru selalu mulai dari halaman 1.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearch]);
   const summaryQuery = useGetFinishedGoodsSummaryQuery(undefined, {
     skip: !apiEnabled,
   });
@@ -632,6 +653,8 @@ export default function FinishedGoodsPage() {
   );
 
   const filteredItems = useMemo(() => {
+    // Mode API: pencarian sudah diterapkan server pada seluruh data.
+    if (apiEnabled) return dateFilteredItems;
     const q = searchValue.trim().toLowerCase();
     if (!q) return dateFilteredItems;
     return dateFilteredItems.filter((r) =>
@@ -648,7 +671,7 @@ export default function FinishedGoodsPage() {
         .toLowerCase()
         .includes(q),
     );
-  }, [dateFilteredItems, searchValue]);
+  }, [apiEnabled, dateFilteredItems, searchValue]);
 
   const total = dateFilterActive
     ? filteredItems.length
@@ -772,11 +795,11 @@ export default function FinishedGoodsPage() {
     try {
       setIsExporting(true);
       const res = await triggerFetchAllFG(
-        { page: 1, limit: 10000 },
+        { page: 1, limit: 10000, status: statusParam },
         true,
       ).unwrap();
       const all = filterByDateRange(res?.items ?? [], dateRange, getItemDate);
-      downloadExcel(all, dateRange ? "filtered" : "all");
+      downloadExcel(all, dateRange || statusParam ? "filtered" : "all");
     } catch (e) {
       message.error("Gagal mengambil data untuk ekspor");
     } finally {
@@ -798,11 +821,8 @@ export default function FinishedGoodsPage() {
     });
   };
 
-  const displayItems = useMemo(() => {
-    // UI-only for now; keeping a dropdown like the screenshot.
-    if (typeFilter === "all") return filteredItems;
-    return filteredItems;
-  }, [filteredItems, typeFilter]);
+  // Filter status sudah diterapkan server (lihat statusParam); tidak ada filter lagi di client.
+  const displayItems = filteredItems;
 
   // Urutkan UNIQ berdasarkan urgensi stok: Low -> Normal -> Overstock.
   // Array.sort stabil, jadi item dengan rank sama mempertahankan urutan aslinya.
@@ -1120,7 +1140,11 @@ export default function FinishedGoodsPage() {
               />
               <Select
                 value={typeFilter}
-                onChange={setTypeFilter}
+                onChange={(v) => {
+                  setTypeFilter(v);
+                  setCurrentPage(1);
+                  setSelectedRowKeys([]);
+                }}
                 style={{ width: 160 }}
                 options={[
                   { value: "all", label: "All Types" },

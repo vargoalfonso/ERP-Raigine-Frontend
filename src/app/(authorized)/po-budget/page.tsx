@@ -385,6 +385,26 @@ function normalizeLookupValue(value: unknown) {
     .toLowerCase();
 }
 
+// [material-code-lookup] Kunci pencarian supplier item: uniq_code, sebango_code,
+// DAN material code (mis. "BR50") sehingga child BOM dengan material code yang
+// sama otomatis menemukan supplier-nya, tidak harus persis uniq-nya. Item lama
+// dari form raw-material menyimpan NAMA master di uniq/sebango_code, tetapi
+// material_grade master tersimpan di `material_code` / `grade`.
+function getSupplierItemLookupKeys(item: SupplierItemRecord): string[] {
+  const typeText = String(item.type ?? item.material_type ?? "").toLowerCase();
+  const isRaw = typeText.includes("raw") && !typeText.includes("indirect");
+  return Array.from(
+    new Set(
+      [
+        normalizeLookupValue(item.uniq_code),
+        normalizeLookupValue(item.sebango_code),
+        normalizeLookupValue(item.material_code),
+        isRaw && !item.material_code ? normalizeLookupValue(item.grade) : "",
+      ].filter(Boolean),
+    ),
+  );
+}
+
 function isIntegerId(value: string) {
   return /^\d+$/.test(value.trim());
 }
@@ -1425,14 +1445,7 @@ export default function PoBudgetPage() {
     supplierItems.forEach((item) => {
       const status = String(item.status ?? "active").toLowerCase();
       if (status && status !== "active") return;
-      const keys = Array.from(
-        new Set(
-          [
-            normalizeLookupValue(item.uniq_code),
-            normalizeLookupValue(item.sebango_code),
-          ].filter(Boolean),
-        ),
-      );
+      const keys = getSupplierItemLookupKeys(item);
       keys.forEach((key) => {
         const current = grouped.get(key) ?? [];
         current.push(item);
@@ -1457,10 +1470,7 @@ export default function PoBudgetPage() {
         return;
       }
 
-      const lookupKeys = [
-        normalizeLookupValue(item.uniq_code),
-        normalizeLookupValue(item.sebango_code),
-      ].filter(Boolean);
+      const lookupKeys = getSupplierItemLookupKeys(item);
 
       lookupKeys.forEach((lookupKey) => {
         const current = grouped.get(lookupKey) ?? [];
@@ -2088,12 +2098,36 @@ export default function PoBudgetPage() {
           normalizeLookupValue(getChildSupplierLookupUniq(row)),
           normalizeLookupValue(row.uniq),
           normalizeLookupValue(row.childUniqCode),
+          // material code dari spec BOM child (mis. "BR50")
+          normalizeLookupValue(
+            (row.materialSpec as { material_grade?: unknown } | undefined)
+              ?.material_grade,
+          ),
+          normalizeLookupValue(
+            (row.materialSpec as { material_code?: unknown } | undefined)
+              ?.material_code,
+          ),
         ].filter(Boolean),
       ),
     );
+    // [material-code-lookup] Material code child (mis. "BR60") juga dicocokkan
+    // ke supplier item lama yang menyimpan NAMA master (material code + form,
+    // mis. "BR60 WIRE"). Berlaku untuk SEMUA material code, bukan kode tertentu.
+    const childSpec = (row.materialSpec ?? {}) as {
+      material_grade?: unknown;
+      material_code?: unknown;
+      form?: unknown;
+    };
+    const childMaterialCode = normalizeLookupValue(
+      childSpec.material_grade || childSpec.material_code,
+    );
+    const childForm = normalizeLookupValue(childSpec.form);
+    if (childMaterialCode && childForm) {
+      codes.push(`${childMaterialCode} ${childForm}`);
+    }
     const deduped = new Map<string, SupplierItemRecord>();
-    codes.forEach((code) => {
-      (supplierItemsByCode.get(code) ?? []).forEach((item, index) => {
+    const addItems = (code: string, items: SupplierItemRecord[]) => {
+      items.forEach((item, index) => {
         const key = String(
           item.id ??
             item.supplier_item_uuid ??
@@ -2102,7 +2136,16 @@ export default function PoBudgetPage() {
         );
         if (!deduped.has(key)) deduped.set(key, item);
       });
-    });
+    };
+    codes.forEach((code) => addItems(code, supplierItemsByCode.get(code) ?? []));
+    // Fallback: belum ada yang cocok persis -> ambil supplier item yang kodenya
+    // diawali material code child + spasi (mis. "br60 plate" untuk "br60").
+    if (deduped.size === 0 && childMaterialCode) {
+      const prefix = `${childMaterialCode} `;
+      supplierItemsByCode.forEach((items, code) => {
+        if (code.startsWith(prefix)) addItems(code, items);
+      });
+    }
     const sorted = Array.from(deduped.values()).sort(
       (a, b) => Number(a.row_id ?? 0) - Number(b.row_id ?? 0),
     );
@@ -2110,7 +2153,38 @@ export default function PoBudgetPage() {
     // Pencarian di atas (uniq / kode sebango) tidak memfilter tipe, jadi di sini
     // supplier dibatasi ke kategori tab aktif: tab Raw hanya supplier raw,
     // tab Subcon hanya supplier subcon, tab Indirect hanya supplier indirect.
-    return pickSupplierItemsByType(sorted, activeTab);
+    const picked = pickSupplierItemsByType(sorted, activeTab);
+
+    // [material-code-lookup] Satu supplier cukup satu kali per child. Supplier
+    // yang terdaftar dua kali (mis. baris lama berbasis nama master + baris
+    // per-uniq, atau cocok lewat uniq DAN material code) jangan tampil dobel.
+    // Bila ada beberapa baris, yang uniq_code-nya persis sama dengan child
+    // diutamakan; selebihnya yang paling awal (row_id terkecil).
+    const exactCodes = new Set(
+      [
+        normalizeLookupValue(row.childUniqCode),
+        normalizeLookupValue(getChildSupplierLookupUniq(row)),
+      ].filter(Boolean),
+    );
+    const bySupplier = new Map<string, SupplierItemRecord>();
+    picked.forEach((item, index) => {
+      const supplierKey = String(item.supplier_uuid ?? item.supplier_name ?? "")
+        .trim()
+        .toLowerCase();
+      if (!supplierKey) {
+        bySupplier.set(`__no-supplier-${index}`, item);
+        return;
+      }
+      const current = bySupplier.get(supplierKey);
+      const isExact = exactCodes.has(normalizeLookupValue(item.uniq_code));
+      const currentIsExact =
+        current !== undefined &&
+        exactCodes.has(normalizeLookupValue(current.uniq_code));
+      if (!current || (isExact && !currentIsExact)) {
+        bySupplier.set(supplierKey, item);
+      }
+    });
+    return Array.from(bySupplier.values());
   };
 
   const buildSupplierOptionsFromItems = (
@@ -2292,7 +2366,7 @@ export default function PoBudgetPage() {
           if (!row.isHeader) return;
 
           const nextRow = childRows[index + 1];
-          if (nextRow && !nextRow.isHeader) return;
+          const hasChildren = Boolean(nextRow && !nextRow.isHeader);
 
           const parentUniqCode = row.parentUniqCode || row.uniq;
           const parentSupplierItem = findSupplierItemsForProduct(
@@ -2302,6 +2376,18 @@ export default function PoBudgetPage() {
           // Spec dari detail BOM parent; untuk form WIRE quantity =
           // total qty x berat (kg) x QPU (QPU parent sendiri = 1).
           const parentBomSpec = bomIndex.materialSpecByUniq[parentUniqCode];
+
+          // Parent yang punya child: baris material parent hanya dibuat bila
+          // parent itu sendiri secara eksplisit SUBCON (child-nya kategori lain,
+          // mis. raw). Backend memasukkannya ke tab Subcon, child ke tab
+          // masing-masing. Parent tanpa child selalu dibuat (perilaku lama).
+          const parentIsSubcon =
+            parentBomSpec?.is_subcon === true ||
+            String(parentBomSpec?.type_material ?? "")
+              .trim()
+              .toLowerCase() === "subcon";
+          if (hasChildren && !parentIsSubcon) return;
+
           const parentWeight =
             Number(row.weightKg) > 0
               ? Number(row.weightKg)
@@ -2320,6 +2406,7 @@ export default function PoBudgetPage() {
             level: 1,
             weightKg: parentWeight,
             quantity: roundChildQty(row.quantity * parentFactor, parentFactor !== 1),
+            budgetCategory: hasChildren ? "subcon" : undefined,
             materialSpec: parentBomSpec,
             existingRawMaterial: String(
               parentSupplierItem?.description ?? row.existingRawMaterial ?? "-",
@@ -4855,6 +4942,11 @@ export default function PoBudgetPage() {
               <div className="text-[11px] text-gray-500 mt-1">
                 {record.childUniqCode}
               </div>
+            ) : null}
+            {record.budgetCategory === "subcon" ? (
+              <Tag color="orange" className="!m-0 !mt-1 !text-[10px]">
+                Masuk tab Subcon
+              </Tag>
             ) : null}
           </div>
         ),
