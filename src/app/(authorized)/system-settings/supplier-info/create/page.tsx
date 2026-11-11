@@ -112,7 +112,7 @@ export default function CreateSupplierInfoPage() {
             <Title level={3} className="!mb-1">
               Add Supplier Info
             </Title>
-            <Text type="secondary">Mapping Material Code ke UNIQ Zahir supplier</Text>
+            <Text type="secondary">Mapping UNIQ ke UNIQ Zahir supplier</Text>
           </div>
 
           <Form
@@ -122,14 +122,14 @@ export default function CreateSupplierInfoPage() {
             onFinish={handleSubmit}
           >
             <Form.Item
-              label="Material Code"
+              label="UNIQ"
               name="material_code"
-              rules={[{ required: true, message: "Material Code wajib dipilih" }]}
+              rules={[{ required: true, message: "UNIQ wajib dipilih" }]}
             >
               <Select
                 showSearch
                 loading={isLoading}
-                placeholder="Pilih Material Code dari Supplier Item"
+                placeholder="Pilih UNIQ dari Supplier Item"
                 optionFilterProp="label"
                 options={materialOptions}
               />
@@ -137,10 +137,10 @@ export default function CreateSupplierInfoPage() {
 
             <div className="grid gap-4 md:grid-cols-2">
               <Form.Item label="Supplier Name">
-                <Input value={supplierName} disabled placeholder="Otomatis dari Material Code" />
+                <Input value={supplierName} disabled placeholder="Otomatis dari UNIQ" />
               </Form.Item>
               <Form.Item label="Type">
-                <Input value={type} disabled placeholder="Otomatis dari Material Code" />
+                <Input value={type} disabled placeholder="Otomatis dari UNIQ" />
               </Form.Item>
             </div>
 
