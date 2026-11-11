@@ -14,7 +14,7 @@ import { useListSupplierItemsQuery } from "@/lib/api/supplier-items/api";
 const { Title, Text } = Typography;
 
 type SupplierInfoFormValues = {
-  uniq: string;
+  material_code: string;
   uniq_zahir?: string;
   status: string;
 };
@@ -35,30 +35,31 @@ export default function CreateSupplierInfoPage() {
     subcon: "SUBCON",
   };
 
-  // Satu UNIQ bisa dimiliki beberapa supplier/type, jadi opsi dibuat per
-  // kombinasi (uniq, supplier, type) dan tidak di-dedup per uniq saja.
-  const uniqOptions = useMemo(() => {
+  // Kunci mapping = Material Code. Satu material code bisa dimiliki beberapa
+  // supplier/type, jadi opsi dibuat per kombinasi (material code, supplier,
+  // type). Banyak UNIQ dengan material code sama otomatis menjadi satu opsi.
+  const materialOptions = useMemo(() => {
     const seen = new Set<string>();
     const options: {
       value: string;
       label: string;
-      uniq: string;
+      materialCode: string;
       supplierName: string;
       type: string;
     }[] = [];
     supplierItems.forEach((item) => {
-      const uniq = String(item.uniq_code ?? "").trim();
-      if (!uniq) return;
+      const materialCode = String(item.material_code ?? "").trim();
+      if (!materialCode) return;
       const supplierName = String(item.supplier_name ?? "").trim();
       const rawType = String(item.type ?? "").trim();
       const typeLabel = typeMap[rawType.toLowerCase()] ?? rawType.toUpperCase();
-      const key = [uniq, supplierName, typeLabel].join("||");
+      const key = [materialCode.toUpperCase(), supplierName, typeLabel].join("||");
       if (seen.has(key)) return;
       seen.add(key);
       options.push({
         value: key,
-        label: `${uniq} — ${supplierName} (${typeLabel})`,
-        uniq,
+        label: `${materialCode} — ${supplierName} (${typeLabel})`,
+        materialCode,
         supplierName,
         type: typeLabel,
       });
@@ -67,8 +68,8 @@ export default function CreateSupplierInfoPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supplierItems]);
 
-  const selectedKey = Form.useWatch("uniq", form);
-  const selectedItem = uniqOptions.find((item) => item.value === selectedKey);
+  const selectedKey = Form.useWatch("material_code", form);
+  const selectedItem = materialOptions.find((item) => item.value === selectedKey);
   const supplierName = selectedItem?.supplierName ?? "";
   const type = selectedItem?.type ?? "";
 
@@ -80,7 +81,7 @@ export default function CreateSupplierInfoPage() {
 
     try {
       await createSupplierInfo({
-        uniq: selectedItem.uniq,
+        material_code: selectedItem.materialCode,
         uniq_zahir: values.uniq_zahir,
         supplier_name: supplierName,
         type,
@@ -122,7 +123,7 @@ export default function CreateSupplierInfoPage() {
           >
             <Form.Item
               label="UNIQ"
-              name="uniq"
+              name="material_code"
               rules={[{ required: true, message: "UNIQ wajib dipilih" }]}
             >
               <Select
@@ -130,7 +131,7 @@ export default function CreateSupplierInfoPage() {
                 loading={isLoading}
                 placeholder="Pilih UNIQ dari Supplier Item"
                 optionFilterProp="label"
-                options={uniqOptions}
+                options={materialOptions}
               />
             </Form.Item>
 

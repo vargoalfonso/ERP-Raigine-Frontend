@@ -494,7 +494,8 @@ export type CreatePoSplitRequest = {
 
 // ── Supplier Info ─────────────────────────────────────────────
 export type CreateSupplierInfoRequest = {
-  uniq: string;
+  uniq?: string;
+  material_code?: string;
   uniq_zahir?: string;
   supplier_name: string;
   type: string;
@@ -1782,7 +1783,7 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
 
     getSupplierInfoList: builder.query<SupplierInfoRecord[], void>({
       query: () => ({
-        url: `${ROUTES.supplierInfo}`,
+        url: `${ROUTES.supplierInfo}?limit=10000`,
         method: "GET",
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
