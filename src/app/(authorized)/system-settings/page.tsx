@@ -33,6 +33,7 @@ import {
   WarningOutlined,
   AppstoreOutlined,
   SettingOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 
 import { getApiErrorMessage } from "@/lib/api/error";
@@ -120,6 +121,7 @@ import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
 import { useListSupplierItemsQuery } from "@/lib/api/supplier-items/api";
 import { useGetInventoryListQuery } from "@/lib/api/inventory/api";
 import MachineSettingsPanel from "@/components/system-settings/MachineSettingsPanel";
+import AutomationSettingsPanel from "@/components/system-settings/AutomationSettingsPanel";
 import {
   getLoginPermissions,
   getLoginRoleNames,
@@ -319,6 +321,7 @@ const MODULE_PERMISSION_KEYS: Record<string, string[]> = {
   kanban: ["kanban"],
   global: ["global_parameter"],
   process: ["process"],
+  automation: ["forecasting"],
 };
 
 const modules: ModuleItem[] = [
@@ -442,6 +445,14 @@ const modules: ModuleItem[] = [
     icon: <AppstoreOutlined />,
     iconBgClass: "bg-green-50",
     iconTextClass: "text-green-700",
+  },
+  {
+    id: "automation",
+    name: "Automation",
+    description: "Demand forecasting training scheduler",
+    icon: <ThunderboltOutlined />,
+    iconBgClass: "bg-amber-50",
+    iconTextClass: "text-amber-600",
   },
 ];
 
@@ -7515,6 +7526,12 @@ export default function SystemSettingsPage() {
         <div className="lg:col-span-8 space-y-4">
           {selectedModuleId === "machine" ? (
             <MachineSettingsPanel />
+          ) : selectedModuleId === "automation" ? (
+            <AutomationSettingsPanel
+              canUpdate={
+                selectedModuleAccess.canUpdate || selectedModuleAccess.canCreate
+              }
+            />
           ) : (
             <Card
               className="rounded-2xl shadow-sm"
