@@ -388,14 +388,16 @@ export type PredictResponse = {
 // training itself (data window / limits are configured inside the script) and
 // reports the result back.
 //
-// Backend contract (NOT implemented yet on the Go side):
+// Backend contract (implemented in the Go backend, migration 0113):
 //   GET  /api/v1/forecasting/schedules               -> data: ForecastSchedule[] (max 1 per domain)
-//        used by the ERP UI and polled by the forecasting script
+//        used by the ERP UI (JWT + permission "forecasting:view")
 //   PUT  /api/v1/forecasting/schedules/:domain       -> body: UpsertForecastScheduleRequest, data: ForecastSchedule
-//        used by the ERP UI (JWT + permission "forecasting")
-//   POST /api/v1/forecasting/schedules/:domain/runs  -> body: ForecastScheduleRunReport
-//        called by the forecasting script (service auth, e.g. BasicAuth like admin_jobs)
-//        to update last_run_at / last_run_status / last_run_message on the schedule
+//        used by the ERP UI (JWT + permission "forecasting:update")
+// Machine-to-machine endpoints for the forecasting script (Basic Auth, same
+// credentials as admin jobs; NOT called from the browser):
+//   GET  /api/v1/forecasting/service/schedules               -> data: ForecastSchedule[]
+//   POST /api/v1/forecasting/service/schedules/:domain/runs  -> body: ForecastScheduleRunReport
+//        updates last_run_at / last_run_status / last_run_message (and next_run_at) on the schedule
 //
 // PRL data is monthly, so PRL only accepts `frequency = "monthly"`.
 
@@ -478,6 +480,60 @@ const unwrapList = <T,>(response: unknown): T[] => {
 // ---------------------------------------------------------------------------
 // Endpoints (injected into the shared apiSlice)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Inventory Plan (hasil scheduler harian safety stock / buy-not-buy)
+// ---------------------------------------------------------------------------
+
+/**
+ * Satu baris hasil `GET /forecasting/inventory-plan`. Semua angka bisa `null`
+ * (data belum lengkap -> lihat `note`). RM / Indirect RM sampai buy-not-buy,
+ * FG / Subcon hanya sampai safety stock.
+ */
+export type InventoryPlanItem = {
+  plan_date: string;
+  inventory_type: string;
+  uniq_code: string;
+  model_version_id?: string | null;
+  forecast_start?: string | null;
+  forecast_end?: string | null;
+  forecast_qty?: number | null;
+  working_days?: number | null;
+  forecast_daily?: number | null;
+  safety_stock_constanta?: number | null;
+  safety_stock_qty?: number | null;
+  stock_qty?: number | null;
+  cycle_pengiriman?: number | null;
+  threshold?: number | null;
+  kanban_std?: number | null;
+  status?: string | null;
+  buy_not_buy?: string | null;
+  kanbans_needed?: number | null;
+  buy_qty?: number | null;
+  note?: string | null;
+  created_at?: string | null;
+};
+
+export type GetInventoryPlanRequest = {
+  /** Kirim per halaman / per Uniq yang tampil (respons klien dibatasi 1 MB). */
+  uniq_codes: string[];
+  inventory_type?: string;
+  /** YYYY-MM-DD. Default: plan terbaru. */
+  plan_date?: string;
+};
+
+const buildInventoryPlanUrl = (req: GetInventoryPlanRequest): string => {
+  // uniq_code harus diulang (?uniq_code=A&uniq_code=B), bukan dipisah koma.
+  const qs = new URLSearchParams();
+  req.uniq_codes.forEach((u) => {
+    const v = String(u ?? "").trim();
+    if (v) qs.append("uniq_code", v);
+  });
+  if (req.inventory_type) qs.set("inventory_type", req.inventory_type);
+  if (req.plan_date) qs.set("plan_date", req.plan_date);
+  const q = qs.toString();
+  return `${FORECASTING_BASE}/inventory-plan${q ? `?${q}` : ""}`;
+};
 
 const forecastingApi = apiSlice
   .enhanceEndpoints({
@@ -741,6 +797,14 @@ const forecastingApi = apiSlice
         transformResponse: (response: unknown) => unwrapList<ForecastSchedule>(response),
         providesTags: [{ type: "ForecastingSchedule", id: "LIST" }],
       }),
+      getInventoryPlan: builder.query<InventoryPlanItem[], GetInventoryPlanRequest>({
+        query: (req) => ({
+          url: buildInventoryPlanUrl(req),
+          method: "GET",
+          meta: AUTH_META,
+        }),
+        transformResponse: (response: unknown) => unwrapList<InventoryPlanItem>(response),
+      }),
       upsertForecastSchedule: builder.mutation<ForecastSchedule, UpsertForecastScheduleRequest>({
         query: ({ domain, ...body }) => ({
           url: `${FORECASTING_BASE}/schedules/${domain}`,
@@ -777,6 +841,7 @@ export const {
   usePredictMutation,
   useListForecastSchedulesQuery,
   useUpsertForecastScheduleMutation,
+  useGetInventoryPlanQuery,
 } = forecastingApi;
 
 export { forecastingApi };

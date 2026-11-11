@@ -143,6 +143,12 @@ export type GenerateProcurementPoRequest = {
   po_budget_entry_ids: Array<string | number>;
   external_system?: string;
   external_po_number?: string;
+  /** Nomor PO eksternal (Zahir) per PO (stage + supplier). Opsional. */
+  external_po_numbers?: Array<{
+    stage: 1 | 2;
+    supplier_name: string;
+    number: string;
+  }>;
   generate_mode?: "both_stages" | "stage_1" | "stage_2" | string;
 };
 

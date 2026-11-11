@@ -37,6 +37,7 @@ import {
   getChildSupplierLookupUniq,
   getStoredParents,
   isChildBudgetType,
+  isWireSpec,
   roundChildQty,
   wireQuantityFactor,
   type PoBudgetChildRow,
@@ -2047,6 +2048,66 @@ export default function PoBudgetPage() {
     loadPoBudgetPrlDetail,
   ]);
 
+  // Bagi qty ke supplier-supplier yang terdaftar untuk satu material.
+  //  - Supplier dengan persentase (>0) memakai persentasenya (bila total > 100
+  //    diskalakan ke 100).
+  //  - Supplier tanpa persentase berbagi sisa (100 - total persentase) sama
+  //    rata; bila tidak ada satupun persentase, semua supplier dibagi sama rata.
+  //  - Pembulatan memakai roundChildQty; sisa pembulatan masuk ke supplier
+  //    terakhir yang punya bagian, jadi total qty tetap sama dengan qty material.
+  const allocateSupplierShares = (
+    items: SupplierItemRecord[],
+    totalQty: number,
+    isWire: boolean,
+  ): BulkSupplierLine[] => {
+    const usable = items.filter((si) =>
+      Boolean(si.supplier_name || si.supplier_uuid),
+    );
+    const pcts = usable.map((si) => Math.max(0, Number(si.percentage ?? 0)));
+    const sumPct = pcts.reduce((acc, p) => acc + p, 0);
+    const withoutPct = pcts.filter((p) => p <= 0).length;
+    const scale = sumPct > 100 ? 100 / sumPct : 1;
+    const remaining = Math.max(0, 100 - sumPct * scale);
+    const effective = pcts.map((p) =>
+      p > 0
+        ? p * scale
+        : withoutPct > 0
+          ? sumPct > 0
+            ? remaining / withoutPct
+            : 100 / withoutPct
+          : 0,
+    );
+
+    const lastShareIdx = effective.reduce(
+      (last, pct, i) => (pct > 0 ? i : last),
+      -1,
+    );
+    let allocated = 0;
+    return usable.map((si, idx) => {
+      const supplierValue = String(
+        si.supplier_uuid ?? si.supplier_name ?? "",
+      ).trim();
+      let qty = 0;
+      if (effective[idx] > 0) {
+        qty =
+          idx === lastShareIdx
+            ? Math.max(0, roundChildQty(totalQty - allocated, isWire))
+            : roundChildQty((totalQty * effective[idx]) / 100, isWire);
+        allocated += qty;
+      }
+      return {
+        id: `auto-${idx + 1}`,
+        supplier: supplierValue,
+        supplierName: String(si.supplier_name ?? supplierValue).trim(),
+        qty,
+        percentage:
+          effective[idx] > 0
+            ? Math.round(effective[idx] * 100) / 100
+            : undefined,
+      };
+    });
+  };
+
   const buildAutoSuppliers = (
     uniqCode: string,
     totalQty: number,
@@ -2069,21 +2130,7 @@ export default function PoBudgetPage() {
       ];
     }
 
-    return items
-      .filter((si) => Boolean(si.supplier_name || si.supplier_uuid))
-      .map((si, idx) => {
-        const pct = Number(si.percentage ?? 0);
-        const supplierValue = String(
-          si.supplier_uuid ?? si.supplier_name ?? "",
-        ).trim();
-        return {
-          id: `auto-${idx + 1}`,
-          supplier: supplierValue,
-          supplierName: String(si.supplier_name ?? supplierValue).trim(),
-          qty: pct > 0 ? Math.round((totalQty * pct) / 100) : 0,
-          percentage: pct > 0 ? pct : undefined,
-        };
-      });
+    return allocateSupplierShares(items, totalQty, false);
   };
 
   // Resolve the supplier-items registered for a specific child row by matching
@@ -2255,25 +2302,13 @@ export default function PoBudgetPage() {
         },
       ];
     }
-    return usable.map((si, idx) => {
-      const pct = Number(si.percentage ?? 0);
-      const supplierValue = String(
-        si.supplier_uuid ?? si.supplier_name ?? "",
-      ).trim();
-      const qty =
-        pct > 0
-          ? Math.round((totalQty * pct) / 100)
-          : usable.length === 1
-            ? totalQty
-            : 0;
-      return {
-        id: `auto-${idx + 1}`,
-        supplier: supplierValue,
-        supplierName: String(si.supplier_name ?? supplierValue).trim(),
-        qty,
-        percentage: pct > 0 ? pct : undefined,
-      };
-    });
+    // Material dengan beberapa supplier terdaftar (mis. BR40 di 3 supplier)
+    // otomatis terbagi per supplier; berlaku untuk semua material.
+    return allocateSupplierShares(
+      usable,
+      totalQty,
+      isWireSpec(row.materialSpec),
+    );
   };
 
   const buildBulkItemsFromPrl = (
@@ -3676,7 +3711,11 @@ export default function PoBudgetPage() {
   //    child yang tersimpan bisa berisi uniq sebagai pengganti grade; bila
   //    item tidak punya material code, jatuh ke kode lama.
   // 3b. Baris dengan Kode Barang yang sama digabung dan Jumlah dijumlahkan.
-  // 4. Render satu halaman print dengan layout dokumen PERMINTAAN BARANG
+  // 3c. Baris dikelompokkan PER SUPPLIER: satu kali download menghasilkan satu
+  //    halaman PERMINTAAN BARANG per supplier (header "PT" = nama supplier),
+  //    item supplier berbeda tidak digabung. Penggabungan Kode Barang (3b)
+  //    hanya terjadi di dalam satu supplier.
+  // 4. Render halaman print dengan layout dokumen PERMINTAAN BARANG
   //    (mengikuti contoh PT. MATRA RODA PIRANTI) lalu window.print() supaya
   //    user bisa Save-as-PDF via dialog browser.
   const escapeHtml = (value: unknown): string =>
@@ -3709,6 +3748,10 @@ export default function PoBudgetPage() {
     `PERSEDIAN ${getBudgetTypeLabel(tab).toUpperCase()} MATERIAL`;
 
   type PrBudgetPrintRow = {
+    /** Supplier tujuan baris ini; PDF dibuat satu halaman per supplier. */
+    supplier: string;
+    /** Customer pemilik entri PO Budget (tampil di header dokumen). */
+    customer: string;
     /** uniq_code of the item; used to look up its material code. */
     uniqCode: string;
     kodeBarang: string;
@@ -3805,6 +3848,43 @@ export default function PoBudgetPage() {
     );
   };
 
+  const NO_SUPPLIER_LABEL = "Tanpa Supplier";
+
+  const isRealSupplierName = (value: unknown): boolean => {
+    const name = String(value ?? "").trim();
+    return (
+      name !== "" &&
+      name !== "-" &&
+      name.toLowerCase() !== "tidak ada data"
+    );
+  };
+
+  // Pecah qty sebuah item ke supplier-supplier-nya. Memakai rincian supplier
+  // (nama + qty) bila ada; bila tidak, seluruh qty ke supplier utama entri.
+  const splitQtyBySupplier = (
+    suppliers: { supplierName: string; quantity: number }[] | undefined,
+    fallbackSupplier: string,
+    totalQty: number,
+  ): { supplier: string; qty: number }[] => {
+    const usable = (suppliers ?? []).filter(
+      (item) => isRealSupplierName(item.supplierName) && Number(item.quantity) > 0,
+    );
+    if (usable.length > 0) {
+      return usable.map((item) => ({
+        supplier: item.supplierName.trim(),
+        qty: Number(item.quantity),
+      }));
+    }
+    return [
+      {
+        supplier: isRealSupplierName(fallbackSupplier)
+          ? fallbackSupplier.trim()
+          : NO_SUPPLIER_LABEL,
+        qty: totalQty,
+      },
+    ];
+  };
+
   // Flatten satu entri PO Budget menjadi baris-baris siap cetak. Untuk tipe
   // child budget (raw-material / indirect), "Kode Barang" diambil dari
   // child.uniq_code (childUniqCode) sesuai permintaan — BUKAN dari
@@ -3819,158 +3899,157 @@ export default function PoBudgetPage() {
     if (isChildBudgetType(apiType)) {
       const parents = getStoredParents(row.detailJson);
       const childRows: PrBudgetPrintRow[] = parents.flatMap((parent) =>
-        (Array.isArray(parent.children) ? parent.children : []).map(
-          (child) => ({
-            uniqCode: pickPrintCode(child.uniq_code, child.uniq, row.uniq),
-            // Placeholder: diganti dengan Material Code dari BOM (lookup
-            // backend) sebelum dicetak. Fallback ini hanya dipakai bila
-            // lookup tidak menemukan material code untuk item tersebut.
-            kodeBarang: pickPrintCode(
-              child.material_spec?.material_grade,
-              child.uniq,
-              child.uniq_code,
-              row.uniq,
-            ),
-            jumlah: Number(child.quantity ?? child.qty_per_uniq ?? row.pr ?? 0),
-            satuan: String(child.uom ?? row.uom ?? "Pcs").trim() || "Pcs",
-            noPart: String(child.part_number ?? "-").trim() || "-",
-            deskripsi: String(child.part_name ?? "-").trim() || "-",
-            sizeText: formatMaterialSize(child.material_spec),
-            keterangan,
-          }),
+        (Array.isArray(parent.children) ? parent.children : []).flatMap(
+          (child) => {
+            const childQty = Number(
+              child.quantity ?? child.qty_per_uniq ?? row.pr ?? 0,
+            );
+            // Satu baris per supplier child (qty sesuai pembagian supplier).
+            const splits = splitQtyBySupplier(
+              (child.suppliers ?? []).map((sup) => ({
+                supplierName: String(sup.supplier_name ?? ""),
+                quantity: Number(sup.quantity ?? 0),
+              })),
+              String(row.supplier ?? ""),
+              childQty,
+            );
+            return splits.map((split) => ({
+              supplier: split.supplier,
+              customer: String(row.customer ?? "").trim(),
+              uniqCode: pickPrintCode(child.uniq_code, child.uniq, row.uniq),
+              // Placeholder: diganti dengan Material Code dari BOM (lookup
+              // backend) sebelum dicetak. Fallback ini hanya dipakai bila
+              // lookup tidak menemukan material code untuk item tersebut.
+              kodeBarang: pickPrintCode(
+                child.material_spec?.material_grade,
+                child.uniq,
+                child.uniq_code,
+                row.uniq,
+              ),
+              jumlah: split.qty,
+              satuan: String(child.uom ?? row.uom ?? "Pcs").trim() || "Pcs",
+              noPart: String(child.part_number ?? "-").trim() || "-",
+              deskripsi: String(child.part_name ?? "-").trim() || "-",
+              sizeText: formatMaterialSize(child.material_spec),
+              keterangan,
+            }));
+          },
         ),
       );
 
       if (childRows.length > 0) return childRows;
 
       // Fallback bila entri belum punya detail child tersimpan.
-      return [
-        {
-          uniqCode: pickPrintCode(row.uniq),
-          kodeBarang: row.uniq || "-",
-          jumlah: Number(row.pr || 0),
-          satuan: row.uom || "Pcs",
-          noPart: row.partNumber || "-",
-          deskripsi: row.partName || "-",
-          sizeText: "",
-          keterangan,
-        },
-      ];
-    }
-
-    // Subcon budget tidak mempunyai struktur parent/child.
-    return [
-      {
+      return splitQtyBySupplier(
+        row.suppliers,
+        String(row.supplier ?? ""),
+        Number(row.pr || 0),
+      ).map((split) => ({
+        supplier: split.supplier,
+        customer: String(row.customer ?? "").trim(),
         uniqCode: pickPrintCode(row.uniq),
         kodeBarang: row.uniq || "-",
-        jumlah: Number(row.pr || 0),
+        jumlah: split.qty,
         satuan: row.uom || "Pcs",
         noPart: row.partNumber || "-",
         deskripsi: row.partName || "-",
         sizeText: "",
         keterangan,
-      },
-    ];
+      }));
+    }
+
+    // Subcon budget tidak mempunyai struktur parent/child.
+    return splitQtyBySupplier(
+      row.suppliers,
+      String(row.supplier ?? ""),
+      Number(row.pr || 0),
+    ).map((split) => ({
+      supplier: split.supplier,
+      customer: String(row.customer ?? "").trim(),
+      uniqCode: pickPrintCode(row.uniq),
+      kodeBarang: row.uniq || "-",
+      jumlah: split.qty,
+      satuan: row.uom || "Pcs",
+      noPart: row.partNumber || "-",
+      deskripsi: row.partName || "-",
+      sizeText: "",
+      keterangan,
+    }));
   };
 
-  const buildPrBudgetPrintHtml = (
+  type PrBudgetPrintMeta = {
+    mrNumber: string;
+    tanggal: string;
+    tglDiperlukan: string;
+    /** "Bagian" di header (mis. Produksi Raw Material). */
+    bagian: string;
+    /** Customer pemilik item pada halaman ini (bisa lebih dari satu). */
+    customer: string;
+    note: string;
+    mengetahuiAtas: string;
+    pemesan: string;
+    mengetahuiBawah: string;
+  };
+
+  const PR_BUDGET_COMPANY_NAME = "PT. MATRA RODA PIRANTI";
+
+  // Satu halaman PERMINTAAN BARANG untuk satu supplier. Layout mengikuti
+  // contoh dokumen: judul kiri + nama perusahaan kanan, No. MR / Tanggal /
+  // Customer di kiri, Tgl diperlukan / Bagian di kanan, tabel header biru
+  // (NO, Kode Barang, Jumlah, Unit, Descripsi Barang, Kelompok Barang) dengan
+  // tambahan kolom Supplier.
+  const buildPrBudgetPrintSection = (
     rows: PrBudgetPrintRow[],
-    meta: {
-      mrNumber: string;
-      ptName: string;
-      tanggal: string;
-      tglDiperlukan: string;
-      unit: string;
-      pembelian: string;
-      note: string;
-      mengetahuiAtas: string;
-      pemesan: string;
-      mengetahuiBawah: string;
-    },
+    meta: PrBudgetPrintMeta,
   ): string => {
     const rowsHtml = rows
       .map(
         (r, index) => `
           <tr>
             <td class="c">${index + 1}</td>
-            <td class="c b">${escapeHtml(r.kodeBarang)}</td>
-            <td class="c">${escapeHtml(r.uniqCode)}</td>
+            <td class="b">${escapeHtml(r.kodeBarang)}</td>
             <td class="r">${formatNumber(Math.ceil(r.jumlah))}</td>
-            <td class="c">${escapeHtml(r.satuan)}</td>
-            <td class="c">${escapeHtml(r.noPart)}</td>
+            <td>${escapeHtml(r.satuan)}</td>
             <td>${escapeHtml(r.deskripsi)}</td>
             <td>${escapeHtml(r.keterangan)}</td>
+            <td>${escapeHtml(r.supplier)}</td>
           </tr>`,
       )
       .join("");
 
-    return `<!doctype html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>Permintaan Barang - ${escapeHtml(meta.tglDiperlukan)}</title>
-          <style>
-            * { box-sizing: border-box; }
-            html, body { margin: 0; padding: 0; background: #eef2f7; color: #111827; font-family: Arial, Helvetica, sans-serif; }
-            .page { padding: 18px; }
-            .frame { background: #fff; padding: 14px 16px; }
-            .brand { text-align: center; font-size: 12px; font-weight: 700; margin-bottom: 2px; }
-            .title { text-align: center; font-size: 15px; font-weight: 800; letter-spacing: 0.03em; margin-bottom: 10px; }
-            .meta { display: grid; grid-template-columns: 90px 8px 1fr 100px 8px 1fr; gap: 4px 0; font-size: 11px; margin: 10px 0; }
-            .meta .lbl { font-weight: 600; color: #374151; }
-            .meta .sep { color: #6b7280; }
-            .meta .val { font-weight: 700; }
-            .items { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10.5px; }
-            .items th, .items td { border: 1px solid #111827; padding: 4px 6px; vertical-align: middle; }
-            .items thead { display: table-header-group; }
-            .items thead th { background: #f3f4f6; text-align: center; font-weight: 700; }
-            .items tr { page-break-inside: avoid; }
-            .items td.c { text-align: center; }
-            .items td.r { text-align: right; }
-            .items td.b { font-weight: 700; }
-            .note { font-size: 10.5px; margin-top: 8px; }
-            .sig-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 30px; font-size: 11px; text-align: center; }
-            .sig-box .sig-title { font-weight: 700; margin-bottom: 44px; }
-            .sig-box .sig-name { border-top: 1px solid #111827; padding-top: 4px; display: inline-block; min-width: 140px; }
-            @page { size: A4; margin: 10mm; }
-            @media print {
-              body { background: #fff; }
-              .page { padding: 0; }
-              .no-print { display: none; }
-            }
-          </style>
-        </head>
-        <body>
-          <section class="page">
+    return `<section class="page">
             <div class="frame">
-              <div class="brand">PT. MATRA RODA PIRANTI</div>
-              <div class="title">PERMINTAAN BARANG</div>
-
-              <div class="meta">
-                <div class="lbl">No. MR</div><div class="sep">:</div><div class="val">${escapeHtml(meta.mrNumber)}</div>
-                <div class="lbl">PT</div><div class="sep">:</div><div class="val">${escapeHtml(meta.ptName)}</div>
-
-                <div class="lbl">Tanggal</div><div class="sep">:</div><div class="val">${escapeHtml(meta.tanggal)}</div>
-                <div class="lbl">Tgl diperlukan</div><div class="sep">:</div><div class="val">${escapeHtml(meta.tglDiperlukan)}</div>
-
-                <div class="lbl">Unit</div><div class="sep">:</div><div class="val">${escapeHtml(meta.unit)}</div>
-                <div class="lbl">Pembelian</div><div class="sep">:</div><div class="val">${escapeHtml(meta.pembelian)}</div>
+              <div class="head">
+                <div class="title">PERMINTAAN BARANG</div>
+                <div class="brand">${escapeHtml(PR_BUDGET_COMPANY_NAME)}</div>
               </div>
+              <div class="rule"></div>
+              <div class="meta">
+                <div class="mcol">
+                  <div class="mrow"><span class="lbl">No. MR</span><span class="sep">:</span><span class="val">${escapeHtml(meta.mrNumber)}</span></div>
+                  <div class="mrow"><span class="lbl">Tanggal</span><span class="sep">:</span><span class="val">${escapeHtml(meta.tanggal)}</span></div>
+                  <div class="mrow"><span class="lbl">Customer</span><span class="sep">:</span><span class="val">${escapeHtml(meta.customer)}</span></div>
+                </div>
+                <div class="mcol">
+                  <div class="mrow"><span class="lbl">Tgl diperlukan</span><span class="sep">:</span><span class="val">${escapeHtml(meta.tglDiperlukan)}</span></div>
+                  <div class="mrow"><span class="lbl">Bagian</span><span class="sep">:</span><span class="val">${escapeHtml(meta.bagian)}</span></div>
+                </div>
+              </div>
+              <div class="rule"></div>
 
               <table class="items">
                 <thead>
                   <tr>
-                    <th style="width:32px">NO.</th>
+                    <th style="width:36px">NO.</th>
                     <th style="width:110px">Kode Barang</th>
-                    <th style="width:130px">Uniq</th>
-                    <th style="width:70px">Jumlah</th>
-                    <th style="width:60px">Satuan</th>
-                    <th style="width:120px">No Part</th>
+                    <th style="width:70px; text-align:right">Jumlah</th>
+                    <th style="width:50px">Unit</th>
                     <th>Descripsi Barang</th>
-                    <th style="width:170px">Keterangan</th>
+                    <th style="width:150px">Kelompok Barang</th>
+                    <th style="width:170px">Supplier</th>
                   </tr>
                 </thead>
-                <tbody>${rowsHtml || `<tr><td colspan="8" class="c">Tidak ada item pada tanggal ini.</td></tr>`}</tbody>
+                <tbody>${rowsHtml || `<tr><td colspan="7" class="c">Tidak ada item pada tanggal ini.</td></tr>`}</tbody>
               </table>
 
               <div class="note">Note : ${escapeHtml(meta.note)}</div>
@@ -3990,7 +4069,62 @@ export default function PoBudgetPage() {
                 </div>
               </div>
             </div>
-          </section>
+          </section>`;
+  };
+
+  // Dokumen print berisi satu section per supplier; tiap supplier mulai di
+  // halaman baru sehingga hasil download tidak tergabung.
+  const buildPrBudgetPrintHtml = (
+    sections: { rows: PrBudgetPrintRow[]; meta: PrBudgetPrintMeta }[],
+  ): string => {
+    const title = sections[0]?.meta.tglDiperlukan ?? "";
+    const body = sections
+      .map((sec) => buildPrBudgetPrintSection(sec.rows, sec.meta))
+      .join("\n");
+    return `<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Permintaan Barang - ${escapeHtml(title)}</title>
+          <style>
+            * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            html, body { margin: 0; padding: 0; background: #eef2f7; color: #111827; font-family: Arial, Helvetica, sans-serif; }
+            .page { padding: 18px; }
+            .page + .page { page-break-before: always; break-before: page; }
+            .frame { background: #fff; padding: 14px 16px; }
+            .head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+            .title { font-size: 22px; font-weight: 800; letter-spacing: 0.02em; }
+            .brand { font-size: 13px; font-weight: 800; font-style: italic; padding-bottom: 3px; }
+            .rule { border-top: 2px solid #374151; margin: 6px 0; }
+            .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; font-size: 11.5px; padding: 4px 0; }
+            .mrow { display: flex; gap: 6px; margin: 3px 0; }
+            .mrow .lbl { width: 92px; color: #374151; }
+            .mrow .sep { width: 8px; color: #6b7280; }
+            .mrow .val { font-weight: 700; flex: 1; }
+            .items { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 11px; }
+            .items th, .items td { padding: 5px 8px; vertical-align: middle; text-align: left; }
+            .items thead { display: table-header-group; }
+            .items thead th { background: #1f4e9e; color: #fff; font-weight: 700; }
+            .items tbody tr:nth-child(odd) td { background: #bfd3f0; }
+            .items tbody tr:nth-child(even) td { background: #e6eefa; }
+            .items tr { page-break-inside: avoid; }
+            .items td.c { text-align: center; }
+            .items td.r { text-align: right; }
+            .items td.b { font-weight: 700; }
+            .note { font-size: 10.5px; margin-top: 8px; }
+            .sig-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 30px; font-size: 11px; text-align: center; }
+            .sig-box .sig-title { font-weight: 700; margin-bottom: 44px; }
+            .sig-box .sig-name { border-top: 1px solid #111827; padding-top: 4px; display: inline-block; min-width: 140px; }
+            @page { size: A4 landscape; margin: 10mm; }
+            @media print {
+              body { background: #fff; }
+              .page { padding: 0; }
+              .no-print { display: none; }
+            }
+          </style>
+        </head>
+        <body>
+          ${body}
           <div class="no-print" style="position:fixed; bottom:12px; right:12px;">
             <button onclick="window.print()" style="padding:8px 14px; border-radius:6px; border:1px solid #111827; background:#111827; color:#fff; cursor:pointer;">Print / Save as PDF</button>
           </div>
@@ -4077,45 +4211,71 @@ export default function PoBudgetPage() {
         }
       }
 
-      const printRows = mergePrBudgetPrintRows(
-        rawPrintRows.map((r) => {
-          const spec = specByUniq[r.uniqCode];
-          const size = formatMaterialSize(spec) || r.sizeText;
-          const baseDesc = r.deskripsi && r.deskripsi !== "-" ? r.deskripsi : "";
-          return {
-            ...r,
-            kodeBarang: spec?.material_code || r.kodeBarang,
-            deskripsi:
-              baseDesc && size
-                ? `${baseDesc} (${size})`
-                : baseDesc || size || "-",
-          };
-        }),
-      );
+      const enrichedRows: PrBudgetPrintRow[] = rawPrintRows.map((r) => {
+        const spec = specByUniq[r.uniqCode];
+        const size = formatMaterialSize(spec) || r.sizeText;
+        // Descripsi Barang mengikuti contoh dokumen: "<no part> <nama part>".
+        const baseDesc = [r.noPart, r.deskripsi]
+          .map((v) => String(v ?? "").trim())
+          .filter((v) => v && v !== "-")
+          .join(" ");
+        return {
+          ...r,
+          kodeBarang: spec?.material_code || r.kodeBarang,
+          deskripsi:
+            baseDesc && size
+              ? `${baseDesc} (${size})`
+              : baseDesc || size || "-",
+        };
+      });
+
+      // Kelompokkan per supplier (tanpa membedakan huruf besar/kecil) supaya
+      // satu download = satu halaman per supplier dengan header supplier-nya.
+      const bySupplier = new Map<
+        string,
+        { name: string; rows: PrBudgetPrintRow[] }
+      >();
+      enrichedRows.forEach((r) => {
+        const key = r.supplier.trim().toLowerCase();
+        const group = bySupplier.get(key) ?? { name: r.supplier, rows: [] };
+        group.rows.push(r);
+        bySupplier.set(key, group);
+      });
+      const supplierGroups = Array.from(bySupplier.values()).sort((a, b) => {
+        // "Tanpa Supplier" selalu paling akhir.
+        const aNone = a.name === NO_SUPPLIER_LABEL ? 1 : 0;
+        const bNone = b.name === NO_SUPPLIER_LABEL ? 1 : 0;
+        return aNone - bNone || a.name.localeCompare(b.name);
+      });
 
       const dateLabel = formatIdLongDate(prBudgetPdfDate);
-      const supplierNames = Array.from(
-        new Set(
-          matchedRows
-            .map((row) => String(row.supplier ?? "-").trim())
-            .filter((name) => Boolean(name) && name !== "-"),
-        ),
-      );
-      const ptName = supplierNames[0] || "-";
       const currentUserName = getCurrentUserDisplayName() ?? "-";
 
-      const html = buildPrBudgetPrintHtml(printRows, {
-        mrNumber: `PR-${prBudgetPdfDate.format("YYYYMMDD")}-${activeTab.toUpperCase()}`,
-        ptName,
-        tanggal: dateLabel,
-        tglDiperlukan: dateLabel,
-        unit: `Produksi ${getBudgetTypeLabel(activeTab)}`,
-        pembelian: currentUserName,
-        note: `${getBudgetTypeLabel(activeTab)} — ${prBudgetPdfDate.format("MMMM YYYY")}`,
-        mengetahuiAtas: "-",
-        pemesan: currentUserName,
-        mengetahuiBawah: "-",
-      });
+      const html = buildPrBudgetPrintHtml(
+        supplierGroups.map((group) => ({
+          // Kode Barang yang sama digabung hanya di dalam satu supplier.
+          rows: mergePrBudgetPrintRows(group.rows),
+          meta: {
+            mrNumber: `PR-${prBudgetPdfDate.format("YYYYMMDD")}-${activeTab.toUpperCase()}`,
+            tanggal: dateLabel,
+            tglDiperlukan: dateLabel,
+            bagian: `Produksi ${getBudgetTypeLabel(activeTab)}`,
+            // Customer unik dari item pada halaman supplier ini.
+            customer:
+              Array.from(
+                new Set(
+                  group.rows
+                    .map((row) => row.customer.trim())
+                    .filter((name) => name && name !== "-"),
+                ),
+              ).join(", ") || "-",
+            note: `${getBudgetTypeLabel(activeTab)} — ${prBudgetPdfDate.format("MMMM YYYY")}`,
+            mengetahuiAtas: "-",
+            pemesan: currentUserName,
+            mengetahuiBawah: "-",
+          },
+        })),
+      );
 
       const win = window.open("", "_blank", "width=900,height=1100");
       if (!win) {

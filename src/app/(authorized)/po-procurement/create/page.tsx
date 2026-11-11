@@ -252,6 +252,23 @@ const mergeSupplierGroups = (groups: PoSupplierGroup[]): PoSupplierGroup[] =>
 
 const formatNumber = (n: number) => new Intl.NumberFormat("en-US").format(n);
 
+/**
+ * Bagi `total` ke beberapa supplier secara proporsional terhadap `weights`,
+ * dibulatkan; bagian terakhir menerima sisa supaya jumlahnya tetap sama.
+ * (Sama dengan splitQtyByShares di backend.)
+ */
+const splitQtyByWeights = (total: number, weights: number[]): number[] => {
+  const sum = weights.reduce((acc, w) => acc + w, 0);
+  if (sum <= 0 || total <= 0) return weights.map(() => 0);
+  let used = 0;
+  return weights.map((w, i) => {
+    if (i === weights.length - 1) return total - used;
+    const part = Math.round((total * w) / sum);
+    used += part;
+    return part;
+  });
+};
+
 // Material spec dari detail BOM (field yang sama dengan halaman
 // /bill-of-material/<id>) diubah ke bentuk PoBudgetMaterialSpecLookup.
 const bomSpecToLookup = (
@@ -827,25 +844,50 @@ function CreatePoProcurementPageContent() {
               ((row.pr || 0) * (pct || 0)) / 100,
           );
           if (flatQty > 0) {
-            items.push({
-              key: `s${stage}-${row.id ?? row.key}-${seq++}`,
-              parentUniq: String(row.uniq ?? "-"),
-              childUniq: "-",
-              materialGrade: String(row.uniq ?? "-"),
-              partNumber: String(row.partNumber ?? "-"),
-              partName: String(row.partName ?? "-"),
-              form: "-",
-              gradeText: "-",
-              typeMaterial: "-",
-              widthMm: "-",
-              diameterMm: "-",
-              thicknessMm: "-",
-              lengthMm: "-",
-              supplier: String(row.supplier || "-"),
-              qty: flatQty,
-              uom: String(row.uom ?? "-"),
-              weightKg: Number(row.weightKg ?? 0),
-            });
+            // Entri tanpa child dengan beberapa supplier: pecah per supplier
+            // (qty proporsional) seperti backend, supaya tiap supplier punya
+            // grup PO sendiri. Satu supplier / tanpa rincian: supplier entri.
+            const flatShares = (row.suppliers ?? []).filter(
+              (sup) =>
+                String(sup.supplierName ?? "").trim() &&
+                Number(sup.quantity) > 0,
+            );
+            const parts: { name: string; qty: number }[] =
+              flatShares.length > 1
+                ? (() => {
+                    const split = splitQtyByWeights(
+                      flatQty,
+                      flatShares.map((sup) => Number(sup.quantity)),
+                    );
+                    return flatShares.map((sup, i) => ({
+                      name: String(sup.supplierName).trim(),
+                      qty: split[i],
+                    }));
+                  })()
+                : [{ name: String(row.supplier || "-"), qty: flatQty }];
+
+            for (const part of parts) {
+              if (part.qty <= 0) continue;
+              items.push({
+                key: `s${stage}-${row.id ?? row.key}-${seq++}`,
+                parentUniq: String(row.uniq ?? "-"),
+                childUniq: "-",
+                materialGrade: String(row.uniq ?? "-"),
+                partNumber: String(row.partNumber ?? "-"),
+                partName: String(row.partName ?? "-"),
+                form: "-",
+                gradeText: "-",
+                typeMaterial: "-",
+                widthMm: "-",
+                diameterMm: "-",
+                thicknessMm: "-",
+                lengthMm: "-",
+                supplier: part.name,
+                qty: part.qty,
+                uom: String(row.uom ?? "-"),
+                weightKg: Number(row.weightKg ?? 0),
+              });
+            }
           }
           continue;
         }
@@ -860,41 +902,79 @@ function CreatePoProcurementPageContent() {
               unknown
             >;
             const childQty = Number(child.quantity ?? child.qty_per_uniq ?? 0);
-            const stageQty = Math.round((childQty * (pct || 0)) / 100);
-            if (stageQty <= 0) continue;
 
-            const suppliers = Array.isArray(child.suppliers)
-              ? child.suppliers
+            // Sama dengan backend (generate PO): satu baris PER SUPPLIER child,
+            // qty = bagian supplier itu (bila 0 -> qty child). Supplier berbeda
+            // tidak digabung; material yang sama dalam satu supplier digabung
+            // di mergePoItemRows. Child tanpa rincian supplier memakai supplier entri.
+            const rawShares = Array.isArray(child.suppliers)
+              ? child.suppliers.filter((sup) =>
+                  String(sup?.supplier_name ?? "").trim(),
+                )
               : [];
-            const supplierName =
-              suppliers[0]?.supplier_name ?? row.supplier ?? "-";
+            // Aturan sama dengan backend: supplier berqty > 0 dipakai apa adanya
+            // (yang qty 0 dilewati); bila semua 0, satu supplier = seluruh qty
+            // child, beberapa supplier = dibagi sama rata.
+            const positiveShares = rawShares.filter(
+              (sup) => Number(sup.quantity) > 0,
+            );
+            const equalSplit =
+              rawShares.length > 1
+                ? splitQtyByWeights(
+                    childQty,
+                    rawShares.map(() => 1),
+                  )
+                : [];
+            const shares: { name: string; qty: number }[] =
+              positiveShares.length > 0
+                ? positiveShares.map((sup) => ({
+                    name: String(sup.supplier_name).trim(),
+                    qty: Number(sup.quantity),
+                  }))
+                : rawShares.length > 1
+                  ? rawShares.map((sup, i) => ({
+                      name: String(sup.supplier_name).trim(),
+                      qty: equalSplit[i],
+                    }))
+                  : rawShares.length === 1
+                    ? [
+                        {
+                          name: String(rawShares[0].supplier_name).trim(),
+                          qty: childQty,
+                        },
+                      ]
+                    : [{ name: String(row.supplier || "-"), qty: childQty }];
 
             const lookup = resolveMaterialSpec(child.uniq_code);
-            items.push({
-              key: `s${stage}-${row.id ?? row.key}-${seq++}`,
-              parentUniq: String(parent.uniq_code ?? row.uniq ?? "-"),
-              childUniq: String(child.uniq_code ?? "-"),
-              materialGrade: String(
-                lookup?.material_code ??
-                  childSpec.material_grade ??
-                  child.uniq ??
-                  child.uniq_code ??
-                  "-",
-              ),
-              partNumber: String(child.part_number ?? "-"),
-              partName: String(child.part_name ?? "-"),
-              form: specValue(lookup, childSpec, "form"),
-              gradeText: specValue(lookup, childSpec, "grade"),
-              typeMaterial: specValue(lookup, childSpec, "type_material"),
-              widthMm: specValue(lookup, childSpec, "width_mm"),
-              diameterMm: specValue(lookup, childSpec, "diameter_mm"),
-              thicknessMm: specValue(lookup, childSpec, "thickness_mm"),
-              lengthMm: specValue(lookup, childSpec, "length_mm"),
-              supplier: String(supplierName),
-              qty: stageQty,
-              uom: String(child.uom ?? row.uom ?? "-"),
-              weightKg: Number(child.weight_kg ?? childSpec.weight_kg ?? 0),
-            });
+            for (const share of shares) {
+              const stageQty = Math.round((share.qty * (pct || 0)) / 100);
+              if (stageQty <= 0) continue;
+              items.push({
+                key: `s${stage}-${row.id ?? row.key}-${seq++}`,
+                parentUniq: String(parent.uniq_code ?? row.uniq ?? "-"),
+                childUniq: String(child.uniq_code ?? "-"),
+                materialGrade: String(
+                  lookup?.material_code ??
+                    childSpec.material_grade ??
+                    child.uniq ??
+                    child.uniq_code ??
+                    "-",
+                ),
+                partNumber: String(child.part_number ?? "-"),
+                partName: String(child.part_name ?? "-"),
+                form: specValue(lookup, childSpec, "form"),
+                gradeText: specValue(lookup, childSpec, "grade"),
+                typeMaterial: specValue(lookup, childSpec, "type_material"),
+                widthMm: specValue(lookup, childSpec, "width_mm"),
+                diameterMm: specValue(lookup, childSpec, "diameter_mm"),
+                thicknessMm: specValue(lookup, childSpec, "thickness_mm"),
+                lengthMm: specValue(lookup, childSpec, "length_mm"),
+                supplier: share.name,
+                qty: stageQty,
+                uom: String(child.uom ?? row.uom ?? "-"),
+                weightKg: Number(child.weight_kg ?? childSpec.weight_kg ?? 0),
+              });
+            }
           }
         }
       }
@@ -1002,14 +1082,13 @@ function CreatePoProcurementPageContent() {
     resolveMaterialSpec,
   ]);
 
-  // Tampilan list: material yang sama (material code, grade, diameter, ukuran)
-  // digabung jadi satu baris. Subcon tidak digabung (tiap part berdiri sendiri).
+  // Tampilan list (SEMUA tab: raw, indirect, subcon): material yang sama
+  // (material code / uniq, grade, diameter, ukuran, UoM) dalam satu supplier
+  // digabung jadi satu baris (akumulatif). Supplier berbeda = grup PO berbeda,
+  // tidak pernah digabung.
   const poSupplierGroups: PoSupplierGroup[] = useMemo(
-    () =>
-      poType === "subcon"
-        ? rawSupplierGroups
-        : mergeSupplierGroups(rawSupplierGroups),
-    [rawSupplierGroups, poType],
+    () => mergeSupplierGroups(rawSupplierGroups),
+    [rawSupplierGroups],
   );
 
   // Edit: isi kembali External PO Number (Zahir) ke grup stage+supplier yang sesuai.
@@ -1225,12 +1304,24 @@ function CreatePoProcurementPageContent() {
           .filter(Boolean)
           .join(" | ") || undefined;
 
+      // Nomor Zahir bersifat OPSIONAL dan per PO (stage + supplier): boleh diisi
+      // sebagian atau dikosongkan semua. Hanya yang terisi yang dikirim.
+      const externalPoNumberList = poSupplierGroups
+        .map((g) => ({
+          stage: g.stage,
+          supplier_name: g.supplier,
+          number: (externalPoNumbers[g.key] ?? "").trim(),
+        }))
+        .filter((entry) => entry.number);
+
       const body = {
         po_type: poType,
         period: period.format("MMMM YYYY"),
         po_budget_entry_ids: selectedBudgetIds,
         external_system: externalSystem,
         external_po_number: combinedExternalPoNumber,
+        // Tiap PO menerima nomornya sendiri (bukan gabungan semua supplier).
+        external_po_numbers: externalPoNumberList,
         generate_mode: generateMode,
       };
 
@@ -1485,7 +1576,10 @@ function CreatePoProcurementPageContent() {
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="text-xs font-semibold text-gray-700 whitespace-nowrap">
-                        External PO Number (Zahir)
+                        External PO Number (Zahir){" "}
+                        <span className="font-normal text-gray-400">
+                          (opsional)
+                        </span>
                       </div>
                       <Input
                         value={externalPoNumbers[g.key] ?? ""}
