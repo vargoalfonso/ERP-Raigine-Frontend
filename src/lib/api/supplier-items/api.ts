@@ -340,10 +340,10 @@ export const supplierItemsApiSlice = apiSlice
           const qs = { type: params?.type, status: params?.status, search: params?.search };
           const items: unknown[] = [];
           let page = 1;
-          const maxPages = 50; // safety cap: 50 * 100 = 5,000 rows
+          const maxRows = 10000; // safety cap: 10,000 rows
 
-          while (page <= maxPages) {
-            const url = `/supplier-items${buildQueryString({ ...qs, limit: "100", page: String(page) })}`;
+          while (items.length < maxRows) {
+            const url = `/supplier-items${buildQueryString({ ...qs, limit: "10000", page: String(page) })}`;
             const result = await fetchWithBQ({
               url,
               method: "GET",
