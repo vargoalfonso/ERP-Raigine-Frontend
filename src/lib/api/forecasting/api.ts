@@ -423,10 +423,12 @@ export type ForecastSchedule = {
   day_of_month?: number | null;
   timezone?: string;
   selected_model?: SelectedModel;
-  /** filled by the forecasting script via POST .../runs */
+  /** filled by the ERP backend from the forecasting service (GET /admin/scheduler/status) */
   last_run_at?: string | null;
   last_run_status?: TrainingStatus | null;
   last_run_message?: string | null;
+  /** training run of the last scheduled run; details via GET /forecasting/training-runs/:id */
+  last_training_run_id?: string | null;
   next_run_at?: string | null;
   updated_at?: string | null;
   updated_by?: string | null;

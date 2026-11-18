@@ -2,7 +2,7 @@
 
 import React, { Suspense, useMemo, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import { Button, Card, InputNumber, Select, Tag, message } from "antd";
+import { Button, Card, InputNumber, Modal, Select, Tag, message } from "antd";
 import {
   InfoCircleOutlined,
   LeftOutlined,
@@ -15,11 +15,20 @@ import {
   useCreateSafetyStockBulkMutation,
   useCreateSafetyStockMutation,
   useGetSafetyStockByIdQuery,
+  useGetKanbanStandardsQuery,
   useGetSafetyStockQuery,
   useUpdateSafetyStockMutation,
 } from "@/lib/api/system-settings/api";
 import { useGetBomListQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import {
+  ALL_UNIQ_VALUE,
+  expandSafetyStockEntries,
+  isAllUniq,
+  isForecastCalculation,
+  uniqsForAllEntries,
+  uniqsInCategory,
+} from "@/lib/utils/safetyStockEntries";
 
 type Entry = {
   id: string;
@@ -78,6 +87,7 @@ function PageContent() {
   const [createSafetyStock, createSafetyStockState] = useCreateSafetyStockMutation();
   const [createSafetyStockBulk, createSafetyStockBulkState] = useCreateSafetyStockBulkMutation();
   const [updateSafetyStock, updateSafetyStockState] = useUpdateSafetyStockMutation();
+  const [modal, modalContextHolder] = Modal.useModal();
 
   const [type, setType] = useState<string | undefined>(undefined);
   const [entries, setEntries] = useState<Entry[]>([makeEntry(1)]);
@@ -153,7 +163,7 @@ function PageContent() {
     // include any uniqs already present in entries (e.g., when editing)
     const existing = entries
       .map((e) => e.uniq)
-      .filter(Boolean)
+      .filter((u) => Boolean(u) && !isAllUniq(u))
       .map((u) => String(u));
 
     for (const u of existing) {
@@ -194,6 +204,7 @@ function PageContent() {
     const first = uniqOptions[0]?.value;
     setEntries((prev) =>
       prev.map((e) => {
+        if (isAllUniq(e.uniq)) return e;
         if (e.uniq && uniqOptions.some((option) => option.value === e.uniq)) {
           return e;
         }
@@ -201,6 +212,52 @@ function PageContent() {
       }),
     );
   }, [inventoryType, uniqOptions]);
+
+  const typeLabel = useMemo(
+    () => TYPE_OPTIONS.find((option) => option.value === type)?.label ?? "",
+    [type],
+  );
+
+  // Kanban Standard aktif = uniq Finished Goods (hanya dimuat bila Type = Finished Goods).
+  const { data: kanbanStandards } = useGetKanbanStandardsQuery(undefined, {
+    skip: !apiEnabled || type !== "finished_goods",
+  });
+  const finishedGoodsUniqs = useMemo(
+    () =>
+      (kanbanStandards ?? [])
+        .filter((k) => String(k?.status ?? "").toLowerCase() === "active")
+        .map((k) => String(k?.item_uniq_code ?? "").trim())
+        .filter(Boolean),
+    [kanbanStandards],
+  );
+
+  // Uniq yang masuk "All Uniq": hanya yang KATEGORInya sama dengan Type yang dipilih
+  // dan belum punya parameter Safety Stock untuk Type itu.
+  const categoryUniqs = useMemo(
+    () =>
+      uniqsInCategory(
+        type,
+        { materialSpecByUniq: bomIndex.materialSpecByUniq, finishedGoodsUniqs },
+        uniqOptions.map((option) => String(option.value)),
+      ),
+    [type, bomIndex.materialSpecByUniq, finishedGoodsUniqs, uniqOptions],
+  );
+
+  // Pilihan Uniq: "All Uniq in <Type> (N)" di paling atas (hanya saat membuat baru
+  // dan ada uniq di kategori itu).
+  const uniqSelectOptions = useMemo(() => {
+    if (!inventoryType || isEditMode || categoryUniqs.length === 0) return uniqOptions;
+    return [
+      { value: ALL_UNIQ_VALUE, label: `All Uniq in ${typeLabel} (${categoryUniqs.length})` },
+      ...uniqOptions,
+    ];
+  }, [inventoryType, isEditMode, typeLabel, categoryUniqs, uniqOptions]);
+
+  // Uniq yang akan dipakai entri "All Uniq" (uniq yang dipilih eksplisit tidak ikut).
+  const allUniqTargets = useMemo(
+    () => uniqsForAllEntries(entries, categoryUniqs),
+    [entries, categoryUniqs],
+  );
 
   const completeCount = useMemo(() => entries.filter((e) => e.created).length, [entries]);
 
@@ -211,7 +268,10 @@ function PageContent() {
   const validateEntry = (e: Entry) => {
     if (!e.uniq) return "Uniq is required";
     if (!e.calculationType) return "Calculation Type is required";
-    if (e.constanta === undefined || e.constanta === null) return "Constanta is required";
+    // Demand Forecasting memakai hasil forecast apa adanya, tanpa Constanta.
+    if (!isForecastCalculation(e.calculationType) && (e.constanta === undefined || e.constanta === null)) {
+      return "Constanta is required";
+    }
     return null;
   };
 
@@ -254,17 +314,38 @@ function PageContent() {
         return;
       }
 
-      const items = entries.map((entry) => ({
-        inventory_type: String(type),
-        item_uniq_code: String(entry.uniq ?? "").trim(),
-        calculation_type: String(entry.calculationType ?? "").trim(),
-        constanta: Number(entry.constanta ?? 0),
-      }));
+      const expanded = expandSafetyStockEntries(
+        entries,
+        categoryUniqs,
+        String(type),
+      );
+      if (!expanded.ok) {
+        message.error(expanded.error);
+        return;
+      }
+      const { items, allUniqCount } = expanded;
+
+      // "All Uniq" menyimpan banyak parameter sekaligus: minta konfirmasi dulu.
+      if (!isEditMode && allUniqCount > 0) {
+        const confirmed = await new Promise<boolean>((resolve) => {
+          modal.confirm({
+            title: `Terapkan ke ${allUniqCount} Uniq?`,
+            content: `Parameter akan dibuat untuk ${allUniqCount} Uniq kategori ${typeLabel} yang belum punya parameter Safety Stock. Total ${items.length} parameter akan disimpan.`,
+            okText: "Terapkan",
+            cancelText: "Batal",
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          });
+        });
+        if (!confirmed) return;
+      }
 
       if (isEditMode && editId) {
         const payload = {
           calculation_type: String(entries[0]?.calculationType ?? "").trim(),
-          constanta: Number(entries[0]?.constanta ?? 0),
+          constanta: isForecastCalculation(entries[0]?.calculationType)
+            ? 0
+            : Number(entries[0]?.constanta ?? 0),
         };
 
         await updateSafetyStock({ id: editId, body: payload }).unwrap();
@@ -283,6 +364,7 @@ function PageContent() {
 
   return (
     <div className="min-h-screen bg-[#EEF5FF]">
+      {modalContextHolder}
       <div className="bg-white border-b border-gray-200">
         <div className="px-6 py-4">
           <div className="flex items-center justify-between gap-4">
@@ -386,27 +468,35 @@ function PageContent() {
                         value={e.uniq}
                         onChange={(v) => updateEntry(e.id, { uniq: v, created: false })}
                         placeholder={inventoryType ? "Select Uniq" : "Select Type first"}
-                        options={uniqOptions}
+                        options={uniqSelectOptions}
                         disabled={!inventoryType}
                         showSearch
                         optionFilterProp="label"
                         virtual
                         listHeight={320}
                       />
+                      {isAllUniq(e.uniq) && (
+                        <div className="mt-1 text-xs text-blue-700">
+                          Diterapkan ke {allUniqTargets.length} Uniq kategori {typeLabel} yang
+                          belum punya parameter.
+                        </div>
+                      )}
                     </div>
 
                     
 
-                    <div className="lg:col-span-3">
-                      <div className="text-sm text-gray-700 mb-2">Constanta (days)</div>
-                      <InputNumber
-                        className="w-full"
-                        value={e.constanta}
-                        onChange={(v) => updateEntry(e.id, { constanta: v ?? undefined, created: false })}
-                        placeholder="Input Constanta"
-                        min={0}
-                      />
-                    </div>
+                    {!isForecastCalculation(e.calculationType) && (
+                      <div className="lg:col-span-3">
+                        <div className="text-sm text-gray-700 mb-2">Constanta (days)</div>
+                        <InputNumber
+                          className="w-full"
+                          value={e.constanta}
+                          onChange={(v) => updateEntry(e.id, { constanta: v ?? undefined, created: false })}
+                          placeholder="Input Constanta"
+                          min={0}
+                        />
+                      </div>
+                    )}
 
                    
                     
@@ -420,11 +510,11 @@ function PageContent() {
                         onChange={(v) => updateEntry(e.id, { calculationType: v, created: false })}
                         options={CALCULATION_OPTIONS}
                       />
-                      {e.calculationType === "forecast" && (
+                      {isForecastCalculation(e.calculationType) && (
                         <div className="mt-2 text-xs text-gray-500">
-                          Safety stock = forecast per hari kerja × Constanta (days). Dihitung
-                          otomatis oleh job harian forecasting (lihat hasilnya di System Settings →
-                          Automation). Constanta tetap wajib diisi.
+                          Safety stock memakai hasil Demand Forecasting untuk tiap Uniq, tanpa
+                          Constanta. Dihitung otomatis oleh job forecasting (lihat hasilnya di
+                          System Settings → Automation).
                         </div>
                       )}
                        <div className="lg:col-span-2 flex items-end mt-10">

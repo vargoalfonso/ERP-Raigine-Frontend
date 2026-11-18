@@ -18,6 +18,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import {
   ClockCircleOutlined,
+  DownloadOutlined,
   SaveOutlined,
   SearchOutlined,
   UndoOutlined,
@@ -37,6 +38,7 @@ import {
   useGetSafetyStockQuery,
   useGetStockdaysQuery,
 } from "@/lib/api/system-settings/api";
+import { downloadScheduleResults } from "@/lib/utils/forecastScheduleExport";
 
 type DomainMeta = {
   domain: ForecastDomain;
@@ -322,16 +324,40 @@ export default function AutomationSettingsPanel({ canUpdate }: AutomationSetting
     }
   };
 
+  const handleDownloadResults = () => {
+    try {
+      const count = downloadScheduleResults(data ?? []);
+      if (count === 0) {
+        messageApi.info("Belum ada jadwal yang bisa diunduh");
+        return;
+      }
+      messageApi.success(`Hasil jadwal training (${count} domain) berhasil diunduh`);
+    } catch (err) {
+      console.error("Download hasil jadwal gagal", err);
+      messageApi.error("Gagal mengunduh hasil jadwal training");
+    }
+  };
+
   return (
     <div className="rounded-2xl bg-white shadow-sm border border-gray-100 overflow-hidden">
       {contextHolder}
-      <div className="bg-blue-50 rounded-t-2xl px-5 py-4 border-b">
-        <div className="text-lg font-semibold text-gray-900">Automation</div>
-        <div className="text-sm text-gray-500">
-          Jadwal training Demand Forecasting untuk DN dan PRL. Jadwal ini dibaca oleh script
-          forecasting, dan hasilnya dipakai Safety Stock &amp; Stockdays dengan kalkulasi
-          &quot;Demand Forecasting&quot;.
+      <div className="bg-blue-50 rounded-t-2xl px-5 py-4 border-b flex items-start justify-between gap-4">
+        <div>
+          <div className="text-lg font-semibold text-gray-900">Automation</div>
+          <div className="text-sm text-gray-500">
+            Jadwal training Demand Forecasting untuk DN dan PRL. Jadwal ini dibaca oleh script
+            forecasting, dan hasilnya dipakai Safety Stock &amp; Stockdays dengan kalkulasi
+            &quot;Demand Forecasting&quot;.
+          </div>
         </div>
+        <Button
+          icon={<DownloadOutlined />}
+          onClick={handleDownloadResults}
+          disabled={isLoading || isError || !(data && data.length > 0)}
+          className="shrink-0"
+        >
+          Download Hasil
+        </Button>
       </div>
 
       <div className="p-5 space-y-4">
