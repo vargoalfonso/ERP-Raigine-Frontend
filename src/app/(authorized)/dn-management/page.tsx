@@ -475,13 +475,27 @@ export default function DnManagementPage() {
     return `${base}?size=140x140&margin=0&data=${q}`;
   }
 
+  // Logo PT. Matra Roda Piranti (public/logo-matra-roda-piranti.png).
+  const logoSrc =
+    (typeof window !== "undefined" ? window.location.origin : "") +
+    "/logo-matra-roda-piranti.png";
+
   const buildDnPageHtml = (
     dn: ProcurementDnRecord,
     printedAtLabel: string,
   ): string => {
     const dnNumber = String(dn.dn_number ?? "-").trim() || "-";
-    const supplierName =
+    const storedSupplierName =
       dn.supplier?.supplier_name ?? dn.supplier_name ?? "-";
+    // DN Subcon: nama SubCon sama dengan yang tampil di list (Master Supplier Item subcon).
+    const supplierName =
+      String(dn.type ?? "").toUpperCase() === "SC"
+        ? resolveSubconSupplierName({
+            storedName: storedSupplierName,
+            uniqCodes: (dn.items ?? []).map((item) => item.item_uniq_code),
+            supplierItems: supplierItemsQuery.data ?? [],
+          })
+        : storedSupplierName;
     const supplierAddress = dn.supplier?.full_address ?? "-";
     const dnDate = formatIdDate(dn.created_at);
     const deliveryDate = formatIdDate(dn.incoming_date);
@@ -520,11 +534,11 @@ export default function DnManagementPage() {
               <div class="b">${escapeHtml(partNumber)}</div>
               <div class="muted">${escapeHtml(partName)}</div>
             </td>
-            <td class="c">${escapeHtml(packing).toUpperCase()}</td>
+            <td class="c pack">${escapeHtml(packing).toUpperCase()}</td>
             <td class="c">-</td>
             <td class="c">${escapeHtml(uom)}</td>
-            <td class="r">${formatIdNumber(snp)}</td>
-            <td class="r">${formatIdNumber(orderKbn, orderKbn % 1 === 0 ? 0 : 2)}</td>
+            <td class="r">${snp > 0 ? formatIdNumber(snp) : "-"}</td>
+            <td class="r">${snp > 0 ? formatIdNumber(orderKbn, orderKbn % 1 === 0 ? 0 : 2) : "-"}</td>
             <td class="r">${formatIdNumber(orderUnit)}</td>
           </tr>`;
       })
@@ -536,7 +550,7 @@ export default function DnManagementPage() {
           <div class="top">
             <div class="brand">
               <div class="logo">
-                <div class="logo-mark">MRP</div>
+                <img src="${escapeHtml(logoSrc)}" alt="PT. Matra Roda Piranti" />
               </div>
               <div>
                 <div class="brand-name">PT. MATRA RODA PIRANTI</div>
@@ -576,7 +590,7 @@ export default function DnManagementPage() {
                 <th style="width:36px">NO.</th>
                 <th style="width:70px">UNIQ</th>
                 <th>PART NUMBER /<br/>PART NAME</th>
-                <th style="width:80px">PACKING</th>
+                <th style="width:96px">PACKING</th>
                 <th style="width:70px">DROP<br/>ZONE</th>
                 <th style="width:50px">UNIT</th>
                 <th style="width:60px">SNP</th>
@@ -587,7 +601,8 @@ export default function DnManagementPage() {
             <tbody>${rowsHtml || `<tr><td colspan="9" class="c muted">Tidak ada item.</td></tr>`}</tbody>
             <tfoot>
               <tr>
-                <td colspan="7" class="r b">Total</td>
+                <td colspan="6"></td>
+                <td class="r b">Total</td>
                 <td class="r b">${formatIdNumber(totalKbn, totalKbn % 1 === 0 ? 0 : 2)}</td>
                 <td class="r b">${formatIdNumber(totalUnit)}</td>
               </tr>
@@ -647,7 +662,8 @@ export default function DnManagementPage() {
     dnList: ProcurementDnRecord[],
     dateLabel: string,
   ): string => {
-    const printedAtLabel = dateLabel;
+    // PRINT DATE = tanggal dokumen dicetak (hari ini), mis. "18 November 2026".
+    const printedAtLabel = formatIdDate(dayjs().format("YYYY-MM-DD"));
     const body = dnList
       .map((dn) => buildDnPageHtml(dn, printedAtLabel))
       .join("\n");
@@ -661,10 +677,11 @@ export default function DnManagementPage() {
             html, body { margin: 0; padding: 0; background: #eef2f7; color: #111827; font-family: Arial, Helvetica, sans-serif; }
             .page { padding: 18px; page-break-after: always; }
             .page:last-child { page-break-after: auto; }
-            .frame { background: #fff; border: 2px solid #111827; border-radius: 4px; padding: 14px 16px; }
+            .frame { background: #fff; border: 2px solid #111827; border-radius: 4px; padding: 12px 14px; margin-right: 2px; }
             .top { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: flex-start; }
             .brand { display: flex; align-items: center; gap: 10px; }
-            .logo { width: 42px; height: 42px; border: 1.5px solid #b91c1c; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #b91c1c; font-weight: 800; font-size: 11px; }
+            .logo { width: 46px; height: 46px; display: flex; align-items: center; justify-content: center; }
+            .logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
             .brand-name { font-size: 15px; font-weight: 800; color: #111827; }
             .brand-sub { font-size: 10px; color: #4b5563; margin-top: 2px; }
             .top-right { text-align: right; }
@@ -673,28 +690,34 @@ export default function DnManagementPage() {
             .dn-print-date { font-size: 10px; color: #4b5563; margin-top: 2px; }
             .dn-status { margin-top: 4px; }
             .dn-status > span { border: 1px solid #111827; padding: 2px 8px; font-size: 10px; font-weight: 700; display: inline-block; }
-            .info { display: grid; grid-template-columns: 1fr 150px 1fr; gap: 12px; margin-top: 14px; padding: 10px 4px; border-top: 1px solid #111827; }
-            .info-col { display: flex; flex-direction: column; gap: 6px; font-size: 11px; }
+            .info { display: grid; grid-template-columns: 1fr 130px 1fr; gap: 12px; margin-top: 10px; padding: 8px 4px; border-top: 1px solid #111827; }
+            .info-col { display: flex; flex-direction: column; gap: 4px; font-size: 10.5px; }
             .info-row { display: grid; grid-template-columns: 68px 8px 1fr; align-items: baseline; }
             .info-row-multi .value { white-space: normal; }
             .info-row .label { color: #4b5563; font-weight: 600; letter-spacing: 0.03em; }
             .info-row .sep { color: #4b5563; }
             .info-row .value { color: #111827; }
             .info-qr { display: flex; align-items: center; justify-content: center; }
-            .info-qr img { width: 130px; height: 130px; border: 1px solid #111827; padding: 4px; background: #fff; }
+            .info-qr img { width: 112px; height: 112px; border: 1px solid #111827; padding: 3px; background: #fff; }
             .b { font-weight: 700; }
             .muted { color: #4b5563; font-size: 10px; margin-top: 1px; }
-            .items { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 10.5px; }
-            .items th, .items td { border: 1px solid #111827; padding: 4px 6px; vertical-align: middle; }
-            .items thead th { background: #f3f4f6; text-align: center; font-weight: 700; }
+            .items { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; }
+            .items th, .items td { border: 1px solid #111827; padding: 2px 5px; vertical-align: middle; }
+            .items thead { display: table-header-group; }
+            .items tfoot { display: table-row-group; }
+            .items tr { page-break-inside: avoid; }
+            .items thead th { background: #eef2f9; text-align: center; font-weight: 700; padding: 4px 5px; }
+            .items td.pack { font-size: 8px; word-break: break-all; }
+            .items td .b { font-size: 9px; line-height: 1.15; }
+            .items td .muted { font-size: 8px; line-height: 1.15; margin-top: 0; }
             .items td.c { text-align: center; }
             .items td.r { text-align: right; }
-            .items tfoot td { background: #f9fafb; }
-            .remarks { border: 1px solid #111827; border-top: none; padding: 10px 8px; min-height: 42px; }
+            .items tfoot td { background: #fff; }
+            .remarks { border: 1px solid #111827; border-top: none; padding: 6px 8px; min-height: 34px; }
             .remarks-label { font-size: 10px; color: #4b5563; }
-            .plant-tag { text-align: center; font-size: 10px; color: #4b5563; margin: 10px 0 6px; }
+            .plant-tag { text-align: center; font-size: 10px; color: #4b5563; margin: 8px 0 5px; }
             .sig-grid { display: grid; grid-template-columns: 1fr 1.5fr 1.4fr; gap: 8px; }
-            .sig-box { border: 1px solid #111827; padding: 8px; display: flex; flex-direction: column; font-size: 10px; min-height: 110px; }
+            .sig-box { border: 1px solid #111827; padding: 6px 8px; display: flex; flex-direction: column; font-size: 10px; min-height: 92px; }
             .sig-title { text-align: center; font-weight: 700; letter-spacing: 0.04em; border-bottom: 1px solid #d1d5db; padding-bottom: 4px; }
             .sig-area { flex: 1; }
             .sig-date { border-top: 1px solid #d1d5db; padding-top: 4px; }
@@ -705,10 +728,10 @@ export default function DnManagementPage() {
             .sig-dates { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid #d1d5db; padding-top: 4px; }
             .sig-dates > div + div { border-left: 1px solid #d1d5db; padding-left: 6px; }
             .sig-box-supplier .sig-title { margin-bottom: 4px; }
-            .page-number { text-align: right; font-size: 10px; color: #4b5563; margin-top: 8px; }
+            .page-number { text-align: right; font-size: 10px; color: #4b5563; margin-top: 6px; }
             @page { size: A4; margin: 8mm; }
             @media print {
-              body { background: #fff; }
+              html, body { background: #fff; }
               .page { padding: 0; }
               .frame { border-width: 1.5px; }
               .no-print { display: none; }
@@ -775,17 +798,7 @@ export default function DnManagementPage() {
   };
 
   /** Prints through a hidden iframe so the app is never navigated away. */
-  const handlePrintKanban = () => {
-    if (kanbanCards.length === 0) {
-      window.alert("Tidak ada kanban yang bisa dicetak untuk DN ini.");
-      return;
-    }
-
-    const html = buildKanbanCardsHtml(
-      kanbanCards,
-      `Kanban Transport - ${barcodeData?.dn_number ?? "DN"}`
-    );
-
+  const printHtmlViaIframe = (html: string) => {
     const iframe = document.createElement("iframe");
     iframe.style.position = "fixed";
     iframe.style.right = "0";
@@ -810,6 +823,41 @@ export default function DnManagementPage() {
     };
 
     document.body.appendChild(iframe);
+  };
+
+  const handlePrintKanban = () => {
+    if (kanbanCards.length === 0) {
+      window.alert("Tidak ada kanban yang bisa dicetak untuk DN ini.");
+      return;
+    }
+
+    const html = buildKanbanCardsHtml(
+      kanbanCards,
+      `Kanban Transport - ${barcodeData?.dn_number ?? "DN"}`
+    );
+    printHtmlViaIframe(html);
+  };
+
+  /**
+   * Mencetak Delivery Note (dokumen A4: header, info supplier, tabel item, remarks,
+   * kotak tanda tangan) untuk DN yang sedang dibuka di modal. Formatnya sama dengan
+   * Export DN per hari.
+   */
+  const handlePrintDn = () => {
+    if (!barcodeData) return;
+    // Detail DN dilengkapi data dari list (alamat & lead time supplier) bila belum ada.
+    const listDn = (listQuery.data?.data ?? []).find(
+      (d) => String(d.id) === String(barcodeDnId),
+    );
+    const dn = {
+      ...(listDn ?? {}),
+      ...barcodeData,
+      supplier: {
+        ...(listDn?.supplier ?? {}),
+        ...(barcodeData.supplier ?? {}),
+      },
+    } as ProcurementDnRecord;
+    printHtmlViaIframe(buildDnPrintHtml([dn], String(dn.dn_number ?? "DN")));
   };
 
   const handlePrintBarcodes = async () => {
@@ -1543,6 +1591,14 @@ export default function DnManagementPage() {
                 onClick={() => setBarcodeDnId(null)}
               >
                 Cancel
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center rounded-lg border border-blue-600 bg-white px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 disabled:opacity-50"
+                onClick={handlePrintDn}
+                disabled={!barcodeData}
+              >
+                Print DN
               </button>
               <button
                 type="button"
