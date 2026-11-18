@@ -466,6 +466,10 @@ export type CreateStockdaysRequest = {
   status?: StatusType;
 };
 
+export type CreateStockdaysBulkRequest = {
+  items: CreateStockdaysRequest[];
+};
+
 export type StockdaysRecord = {
   id: string;
   inventory_type: string;
@@ -1556,6 +1560,19 @@ export const systemSettingsSlice = apiSlice.injectEndpoints({
     }),
 
     // Stockdays
+    createStockdaysBulk: builder.mutation<
+      { message?: string },
+      CreateStockdaysBulkRequest
+    >({
+      query: (body) => ({
+        url: `${ROUTES.stockdays}/bulk`,
+        method: "POST",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      invalidatesTags: [{ type: "SystemSettingsStockdays", id: "LIST" }],
+    }),
+
     createStockdays: builder.mutation<
       { message?: string; data?: StockdaysRecord },
       CreateStockdaysRequest
@@ -1873,6 +1890,7 @@ export const {
   useGetSafetyStockByIdQuery,
   useCalculateSafetyStockQuery,
   useCreateStockdaysMutation,
+  useCreateStockdaysBulkMutation,
   useUpdateStockdaysMutation,
   useDeleteStockdaysMutation,
   useGetStockdaysQuery,

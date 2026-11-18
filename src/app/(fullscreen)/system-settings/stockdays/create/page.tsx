@@ -1,7 +1,7 @@
 "use client";
 
 import React, { Suspense, useEffect, useMemo, useState } from "react";
-import { Button, Card, Form, InputNumber, Select, Tag, message } from "antd";
+import { Button, Card, Form, InputNumber, Modal, Select, Tag, message } from "antd";
 import { LeftOutlined, SaveOutlined } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -10,12 +10,28 @@ import { getApiErrorMessage } from "@/lib/api/error";
 import { useGetBomListQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 
+import { ALL_UNIQ_VALUE, isAllUniq, uniqsInCategory } from "@/lib/utils/safetyStockEntries";
 import {
+  effectiveConstanta,
+  expandStockdaysEntries,
+  isDataHistoryCalculation,
+} from "@/lib/utils/stockdaysEntries";
+
+import {
+  useCreateStockdaysBulkMutation,
   useCreateStockdaysMutation,
+  useGetKanbanStandardsQuery,
   useGetStockdaysQuery,
   useGetStockdaysByIdQuery,
   useUpdateStockdaysMutation,
 } from "@/lib/api/system-settings/api";
+
+const TYPE_LABELS: Record<string, string> = {
+  raw_material: "Raw Material",
+  finished_goods: "Finished Goods",
+  indirect_material: "Indirect Raw Material",
+  subcon: "SubCon",
+};
 
 type FormValues = {
   inventoryType?: string;
@@ -64,6 +80,8 @@ function PageContent() {
 
   const [createStockdays, createState] = useCreateStockdaysMutation();
   const [updateStockdays, updateState] = useUpdateStockdaysMutation();
+  const [createStockdaysBulk, bulkState] = useCreateStockdaysBulkMutation();
+  const [modal, modalContextHolder] = Modal.useModal();
   const { data: stockdaysList } = useGetStockdaysQuery(undefined, {
     skip: !apiEnabled,
   });
@@ -78,6 +96,9 @@ function PageContent() {
   );
 
   const selectedInventoryType = Form.useWatch("inventoryType", form);
+  const selectedCalculationType = Form.useWatch("calculationType", form);
+  const selectedItemCode = Form.useWatch("itemCode", form);
+  const isDataHistory = isDataHistoryCalculation(selectedCalculationType);
 
   // Uniq options are sourced entirely from the Bill of Material (see uniqOptions).
 
@@ -107,6 +128,71 @@ function PageContent() {
     });
   }, [bomIndex, form, selectedInventoryType, stockdaysList]);
 
+  // Kanban Standard aktif = uniq Finished Goods.
+  const { data: kanbanStandards } = useGetKanbanStandardsQuery(undefined, {
+    skip: !apiEnabled,
+  });
+  const finishedGoodsUniqs = useMemo(
+    () =>
+      (kanbanStandards ?? [])
+        .filter((k) => String(k?.status ?? "").toLowerCase() === "active")
+        .map((k) => String(k?.item_uniq_code ?? "").trim())
+        .filter(Boolean),
+    [kanbanStandards],
+  );
+
+  // Uniq untuk "All Uniq in <Type>": hanya yang KATEGORInya sama dengan Type dan
+  // belum punya parameter Stockdays untuk Type itu.
+  const availableUniqsFor = (inventoryType: string): string[] => {
+    const used = new Set<string>();
+    for (const item of stockdaysList ?? []) {
+      const uniq = String(item?.item_code ?? "").trim();
+      const type = String(item?.inventory_type ?? "").trim();
+      if (!uniq) continue;
+      if (type && type !== inventoryType) continue;
+      used.add(uniq);
+    }
+    return uniqsInCategory(
+      inventoryType,
+      { materialSpecByUniq: bomIndex.materialSpecByUniq, finishedGoodsUniqs },
+      bomIndex.options.map((option) => option.value).filter((u) => !used.has(u)),
+    );
+  };
+
+  const categoryUniqs = useMemo(
+    () =>
+      selectedInventoryType
+        ? uniqsInCategory(
+            selectedInventoryType,
+            { materialSpecByUniq: bomIndex.materialSpecByUniq, finishedGoodsUniqs },
+            uniqOptions.map((option) => String(option.value)),
+          )
+        : [],
+    [selectedInventoryType, bomIndex.materialSpecByUniq, finishedGoodsUniqs, uniqOptions],
+  );
+
+  const typeLabel = TYPE_LABELS[String(selectedInventoryType ?? "")] ?? "";
+
+  // Uniq yang akan diambil "All Uniq" untuk Type terpilih (uniq manual di Summary tidak ikut).
+  const allUniqTargetCount = useMemo(
+    () =>
+      categoryUniqs.filter(
+        (u) => !entries.some((e) => e.inventoryType === selectedInventoryType && e.itemCode === u),
+      ).length,
+    [categoryUniqs, entries, selectedInventoryType],
+  );
+
+  // Pilihan Uniq: "All Uniq in <Type> (N)" di paling atas (hanya saat membuat baru).
+  const uniqSelectOptions = useMemo(() => {
+    if (isEditMode || isReadOnly || !selectedInventoryType || categoryUniqs.length === 0) {
+      return uniqOptions;
+    }
+    return [
+      { value: ALL_UNIQ_VALUE, label: `All Uniq in ${typeLabel} (${categoryUniqs.length})` },
+      ...uniqOptions,
+    ];
+  }, [isEditMode, isReadOnly, selectedInventoryType, categoryUniqs, typeLabel, uniqOptions]);
+
   const detailQuery = useGetStockdaysByIdQuery(id, {
     skip: !apiEnabled || !id,
   });
@@ -126,11 +212,11 @@ function PageContent() {
 
   useEffect(() => {
     const currentItemCode = form.getFieldValue("itemCode");
-    if (currentItemCode && uniqOptions.some((option) => option.value === currentItemCode)) {
+    if (currentItemCode && uniqSelectOptions.some((option) => option.value === currentItemCode)) {
       return;
     }
     form.setFieldsValue({ itemCode: uniqOptions[0]?.value });
-  }, [form, uniqOptions]);
+  }, [form, uniqOptions, uniqSelectOptions]);
 
   const handleAdd = async () => {
     try {
@@ -153,7 +239,8 @@ function PageContent() {
           inventoryType: values.inventoryType!,
           itemCode: values.itemCode!,
           calculationType: values.calculationType!,
-          constanta: values.constanta,
+          // Data history tidak memakai Constanta (dikirim 100 = 100% daily usage).
+          constanta: effectiveConstanta(values.calculationType, values.constanta),
         },
       ]);
 
@@ -179,7 +266,7 @@ function PageContent() {
             inventory_type: values.inventoryType,
             item_code: values.itemCode,
             calculation_type: values.calculationType,
-            constanta: values.constanta,
+            constanta: effectiveConstanta(values.calculationType, values.constanta),
             status: "active",
           },
         }).unwrap();
@@ -189,14 +276,32 @@ function PageContent() {
         return;
       }
 
-      for (const item of entries) {
-        await createStockdays({
-          inventory_type: item.inventoryType,
-          item_code: item.itemCode,
-          calculation_type: item.calculationType,
-          constanta: item.constanta,
-          status: "active",
-        }).unwrap();
+      // "All Uniq" dikembangkan ke semua uniq sekategori; uniq manual didahulukan.
+      const expanded = expandStockdaysEntries(entries, availableUniqsFor);
+      if (!expanded.ok) {
+        message.error(expanded.error);
+        return;
+      }
+      const { items, allUniqCount } = expanded;
+
+      if (allUniqCount > 0) {
+        const confirmed = await new Promise<boolean>((resolve) => {
+          modal.confirm({
+            title: `Terapkan ke ${allUniqCount} Uniq?`,
+            content: `Parameter akan dibuat untuk ${allUniqCount} Uniq yang belum punya parameter Stockdays (sesuai kategori Type-nya). Total ${items.length} parameter akan disimpan.`,
+            okText: "Terapkan",
+            cancelText: "Batal",
+            onOk: () => resolve(true),
+            onCancel: () => resolve(false),
+          });
+        });
+        if (!confirmed) return;
+      }
+
+      if (items.length === 1) {
+        await createStockdays(items[0]).unwrap();
+      } else {
+        await createStockdaysBulk({ items }).unwrap();
       }
 
       message.success("Stockdays created");
@@ -208,6 +313,7 @@ function PageContent() {
 
   return (
     <div className="min-h-screen bg-[#EEF5FF]">
+      {modalContextHolder}
       <div className="bg-white border-b">
         <div className="px-6 py-4">
           <div className="flex justify-between items-center">
@@ -230,7 +336,7 @@ function PageContent() {
                   type="primary"
                   icon={<SaveOutlined />}
                   loading={
-                    createState.isLoading || updateState.isLoading
+                    createState.isLoading || updateState.isLoading || bulkState.isLoading
                   }
                   onClick={handleSave}
                 >
@@ -324,12 +430,20 @@ function PageContent() {
                     label="Uniq"
                     name="itemCode"
                     rules={[{ required: true }]}
+                    extra={
+                      isAllUniq(selectedItemCode) ? (
+                        <span className="text-blue-700">
+                          Diterapkan ke {allUniqTargetCount} Uniq kategori {typeLabel} yang belum punya
+                          parameter.
+                        </span>
+                      ) : undefined
+                    }
                   >
                     <Select
                       placeholder="Select Uniq"
                       showSearch
                       optionFilterProp="label"
-                      options={uniqOptions}
+                      options={uniqSelectOptions}
                       virtual
                       listHeight={320}
                     />
@@ -337,15 +451,17 @@ function PageContent() {
 
                  
 
-                  <Form.Item
-                    label="Constanta (days)"
-                    name="constanta"
-                  >
-                    <InputNumber
-                      className="w-full"
-                      min={0}
-                    />
-                  </Form.Item>
+                  {!isDataHistory && (
+                    <Form.Item
+                      label="Constanta (days)"
+                      name="constanta"
+                    >
+                      <InputNumber
+                        className="w-full"
+                        min={0}
+                      />
+                    </Form.Item>
+                  )}
 
                  
                    <Form.Item
@@ -392,13 +508,26 @@ function PageContent() {
                   className="border rounded p-3 flex justify-between"
                 >
                   <div>
-                    <div>{item.itemCode}</div>
+                    <div>
+                      {isAllUniq(item.itemCode)
+                        ? `All Uniq in ${TYPE_LABELS[item.inventoryType] ?? item.inventoryType} (${
+                            availableUniqsFor(item.inventoryType).filter(
+                              (u) =>
+                                !entries.some(
+                                  (e) => e.inventoryType === item.inventoryType && e.itemCode === u,
+                                ),
+                            ).length
+                          })`
+                        : item.itemCode}
+                    </div>
                     <div className="text-xs text-gray-500">
                       {item.inventoryType} - {item.calculationType}
                     </div>
                   </div>
 
-                  <div>{item.constanta ?? 0}</div>
+                  <div>
+                    {isDataHistoryCalculation(item.calculationType) ? "-" : item.constanta ?? 0}
+                  </div>
                 </div>
               ))}
 
