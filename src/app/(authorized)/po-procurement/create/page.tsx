@@ -779,8 +779,23 @@ function CreatePoProcurementPageContent() {
       ];
     }
 
+    // Entry dengan beberapa supplier: tampilkan nama-nama suppliernya (bukan
+    // "Multiple") supaya bisa dibaca dan dicari lewat search.
+    const supplierLabel = (row: (typeof budgetRowsForPeriod)[number]) => {
+      const seen = new Set<string>();
+      const names: string[] = [];
+      for (const sup of row.suppliers ?? []) {
+        const name = String(sup.supplierName ?? "").trim();
+        const key = name.toLowerCase();
+        if (!name || key === "multiple" || seen.has(key)) continue;
+        seen.add(key);
+        names.push(name);
+      }
+      return names.length > 0 ? names.join(", ") : String(row.supplier || "-");
+    };
+
     const options = budgetRowsForPeriod.map((row) => ({
-      label: `${row.poBudgetRef ?? row.id ?? row.key} - ${row.uniq} - ${row.supplier}`,
+      label: `${row.poBudgetRef ?? row.id ?? row.key} - ${row.uniq} - ${supplierLabel(row)}`,
       value: Number(row.id ?? row.key),
     }));
     // Pilihan yang belum ada di daftar (mis. daftar masih dimuat) tetap tampil
