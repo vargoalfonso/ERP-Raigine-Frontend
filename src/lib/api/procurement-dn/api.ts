@@ -1,4 +1,4 @@
-import { apiSlice } from "@/lib/api/instance";
+ import { apiSlice } from "@/lib/api/instance";
 import { unwrapBackendData } from "@/lib/api/utils/unwrap";
 import type { ApiResponse } from "@/types";
 
@@ -74,6 +74,22 @@ export type CreateProcurementDnRequest = {
   delivery_total?: number;
   // [dn-remark] Catatan/keterangan tambahan level DN.
   remark?: string | null;
+};
+
+/** Item yang boleh diedit pada DN yang belum diproses: hanya qty dan tanggal incoming. */
+export type UpdateProcurementDnItemRequest = {
+  id: number;
+  qty: number;
+  /** dd/MM/yyyy; kosong = tidak diubah */
+  incoming_date?: string;
+};
+
+/** PUT /delivery-notes/:id. Field header yang tidak dikirim tidak berubah. */
+export type UpdateProcurementDnRequest = {
+  wo_number?: string;
+  delivery_to?: number;
+  delivery_total?: number;
+  items?: UpdateProcurementDnItemRequest[];
 };
 
 export type ProcurementDnItem = {
@@ -152,6 +168,7 @@ export type ProcurementDnRecord = {
   material_grade?: string; 
   // "Pengiriman ke ..." berikut total pengiriman terjadwal (= cycle_time supplier).
   delivery_to?: number;
+  wo_number?: string;
   delivery_total?: number;
   // [dn-remark] Catatan/keterangan tambahan level DN. Dipakai untuk menampilkan kolom Remark di daftar DN.
   remark?: string;
@@ -293,6 +310,7 @@ const toDnRecord = (raw: unknown): ProcurementDnRecord => {
     items: Array.isArray(record.items) ? record.items.map(toDnItem) : [],
     delivery_to: toNumber(record.delivery_to),
     delivery_total: toNumber(record.delivery_total),
+    wo_number: toText(record.wo_number),
     // [dn-remark] Ambil dari beberapa kemungkinan nama field backend.
     remark:
       toText((record as UnknownRecord).remark) ??
@@ -420,6 +438,24 @@ export const procurementDnApiSlice = apiSlice
       invalidatesTags: [{ type: TAG, id: "LIST" }],
     }),
 
+    updateProcurementDn: builder.mutation<
+      ApiResponse<ProcurementDnRecord>,
+      { id: string | number; body: UpdateProcurementDnRequest }
+    >({
+      query: ({ id, body }) => ({
+        url: `/delivery-notes/${encodeURIComponent(String(id))}`,
+        method: "PUT",
+        body,
+        meta: { useAuthorization: true, contentType: "application/json" },
+      }),
+      transformResponse: (response: unknown) =>
+        ok(toDnRecord(parseObjectResponse<unknown>(response)), "Updated"),
+      invalidatesTags: (_result, _error, { id }) => [
+        { type: TAG, id: "LIST" },
+        { type: TAG, id: String(id) },
+      ],
+    }),
+
     previewProcurementDn: builder.mutation<ApiResponse<ProcurementDnPreview>, ProcurementDnPreviewRequest>({
       query: ({ po_number, period }) => {
         const params = new URLSearchParams({ po_number: String(po_number ?? "").trim() });
@@ -455,6 +491,7 @@ export const procurementDnApiSlice = apiSlice
         meta: { useAuthorization: true, contentType: "application/json" },
       }),
       transformResponse: (response: unknown) => ok(toDnRecord(parseObjectResponse<unknown>(response))),
+      providesTags: (_result, _error, id) => [{ type: TAG, id: String(id) }],
     }),
 
     getProcurementDnHistory: builder.query<ApiResponse<ProcurementDnHistoryLog[]>, string | number>({
@@ -475,5 +512,6 @@ export const {
   useLazyScanProcurementDnPackingQuery,
   useGetProcurementDnByIdQuery,
   useCreateProcurementDnMutation,
+  useUpdateProcurementDnMutation,
   useGetProcurementDnHistoryQuery,
 } = procurementDnApiSlice;

@@ -1,12 +1,32 @@
 "use client";
 
-import React, { Suspense, useEffect, useMemo, useState } from "react";
-import { Button, Input, message } from "antd";
-import { DownloadOutlined, EditOutlined, LeftOutlined } from "@ant-design/icons";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Button, DatePicker, Input, InputNumber, Modal, message } from "antd";
+import dayjs, { type Dayjs } from "dayjs";
+import { EditOutlined, LeftOutlined, PrinterOutlined } from "@ant-design/icons";
 import { useParams, useRouter } from "next/navigation";
 import { apiBaseUrl } from "@/lib/api/instance";
 import { getApiErrorMessage } from "@/lib/api/error";
-import { useGetProcurementDnByIdQuery, useLazyScanProcurementDnPackingQuery, useGetProcurementDnHistoryQuery } from "@/lib/api/procurement-dn/api";
+import {
+  useGetProcurementDnByIdQuery,
+  useLazyScanProcurementDnPackingQuery,
+  useGetProcurementDnHistoryQuery,
+  useListProcurementDnsQuery,
+  useUpdateProcurementDnMutation,
+  type ProcurementDnRecord,
+} from "@/lib/api/procurement-dn/api";
+import { useGetBomTreeQuery } from "@/lib/api/bom/api";
+import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
+import { buildDnDocumentHtml } from "@/lib/utils/dnDocumentHtml";
+import { useListSupplierItemsQuery } from "@/lib/api/supplier-items/api";
+import { resolveSubconSupplierName } from "@/lib/utils/subconSupplier";
+import {
+  buildPackingLabelsHtml,
+  formatLabelQty,
+  normalizeQrSrc,
+  printHtmlViaIframe,
+  type PackingLabel,
+} from "@/lib/utils/dnPackingLabel";
 
 type DetailTabId = "details";
 
@@ -277,6 +297,213 @@ function DnRawMaterialDetailPageContent() {
     return Array.from(map.values());
   }, [items]);
 
+  // ---- Label packing (QR + PO, UNIQ, Packing, Nama Supplier, Qty, Packing No) ----
+  const isSubconDn = String(detail?.type ?? header.type ?? "").toUpperCase() === "SC";
+  const supplierItemsQuery = useListSupplierItemsQuery(undefined, { skip: !apiEnabled || !isSubconDn });
+  const [runLabelScan] = useLazyScanProcurementDnPackingQuery(); // terpisah dari form scan di halaman ini
+  const labelQrCache = useRef<Record<string, string>>({});
+  const [labelBusy, setLabelBusy] = useState(false);
+  const [labelPreview, setLabelPreview] = useState<PackingLabel | null>(null);
+
+  // Packing yang punya nomor; urutan "i dari N" mengikuti daftar ini (sama dengan modal di list DN).
+  const labelItems = useMemo(
+    () => items.filter((item) => item.packingNumber && item.packingNumber !== "-"),
+    [items],
+  );
+
+  const labelSupplierName = useMemo(() => {
+    const stored = String(header.supplier ?? "-");
+    if (!isSubconDn) return stored;
+    // DN Subcon: nama SubCon sama dengan yang tampil di list (Master Supplier Item subcon).
+    return resolveSubconSupplierName({
+      storedName: stored,
+      uniqCodes: items.map((item) => item.uniq),
+      supplierItems: supplierItemsQuery.data ?? [],
+    });
+  }, [header.supplier, isSubconDn, items, supplierItemsQuery.data]);
+
+  const buildLabel = async (packingNumber: string): Promise<PackingLabel | null> => {
+    const index = labelItems.findIndex((item) => item.packingNumber === packingNumber);
+    if (index < 0) return null;
+    const item = labelItems[index];
+
+    let qr = normalizeQrSrc(item.qr) || labelQrCache.current[packingNumber] || "";
+    if (!qr && apiEnabled) {
+      try {
+        const res = await runLabelScan({ packing: packingNumber, qty: 1 }).unwrap();
+        qr = normalizeQrSrc(res.data?.qr);
+        if (qr) labelQrCache.current[packingNumber] = qr;
+      } catch {
+        // QR tidak tersedia untuk packing ini; dilewati oleh pemanggil
+      }
+    }
+    if (!qr) return null;
+
+    return {
+      qr,
+      uniq: item.uniq,
+      packing: item.packingNumber,
+      po: String(header.poNumber ?? "-"),
+      supplier: labelSupplierName,
+      qty: formatLabelQty(item.totalQty, item.uom),
+      packingNo: `${index + 1} dari ${labelItems.length}`,
+    };
+  };
+
+  const printLabels = async (packingNumbers: string[]) => {
+    if (packingNumbers.length === 0) {
+      message.warning("Tidak ada packing untuk dicetak");
+      return;
+    }
+    setLabelBusy(true);
+    try {
+      const labels: PackingLabel[] = [];
+      for (const packingNumber of packingNumbers) {
+        const label = await buildLabel(packingNumber);
+        if (label) labels.push(label);
+      }
+      if (labels.length === 0) {
+        message.warning("QR belum tersedia untuk packing ini");
+        return;
+      }
+      if (labels.length < packingNumbers.length) {
+        message.warning(`${packingNumbers.length - labels.length} packing dilewati karena QR belum tersedia`);
+      }
+      printHtmlViaIframe(buildPackingLabelsHtml(labels, { title: `Packing Labels - ${header.dnCode}` }));
+    } finally {
+      setLabelBusy(false);
+    }
+  };
+
+  const openLabelPreview = async (packingNumber: string) => {
+    setLabelBusy(true);
+    try {
+      const label = await buildLabel(packingNumber);
+      if (!label) {
+        message.warning("QR belum tersedia untuk packing ini");
+        return;
+      }
+      setLabelPreview(label);
+    } finally {
+      setLabelBusy(false);
+    }
+  };
+
+  // ---- Dokumen DN (format A4 seperti Delivery Note: header, tabel item, tanda tangan di footer) ----
+  // Nomor & nama part tidak dibawa item DN, jadi diambil dari BOM.
+  const bomTreeQuery = useGetBomTreeQuery(undefined, { skip: !apiEnabled });
+  const bomIndex = useMemo(
+    () => buildBomUniqIndex(bomTreeQuery.data?.data ?? []),
+    [bomTreeQuery.data?.data],
+  );
+  // Alamat & lead time supplier: bila belum ada di detail DN, dilengkapi dari list DN.
+  const needSupplierInfo = Boolean(detail) && !detail?.supplier?.full_address;
+  const dnListQuery = useListProcurementDnsQuery(undefined, { skip: !apiEnabled || !needSupplierInfo });
+
+  const handlePrintDnDocument = () => {
+    if (!detail) {
+      message.warning("Data DN belum tersedia");
+      return;
+    }
+    const listDn = (dnListQuery.data?.data ?? []).find(
+      (d) => String(d.id) === String(detail.id) || (d.dn_number && d.dn_number === detail.dn_number),
+    );
+    const dn = {
+      ...(listDn ?? {}),
+      ...detail,
+      supplier: { ...(listDn?.supplier ?? {}), ...(detail.supplier ?? {}) },
+    } as ProcurementDnRecord;
+    printHtmlViaIframe(
+      buildDnDocumentHtml(
+        [dn],
+        {
+          partNumberByUniq: bomIndex.partNumberByUniq,
+          partNameByUniq: bomIndex.partNameByUniq,
+          supplierItems: supplierItemsQuery.data ?? [],
+        },
+        String(dn.dn_number ?? header.dnCode),
+      ),
+    );
+  };
+
+  // ---- Edit DN ----
+  // Hanya DN yang belum diproses (belum ada scan incoming/outgoing) yang bisa diedit, dan hanya:
+  // Pengiriman ke / total, WO Number (Subcon), serta qty dan tanggal incoming per item.
+  // PO, supplier, daftar item, nomor packing, dan QR tidak berubah (label yang sudah dicetak tetap valid).
+  const [updateDn, updateDnState] = useUpdateProcurementDnMutation();
+  const [editOpen, setEditOpen] = useState(false);
+  const [editDeliveryTo, setEditDeliveryTo] = useState<number | null>(null);
+  const [editDeliveryTotal, setEditDeliveryTotal] = useState<number | null>(null);
+  const [editWoNumber, setEditWoNumber] = useState("");
+  const [editItems, setEditItems] = useState<
+    Array<{ id: number; uniq: string; packing: string; uom: string; qty: number | null; date: Dayjs | null }>
+  >([]);
+
+  const editLockedReason = useMemo(() => {
+    if (!detail) return "Data DN belum tersedia";
+    if (String(detail.status ?? "").toLowerCase() !== "active") return `DN berstatus ${detail.status ?? "-"}, tidak bisa diedit`;
+    const processed = (detail.items ?? []).some((item) => {
+      const check = String(item.check ?? "").trim().toLowerCase();
+      return (
+        Number(item.qty_received ?? 0) > 0 ||
+        Number(item.qty_sent ?? 0) > 0 ||
+        Boolean(item.received_at) ||
+        (check !== "" && check !== "progress")
+      );
+    });
+    return processed ? "DN sudah diproses (ada scan incoming/outgoing), tidak bisa diedit" : "";
+  }, [detail]);
+
+  const openEdit = () => {
+    if (!detail || editLockedReason) {
+      message.warning(editLockedReason || "Data DN belum tersedia");
+      return;
+    }
+    setEditDeliveryTo(detail.delivery_to != null ? Number(detail.delivery_to) : null);
+    setEditDeliveryTotal(detail.delivery_total != null ? Number(detail.delivery_total) : null);
+    setEditWoNumber(String(detail.wo_number ?? ""));
+    setEditItems(
+      (detail.items ?? []).map((item) => {
+        const parsed = item.date_incoming ? dayjs(item.date_incoming) : null;
+        return {
+          id: Number(item.id),
+          uniq: item.item_uniq_code ?? "-",
+          packing: item.packing_number ?? "-",
+          uom: item.uom ?? "",
+          qty: item.quantity != null ? Number(item.quantity) : null,
+          date: parsed && parsed.isValid() ? parsed : null,
+        };
+      }),
+    );
+    setEditOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (editItems.some((item) => !item.qty || item.qty <= 0 || !Number.isInteger(item.qty))) {
+      message.error("Qty setiap item harus bilangan bulat lebih dari 0");
+      return;
+    }
+    try {
+      await updateDn({
+        id: dnNumber,
+        body: {
+          delivery_to: editDeliveryTo ?? undefined,
+          delivery_total: editDeliveryTotal ?? undefined,
+          ...(isSubconDn ? { wo_number: editWoNumber.trim() } : {}),
+          items: editItems.map((item) => ({
+            id: item.id,
+            qty: Number(item.qty),
+            incoming_date: item.date ? item.date.format("DD/MM/YYYY") : undefined,
+          })),
+        },
+      }).unwrap();
+      message.success("DN berhasil diperbarui");
+      setEditOpen(false);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, "Gagal memperbarui DN"));
+    }
+  };
+
   const incomingLogs = useMemo(() => {
     if (!detail) return [] as Array<{ packing: string; uniq: string; qty: number; quality: string; receivedAt: string }>;
     return (detail.items ?? [])
@@ -483,7 +710,12 @@ function DnRawMaterialDetailPageContent() {
                     <div className="text-sm font-semibold text-gray-900">Packing Lists</div>
                     <div className="text-xs text-gray-500">View and print packing labels</div>
                   </div>
-                  <div className="text-xs text-gray-500">{packingLists.length} packings</div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-xs text-gray-500">{packingLists.length} packings</div>
+                    <Button size="small" loading={labelBusy} onClick={() => printLabels(labelItems.map((item) => item.packingNumber))}>
+                      Print All Labels
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="mt-4 space-y-3">
@@ -498,14 +730,16 @@ function DnRawMaterialDetailPageContent() {
                           <button
                             type="button"
                             className="inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                            onClick={() => message.info(`Packing ${p.packingNumber}`)}
+                            onClick={() => openLabelPreview(p.packingNumber)}
+                            disabled={labelBusy}
                           >
                             View
                           </button>
                           <button
                             type="button"
-                            className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                            onClick={() => window.print()}
+                            className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                            onClick={() => printLabels([p.packingNumber])}
+                            disabled={labelBusy}
                           >
                             Print
                           </button>
@@ -722,17 +956,126 @@ function DnRawMaterialDetailPageContent() {
 
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-white">
               <Button onClick={() => router.push(`/dn-management?tab=${encodeURIComponent(tab)}`)}>Close</Button>
-              <Button icon={<EditOutlined />} onClick={() => router.push(`/dn-management/create?tab=${encodeURIComponent(tab)}&id=${encodeURIComponent(String(dnNumber))}`)}>
+              <Button icon={<EditOutlined />} onClick={openEdit} disabled={!detail || Boolean(editLockedReason)} title={editLockedReason || undefined}>
                 Edit DN
               </Button>
               <Button onClick={() => message.info("Scan incoming from this page uses the form above")}>Scan Incoming</Button>
-              <Button type="primary" icon={<DownloadOutlined />} onClick={() => window.print()}>
-                Download DN Detail
+              <Button type="primary" icon={<PrinterOutlined />} onClick={handlePrintDnDocument} disabled={!detail}>
+                Print DN
               </Button>
             </div>
           </div>
         </div>
       </div>
+      <Modal
+        open={editOpen}
+        title={`Edit DN ${header.dnCode}`}
+        onCancel={() => setEditOpen(false)}
+        onOk={handleSaveEdit}
+        okText="Simpan"
+        cancelText="Batal"
+        confirmLoading={updateDnState.isLoading}
+        width={760}
+        destroyOnClose
+      >
+        <div className="text-xs text-gray-500 mb-3">
+          Hanya qty dan tanggal incoming item yang bisa diubah. PO, supplier, daftar item, nomor packing, dan QR tetap.
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <label className="block">
+            <div className="text-xs text-gray-500 mb-1">Pengiriman ke</div>
+            <InputNumber className="w-full" min={0} precision={0} value={editDeliveryTo} onChange={(v) => setEditDeliveryTo(v)} />
+          </label>
+          <label className="block">
+            <div className="text-xs text-gray-500 mb-1">Dari total pengiriman</div>
+            <InputNumber className="w-full" min={0} precision={0} value={editDeliveryTotal} onChange={(v) => setEditDeliveryTotal(v)} />
+          </label>
+          {isSubconDn ? (
+            <label className="block">
+              <div className="text-xs text-gray-500 mb-1">WO Number</div>
+              <Input value={editWoNumber} onChange={(e) => setEditWoNumber(e.target.value)} />
+            </label>
+          ) : null}
+        </div>
+
+        <div className="mt-4 overflow-x-auto rounded-xl border border-gray-100">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-gray-600">
+              <tr>
+                <th className="text-left font-medium px-3 py-2">Uniq</th>
+                <th className="text-left font-medium px-3 py-2">Packing</th>
+                <th className="text-left font-medium px-3 py-2">Qty</th>
+                <th className="text-left font-medium px-3 py-2">Incoming Date</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {editItems.map((item, index) => (
+                <tr key={item.id}>
+                  <td className="px-3 py-2 font-medium text-gray-900">{item.uniq}</td>
+                  <td className="px-3 py-2 text-xs text-gray-500">{item.packing}</td>
+                  <td className="px-3 py-2">
+                    <InputNumber
+                      min={1}
+                      precision={0}
+                      value={item.qty}
+                      addonAfter={item.uom || undefined}
+                      onChange={(v) =>
+                        setEditItems((prev) => prev.map((row, i) => (i === index ? { ...row, qty: v } : row)))
+                      }
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <DatePicker
+                      format="DD/MM/YYYY"
+                      value={item.date}
+                      allowClear={false}
+                      onChange={(v) =>
+                        setEditItems((prev) => prev.map((row, i) => (i === index ? { ...row, date: v } : row)))
+                      }
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(labelPreview)}
+        title="Label Packing"
+        onCancel={() => setLabelPreview(null)}
+        footer={[
+          <Button key="close" onClick={() => setLabelPreview(null)}>
+            Close
+          </Button>,
+          <Button
+            key="print"
+            type="primary"
+            onClick={() => labelPreview && printHtmlViaIframe(buildPackingLabelsHtml([labelPreview], { title: `Packing Label - ${labelPreview.packing}`, columns: 2 }))}
+          >
+            Print Label
+          </Button>,
+        ]}
+        width={360}
+      >
+        {labelPreview ? (
+          <div className="rounded-2xl border border-gray-100 bg-white p-3">
+            <div className="flex items-center justify-center rounded-xl border border-gray-100 bg-gray-50 p-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={labelPreview.qr} alt="QR" className="h-40 w-40 object-contain" />
+            </div>
+            <div className="mt-3 space-y-1 text-xs text-gray-500">
+              <div>PO: <span className="font-semibold text-gray-900">{labelPreview.po}</span></div>
+              <div>UNIQ: <span className="font-semibold text-gray-900">{labelPreview.uniq}</span></div>
+              <div>Packing: <span className="font-semibold text-gray-900">{labelPreview.packing}</span></div>
+              <div>Nama Supplier: <span className="font-semibold text-gray-900">{labelPreview.supplier}</span></div>
+              <div>Qty: <span className="font-semibold text-gray-900">{labelPreview.qty}</span></div>
+              <div>Packing No: <span className="font-semibold text-gray-900">{labelPreview.packingNo}</span></div>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }
