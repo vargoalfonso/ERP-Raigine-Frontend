@@ -165,6 +165,38 @@ const normalizePaginatedResponse = <T,>(response: unknown): Paginated<T> => {
   };
 };
 
+// Backend membatasi /customer-orders maksimal 100 baris per request (limit lebih besar
+// dipotong diam-diam), jadi satu request `limit: 200` hanya memuat 100 data pertama.
+// Helper ini mengambil semua halaman sampai habis.
+const CUSTOMER_ORDERS_PAGE_SIZE = 100;
+const CUSTOMER_ORDERS_MAX_PAGES = 1000;
+
+const fetchAllCustomerOrders = async (
+  fetchWithBQ: (arg: {
+    url: string;
+    method: string;
+    params: Record<string, unknown>;
+    meta: Record<string, unknown>;
+  }) => PromiseLike<{ data?: unknown; error?: unknown }>,
+  documentType: string,
+): Promise<{ items: unknown[] } | { error: unknown }> => {
+  const all: unknown[] = [];
+  for (let page = 1; page <= CUSTOMER_ORDERS_MAX_PAGES; page += 1) {
+    const result = await fetchWithBQ({
+      url: "/customer-orders",
+      method: "GET",
+      params: { document_type: documentType, page, limit: CUSTOMER_ORDERS_PAGE_SIZE },
+      meta: { useAuthorization: true, contentType: "application/json" },
+    });
+    if (result.error) return { error: result.error };
+    const { items, pagination } = normalizePaginatedResponse<unknown>(result.data);
+    all.push(...items);
+    if (items.length === 0) break;
+    if (pagination.total > 0 ? all.length >= pagination.total : items.length < CUSTOMER_ORDERS_PAGE_SIZE) break;
+  }
+  return { items: all };
+};
+
 export type CustomerOrderDocumentType = "PO" | "DN" | "SO" | string;
 
 export type CustomerOrderItemRecord = {
@@ -378,36 +410,27 @@ export const customerOrdersApiSlice = apiSlice.injectEndpoints({
 
     // Keep existing UI hooks (PO/DN/SO) backed by /customer-orders
     listCustomerPos: builder.query<CustomerPoDto[], void>({
-      query: () => ({
-        url: "/customer-orders",
-        method: "GET",
-        params: { document_type: "PO", page: 1, limit: 200 },
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) =>
-        normalizePaginatedResponse<unknown>(response).items.map((r) => toCustomerPoDto(toCustomerOrderRecord(r))),
+      queryFn: async (_arg, _api, _extraOptions, fetchWithBQ) => {
+        const result = await fetchAllCustomerOrders(fetchWithBQ as never, "PO");
+        if ("error" in result) return { error: result.error as never };
+        return { data: result.items.map((r) => toCustomerPoDto(toCustomerOrderRecord(r))) };
+      },
     }),
 
     listDeliveryNotes: builder.query<DeliveryNoteDto[], void>({
-      query: () => ({
-        url: "/customer-orders",
-        method: "GET",
-        params: { document_type: "DN", page: 1, limit: 200 },
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) =>
-        normalizePaginatedResponse<unknown>(response).items.map((r) => toDeliveryNoteDto(toCustomerOrderRecord(r))),
+      queryFn: async (_arg, _api, _extraOptions, fetchWithBQ) => {
+        const result = await fetchAllCustomerOrders(fetchWithBQ as never, "DN");
+        if ("error" in result) return { error: result.error as never };
+        return { data: result.items.map((r) => toDeliveryNoteDto(toCustomerOrderRecord(r))) };
+      },
     }),
 
     listSpecialOrders: builder.query<SpecialOrderDto[], void>({
-      query: () => ({
-        url: "/customer-orders",
-        method: "GET",
-        params: { document_type: "SO", page: 1, limit: 200 },
-        meta: { useAuthorization: true, contentType: "application/json" },
-      }),
-      transformResponse: (response: unknown) =>
-        normalizePaginatedResponse<unknown>(response).items.map((r) => toSpecialOrderDto(toCustomerOrderRecord(r))),
+      queryFn: async (_arg, _api, _extraOptions, fetchWithBQ) => {
+        const result = await fetchAllCustomerOrders(fetchWithBQ as never, "SO");
+        if ("error" in result) return { error: result.error as never };
+        return { data: result.items.map((r) => toSpecialOrderDto(toCustomerOrderRecord(r))) };
+      },
     }),
 
     createCustomerPo: builder.mutation<CustomerOrderRecord, CreateCustomerPoRequest>({

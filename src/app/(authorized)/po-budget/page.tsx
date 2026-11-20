@@ -29,7 +29,12 @@ import {
 import { getCurrentUserDisplayName } from "@/lib/utils/currentUser";
 import type { ApiResponse } from "@/types";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
-import { pickSupplierItemsByType } from "@/lib/utils/supplierItemType";
+import {
+  isSubconMaterialSpec,
+  normalizeSupplierItemTypeKey,
+  pickSupplierItemsByType,
+  type SupplierItemTypeKey,
+} from "@/lib/utils/supplierItemType";
 import {
   buildBulkChildRowsFromPrlDetail,
   buildSingleChildRowsFromPrlDetail,
@@ -362,6 +367,9 @@ function dedupeSupplierOptions(options: SupplierOption[]): SupplierOption[] {
   }
   return result;
 }
+
+// Label placeholder pada baris supplier bila UNIQ belum punya supplier terdaftar.
+const NO_SUPPLIER_DATA_LABEL = "Tidak ada data";
 
 function normalizeSupplierItemType(value: unknown): BudgetTabId | null {
   const raw = String(value ?? "")
@@ -2123,7 +2131,7 @@ export default function PoBudgetPage() {
       return [
         {
           id: `auto-1`,
-          supplier: "Tidak ada data",
+          supplier: NO_SUPPLIER_DATA_LABEL,
           qty: totalQty,
           percentage: 100,
         },
@@ -2200,7 +2208,17 @@ export default function PoBudgetPage() {
     // Pencarian di atas (uniq / kode sebango) tidak memfilter tipe, jadi di sini
     // supplier dibatasi ke kategori tab aktif: tab Raw hanya supplier raw,
     // tab Subcon hanya supplier subcon, tab Indirect hanya supplier indirect.
-    const picked = pickSupplierItemsByType(sorted, activeTab);
+    //
+    // Tipe efektif diambil dari child itu sendiri (budgetCategory / spec BOM),
+    // BUKAN hanya dari tab aktif: child indirect (mis. BN6-4, M14) yang tampil
+    // saat tab Raw aktif sebelumnya kehilangan supplier indirect-nya dan jatuh ke
+    // "Tidak ada data". Tab aktif hanya dipakai bila child tidak punya tipe.
+    const childSpecType = (row.materialSpec ?? {}) as { type_material?: unknown };
+    const effectiveType: SupplierItemTypeKey =
+      row.budgetCategory === "subcon" || isSubconMaterialSpec(row.materialSpec)
+        ? "subcon"
+        : (normalizeSupplierItemTypeKey(childSpecType.type_material) ?? activeTab);
+    const picked = pickSupplierItemsByType(sorted, effectiveType);
 
     // [material-code-lookup] Satu supplier cukup satu kali per child. Supplier
     // yang terdaftar dua kali (mis. baris lama berbasis nama master + baris
@@ -2296,7 +2314,7 @@ export default function PoBudgetPage() {
       return [
         {
           id: `auto-1`,
-          supplier: "Tidak ada data",
+          supplier: NO_SUPPLIER_DATA_LABEL,
           qty: totalQty,
           percentage: 100,
         },
@@ -3555,16 +3573,31 @@ export default function PoBudgetPage() {
     const selectedPrl = selectedBulkPrl;
 
     // Only consider non-header (child) rows for validation and payload
-    const nonHeaderItems = bulkItems.filter((item) => !item.isHeader);
+    const allNonHeaderItems = bulkItems.filter((item) => !item.isHeader);
 
-    const missingSupplierItems = nonHeaderItems.filter(
-      (item) => item.suppliers.length === 0,
-    );
-    if (missingSupplierItems.length > 0) {
+    // Baris supplier yang DIABAIKAN (tidak divalidasi, tidak dikirim): supplier
+    // kosong / placeholder "Tidak ada data" dan qty 0 (backend menolak qty <= 0
+    // dengan 422). Item yang tidak punya baris supplier valid dilewati, bukan
+    // memblokir simpan; jumlahnya dilaporkan setelah simpan.
+    const isSendableSupplierLine = (line: BulkSupplierLine) => {
+      const value = String(line.supplier ?? "").trim();
+      return (
+        value !== "" &&
+        value !== NO_SUPPLIER_DATA_LABEL &&
+        Number(line.qty || 0) > 0
+      );
+    };
+    const nonHeaderItems = allNonHeaderItems
+      .map((item) => ({
+        ...item,
+        suppliers: item.suppliers.filter(isSendableSupplierLine),
+      }))
+      .filter((item) => item.suppliers.length > 0);
+    const skippedItemCount = allNonHeaderItems.length - nonHeaderItems.length;
+
+    if (nonHeaderItems.length === 0) {
       message.warning(
-        `Add at least one supplier for UNIQ: ${missingSupplierItems
-          .map((item) => item.uniq)
-          .join(", ")}`,
+        "Tidak ada item dengan supplier dan qty lebih dari 0 untuk disimpan",
       );
       return;
     }
@@ -3676,7 +3709,10 @@ export default function PoBudgetPage() {
           : [];
 
         if (errors.length > 0) {
-          message.error(errors.join("; "));
+          message.error({
+            content: Array.from(new Set(errors.map(String))).join("; "),
+            duration: 8,
+          });
           if (created <= 0) return;
         }
 
@@ -3688,9 +3724,17 @@ export default function PoBudgetPage() {
       message.success(
         `Bulk ${getBudgetTypeLabel(activeTab)} PO Budget saved successfully (${created} entr${created === 1 ? "y" : "ies"} created)`,
       );
+      if (skippedItemCount > 0) {
+        message.info(
+          `${skippedItemCount} item dilewati karena belum punya supplier atau qty-nya 0`,
+        );
+      }
       setBulkOpen(false);
     } catch (error) {
-      message.error(getApiErrorMessage(error, "Failed to save bulk PO Budget"));
+      message.error({
+        content: getApiErrorMessage(error, "Failed to save bulk PO Budget"),
+        duration: 8,
+      });
       console.error(error);
     }
   };

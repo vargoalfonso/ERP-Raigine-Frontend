@@ -37,6 +37,18 @@ const parseObjectResponse = <T,>(response: unknown): T | null => {
   return null;
 };
 
+// total_pages dari blok `pagination` (top-level, data, atau data.data).
+const parseTotalPages = (response: unknown): number | undefined => {
+  if (!isRecord(response)) return undefined;
+  const candidates = [response, response.data, isRecord(response.data) ? response.data.data : undefined];
+  for (const candidate of candidates) {
+    if (!isRecord(candidate) || !isRecord(candidate.pagination)) continue;
+    const n = Number(candidate.pagination.total_pages ?? candidate.pagination.totalPages);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  }
+  return undefined;
+};
+
 export type CustomerRecord = {
   row_id?: number;
   id?: string | number;
@@ -85,13 +97,39 @@ export const customerApiSlice = apiSlice
   .injectEndpoints({
     endpoints: (builder) => ({
       listCustomers: builder.query<CustomerRecord[], Record<string, unknown> | void>({
-        query: (params) => ({
-          url: "/customers",
-          method: "GET",
-          params: params ? params : undefined,
-          meta: { useAuthorization: true, contentType: "application/json" },
-        }),
-        transformResponse: (response: unknown) => parseArrayResponse<CustomerRecord>(response),
+        // Backend hanya mengirim 10 customer bila `limit` tidak diisi. Tanpa `limit`
+        // eksplisit, ambil SEMUA halaman (10.000/halaman = batas backend); dengan
+        // `limit` eksplisit perilaku lama (satu request) dipertahankan.
+        queryFn: async (params, _api, _extraOptions, fetchWithBQ) => {
+          const meta = { useAuthorization: true, contentType: "application/json" };
+          const hasLimit =
+            params?.limit !== undefined && params?.limit !== null && String(params.limit) !== "";
+
+          if (hasLimit) {
+            const result = await fetchWithBQ({ url: "/customers", method: "GET", params: params ?? undefined, meta });
+            if (result.error) return { error: result.error };
+            return { data: parseArrayResponse<CustomerRecord>(result.data) };
+          }
+
+          const pageSize = 10000;
+          const maxPages = 1000;
+          const all: CustomerRecord[] = [];
+          for (let page = 1; page <= maxPages; page += 1) {
+            const result = await fetchWithBQ({
+              url: "/customers",
+              method: "GET",
+              params: { ...(params ?? {}), limit: pageSize, page },
+              meta,
+            });
+            if (result.error) return { error: result.error };
+            const rows = parseArrayResponse<CustomerRecord>(result.data);
+            all.push(...rows);
+            const totalPages = parseTotalPages(result.data);
+            if (rows.length === 0) break;
+            if (totalPages ? page >= totalPages : rows.length < pageSize) break;
+          }
+          return { data: all };
+        },
         providesTags: (result) => {
           const base: Array<{ type: typeof TAG; id: "LIST" | string | number }> = [
             { type: TAG, id: "LIST" },

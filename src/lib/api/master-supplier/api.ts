@@ -301,11 +301,12 @@ export const supplierItemsApiSlice = apiSlice
         queryFn: async (params, _api, _extraOptions, fetchWithBQ) => {
           const qs = { type: params?.type, status: params?.status, search: params?.search };
           const items: unknown[] = [];
-          let page = 1;
-          const maxPages = 50; // safety cap: 50 * 100 = 5,000 rows
+          const pageSize = 10000; // batas maksimum per request di backend
+          const maxPages = 1000; // pengaman terhadap respons yang salah
 
-          while (page <= maxPages) {
-            const url = `/supplier-items${buildQueryString({ ...qs, limit: "100", page: String(page) })}`;
+          // Ambil SEMUA halaman (sebelumnya 100 x 50 = maks 5.000 baris, sisanya terpotong).
+          for (let page = 1; page <= maxPages; page += 1) {
+            const url = `/supplier-items${buildQueryString({ ...qs, limit: String(pageSize), page: String(page) })}`;
             const result = await fetchWithBQ({
               url,
               method: "GET",
@@ -313,10 +314,11 @@ export const supplierItemsApiSlice = apiSlice
             });
             if (result.error) return { error: result.error };
 
-            items.push(...parseArrayResponse<unknown>(result.data));
+            const rows = parseArrayResponse<unknown>(result.data);
+            items.push(...rows);
             const { totalPages } = parseListPagination(result.data);
-            if (!totalPages || page >= totalPages) break;
-            page += 1;
+            if (rows.length === 0) break;
+            if (totalPages ? page >= totalPages : rows.length < pageSize) break;
           }
 
           return { data: items.map(normalizeSupplierItem) };
