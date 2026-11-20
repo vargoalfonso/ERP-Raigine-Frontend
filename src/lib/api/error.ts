@@ -9,21 +9,79 @@ const getStringField = (value: unknown, key: string): string | undefined => {
   return typeof field === "string" && field.trim() ? field : undefined;
 };
 
+// Label ramah untuk nama field JSON dari backend (respons 422 hanya membawa nama
+// field "daun", mis. "quantity", tanpa nomor baris).
+const FIELD_LABELS: Record<string, string> = {
+  quantity: "Qty supplier",
+  supplier_name: "Nama supplier",
+  supplier_id: "ID supplier",
+  suppliers: "Supplier",
+  items: "Item",
+  uniq_code: "UNIQ",
+  child_uniq_code: "UNIQ child",
+  prl_id: "PRL",
+  prl_item_id: "PRL item",
+  period: "Periode",
+  budget_subtype: "Tipe budget",
+  po_type: "Tipe PO",
+  sales_plan: "Sales plan",
+  qty_per_uniq: "Qty per UNIQ",
+  weight_kg: "Berat (kg)",
+  uom: "UoM",
+};
+
+const labelForField = (field: string): string => {
+  const key = field.trim();
+  if (!key) return "";
+  if (FIELD_LABELS[key]) return FIELD_LABELS[key];
+  const spaced = key.replace(/[_.]+/g, " ").trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+};
+
+// "quantity harus lebih besar dari 0" -> "Qty supplier harus lebih besar dari 0".
+// Pesan backend sudah memuat nama field di depannya, jadi cukup diganti dengan label
+// (tidak diberi awalan "field: " lagi supaya tidak dobel).
+const formatValidationItem = (field: string, message: string): string => {
+  const f = field.trim();
+  const m = message.trim();
+  if (!f || f === "_") return m;
+  const label = labelForField(f);
+  if (!m) return label;
+  if (m.toLowerCase().startsWith(f.toLowerCase())) return `${label}${m.slice(f.length)}`;
+  return `${label}: ${m}`;
+};
+
+const MAX_VALIDATION_LINES = 5;
+
+// Error validasi (422) bisa ada di `value.errors` (body langsung) atau
+// `value.data.errors` (body dibungkus { status, message, data: { errors } }).
 const getValidationErrors = (value: unknown): string | undefined => {
-  if (!isRecord(value) || !Array.isArray(value.errors)) return undefined;
+  if (!isRecord(value)) return undefined;
+  const list = Array.isArray(value.errors)
+    ? value.errors
+    : isRecord(value.data) && Array.isArray(value.data.errors)
+      ? value.data.errors
+      : undefined;
+  if (!list) return undefined;
 
-  const messages = value.errors
-    .map((item) => {
-      if (typeof item === "string") return item.trim();
-      if (!isRecord(item)) return "";
-      const field = typeof item.field === "string" ? item.field.trim() : "";
-      const message = typeof item.message === "string" ? item.message.trim() : "";
-      if (field && message) return `${field}: ${message}`;
-      return message || field;
-    })
-    .filter(Boolean);
+  const counts = new Map<string, number>();
+  list.forEach((item) => {
+    let text = "";
+    if (typeof item === "string") text = item.trim();
+    else if (isRecord(item)) {
+      const field = typeof item.field === "string" ? item.field : "";
+      const message = typeof item.message === "string" ? item.message : "";
+      text = formatValidationItem(field, message);
+    }
+    if (text) counts.set(text, (counts.get(text) ?? 0) + 1);
+  });
 
-  return messages.length > 0 ? messages.join("; ") : undefined;
+  // Pesan yang sama berulang (satu per baris) digabung: "... (3 baris)".
+  const lines = Array.from(counts.entries()).map(([text, n]) => (n > 1 ? `${text} (${n} baris)` : text));
+  if (lines.length === 0) return undefined;
+  const shown = lines.slice(0, MAX_VALIDATION_LINES);
+  const rest = lines.length - shown.length;
+  return rest > 0 ? `${shown.join("; ")}; +${rest} kesalahan lainnya` : shown.join("; ");
 };
 
 /**
@@ -53,9 +111,10 @@ export const getApiErrorMessage = (error: unknown, fallback: string): string => 
     const data = (error as UnknownRecord).data;
     const dataValidationErrors = getValidationErrors(data);
     const dataMessage = getStringField(data, "message");
-    if (dataMessage && dataValidationErrors) {
-      const message = `${dataMessage}: ${dataValidationErrors}`;
-      return status ? `${message} (status ${String(status)})` : message;
+    if (dataValidationErrors) {
+      // Validasi gagal: tampilkan hanya daftar kesalahan yang mudah dibaca,
+      // tanpa "validation failed (status 422)" yang tidak membantu.
+      return `Data belum valid — ${dataValidationErrors}`;
     }
     if (dataMessage) return status ? `${dataMessage} (status ${String(status)})` : dataMessage;
 
