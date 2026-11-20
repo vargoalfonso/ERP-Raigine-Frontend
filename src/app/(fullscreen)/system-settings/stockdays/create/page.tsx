@@ -11,10 +11,12 @@ import { useGetBomListQuery } from "@/lib/api/bom/api";
 import { buildBomUniqIndex } from "@/lib/utils/bomUniq";
 
 import { ALL_UNIQ_VALUE, isAllUniq, uniqsInCategory } from "@/lib/utils/safetyStockEntries";
+import { isForecastCalculation } from "@/lib/utils/safetyStockEntries";
 import {
   effectiveConstanta,
   expandStockdaysEntries,
-  isDataHistoryCalculation,
+  hidesConstanta,
+  supportsForecastStockdays,
 } from "@/lib/utils/stockdaysEntries";
 
 import {
@@ -98,7 +100,8 @@ function PageContent() {
   const selectedInventoryType = Form.useWatch("inventoryType", form);
   const selectedCalculationType = Form.useWatch("calculationType", form);
   const selectedItemCode = Form.useWatch("itemCode", form);
-  const isDataHistory = isDataHistoryCalculation(selectedCalculationType);
+  const hideConstanta = hidesConstanta(selectedCalculationType);
+  const isForecast = isForecastCalculation(selectedCalculationType);
 
   // Uniq options are sourced entirely from the Bill of Material (see uniqOptions).
 
@@ -222,6 +225,11 @@ function PageContent() {
     try {
       const values = await form.validateFields();
 
+      if (isForecastCalculation(values.calculationType) && !supportsForecastStockdays(values.inventoryType)) {
+        message.warning("Demand Forecasting hanya untuk Raw Material dan Indirect Raw Material");
+        return;
+      }
+
       const duplicate = entries.find(
         (x) =>
           x.inventoryType === values.inventoryType &&
@@ -239,7 +247,7 @@ function PageContent() {
           inventoryType: values.inventoryType!,
           itemCode: values.itemCode!,
           calculationType: values.calculationType!,
-          // Data history tidak memakai Constanta (dikirim 100 = 100% daily usage).
+          // Data history dikirim 100 (= 100% daily usage); Demand Forecasting dikirim 0.
           constanta: effectiveConstanta(values.calculationType, values.constanta),
         },
       ]);
@@ -451,7 +459,7 @@ function PageContent() {
 
                  
 
-                  {!isDataHistory && (
+                  {!hideConstanta && (
                     <Form.Item
                       label="Constanta (days)"
                       name="constanta"
@@ -483,8 +491,19 @@ function PageContent() {
                             "Stockdats - DailyUsage = Stock / Daily Usage (Data history)",
                           value: "percentage",
                         },
+                        {
+                          label: "Demand Forecasting result for each Uniq",
+                          value: "forecast",
+                        },
                       ]}
                     />
+                    {isForecast && (
+                      <div className="mt-2 text-xs text-gray-500">
+                        Stock days memakai hasil Demand Forecasting: daily usage RM/IRM dijumlah
+                        dari semua FG yang memakainya di BOM, tanpa Constanta. Hanya untuk Raw
+                        Material dan Indirect Raw Material. Dihitung otomatis oleh job forecasting.
+                      </div>
+                    )}
                   </Form.Item>
                 </div>
                  <div className="flex items-end">
@@ -526,7 +545,7 @@ function PageContent() {
                   </div>
 
                   <div>
-                    {isDataHistoryCalculation(item.calculationType) ? "-" : item.constanta ?? 0}
+                    {hidesConstanta(item.calculationType) ? "-" : item.constanta ?? 0}
                   </div>
                 </div>
               ))}
