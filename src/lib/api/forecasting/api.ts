@@ -491,6 +491,14 @@ const unwrapList = <T,>(response: unknown): T[] => {
  * Satu baris hasil `GET /forecasting/inventory-plan`. Semua angka bisa `null`
  * (data belum lengkap -> lihat `note`). RM / Indirect RM sampai buy-not-buy,
  * FG / Subcon hanya sampai safety stock.
+ *
+ * Endpoint ini KHUSUS safety stock (uniq yang parameter safety stock-nya
+ * "forecast"). Arti field sejak 19 Nov 2026:
+ * - `safety_stock_qty` = `forecast_daily`, tanpa Constanta.
+ * - `threshold` = safety stock (10 bila safety stock <= 0).
+ * - `cycle_pengiriman` selalu `null` (tidak dipakai lagi).
+ * - `buy_not_buy` memakai `stock < threshold`.
+ * - RM / Indirect RM: `forecast_qty` = permintaan per bulan hasil akumulasi BOM.
  */
 export type InventoryPlanItem = {
   plan_date: string;
@@ -513,6 +521,36 @@ export type InventoryPlanItem = {
   kanbans_needed?: number | null;
   buy_qty?: number | null;
   note?: string | null;
+  unit?: string | null;
+  /** Jumlah FG yang memakai RM / Indirect RM ini di BOM. */
+  fg_total?: number | null;
+  /** Dari `fg_total`, berapa FG yang punya forecast. */
+  fg_with_forecast?: number | null;
+  created_at?: string | null;
+};
+
+/**
+ * Satu baris hasil `GET /forecasting/inventory-plan/stockdays`. Khusus RM /
+ * Indirect RM yang parameter stockdays-nya "forecast". Semua angka bisa `null`
+ * (lihat `note`).
+ */
+export type InventoryStockdaysItem = {
+  plan_date: string;
+  inventory_type: string;
+  uniq_code: string;
+  model_version_id?: string | null;
+  forecast_start?: string | null;
+  forecast_end?: string | null;
+  /** Permintaan per bulan, akumulasi dari semua FG yang memakainya di BOM. */
+  forecast_qty?: number | null;
+  working_days?: number | null;
+  daily_usage?: number | null;
+  stock_qty?: number | null;
+  stock_days?: number | null;
+  unit?: string | null;
+  fg_total?: number | null;
+  fg_with_forecast?: number | null;
+  note?: string | null;
   created_at?: string | null;
 };
 
@@ -524,7 +562,7 @@ export type GetInventoryPlanRequest = {
   plan_date?: string;
 };
 
-const buildInventoryPlanUrl = (req: GetInventoryPlanRequest): string => {
+const buildInventoryPlanQuery = (req: GetInventoryPlanRequest): string => {
   // uniq_code harus diulang (?uniq_code=A&uniq_code=B), bukan dipisah koma.
   const qs = new URLSearchParams();
   req.uniq_codes.forEach((u) => {
@@ -534,8 +572,14 @@ const buildInventoryPlanUrl = (req: GetInventoryPlanRequest): string => {
   if (req.inventory_type) qs.set("inventory_type", req.inventory_type);
   if (req.plan_date) qs.set("plan_date", req.plan_date);
   const q = qs.toString();
-  return `${FORECASTING_BASE}/inventory-plan${q ? `?${q}` : ""}`;
+  return q ? `?${q}` : "";
 };
+
+const buildInventoryPlanUrl = (req: GetInventoryPlanRequest): string =>
+  `${FORECASTING_BASE}/inventory-plan${buildInventoryPlanQuery(req)}`;
+
+const buildInventoryStockdaysUrl = (req: GetInventoryPlanRequest): string =>
+  `${FORECASTING_BASE}/inventory-plan/stockdays${buildInventoryPlanQuery(req)}`;
 
 const forecastingApi = apiSlice
   .enhanceEndpoints({
@@ -807,6 +851,14 @@ const forecastingApi = apiSlice
         }),
         transformResponse: (response: unknown) => unwrapList<InventoryPlanItem>(response),
       }),
+      getInventoryStockdays: builder.query<InventoryStockdaysItem[], GetInventoryPlanRequest>({
+        query: (req) => ({
+          url: buildInventoryStockdaysUrl(req),
+          method: "GET",
+          meta: AUTH_META,
+        }),
+        transformResponse: (response: unknown) => unwrapList<InventoryStockdaysItem>(response),
+      }),
       upsertForecastSchedule: builder.mutation<ForecastSchedule, UpsertForecastScheduleRequest>({
         query: ({ domain, ...body }) => ({
           url: `${FORECASTING_BASE}/schedules/${domain}`,
@@ -844,6 +896,7 @@ export const {
   useListForecastSchedulesQuery,
   useUpsertForecastScheduleMutation,
   useGetInventoryPlanQuery,
+  useGetInventoryStockdaysQuery,
 } = forecastingApi;
 
 export { forecastingApi };

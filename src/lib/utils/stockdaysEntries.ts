@@ -1,4 +1,4 @@
-import { ALL_UNIQ_VALUE, isAllUniq } from "@/lib/utils/safetyStockEntries";
+import { ALL_UNIQ_VALUE, isAllUniq, isForecastCalculation } from "@/lib/utils/safetyStockEntries";
 
 /**
  * Entri form Stockdays -> item yang dikirim ke API.
@@ -7,6 +7,9 @@ import { ALL_UNIQ_VALUE, isAllUniq } from "@/lib/utils/safetyStockEntries";
  *   Backend menghitung tipe ini sebagai daily usage x (constanta / 100), jadi yang
  *   dikirim adalah 100 (= 100% daily usage, yaitu Stock / Daily Usage apa adanya).
  *   Mengirim 0 akan membuat daily usage efektif 0 dan hasilnya salah.
+ * - "Demand Forecasting" (calculation_type = "forecast") juga tanpa Constanta (dikirim 0):
+ *   daily usage dan stock days dihitung job forecasting dari akumulasi BOM, sehingga
+ *   hanya berlaku untuk Raw Material dan Indirect Raw Material.
  * - Pilihan Uniq "All Uniq in <Type>" diterapkan ke semua uniq yang tersedia untuk
  *   KATEGORI tipe itu. Uniq yang dipilih manual didahulukan (tidak dobel).
  */
@@ -17,9 +20,21 @@ export const DATA_HISTORY_CONSTANTA = 100;
 export const isDataHistoryCalculation = (calculationType?: string) =>
   String(calculationType ?? "").trim() === DATA_HISTORY_CALCULATION;
 
+/** Tipe inventori yang boleh memakai stockdays "forecast" (kebutuhan dari akumulasi BOM). */
+export const FORECAST_STOCKDAYS_TYPES = ["raw_material", "indirect_material"];
+
+export const supportsForecastStockdays = (inventoryType?: string) =>
+  FORECAST_STOCKDAYS_TYPES.includes(String(inventoryType ?? "").trim());
+
+/** True bila tipe kalkulasi tidak memakai input Constanta di form. */
+export const hidesConstanta = (calculationType?: string) =>
+  isDataHistoryCalculation(calculationType) || isForecastCalculation(calculationType);
+
 /** Constanta yang dikirim ke API untuk sebuah entri. */
-export const effectiveConstanta = (calculationType?: string, constanta?: number) =>
-  isDataHistoryCalculation(calculationType) ? DATA_HISTORY_CONSTANTA : constanta;
+export const effectiveConstanta = (calculationType?: string, constanta?: number) => {
+  if (isForecastCalculation(calculationType)) return 0;
+  return isDataHistoryCalculation(calculationType) ? DATA_HISTORY_CONSTANTA : constanta;
+};
 
 export type StockdaysEntryLike = {
   inventoryType: string;
@@ -67,6 +82,12 @@ export function expandStockdaysEntries(
 
   for (let i = 0; i < entries.length; i += 1) {
     const e = entries[i];
+    if (isForecastCalculation(e.calculationType) && !supportsForecastStockdays(e.inventoryType)) {
+      return {
+        ok: false,
+        error: `Entry ${i + 1}: Demand Forecasting hanya untuk Raw Material dan Indirect Raw Material`,
+      };
+    }
     const constanta = effectiveConstanta(e.calculationType, e.constanta);
     const base = {
       inventory_type: e.inventoryType,
