@@ -34,12 +34,15 @@ import {
   type SupplierItemPayloadJSON,
   type SupplierItemPayloadMaterialSpecDetail,
   useCreateSupplierItemMutation,
+  type BomMaterialGrade,
   useCreateSupplierItemsByMaterialCodeMutation,
+  useGetBomMaterialGradesQuery,
   useGetUniqsByMaterialCodeQuery,
   useGetSupplierItemByIdQuery,
   useUpdateSupplierItemMutation,
 } from "@/lib/api/supplier-items/api";
 import { useListSuppliersQuery } from "@/lib/api/suppliers/api";
+import BomUsagePanel from "@/components/master-data/BomUsagePanel";
 import { useGetUomsQuery } from "@/lib/api/system-settings/api";
 import { useListWarehousesQuery } from "@/lib/api/warehouse/api";
 import {
@@ -640,6 +643,15 @@ function MasterSupplierCreatePageContent() {
   const readOnly = mode === "view";
   const itemId = String(searchParams.get("id") ?? "").trim();
   const isEditing = mode === "edit";
+  // [indirect-bulk] Section Indirect (mode create) memakai alur yang sama dengan
+  // Raw Material: dropdown hanya menampilkan Material Code, lalu muncul kotak
+  // bantuan berisi semua uniq yang ikut didaftarkan ke supplier. Mode edit/view
+  // tetap per-uniq karena yang diedit adalah satu baris supplier_item.
+  const indirectPickMode =
+    section === "indirect-raw-material" && mode === "create";
+  const materialPickMode = section === "raw-material" || indirectPickMode;
+  const bulkType: "raw_material" | "indirect" =
+    section === "indirect-raw-material" ? "indirect" : "raw_material";
   const useMaterialSpecOnlyAutofill =
     section === "raw-material" || section === "indirect-raw-material";
   const autofilled = Boolean(selectedUniqCode);
@@ -672,6 +684,7 @@ function MasterSupplierCreatePageContent() {
     setRawMasterPage(1);
     setAccumulatedRawMasters([]);
     setAccumulatedBomItems([]);
+    setSelectedMaterialCode("");
   }, [selectedSupplierId, section]);
 
   const { data: suppliers = [], isLoading: suppliersLoading } =
@@ -737,6 +750,62 @@ function MasterSupplierCreatePageContent() {
       }));
   }, [accumulatedRawMasters]);
 
+  // [fix-missing-uniq] Material code yang ada di BOM tapi BELUM punya Raw
+  // Material Master tidak akan pernah muncul di dropdown raw-material (sumbernya
+  // hanya master). Ambil dari BOM supaya tetap bisa dipilih & didaftarkan.
+  const bomGradesQuery = useGetBomMaterialGradesQuery(
+    { type: bulkType, search: debouncedUniqSearch || undefined },
+    { skip: !apiEnabled || !materialPickMode || !selectedSupplierId },
+  );
+  const bomOnlyGrades = useMemo<BomMaterialGrade[]>(() => {
+    const masterGrades = new Set(
+      accumulatedRawMasters
+        .map((m) => String(m.material_grade ?? "").trim().toUpperCase())
+        .filter(Boolean),
+    );
+    return (bomGradesQuery.data ?? []).filter(
+      (g) =>
+        !g.has_master &&
+        !masterGrades.has(String(g.material_grade).trim().toUpperCase()),
+    );
+  }, [bomGradesQuery.data, accumulatedRawMasters]);
+
+  // Grade yang bisa dipilih lewat opsi "dari BOM":
+  //  - raw      : hanya yang belum punya master
+  //  - indirect : semua material code indirect di BOM (tidak ada master)
+  const selectableGrades = useMemo<BomMaterialGrade[]>(
+    () => (indirectPickMode ? (bomGradesQuery.data ?? []) : bomOnlyGrades),
+    [indirectPickMode, bomGradesQuery.data, bomOnlyGrades],
+  );
+
+  const indirectSelectOptions = useMemo<BomOption[]>(
+    () =>
+      (bomGradesQuery.data ?? []).map((g) => ({
+        value: g.material_grade,
+        label: `${g.material_grade} (${g.uniq_count} uniq)`,
+        materialCode: g.material_grade,
+        partName: g.material_grade,
+        grade: g.material_grade,
+        type: "indirect",
+      })),
+    [bomGradesQuery.data],
+  );
+
+  const rawSelectOptions = useMemo<BomOption[]>(() => {
+    const taken = new Set(rawMaterialMasterOptions.map((o) => o.value));
+    const extra: BomOption[] = bomOnlyGrades
+      .filter((g) => !taken.has(g.material_grade))
+      .map((g) => ({
+        value: g.material_grade,
+        label: `${g.material_grade}`,
+        materialCode: g.material_grade,
+        partName: g.material_grade,
+        grade: g.material_grade,
+        type: "raw",
+      }));
+    return [...rawMaterialMasterOptions, ...extra];
+  }, [rawMaterialMasterOptions, bomOnlyGrades]);
+
   const BOM_PAGE_SIZE = 1000;
 
   const { data: bomPageResult, isFetching: bomSearchFetching } =
@@ -748,7 +817,7 @@ function MasterSupplierCreatePageContent() {
         page: uniqPage,
         limit: BOM_PAGE_SIZE,
       },
-      { skip: !apiEnabled },
+      { skip: !apiEnabled || indirectPickMode },
     );
 
   // Accumulate pages — replace on page 1, append on subsequent pages
@@ -799,13 +868,12 @@ function MasterSupplierCreatePageContent() {
   // supplier terpilih, tanpa memilih uniq satu per satu.
   const [selectedMaterialCode, setSelectedMaterialCode] = useState("");
   const [bulkUniqSelection, setBulkUniqSelection] = useState<string[]>([]);
-  const bulkEnabled =
-    section === "raw-material" && mode === "create" && !readOnly;
+  const bulkEnabled = materialPickMode && mode === "create" && !readOnly;
   const bulkUniqQuery = useGetUniqsByMaterialCodeQuery(
     {
       material_code: selectedMaterialCode,
       supplier_uuid: selectedSupplierId,
-      type: "raw_material",
+      type: bulkType,
     },
     {
       skip:
@@ -949,9 +1017,13 @@ function MasterSupplierCreatePageContent() {
         (option): option is BomOption & { _isParent: boolean } =>
           option !== null,
       );
+    // [fix-missing-uniq] Dedupe per UNIQ. Sebelumnya kunci dedupe memakai
+    // materialCode, sehingga beberapa uniq berbeda yang memakai material code
+    // / grade sama (mis. BM4 & BM6, atau beberapa pipa STKM-13AC) hanya
+    // menyisakan satu opsi dan sisanya "hilang" dari dropdown.
     const deduped = new Map<string, BomOption>();
     mapped.forEach((option) => {
-      const key = option.materialCode ? option.materialCode : option.value;
+      const key = option.value.trim().toUpperCase();
       if (!deduped.has(key)) deduped.set(key, option);
     });
     return Array.from(deduped.values());
@@ -981,6 +1053,23 @@ function MasterSupplierCreatePageContent() {
   };
 
   const formUniqCode = Form.useWatch("uniq_code", form);
+
+  // [traceability] Uniq yang dipakai untuk menampilkan FG / Child Part terkait.
+  //  - raw-material (bulk): semua uniq ber-material-code terpilih
+  //  - lainnya / edit / view: uniq yang sedang dipilih
+  const traceUniqCodes = useMemo<string[]>(() => {
+    if (bulkEnabled && selectedMaterialCode) {
+      return bulkUniqRows.map((row) => row.uniq_code);
+    }
+    const code = String(selectedUniqCode || formUniqCode || "").trim();
+    return code ? [code] : [];
+  }, [
+    bulkEnabled,
+    selectedMaterialCode,
+    bulkUniqRows,
+    selectedUniqCode,
+    formUniqCode,
+  ]);
 
   const selectedWarehouse = useMemo(
     () =>
@@ -1065,6 +1154,9 @@ function MasterSupplierCreatePageContent() {
   const handleSupplierChange = (value?: string) => {
     setSelectedSupplierId(value);
     setSelectedUniqCode("");
+    // Material code terpilih ikut dibersihkan supaya kotak bantuan (bulk) tidak
+    // tertinggal dari supplier sebelumnya.
+    setSelectedMaterialCode("");
     setSelectedBomOption(null);
     setSelectedBomLookupId("");
     form.setFieldsValue({
@@ -1288,7 +1380,7 @@ function MasterSupplierCreatePageContent() {
         const result = await createByMaterialCode({
           supplier_uuid: pickText(values.supplier_uuid),
           material_code: selectedMaterialCode,
-          type: "raw_material",
+          type: bulkType,
           warehouse_uuid: pickText(values.warehouse_uuid) || undefined,
           warehouse_name: selectedWarehouse?.label,
           quantity: String(values.quantity ?? 0),
@@ -1621,12 +1713,18 @@ function MasterSupplierCreatePageContent() {
                           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-12">
                             <Form.Item
                               className="md:col-span-2 xl:col-span-6"
-                              label="UNIQ Code"
+                              label={
+                                materialPickMode
+                                  ? "Material (Material Code)"
+                                  : "UNIQ Code"
+                              }
                               name="uniq_code"
                               rules={[
                                 {
                                   required: true,
-                                  message: "Please select a UNIQ Code",
+                                  message: materialPickMode
+                                    ? "Please select a Material"
+                                    : "Please select a UNIQ Code",
                                 },
                               ]}
                             >
@@ -1677,8 +1775,10 @@ function MasterSupplierCreatePageContent() {
                                 placeholder="Search or scroll to browse..."
                                 options={
                                   section === "raw-material"
-                                    ? rawMaterialMasterOptions
-                                    : (() => {
+                                    ? rawSelectOptions
+                                    : indirectPickMode
+                                      ? indirectSelectOptions
+                                      : (() => {
                                         const toSelectOpt = (
                                           option: BomOption & {
                                             _isParent?: boolean;
@@ -1712,7 +1812,7 @@ function MasterSupplierCreatePageContent() {
                                 }
                                 onSearch={setUniqSearch}
                                 onChange={(val, opt) => {
-                                  if (section === "raw-material") {
+                                  if (materialPickMode) {
                                     const materialCode = String(
                                       val ?? "",
                                     ).trim();
@@ -1731,21 +1831,37 @@ function MasterSupplierCreatePageContent() {
                                         item.material_name.trim() ===
                                         materialCode,
                                     );
+                                    // Tidak ada master -> opsi berasal dari BOM
+                                    // (value = material code / grade itu sendiri).
+                                    const bomGrade = master
+                                      ? undefined
+                                      : selectableGrades.find(
+                                          (g) =>
+                                            g.material_grade === materialCode,
+                                        );
                                     // Material Code di BOM = item_material_specs.material_grade
                                     // (mis. "BR50"), BUKAN master.material_code.
                                     setSelectedMaterialCode(
                                       String(
                                         master?.material_grade ??
                                           master?.material_code ??
+                                          bomGrade?.material_grade ??
                                           "",
                                       ).trim(),
                                     );
                                     form.setFieldsValue({
                                       uniq_code: materialCode,
-                                      part_name: master?.material_name,
+                                      part_name:
+                                        master?.material_name ??
+                                        bomGrade?.material_grade,
                                       grade:
-                                        master?.material_grade ?? undefined,
-                                      material_form: master?.form ?? undefined,
+                                        master?.material_grade ??
+                                        bomGrade?.material_grade ??
+                                        undefined,
+                                      material_form:
+                                        master?.form ??
+                                        bomGrade?.form ??
+                                        undefined,
                                       width_mm: master?.width_mm ?? undefined,
                                       diameter_mm:
                                         master?.diameter_mm ?? undefined,
@@ -1765,22 +1881,32 @@ function MasterSupplierCreatePageContent() {
                                 onPopupScroll={
                                   section === "raw-material"
                                     ? handleRawMasterPopupScroll
-                                    : handleUniqPopupScroll
+                                    : indirectPickMode
+                                      ? undefined
+                                      : handleUniqPopupScroll
                                 }
                                 loading={
-                                  section === "raw-material"
-                                    ? rawMaterialMastersQuery.isFetching
+                                  materialPickMode
+                                    ? (section === "raw-material" &&
+                                        rawMaterialMastersQuery.isFetching) ||
+                                      bomGradesQuery.isFetching
                                     : bomSearchFetching
                                 }
                                 disabled={readOnly || !selectedSupplierId}
                                 notFoundContent={
                                   (
-                                    section === "raw-material"
-                                      ? rawMaterialMastersQuery.isFetching
+                                    materialPickMode
+                                      ? (section === "raw-material" &&
+                                          rawMaterialMastersQuery.isFetching) ||
+                                        bomGradesQuery.isFetching
                                       : bomSearchFetching
                                   )
                                     ? "Loading..."
-                                    : "No material codes found"
+                                    : section === "raw-material"
+                                      ? "Material tidak ditemukan di Raw Material Master maupun BOM"
+                                      : indirectPickMode
+                                        ? "Material Code indirect tidak ditemukan di BOM"
+                                        : "No uniq found in BOM for this section"
                                 }
                               />
                             </Form.Item>
@@ -2360,6 +2486,11 @@ function MasterSupplierCreatePageContent() {
                       ) : null}
                     </div>
                   </Card>
+
+                  <BomUsagePanel
+                    className="mt-6"
+                    uniqCodes={traceUniqCodes}
+                  />
                 </div>
 
                 <div className="space-y-6">
