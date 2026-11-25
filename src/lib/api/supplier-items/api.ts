@@ -302,6 +302,41 @@ export type MaterialCodeUniq = {
   already_registered?: boolean;
 };
 
+// ── Traceability FG / Child Part & material code dari BOM ───────────────────
+export type BomUsageRow = {
+  child_uniq_code: string;
+  child_part_name?: string | null;
+  parent_uniq_code?: string | null;
+  parent_part_name?: string | null;
+  fg_uniq_code: string;
+  fg_part_number?: string | null;
+  fg_part_name?: string | null;
+  fg_model?: string | null;
+  /** 0 = uniq tersebut adalah root BOM (FG) itu sendiri */
+  level: number;
+  qty_per_uniq: number;
+  bom_version?: number;
+  bom_status?: string;
+};
+
+export type BomUsageParams = {
+  /** daftar uniq dipisah koma */
+  uniq_codes: string;
+};
+
+export type BomMaterialGrade = {
+  material_grade: string;
+  uniq_count: number;
+  form?: string | null;
+  /** false = material ada di BOM tapi belum punya Raw Material Master (Active) */
+  has_master: boolean;
+};
+
+export type BomMaterialGradesParams = {
+  type: "raw_material" | "indirect";
+  search?: string;
+};
+
 export type UniqsByMaterialCodeParams = {
   material_code: string;
   supplier_uuid?: string;
@@ -409,6 +444,29 @@ export const supplierItemsApiSlice = apiSlice
         providesTags: [{ type: TAG, id: "LIST" }],
       }),
 
+      getBomUsage: builder.query<BomUsageRow[], BomUsageParams>({
+        query: (params) => ({
+          url: `/supplier-items/bom-usage${buildQueryString({
+            uniq_codes: params.uniq_codes,
+          })}`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => parseArrayResponse<BomUsageRow>(response),
+      }),
+
+      getBomMaterialGrades: builder.query<BomMaterialGrade[], BomMaterialGradesParams>({
+        query: (params) => ({
+          url: `/supplier-items/bom-material-grades${buildQueryString({
+            type: params.type,
+            search: params.search,
+          })}`,
+          method: "GET",
+          meta: { useAuthorization: true, contentType: "application/json" },
+        }),
+        transformResponse: (response: unknown) => parseArrayResponse<BomMaterialGrade>(response),
+      }),
+
       createSupplierItemsByMaterialCode: builder.mutation<BulkByMaterialCodeResult, BulkByMaterialCodeRequest>({
         query: (body) => ({
           url: "/supplier-items/bulk-by-material-code",
@@ -454,6 +512,8 @@ export const {
   useGetSupplierItemByIdQuery,
   useCreateSupplierItemMutation,
   useGetUniqsByMaterialCodeQuery,
+  useGetBomUsageQuery,
+  useGetBomMaterialGradesQuery,
   useCreateSupplierItemsByMaterialCodeMutation,
   useUpdateSupplierItemMutation,
   useDeleteSupplierItemMutation,
