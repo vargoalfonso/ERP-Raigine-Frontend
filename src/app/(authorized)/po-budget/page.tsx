@@ -2214,10 +2214,22 @@ export default function PoBudgetPage() {
     // saat tab Raw aktif sebelumnya kehilangan supplier indirect-nya dan jatuh ke
     // "Tidak ada data". Tab aktif hanya dipakai bila child tidak punya tipe.
     const childSpecType = (row.materialSpec ?? {}) as { type_material?: unknown };
+    const childSpecTypeKey = normalizeSupplierItemTypeKey(
+      childSpecType.type_material,
+    );
+    const childIsSubcon =
+      row.budgetCategory === "subcon" || isSubconMaterialSpec(row.materialSpec);
+    // Satu item bisa muncul di dua tab (type_material raw/indirect DAN is_subcon):
+    // bila tab aktif sama dengan type_material aslinya (mis. Raw), pakai supplier
+    // tab itu; selain itu (tab Subcon) pakai supplier subcon.
+    const matchesActiveOwnType =
+      childSpecTypeKey != null &&
+      childSpecTypeKey !== "subcon" &&
+      childSpecTypeKey === activeTab;
     const effectiveType: SupplierItemTypeKey =
-      row.budgetCategory === "subcon" || isSubconMaterialSpec(row.materialSpec)
+      childIsSubcon && !matchesActiveOwnType
         ? "subcon"
-        : (normalizeSupplierItemTypeKey(childSpecType.type_material) ?? activeTab);
+        : (childSpecTypeKey ?? activeTab);
     const picked = pickSupplierItemsByType(sorted, effectiveType);
 
     // [material-code-lookup] Satu supplier cukup satu kali per child. Supplier
